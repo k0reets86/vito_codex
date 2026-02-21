@@ -10,6 +10,7 @@
 Прямые API предпочтительнее. OpenRouter — только как fallback.
 """
 
+import asyncio
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -124,6 +125,8 @@ class LLMRouter:
         self._anthropic: anthropic.AsyncAnthropic | None = None
         self._openai: AsyncOpenAI | None = None
         self._google: Any | None = None
+        self._gemini_calls: list[float] = []  # timestamps for rate limiting
+        self._gemini_lock = asyncio.Lock()
         self._sqlite_path = sqlite_path or settings.SQLITE_PATH
         self._sqlite_conn: sqlite3.Connection | None = None
         self._finance = finance  # FinancialController — set via set_finance()
@@ -133,6 +136,19 @@ class LLMRouter:
     def set_finance(self, finance) -> None:
         """Attach FinancialController for budget enforcement."""
         self._finance = finance
+
+    async def _gemini_rate_limit(self, max_rpm: int = 15) -> None:
+        """Enforce Gemini free tier rate limit (15 req/min)."""
+        async with self._gemini_lock:
+            now = time.monotonic()
+            # Remove calls older than 60 seconds
+            self._gemini_calls = [t for t in self._gemini_calls if now - t < 60]
+            if len(self._gemini_calls) >= max_rpm:
+                wait = 60 - (now - self._gemini_calls[0])
+                if wait > 0:
+                    logger.info(f"Gemini rate limit: ждём {wait:.1f}s", extra={"event": "gemini_rate_wait"})
+                    await asyncio.sleep(wait)
+            self._gemini_calls.append(time.monotonic())
 
     def _get_sqlite(self) -> sqlite3.Connection:
         if self._sqlite_conn is None:
@@ -348,11 +364,17 @@ class LLMRouter:
 
         elif model.provider == "google":
             if self._google is None:
-                from google import genai
+                try:
+                    from google import genai
+                except ImportError:
+                    logger.warning("google-genai не установлен, Gemini недоступен", extra={"event": "gemini_import_error"})
+                    return None
                 self._google = genai.Client(api_key=settings.GOOGLE_API_KEY)
             contents = prompt
             if system_prompt:
                 contents = f"{system_prompt}\n\n{prompt}"
+            # Rate limit: Gemini free tier = 15 req/min
+            await self._gemini_rate_limit()
             response = self._google.models.generate_content(
                 model=model.model_id,
                 contents=contents,

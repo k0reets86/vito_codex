@@ -55,10 +55,16 @@ class ContentCreator(BaseAgent):
             return TaskResult(success=False, error="LLM Router недоступен")
         parts = []
         for i in range(1, chapters + 1):
+            if not self.llm_router.check_daily_limit():
+                logger.warning(f"Ebook остановлен на главе {i}/{chapters}: бюджет исчерпан", extra={"event": "ebook_budget_stop"})
+                break
             prompt = f"Напиши главу {i} из {chapters} для ebook на тему: {topic}. 800-1200 слов, с подзаголовками."
             response = await self.llm_router.call_llm(task_type=TaskType.CONTENT, prompt=prompt, estimated_tokens=3000)
             if response:
                 parts.append(f"# Глава {i}\n\n{response}")
+            else:
+                logger.warning(f"Ebook: глава {i}/{chapters} не сгенерирована, останавливаюсь", extra={"event": "ebook_chapter_fail"})
+                break
         if not parts:
             return TaskResult(success=False, error="Не удалось сгенерировать ebook")
         cost = 0.02 * len(parts)
