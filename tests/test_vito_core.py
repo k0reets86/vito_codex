@@ -20,7 +20,7 @@ class TestVITOCoreInit:
 class TestVITOCoreClassify:
     def test_classify_trend(self):
         core = VITOCore()
-        assert core.classify_step("Исследовать тренды Google") == "trend_scan"
+        assert core.classify_step("Сканировать тренды Google") == "trend_scan"
 
     def test_classify_content(self):
         core = VITOCore()
@@ -50,7 +50,7 @@ class TestVITOCoreDispatch:
         registry.register(mock_agent)
 
         core = VITOCore(registry=registry)
-        result = await core.execute_task("orchestrate", step="Исследовать тренды рынка")
+        result = await core.execute_task("orchestrate", step="Сканировать тренды рынка")
         assert result.success is True
 
 
