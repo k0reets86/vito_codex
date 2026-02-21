@@ -23,6 +23,16 @@ DEFAULT_RSS_FEEDS = [
 ]
 
 
+def _get_reddit_rss_feeds() -> list[str]:
+    """Собирает Reddit RSS фиды из .env (settings)."""
+    feeds = []
+    for attr in ("REDDIT_RSS_ENTREPRENEUR", "REDDIT_RSS_PASSIVE", "REDDIT_RSS_ECOMMERCE"):
+        url = getattr(settings, attr, "")
+        if url:
+            feeds.append(url)
+    return feeds
+
+
 class TrendScout(BaseAgent):
     def __init__(self, browser_agent=None, **kwargs):
         super().__init__(name="trend_scout", description="Сканирование трендов, исследование ниш", **kwargs)
@@ -30,7 +40,7 @@ class TrendScout(BaseAgent):
 
     @property
     def capabilities(self) -> list[str]:
-        return ["trend_scan", "niche_research", "google_news", "rss_scan"]
+        return ["trend_scan", "niche_research", "google_news", "rss_scan", "reddit_scan"]
 
     async def execute_task(self, task_type: str, **kwargs) -> TaskResult:
         self._status = AgentStatus.RUNNING
@@ -46,7 +56,10 @@ class TrendScout(BaseAgent):
                     kwargs.get("language", "en"),
                 )
             elif task_type == "rss_scan":
-                result = await self.scan_rss_feeds(kwargs.get("feeds", DEFAULT_RSS_FEEDS))
+                feeds = kwargs.get("feeds", DEFAULT_RSS_FEEDS + _get_reddit_rss_feeds())
+                result = await self.scan_rss_feeds(feeds)
+            elif task_type == "reddit_scan":
+                result = await self.scan_reddit(kwargs.get("subreddits"))
             else:
                 result = await self.scan_google_trends(kwargs.get("keywords", ["digital products"]))
             result.duration_ms = int((time.monotonic() - start) * 1000)
@@ -69,14 +82,35 @@ class TrendScout(BaseAgent):
             self.memory.store_knowledge(doc_id=f"trends_{uuid.uuid4().hex[:8]}", text=f"Google Trends {geo}: {response[:500]}", metadata={"type": "trend", "geo": geo})
         return TaskResult(success=True, output=response, cost_usd=0.02)
 
-    async def scan_reddit(self, subreddits: list[str]) -> TaskResult:
+    async def scan_reddit(self, subreddits: list[str] | None = None) -> TaskResult:
+        """Сканирование Reddit: сначала RSS из .env, потом LLM-анализ."""
+        # 1. Пробуем прочитать Reddit RSS из .env
+        reddit_feeds = _get_reddit_rss_feeds()
+        rss_context = ""
+        if reddit_feeds:
+            rss_result = await self.scan_rss_feeds(reddit_feeds)
+            if rss_result.success and rss_result.output:
+                rss_context = f"\n\nДанные из Reddit RSS:\n{rss_result.output[:2000]}"
+                logger.info(
+                    f"Reddit RSS загружен: {len(reddit_feeds)} фидов",
+                    extra={"event": "reddit_rss_loaded", "context": {"feeds": len(reddit_feeds)}},
+                )
+
         if not self.llm_router:
+            if rss_context:
+                return TaskResult(success=True, output=rss_context, cost_usd=0.0)
             return TaskResult(success=False, error="LLM Router недоступен")
-        prompt = f"Проанализируй горячие темы в Reddit-сообществах: {', '.join(subreddits)}. Какие темы обсуждаются чаще всего? Какие возможности для цифровых продуктов?"
+
+        subs = subreddits or ["entrepreneur", "passive_income", "ecommerce"]
+        prompt = (
+            f"Проанализируй горячие темы в Reddit-сообществах: {', '.join(subs)}. "
+            f"Какие темы обсуждаются чаще всего? Какие возможности для цифровых продуктов?"
+            f"{rss_context}"
+        )
         response = await self.llm_router.call_llm(task_type=TaskType.RESEARCH, prompt=prompt, estimated_tokens=2000)
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
-        self._record_expense(0.02, f"Reddit scan: {', '.join(subreddits[:3])}")
+        self._record_expense(0.02, f"Reddit scan: {', '.join(subs[:3])}")
         if self.memory:
             self.memory.store_knowledge(doc_id=f"reddit_{uuid.uuid4().hex[:8]}", text=f"Reddit trends: {response[:500]}", metadata={"type": "trend", "source": "reddit"})
         return TaskResult(success=True, output=response, cost_usd=0.02)

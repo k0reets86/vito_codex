@@ -345,6 +345,33 @@ class LLMRouter:
         ).fetchone()
         return float(row["total"])
 
+    def get_spend_breakdown(self, days: int = 1) -> list[dict]:
+        """Разбивка расходов по моделям за N дней."""
+        conn = self._get_sqlite()
+        rows = conn.execute(
+            """SELECT model, task_type, COUNT(*) as calls,
+                      SUM(cost_usd) as total_cost,
+                      SUM(input_tokens) as total_input,
+                      SUM(output_tokens) as total_output
+               FROM spend_log
+               WHERE date >= date('now', ?)
+               GROUP BY model, task_type
+               ORDER BY total_cost DESC""",
+            (f"-{days} days",),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_spend_log_recent(self, limit: int = 20) -> list[dict]:
+        """Последние N записей из spend_log (для детальной отладки)."""
+        conn = self._get_sqlite()
+        rows = conn.execute(
+            """SELECT date, model, task_type, input_tokens, output_tokens,
+                      cost_usd, created_at
+               FROM spend_log ORDER BY id DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def check_daily_limit(self) -> bool:
         """Проверяет не превышен ли дневной лимит."""
         daily_spend = self.get_daily_spend()

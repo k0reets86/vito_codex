@@ -45,10 +45,14 @@ class Turn:
 
 
 class ConversationEngine:
-    def __init__(self, llm_router: LLMRouter, memory, goal_engine=None):
+    def __init__(self, llm_router: LLMRouter, memory, goal_engine=None,
+                 finance=None, agent_registry=None, decision_loop=None):
         self.llm_router = llm_router
         self.memory = memory
         self.goal_engine = goal_engine
+        self.finance = finance
+        self.agent_registry = agent_registry
+        self.decision_loop = decision_loop
         self._context: list[Turn] = []
         logger.info("ConversationEngine инициализирован", extra={"event": "init"})
 
@@ -157,14 +161,14 @@ class ConversationEngine:
             except Exception:
                 pass
 
-        goals_context = self._format_goals_context()
+        system_context = self._format_system_context()
         prompt = (
             f"{VITO_PERSONALITY}\n\n"
+            f"Текущее состояние системы VITO:\n{system_context}\n\n"
             f"История разговора:\n{self._format_context()}\n\n"
-            f"{goals_context}\n\n"
             f"{context_from_memory}\n\n"
             f"Вопрос владельца: {text}\n\n"
-            f"Дай конкретный ответ."
+            f"Дай конкретный ответ с реальными данными из системы."
         )
 
         response = await self.llm_router.call_llm(
@@ -180,13 +184,13 @@ class ConversationEngine:
 
     async def _handle_goal_request(self, text: str) -> dict[str, Any]:
         """Извлекает цель и подтверждает естественным языком."""
-        goals_context = self._format_goals_context()
+        system_context = self._format_system_context()
         prompt = (
             f"{VITO_PERSONALITY}\n\n"
-            f"{goals_context}\n\n"
+            f"Текущее состояние системы VITO:\n{system_context}\n\n"
             f"Владелец просит выполнить задачу: \"{text}\"\n\n"
             f"1. Сформулируй краткое название цели (до 100 символов)\n"
-            f"2. Напиши подтверждение естественным языком (учитывай уже существующие цели)\n\n"
+            f"2. Напиши подтверждение естественным языком (учитывай существующие цели и бюджет)\n\n"
             f"Ответь в JSON: {{\"goal_title\": \"...\", \"confirmation\": \"...\"}}"
         )
 
@@ -255,13 +259,13 @@ class ConversationEngine:
 
     async def _handle_conversation(self, text: str) -> dict[str, Any]:
         """Свободный разговор с личностью VITO."""
-        goals_context = self._format_goals_context()
+        system_context = self._format_system_context()
         prompt = (
             f"{VITO_PERSONALITY}\n\n"
+            f"Текущее состояние системы VITO:\n{system_context}\n\n"
             f"История разговора:\n{self._format_context()}\n\n"
-            f"{goals_context}\n\n"
             f"Владелец: {text}\n\n"
-            f"Ответь естественно, как коллега."
+            f"Ответь естественно, как коллега. Используй реальные данные из системы."
         )
 
         response = await self.llm_router.call_llm(
@@ -281,6 +285,70 @@ class ConversationEngine:
         # Ограничиваем историю
         if len(self._context) > MAX_CONTEXT_TURNS:
             self._context = self._context[-MAX_CONTEXT_TURNS:]
+
+    def _format_system_context(self) -> str:
+        """Полный контекст системы: расходы, модели, цели, агенты."""
+        parts = []
+
+        # 1. Расходы по моделям (из spend_log)
+        try:
+            daily_spend = self.llm_router.get_daily_spend()
+            breakdown = self.llm_router.get_spend_breakdown(days=1)
+            from config.settings import settings as _s
+            spend_lines = [f"Расходы LLM сегодня: ${daily_spend:.4f} / ${_s.DAILY_LIMIT_USD:.2f}"]
+            if breakdown:
+                for row in breakdown:
+                    spend_lines.append(
+                        f"  {row['model']} [{row['task_type']}]: ${row['total_cost']:.4f} ({row['calls']} вызовов)"
+                    )
+            parts.append("\n".join(spend_lines))
+        except Exception:
+            pass
+
+        # 2. Финансы (если подключены)
+        if self.finance:
+            try:
+                daily_spent = self.finance.get_daily_spent()
+                daily_earned = self.finance.get_daily_earned()
+                by_agent = self.finance.get_spend_by_agent(days=1)
+                fin_lines = [f"Финансы: потрачено ${daily_spent:.4f}, заработано ${daily_earned:.2f}"]
+                if by_agent:
+                    for a in by_agent[:5]:
+                        fin_lines.append(f"  {a['agent']}: ${a['total']:.4f} ({a['calls']} операций)")
+                parts.append("\n".join(fin_lines))
+            except Exception:
+                pass
+
+        # 3. Активные цели
+        goals_ctx = self._format_goals_context()
+        if goals_ctx:
+            parts.append(goals_ctx)
+
+        # 4. Статус агентов
+        if self.agent_registry:
+            try:
+                statuses = self.agent_registry.get_all_statuses()
+                running = [s for s in statuses if s.get("status") == "running"]
+                if running:
+                    agent_lines = ["Агенты в работе:"]
+                    for s in running[:5]:
+                        agent_lines.append(f"  {s['name']}: {s['status']} (задач: {s.get('tasks_completed', 0)})")
+                    parts.append("\n".join(agent_lines))
+            except Exception:
+                pass
+
+        # 5. Decision Loop
+        if self.decision_loop:
+            try:
+                dl_status = self.decision_loop.get_status()
+                parts.append(
+                    f"Decision Loop: {'работает' if dl_status['running'] else 'остановлен'}, "
+                    f"тиков: {dl_status['tick_count']}"
+                )
+            except Exception:
+                pass
+
+        return "\n\n".join(parts) if parts else ""
 
     def _format_goals_context(self) -> str:
         """Форматирует активные цели для включения в промпт."""
