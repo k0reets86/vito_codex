@@ -2,9 +2,20 @@
 
 Возможности: навигация, скриншоты, извлечение текста, формы, загрузка файлов.
 Singleton: один инстанс Chromium на весь жизненный цикл.
+
+OOM Protection:
+- Singleton pattern: max 1 browser instance
+- --single-process + --disable-dev-shm-usage Chrome flags
+- Watchdog: kills orphan headless_shell processes (max 2 allowed)
+- Memory limit: 600MB per process via resource.setrlimit
+- Guaranteed cleanup in finally blocks
 """
 
+import asyncio
 import os
+import platform
+import resource
+import subprocess
 import time
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -14,11 +25,77 @@ from config.logger import get_logger
 
 logger = get_logger("browser_agent", agent="browser_agent")
 
+# --- OOM Protection Constants ---
+MAX_HEADLESS_PROCESSES = 2
+MEMORY_LIMIT_BYTES = 600 * 1024 * 1024  # 600 MB
+
+
+def _set_memory_limit() -> None:
+    """Set virtual memory limit for the current process (Linux only)."""
+    if platform.system() != "Linux":
+        return
+    try:
+        soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+        # Only tighten the limit, never loosen it
+        if hard == resource.RLIM_INFINITY or hard > MEMORY_LIMIT_BYTES:
+            new_hard = MEMORY_LIMIT_BYTES
+        else:
+            new_hard = hard
+        resource.setrlimit(resource.RLIMIT_AS, (MEMORY_LIMIT_BYTES, new_hard))
+        logger.info(
+            f"Memory limit set: {MEMORY_LIMIT_BYTES // (1024*1024)}MB",
+            extra={"event": "memory_limit_set"},
+        )
+    except (ValueError, OSError) as e:
+        logger.warning(f"Could not set memory limit: {e}", extra={"event": "memory_limit_failed"})
+
+
+def _kill_orphan_headless_shells() -> int:
+    """Kill orphan headless_shell/chrome processes exceeding MAX_HEADLESS_PROCESSES.
+
+    Returns the number of processes killed.
+    """
+    if platform.system() != "Linux":
+        return 0
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", "headless_shell|chromium.*--headless"],
+            capture_output=True, text=True, timeout=5,
+        )
+        pids = [int(p) for p in result.stdout.strip().split("\n") if p.strip()]
+    except (subprocess.TimeoutExpired, FileNotFoundError, ValueError):
+        return 0
+
+    if len(pids) <= MAX_HEADLESS_PROCESSES:
+        return 0
+
+    # Kill the oldest processes first (lowest PIDs), keep the newest ones
+    pids_to_kill = sorted(pids)[:-MAX_HEADLESS_PROCESSES]
+    killed = 0
+    for pid in pids_to_kill:
+        try:
+            os.kill(pid, 9)  # SIGKILL
+            killed += 1
+            logger.warning(
+                f"Killed orphan headless_shell pid={pid}",
+                extra={"event": "orphan_process_killed", "pid": pid},
+            )
+        except OSError:
+            pass  # Already dead
+
+    if killed:
+        logger.warning(
+            f"Watchdog killed {killed} orphan headless_shell processes ({len(pids)} found, max {MAX_HEADLESS_PROCESSES})",
+            extra={"event": "watchdog_cleanup", "killed": killed, "found": len(pids)},
+        )
+    return killed
+
 
 class BrowserAgent(BaseAgent):
     _instance: Optional["BrowserAgent"] = None
     _browser = None
     _playwright_inst = None
+    _lock: Optional[asyncio.Lock] = None
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
@@ -32,6 +109,8 @@ class BrowserAgent(BaseAgent):
         self._initialized = True
         self._context = None
         self._page = None
+        if BrowserAgent._lock is None:
+            BrowserAgent._lock = asyncio.Lock()
 
     @property
     def capabilities(self) -> list[str]:
@@ -41,10 +120,27 @@ class BrowserAgent(BaseAgent):
         await super().start()
         try:
             from playwright.async_api import async_playwright
+
+            # Watchdog: clean up orphan processes before launching
+            _kill_orphan_headless_shells()
+
             if BrowserAgent._playwright_inst is None:
+                # Set memory limit before launching browser
+                _set_memory_limit()
+
                 BrowserAgent._playwright_inst = await async_playwright().start()
                 BrowserAgent._browser = await BrowserAgent._playwright_inst.chromium.launch(
-                    headless=True, args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+                    headless=True,
+                    args=[
+                        "--no-sandbox",
+                        "--disable-setuid-sandbox",
+                        "--disable-dev-shm-usage",
+                        "--single-process",
+                        "--disable-gpu",
+                        "--disable-extensions",
+                        "--disable-background-networking",
+                        "--js-flags=--max-old-space-size=256",
+                    ],
                 )
                 self._context = await BrowserAgent._browser.new_context(
                     viewport={"width": 1280, "height": 720},
@@ -54,6 +150,31 @@ class BrowserAgent(BaseAgent):
         except Exception as e:
             self._status = AgentStatus.ERROR
             logger.error(f"Ошибка запуска Playwright: {e}", extra={"event": "browser_start_failed"}, exc_info=True)
+            # Ensure cleanup on failed start
+            await self._force_cleanup()
+
+    async def _force_cleanup(self) -> None:
+        """Force-close all browser resources. Used on error paths."""
+        try:
+            if self._context:
+                await self._context.close()
+        except Exception:
+            pass
+        self._context = None
+
+        try:
+            if BrowserAgent._browser:
+                await BrowserAgent._browser.close()
+        except Exception:
+            pass
+        BrowserAgent._browser = None
+
+        try:
+            if BrowserAgent._playwright_inst:
+                await BrowserAgent._playwright_inst.stop()
+        except Exception:
+            pass
+        BrowserAgent._playwright_inst = None
 
     async def stop(self) -> None:
         try:
@@ -68,8 +189,14 @@ class BrowserAgent(BaseAgent):
                 BrowserAgent._playwright_inst = None
         except Exception as e:
             logger.error(f"Ошибка остановки Playwright: {e}", extra={"event": "browser_stop_failed"})
+            # Force cleanup even if graceful stop fails
+            await self._force_cleanup()
         finally:
             BrowserAgent._instance = None
+            if BrowserAgent._lock is not None:
+                BrowserAgent._lock = None
+            # Kill any remaining orphans after shutdown
+            _kill_orphan_headless_shells()
             await super().stop()
 
     async def _ensure_browser(self) -> None:
@@ -89,7 +216,10 @@ class BrowserAgent(BaseAgent):
         except Exception as e:
             return TaskResult(success=False, error=str(e))
         finally:
-            await page.close()
+            try:
+                await page.close()
+            except Exception:
+                pass
 
     async def screenshot(self, url: str, path: str = "") -> TaskResult:
         if not path:
@@ -102,7 +232,10 @@ class BrowserAgent(BaseAgent):
         except Exception as e:
             return TaskResult(success=False, error=str(e))
         finally:
-            await page.close()
+            try:
+                await page.close()
+            except Exception:
+                pass
 
     async def extract_text(self, url: str, selector: str = "body") -> TaskResult:
         page = await self._new_page()
@@ -113,7 +246,10 @@ class BrowserAgent(BaseAgent):
         except Exception as e:
             return TaskResult(success=False, error=str(e))
         finally:
-            await page.close()
+            try:
+                await page.close()
+            except Exception:
+                pass
 
     async def fill_form(self, url: str, data: dict[str, str]) -> TaskResult:
         page = await self._new_page()
@@ -130,7 +266,10 @@ class BrowserAgent(BaseAgent):
         except Exception as e:
             return TaskResult(success=False, error=str(e))
         finally:
-            await page.close()
+            try:
+                await page.close()
+            except Exception:
+                pass
 
     async def upload_file(self, url: str, file_path: str, selector: str = 'input[type="file"]') -> TaskResult:
         if not os.path.isfile(file_path):
@@ -146,7 +285,10 @@ class BrowserAgent(BaseAgent):
         except Exception as e:
             return TaskResult(success=False, error=str(e))
         finally:
-            await page.close()
+            try:
+                await page.close()
+            except Exception:
+                pass
 
     async def execute_task(self, task_type: str, **kwargs) -> TaskResult:
         self._status = AgentStatus.RUNNING

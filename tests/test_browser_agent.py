@@ -1,7 +1,10 @@
-"""Тесты BrowserAgent — 6 тестов."""
+"""Тесты BrowserAgent — OOM protection + core functionality."""
+
+import os
+import platform
+from unittest.mock import AsyncMock, MagicMock, patch, call
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from agents.base_agent import TaskResult
 
@@ -14,6 +17,7 @@ class TestBrowserAgent:
         BrowserAgent._instance = None
         BrowserAgent._browser = None
         BrowserAgent._playwright_inst = None
+        BrowserAgent._lock = None
         return BrowserAgent(
             llm_router=mock_llm_router,
             memory=mock_memory,
@@ -38,11 +42,15 @@ class TestBrowserAgent:
         mock_pw_factory = MagicMock()
         mock_pw_factory.return_value.start = AsyncMock(return_value=mock_pw)
 
-        with patch("playwright.async_api.async_playwright", mock_pw_factory):
+        with patch("playwright.async_api.async_playwright", mock_pw_factory), \
+             patch("agents.browser_agent._kill_orphan_headless_shells", return_value=0), \
+             patch("agents.browser_agent._set_memory_limit"):
             await agent.start()
         status = agent.get_status()
         assert status["status"] == "idle"
-        await agent.stop()
+
+        with patch("agents.browser_agent._kill_orphan_headless_shells", return_value=0):
+            await agent.stop()
         assert agent.get_status()["status"] == "stopped"
 
     @pytest.mark.asyncio
@@ -84,3 +92,195 @@ class TestBrowserAgent:
     async def test_execute_task_unknown(self, agent):
         result = await agent.execute_task("unknown_task")
         assert result.success is False
+
+
+class TestOOMProtection:
+    """Tests for OOM protection mechanisms."""
+
+    def test_kill_orphan_headless_shells_under_limit(self):
+        """No kills when process count is within limit."""
+        from agents.browser_agent import _kill_orphan_headless_shells, MAX_HEADLESS_PROCESSES
+
+        with patch("agents.browser_agent.platform") as mock_platform, \
+             patch("agents.browser_agent.subprocess") as mock_subprocess:
+            mock_platform.system.return_value = "Linux"
+            # Only 1 process running — under the limit
+            mock_subprocess.run.return_value = MagicMock(stdout="12345\n")
+            killed = _kill_orphan_headless_shells()
+            assert killed == 0
+
+    def test_kill_orphan_headless_shells_over_limit(self):
+        """Kills excess processes when over limit."""
+        from agents.browser_agent import _kill_orphan_headless_shells, MAX_HEADLESS_PROCESSES
+
+        with patch("agents.browser_agent.platform") as mock_platform, \
+             patch("agents.browser_agent.subprocess") as mock_subprocess, \
+             patch("agents.browser_agent.os") as mock_os:
+            mock_platform.system.return_value = "Linux"
+            # 5 processes — should kill 3 (keep MAX_HEADLESS_PROCESSES=2 newest)
+            mock_subprocess.run.return_value = MagicMock(stdout="100\n200\n300\n400\n500\n")
+            mock_os.kill = MagicMock()
+
+            killed = _kill_orphan_headless_shells()
+            assert killed == 3
+            # Should kill the 3 lowest PIDs (oldest)
+            mock_os.kill.assert_any_call(100, 9)
+            mock_os.kill.assert_any_call(200, 9)
+            mock_os.kill.assert_any_call(300, 9)
+
+    def test_kill_orphan_headless_shells_not_linux(self):
+        """Watchdog is a no-op on non-Linux."""
+        from agents.browser_agent import _kill_orphan_headless_shells
+
+        with patch("agents.browser_agent.platform") as mock_platform:
+            mock_platform.system.return_value = "Darwin"
+            killed = _kill_orphan_headless_shells()
+            assert killed == 0
+
+    def test_kill_orphan_headless_shells_pgrep_not_found(self):
+        """Handles missing pgrep gracefully."""
+        from agents.browser_agent import _kill_orphan_headless_shells
+
+        with patch("agents.browser_agent.platform") as mock_platform, \
+             patch("agents.browser_agent.subprocess.run", side_effect=FileNotFoundError("pgrep not found")):
+            mock_platform.system.return_value = "Linux"
+            killed = _kill_orphan_headless_shells()
+            assert killed == 0
+
+    def test_set_memory_limit_linux(self):
+        """Memory limit is set on Linux."""
+        from agents.browser_agent import _set_memory_limit, MEMORY_LIMIT_BYTES
+
+        with patch("agents.browser_agent.platform") as mock_platform, \
+             patch("agents.browser_agent.resource") as mock_resource:
+            mock_platform.system.return_value = "Linux"
+            mock_resource.RLIMIT_AS = 9  # actual value on Linux
+            mock_resource.RLIM_INFINITY = -1
+            mock_resource.getrlimit.return_value = (-1, -1)
+
+            _set_memory_limit()
+            mock_resource.setrlimit.assert_called_once_with(
+                9, (MEMORY_LIMIT_BYTES, MEMORY_LIMIT_BYTES)
+            )
+
+    def test_set_memory_limit_not_linux(self):
+        """Memory limit is a no-op on non-Linux."""
+        from agents.browser_agent import _set_memory_limit
+
+        with patch("agents.browser_agent.platform") as mock_platform, \
+             patch("agents.browser_agent.resource") as mock_resource:
+            mock_platform.system.return_value = "Darwin"
+            _set_memory_limit()
+            mock_resource.setrlimit.assert_not_called()
+
+    def test_set_memory_limit_error_handled(self):
+        """setrlimit errors are handled gracefully (no crash)."""
+        from agents.browser_agent import _set_memory_limit
+
+        with patch("agents.browser_agent.platform") as mock_platform, \
+             patch("agents.browser_agent.resource") as mock_resource:
+            mock_platform.system.return_value = "Linux"
+            mock_resource.RLIMIT_AS = 9
+            mock_resource.RLIM_INFINITY = -1
+            mock_resource.getrlimit.return_value = (-1, -1)
+            mock_resource.setrlimit.side_effect = OSError("Permission denied")
+            # Should not raise
+            _set_memory_limit()
+
+    def test_singleton_pattern(self, mock_llm_router, mock_memory, mock_finance, mock_comms):
+        """Only one BrowserAgent instance exists."""
+        from agents.browser_agent import BrowserAgent
+        BrowserAgent._instance = None
+        BrowserAgent._browser = None
+        BrowserAgent._playwright_inst = None
+        BrowserAgent._lock = None
+
+        a = BrowserAgent(llm_router=mock_llm_router, memory=mock_memory, finance=mock_finance, comms=mock_comms)
+        b = BrowserAgent(llm_router=mock_llm_router, memory=mock_memory, finance=mock_finance, comms=mock_comms)
+        assert a is b
+
+    def test_chrome_launch_args_include_single_process(self):
+        """Verify --single-process is in the launch args."""
+        # This is a code-inspection test verifying the args are present in source
+        import inspect
+        from agents.browser_agent import BrowserAgent
+        source = inspect.getsource(BrowserAgent.start)
+        assert "--single-process" in source
+        assert "--disable-dev-shm-usage" in source
+        assert "--no-sandbox" in source
+
+    @pytest.mark.asyncio
+    async def test_page_close_on_navigate_error(self, mock_llm_router, mock_memory, mock_finance, mock_comms):
+        """Page is closed even when navigation throws."""
+        from agents.browser_agent import BrowserAgent
+        BrowserAgent._instance = None
+        BrowserAgent._browser = None
+        BrowserAgent._playwright_inst = None
+        BrowserAgent._lock = None
+
+        agent = BrowserAgent(llm_router=mock_llm_router, memory=mock_memory, finance=mock_finance, comms=mock_comms)
+        mock_page = AsyncMock()
+        mock_page.goto = AsyncMock(side_effect=Exception("Network error"))
+        mock_page.close = AsyncMock()
+        mock_context = AsyncMock()
+        mock_context.new_page = AsyncMock(return_value=mock_page)
+        agent._context = mock_context
+
+        with patch.object(agent, '_ensure_browser', new_callable=AsyncMock):
+            result = await agent.navigate("https://example.com")
+            assert result.success is False
+            assert "Network error" in result.error
+            mock_page.close.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_force_cleanup(self, mock_llm_router, mock_memory, mock_finance, mock_comms):
+        """_force_cleanup closes all resources without raising."""
+        from agents.browser_agent import BrowserAgent
+        BrowserAgent._instance = None
+        BrowserAgent._browser = None
+        BrowserAgent._playwright_inst = None
+        BrowserAgent._lock = None
+
+        agent = BrowserAgent(llm_router=mock_llm_router, memory=mock_memory, finance=mock_finance, comms=mock_comms)
+
+        # Set up mocks that raise on close
+        agent._context = AsyncMock()
+        agent._context.close = AsyncMock(side_effect=Exception("context close error"))
+        BrowserAgent._browser = AsyncMock()
+        BrowserAgent._browser.close = AsyncMock(side_effect=Exception("browser close error"))
+        BrowserAgent._playwright_inst = AsyncMock()
+        BrowserAgent._playwright_inst.stop = AsyncMock(side_effect=Exception("playwright stop error"))
+
+        # Should not raise despite all close() calls failing
+        await agent._force_cleanup()
+
+        assert agent._context is None
+        assert BrowserAgent._browser is None
+        assert BrowserAgent._playwright_inst is None
+
+    @pytest.mark.asyncio
+    async def test_start_calls_watchdog_and_memory_limit(self, mock_llm_router, mock_memory, mock_finance, mock_comms):
+        """start() calls watchdog and memory limit before launching browser."""
+        from agents.browser_agent import BrowserAgent
+        BrowserAgent._instance = None
+        BrowserAgent._browser = None
+        BrowserAgent._playwright_inst = None
+        BrowserAgent._lock = None
+
+        agent = BrowserAgent(llm_router=mock_llm_router, memory=mock_memory, finance=mock_finance, comms=mock_comms)
+
+        mock_context = AsyncMock()
+        mock_browser = AsyncMock()
+        mock_browser.new_context = AsyncMock(return_value=mock_context)
+        mock_pw = AsyncMock()
+        mock_pw.chromium.launch = AsyncMock(return_value=mock_browser)
+
+        mock_pw_factory = MagicMock()
+        mock_pw_factory.return_value.start = AsyncMock(return_value=mock_pw)
+
+        with patch("playwright.async_api.async_playwright", mock_pw_factory), \
+             patch("agents.browser_agent._kill_orphan_headless_shells", return_value=0) as mock_watchdog, \
+             patch("agents.browser_agent._set_memory_limit") as mock_memlimit:
+            await agent.start()
+            mock_watchdog.assert_called_once()
+            mock_memlimit.assert_called_once()
