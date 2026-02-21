@@ -83,12 +83,13 @@ class CommsAgent:
         )
 
     def set_modules(
-        self, goal_engine=None, llm_router=None, decision_loop=None
+        self, goal_engine=None, llm_router=None, decision_loop=None, agent_registry=None
     ) -> None:
         """Привязывает модули после инициализации (избегаем циклических импортов)."""
         self._goal_engine = goal_engine
         self._llm_router = llm_router
         self._decision_loop = decision_loop
+        self._agent_registry = agent_registry
 
     # ── Запуск / Остановка ──
 
@@ -112,6 +113,7 @@ class CommsAgent:
         self._app.add_handler(CommandHandler("approve", self._cmd_approve))
         self._app.add_handler(CommandHandler("reject", self._cmd_reject))
         self._app.add_handler(CommandHandler("goal", self._cmd_goal))
+        self._app.add_handler(CommandHandler("agents", self._cmd_agents))
         self._app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_message)
         )
@@ -126,6 +128,7 @@ class CommsAgent:
             BotCommand("approve", "Одобрить запрос"),
             BotCommand("reject", "Отклонить запрос"),
             BotCommand("goal", "Создать цель"),
+            BotCommand("agents", "Список агентов"),
         ])
 
         await self._app.start()
@@ -302,6 +305,27 @@ class CommsAgent:
             f"Цель от владельца: {goal.goal_id}",
             extra={"event": "owner_goal", "context": {"goal_id": goal.goal_id, "title": text[:100]}},
         )
+
+    async def _cmd_agents(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Список всех агентов со статусом."""
+        if await self._reject_stranger(update):
+            return
+        if not self._agent_registry:
+            await update.message.reply_text("AgentRegistry не подключён", reply_markup=self._main_keyboard())
+            return
+
+        statuses = self._agent_registry.get_all_statuses()
+        if not statuses:
+            await update.message.reply_text("Нет зарегистрированных агентов.", reply_markup=self._main_keyboard())
+            return
+
+        lines = [f"Агенты ({len(statuses)}):"]
+        for s in statuses:
+            icon = {"idle": "o", "running": ">>", "stopped": "x", "error": "!"}.get(s["status"], "?")
+            lines.append(f"[{icon}] {s['name']} — {s['status']} (done:{s.get('tasks_completed', 0)}, ${s.get('total_cost', 0):.2f})")
+
+        await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
+        logger.info("Команда /agents выполнена", extra={"event": "cmd_agents"})
 
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Произвольное текстовое сообщение от владельца → цель."""

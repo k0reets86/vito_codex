@@ -24,6 +24,19 @@ class Settings:
     CHROMA_PATH: str = os.getenv("CHROMA_PATH", "/home/vito/vito-agent/memory/chroma_db")
     SQLITE_PATH: str = os.getenv("SQLITE_PATH", "/home/vito/vito-agent/memory/vito_local.db")
 
+    # Platforms
+    GUMROAD_API_KEY: str = os.getenv("GUMROAD_API_KEY", "")
+    ETSY_API_KEY: str = os.getenv("ETSY_API_KEY", "")
+    KOFI_API_KEY: str = os.getenv("KOFI_API_KEY", "")
+    WORDPRESS_URL: str = os.getenv("WORDPRESS_URL", "")
+    WORDPRESS_APP_PASSWORD: str = os.getenv("WORDPRESS_APP_PASSWORD", "")
+    MEDIUM_TOKEN: str = os.getenv("MEDIUM_TOKEN", "")
+
+    # Email & Social
+    SENDGRID_API_KEY: str = os.getenv("SENDGRID_API_KEY", "")
+    REDDIT_CLIENT_ID: str = os.getenv("REDDIT_CLIENT_ID", "")
+    REDDIT_CLIENT_SECRET: str = os.getenv("REDDIT_CLIENT_SECRET", "")
+
     # Financial limits (USD)
     DAILY_LIMIT_USD: float = float(os.getenv("DAILY_LIMIT_USD", "10"))
     OPERATION_NOTIFY_USD: float = float(os.getenv("OPERATION_NOTIFY_USD", "20"))

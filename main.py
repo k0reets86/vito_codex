@@ -24,7 +24,38 @@ from goal_engine import GoalEngine
 from llm_router import LLMRouter
 from memory.memory_manager import MemoryManager
 
-VERSION = "0.1.0"
+from agents.agent_registry import AgentRegistry
+from agents.vito_core import VITOCore
+from agents.browser_agent import BrowserAgent
+from agents.devops_agent import DevOpsAgent
+from agents.research_agent import ResearchAgent
+from agents.quality_judge import QualityJudge
+from agents.trend_scout import TrendScout
+from agents.content_creator import ContentCreator
+from agents.ecommerce_agent import ECommerceAgent
+from agents.seo_agent import SEOAgent
+from agents.smm_agent import SMMAgent
+from agents.marketing_agent import MarketingAgent
+from agents.email_agent import EmailAgent
+from agents.publisher_agent import PublisherAgent
+from agents.translation_agent import TranslationAgent
+from agents.analytics_agent import AnalyticsAgent
+from agents.economics_agent import EconomicsAgent
+from agents.security_agent import SecurityAgent
+from agents.legal_agent import LegalAgent
+from agents.risk_agent import RiskAgent
+from agents.account_manager import AccountManager
+from agents.partnership_agent import PartnershipAgent
+from agents.hr_agent import HRAgent
+from agents.document_agent import DocumentAgent
+
+from platforms.gumroad import GumroadPlatform
+from platforms.etsy import EtsyPlatform
+from platforms.kofi import KofiPlatform
+from platforms.wordpress import WordPressPlatform
+from platforms.medium import MediumPlatform
+
+VERSION = "0.2.0"
 
 logger = get_logger("main", agent="vito_core")
 
@@ -37,16 +68,72 @@ class VITO:
         self.memory = MemoryManager()
         self.finance = FinancialController()
         self.comms = CommsAgent()
+
+        # Agent Registry + 23 агентов
+        self.registry = AgentRegistry()
+        self._init_agents()
+
         self.decision_loop = DecisionLoop(
             goal_engine=self.goal_engine,
             llm_router=self.llm_router,
             memory=self.memory,
+            agent_registry=self.registry,
         )
         self.comms.set_modules(
             goal_engine=self.goal_engine,
             llm_router=self.llm_router,
             decision_loop=self.decision_loop,
+            agent_registry=self.registry,
         )
+
+    def _init_agents(self) -> None:
+        """Создаёт и регистрирует все 23 агента."""
+        deps = dict(llm_router=self.llm_router, memory=self.memory, finance=self.finance, comms=self.comms)
+
+        # Platforms
+        platforms_commerce = {
+            "gumroad": GumroadPlatform(),
+            "etsy": EtsyPlatform(),
+            "kofi": KofiPlatform(),
+        }
+        platforms_publish = {
+            "wordpress": WordPressPlatform(),
+            "medium": MediumPlatform(),
+        }
+
+        # Infrastructure
+        browser = BrowserAgent(**deps)
+        quality_judge = QualityJudge(**deps)
+
+        # All agents
+        agents = [
+            VITOCore(registry=self.registry, **deps),                          # 00
+            TrendScout(browser_agent=browser, **deps),                         # 01
+            ContentCreator(quality_judge=quality_judge, **deps),               # 02
+            SMMAgent(**deps),                                                  # 03
+            MarketingAgent(**deps),                                            # 04
+            ECommerceAgent(platforms=platforms_commerce, **deps),               # 05
+            SEOAgent(**deps),                                                  # 06
+            EmailAgent(**deps),                                                # 07
+            TranslationAgent(**deps),                                          # 08
+            AnalyticsAgent(**deps),                                            # 09
+            EconomicsAgent(**deps),                                            # 16
+            LegalAgent(**deps),                                                # 11
+            RiskAgent(**deps),                                                 # 12
+            SecurityAgent(**deps),                                             # 13
+            DevOpsAgent(**deps),                                               # 14
+            HRAgent(**deps),                                                   # 15
+            PartnershipAgent(**deps),                                          # 17
+            ResearchAgent(**deps),                                             # 18
+            DocumentAgent(**deps),                                             # 19
+            AccountManager(**deps),                                            # 20
+            browser,                                                           # 21
+            PublisherAgent(quality_judge=quality_judge, platforms=platforms_publish, **deps),  # 22
+            quality_judge,                                                     # Quality Judge
+        ]
+
+        for agent in agents:
+            self.registry.register(agent)
 
     async def startup(self) -> None:
         """Инициализация всех подсистем."""
@@ -78,11 +165,13 @@ class VITO:
             )
 
         await self.comms.start()
+        await self.registry.start_all()
 
         self.running = True
+        agent_count = len(self.registry.get_all_statuses())
         logger.info(
-            f"VITO v{VERSION} готов к работе",
-            extra={"event": "startup_complete"},
+            f"VITO v{VERSION} готов к работе ({agent_count} агентов)",
+            extra={"event": "startup_complete", "context": {"agents": agent_count}},
         )
 
     def _verify_api_keys(self) -> None:
@@ -114,6 +203,10 @@ class VITO:
             today = now.strftime("%Y-%m-%d")
             hour = now.hour
 
+            if hour == 2 and last_run.get("security_audit") != today:
+                last_run["security_audit"] = today
+                await self._security_audit()
+
             if hour == 3 and last_run.get("consolidation") != today:
                 last_run["consolidation"] = today
                 await self._night_consolidation()
@@ -139,17 +232,32 @@ class VITO:
         # TODO: анализ дня через LLM, уплотнение старых воспоминаний
         logger.info("Ночная консолидация завершена", extra={"event": "consolidation_done"})
 
+    async def _security_audit(self) -> None:
+        """02:00 — ночной аудит безопасности."""
+        logger.info("Ночной аудит безопасности", extra={"event": "security_audit_start"})
+        try:
+            result = await self.registry.dispatch("security")
+            if result and result.success:
+                logger.info(f"Аудит завершён: {result.output}", extra={"event": "security_audit_done"})
+        except Exception as e:
+            logger.warning(f"Ошибка аудита безопасности: {e}", extra={"event": "security_audit_error"})
+
     async def _morning_scout(self) -> None:
         """06:00 — trend_scout + knowledge_updater (по понедельникам)."""
         logger.info("Утренняя разведка начата", extra={"event": "scout_start"})
+        try:
+            result = await self.registry.dispatch("trend_scan")
+            if result and result.success:
+                logger.info("TrendScout завершил сканирование", extra={"event": "trend_scan_done"})
+        except Exception as e:
+            logger.warning(f"TrendScout ошибка: {e}", extra={"event": "trend_scan_error"})
+
         now = datetime.now(timezone.utc)
         if now.weekday() == 0:  # понедельник
             logger.info(
-                "Понедельник — запуск обновления базы знаний LLM",
+                "Понедельник — запуск обновления базы знаний",
                 extra={"event": "knowledge_update_trigger"},
             )
-            # TODO: knowledge_updater.py
-        # TODO: trend_scout.py
         logger.info("Утренняя разведка завершена", extra={"event": "scout_done"})
 
     async def _morning_report(self) -> None:
@@ -178,6 +286,7 @@ class VITO:
         logger.info("VITO завершает работу...", extra={"event": "shutdown_start"})
         self.running = False
         self.decision_loop.stop()
+        await self.registry.stop_all()
         await self.comms.stop()
         self.finance.close()
         await self.memory.close()

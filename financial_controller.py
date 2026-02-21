@@ -544,6 +544,46 @@ class FinancialController:
             )
         return synced
 
+    # ── Аналитика для агентов ──
+
+    def get_daily_spend(self) -> float:
+        """Alias для get_daily_spent() — совместимость с агентами."""
+        return self.get_daily_spent()
+
+    def get_daily_revenue(self) -> float:
+        """Alias для get_daily_earned() — совместимость с агентами."""
+        return self.get_daily_earned()
+
+    def get_agent_roi(self, agent_name: str) -> dict[str, Any]:
+        """ROI конкретного агента: (доход от его задач - расходы) / расходы."""
+        conn = self._get_db()
+        expense_row = conn.execute(
+            "SELECT COALESCE(SUM(amount_usd), 0) as total FROM transactions WHERE tx_type = 'expense' AND agent = ?",
+            (agent_name,),
+        ).fetchone()
+        expenses = expense_row["total"] if expense_row else 0.0
+        return {
+            "agent": agent_name,
+            "total_expenses": expenses,
+            "roi_pct": 0.0,
+        }
+
+    def get_revenue_trend(self, days: int = 7) -> list[dict]:
+        """Дневной тренд выручки за N дней."""
+        conn = self._get_db()
+        rows = conn.execute(
+            """SELECT date, earned_usd, spent_usd
+               FROM daily_budgets
+               WHERE date >= date('now', ?)
+               ORDER BY date""",
+            (f"-{days} days",),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_product_analytics(self) -> list[dict]:
+        """Аналитика по всем продуктам."""
+        return self.get_product_roi()
+
     # ── Очистка ──
 
     def close(self) -> None:

@@ -34,10 +34,12 @@ class DecisionLoop:
         goal_engine: GoalEngine,
         llm_router: LLMRouter,
         memory: MemoryManager,
+        agent_registry=None,
     ):
         self.goal_engine = goal_engine
         self.llm_router = llm_router
         self.memory = memory
+        self.agent_registry = agent_registry
         self.running = False
         self._tick_count = 0
         self._consecutive_idle = 0
@@ -225,8 +227,26 @@ class DecisionLoop:
         return results
 
     async def _execute_step(self, goal: Goal, step: str) -> dict[str, Any]:
-        """Выполняет один шаг плана. Диспетчеризация по типу задачи."""
+        """Выполняет один шаг плана. Сначала через AgentRegistry, fallback на LLM."""
         try:
+            # Попытка диспатча через реестр агентов
+            if self.agent_registry:
+                try:
+                    result = await self.agent_registry.dispatch(
+                        step, step=step, goal_title=goal.title
+                    )
+                    if result and result.success:
+                        output = result.output
+                        if isinstance(output, str):
+                            output = output[:500]
+                        return {"status": "completed", "output": output, "agent": "registry"}
+                except Exception as e:
+                    logger.debug(
+                        f"Registry dispatch failed, falling back to LLM: {e}",
+                        extra={"event": "registry_fallback"},
+                    )
+
+            # Fallback: прямой вызов LLM
             task_type = self._classify_step(step)
 
             response = await self.llm_router.call_llm(
