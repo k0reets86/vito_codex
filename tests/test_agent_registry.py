@@ -84,9 +84,12 @@ class TestRegistryDispatch:
 class TestRegistryLifecycle:
     @pytest.mark.asyncio
     async def test_start_stop_all(self):
+        """start_all() now only starts CORE tier agents.
+        Non-core agents start lazily on first dispatch."""
         registry = AgentRegistry()
-        a1 = FakeAgent("a1", ["cap1"])
-        a2 = FakeAgent("a2", ["cap2"])
+        # Use core agent names so they start with start_all()
+        a1 = FakeAgent("vito_core", ["cap1"])
+        a2 = FakeAgent("devops_agent", ["cap2"])
         registry.register(a1)
         registry.register(a2)
         await registry.start_all()
@@ -95,6 +98,16 @@ class TestRegistryLifecycle:
         await registry.stop_all()
         assert a1._status == AgentStatus.STOPPED
         assert a2._status == AgentStatus.STOPPED
+
+    @pytest.mark.asyncio
+    async def test_lazy_start_on_dispatch(self):
+        """Non-core agents start lazily when dispatched."""
+        registry = AgentRegistry()
+        agent = FakeAgent("test_agent", ["test_cap"])
+        registry.register(agent)
+        assert agent._status == AgentStatus.STOPPED
+        await registry.dispatch("test_cap")
+        assert agent._status == AgentStatus.IDLE  # started by lazy start
 
     def test_get_all_statuses(self):
         registry = AgentRegistry()

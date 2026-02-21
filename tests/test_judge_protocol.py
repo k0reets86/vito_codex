@@ -56,11 +56,12 @@ class TestJudgeVote:
 class TestQueryModel:
     @pytest.mark.asyncio
     async def test_query_model_success(self, judge):
-        response = json.dumps({
+        response_text = json.dumps({
             "demand": 80, "competition": 65, "margin": 75,
             "automation": 70, "scaling": 60, "reasoning": "Good"
         })
-        judge.llm_router._call_provider = AsyncMock(return_value=response)
+        # _call_provider returns (text, cost) tuple
+        judge.llm_router._call_provider = AsyncMock(return_value=(response_text, 0.001))
 
         vote = await judge._query_model("claude-sonnet", "AI templates", None)
         assert vote.error is None
@@ -69,7 +70,7 @@ class TestQueryModel:
 
     @pytest.mark.asyncio
     async def test_query_model_invalid_json(self, judge):
-        judge.llm_router._call_provider = AsyncMock(return_value="not json")
+        judge.llm_router._call_provider = AsyncMock(return_value=("not json", 0.001))
         vote = await judge._query_model("claude-sonnet", "test niche", None)
         assert vote.error is not None
 
@@ -89,11 +90,11 @@ class TestQueryModel:
 class TestEvaluateNiche:
     @pytest.mark.asyncio
     async def test_evaluate_niche_all_models(self, judge):
-        response = json.dumps({
+        response_text = json.dumps({
             "demand": 80, "competition": 70, "margin": 75,
             "automation": 65, "scaling": 70, "reasoning": "Solid niche"
         })
-        judge.llm_router._call_provider = AsyncMock(return_value=response)
+        judge.llm_router._call_provider = AsyncMock(return_value=(response_text, 0.001))
 
         verdict = await judge.evaluate_niche("AI шаблоны для Canva")
         assert isinstance(verdict, JudgeVerdict)
@@ -111,11 +112,11 @@ class TestEvaluateNiche:
 
     @pytest.mark.asyncio
     async def test_evaluate_saves_pattern(self, judge):
-        response = json.dumps({
+        response_text = json.dumps({
             "demand": 90, "competition": 80, "margin": 85,
             "automation": 75, "scaling": 80, "reasoning": "Excellent"
         })
-        judge.llm_router._call_provider = AsyncMock(return_value=response)
+        judge.llm_router._call_provider = AsyncMock(return_value=(response_text, 0.001))
 
         await judge.evaluate_niche("premium niche")
         judge.memory.save_pattern.assert_called()

@@ -94,12 +94,14 @@ class DecisionLoop:
             extra={"event": "tick_start", "context": {"tick": self._tick_count}},
         )
 
-        # 1. Проверка финансового лимита
+        # 1. Проверка финансового лимита — БЛОКИРУЕМ если исчерпан
         if not self.llm_router.check_daily_limit():
             logger.warning(
-                "Дневной лимит исчерпан — только бесплатные операции",
+                "Дневной лимит исчерпан — пропускаем тик",
                 extra={"event": "budget_exhausted"},
             )
+            self._log_tick_done(tick_start, idle=True)
+            return
 
         # 2. Выбор следующей цели
         goal = self.goal_engine.get_next_goal()

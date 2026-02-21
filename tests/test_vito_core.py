@@ -42,6 +42,7 @@ class TestVITOCoreDispatch:
         mock_agent = MagicMock()
         mock_agent.name = "trend_scout"
         mock_agent.capabilities = ["trend_scan"]
+        mock_agent.start = AsyncMock()  # Needed for lazy start
         mock_agent.execute_task = AsyncMock(
             return_value=TaskResult(success=True, output="trends found")
         )

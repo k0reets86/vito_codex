@@ -78,6 +78,8 @@ class VITO:
         self.llm_router = LLMRouter()
         self.memory = MemoryManager()
         self.finance = FinancialController()
+        # Wire finance into LLM router for budget enforcement
+        self.llm_router.set_finance(self.finance)
         self.comms = CommsAgent()
 
         # Agent Registry + 23 агентов
@@ -223,22 +225,44 @@ class VITO:
         )
 
     def _verify_api_keys(self) -> None:
-        """Проверяет наличие критичных API-ключей."""
-        missing = []
+        """Проверяет наличие критичных и опциональных API-ключей."""
+        missing_critical = []
         if not settings.ANTHROPIC_API_KEY:
-            missing.append("ANTHROPIC_API_KEY")
+            missing_critical.append("ANTHROPIC_API_KEY")
         if not settings.TELEGRAM_BOT_TOKEN:
-            missing.append("TELEGRAM_BOT_TOKEN")
+            missing_critical.append("TELEGRAM_BOT_TOKEN")
         if not settings.TELEGRAM_OWNER_CHAT_ID:
-            missing.append("TELEGRAM_OWNER_CHAT_ID")
+            missing_critical.append("TELEGRAM_OWNER_CHAT_ID")
 
-        if missing:
+        if missing_critical:
             logger.warning(
-                f"Отсутствуют ключи: {', '.join(missing)}",
-                extra={"event": "missing_keys", "context": {"keys": missing}},
+                f"Отсутствуют критичные ключи: {', '.join(missing_critical)}",
+                extra={"event": "missing_keys", "context": {"keys": missing_critical}},
             )
         else:
             logger.info("Все критичные API-ключи на месте", extra={"event": "keys_ok"})
+
+        # Optional keys — log which are available
+        optional_keys = {
+            "GOOGLE_API_KEY": settings.GOOGLE_API_KEY,
+            "OPENAI_API_KEY": settings.OPENAI_API_KEY,
+            "PERPLEXITY_API_KEY": settings.PERPLEXITY_API_KEY,
+            "GUMROAD_API_KEY": settings.GUMROAD_API_KEY,
+            "ETSY_KEYSTRING": settings.ETSY_KEYSTRING,
+            "KOFI_API_KEY": settings.KOFI_API_KEY,
+        }
+        available = [k for k, v in optional_keys.items() if v]
+        missing_optional = [k for k, v in optional_keys.items() if not v]
+        if available:
+            logger.info(
+                f"Доступны ключи: {', '.join(available)}",
+                extra={"event": "optional_keys_available", "context": {"keys": available}},
+            )
+        if missing_optional:
+            logger.debug(
+                f"Не настроены: {', '.join(missing_optional)}",
+                extra={"event": "optional_keys_missing", "context": {"keys": missing_optional}},
+            )
 
     # ── Расписание периодических задач ──
 
@@ -274,6 +298,17 @@ class VITO:
                     last_run[proactive_key] = today
                     await self._proactive_check()
 
+            # Auto-stop idle agents every minute
+            try:
+                stopped = await self.registry.stop_idle_agents()
+                if stopped:
+                    logger.info(
+                        f"Auto-stopped {stopped} idle agents",
+                        extra={"event": "idle_cleanup", "context": {"stopped": stopped}},
+                    )
+            except Exception:
+                pass
+
             await asyncio.sleep(60)
 
     async def _night_consolidation(self) -> None:
@@ -284,7 +319,18 @@ class VITO:
             f"Статистика дня: {stats}",
             extra={"event": "daily_stats", "context": stats},
         )
-        # TODO: анализ дня через LLM, уплотнение старых воспоминаний
+
+        # Cleanup resolved errors older than 7 days
+        try:
+            deleted = self.self_healer.cleanup_old_errors(days=7)
+            if deleted:
+                logger.info(
+                    f"Очищено {deleted} старых ошибок",
+                    extra={"event": "error_cleanup_done", "context": {"deleted": deleted}},
+                )
+        except Exception as e:
+            logger.debug(f"Ошибка очистки: {e}", extra={"event": "cleanup_error"})
+
         logger.info("Ночная консолидация завершена", extra={"event": "consolidation_done"})
 
     async def _security_audit(self) -> None:

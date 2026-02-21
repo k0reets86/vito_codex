@@ -253,6 +253,28 @@ class SelfHealer:
                 extra={"event": "escalation_failed"},
             )
 
+    def cleanup_old_errors(self, days: int = 7) -> int:
+        """Удаляет resolved ошибки старше N дней. Возвращает кол-во удалённых."""
+        try:
+            conn = self.memory._get_sqlite()
+            cursor = conn.execute(
+                """DELETE FROM errors
+                   WHERE resolved = 1
+                   AND created_at < datetime('now', ?)""",
+                (f"-{days} days",),
+            )
+            conn.commit()
+            deleted = cursor.rowcount
+            if deleted > 0:
+                logger.info(
+                    f"Очистка: удалено {deleted} resolved ошибок старше {days} дней",
+                    extra={"event": "errors_cleanup", "context": {"deleted": deleted}},
+                )
+            return deleted
+        except Exception as e:
+            logger.debug(f"Ошибка очистки: {e}", extra={"event": "cleanup_error"})
+            return 0
+
     def get_error_stats(self) -> dict[str, Any]:
         """Статистика ошибок для /errors и /healer."""
         try:

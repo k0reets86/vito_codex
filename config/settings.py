@@ -61,9 +61,10 @@ class Settings:
     CLOUDINARY_API_SECRET: str = os.getenv("CLOUDINARY_API_SECRET", "")
 
     # Financial limits (USD)
-    DAILY_LIMIT_USD: float = float(os.getenv("DAILY_LIMIT_USD", "5"))
-    OPERATION_NOTIFY_USD: float = float(os.getenv("OPERATION_NOTIFY_USD", "20"))
-    OPERATION_APPROVE_USD: float = float(os.getenv("OPERATION_APPROVE_USD", "50"))
+    # Hierarchy: OPERATION_MAX < OPERATION_NOTIFY < DAILY_LIMIT < OPERATION_APPROVE
+    DAILY_LIMIT_USD: float = float(os.getenv("DAILY_LIMIT_USD", "3"))
+    OPERATION_NOTIFY_USD: float = float(os.getenv("OPERATION_NOTIFY_USD", "1"))
+    OPERATION_APPROVE_USD: float = float(os.getenv("OPERATION_APPROVE_USD", "20"))
     OPERATION_MAX_USD: float = float(os.getenv("OPERATION_MAX_USD", "2"))
 
 

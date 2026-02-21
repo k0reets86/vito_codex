@@ -79,16 +79,19 @@ class JudgeProtocol:
     async def evaluate_niche(
         self, niche: str, context: dict[str, Any] | None = None
     ) -> JudgeVerdict:
-        """Оценивает нишу через 4 модели параллельно."""
+        """Оценивает нишу через 1 экономичную модель (вместо 4 параллельных).
+
+        Стоимость: ~$0.01 вместо $0.20.
+        Вызов 4 моделей доступен через evaluate_niche_deep() по запросу владельца.
+        """
         logger.info(
             f"Оценка ниши: {niche}",
             extra={"event": "niche_evaluation_start", "context": {"niche": niche}},
         )
 
-        # Модели для оценки
-        models_to_query = ["claude-opus", "gpt-o3", "perplexity", "claude-sonnet"]
+        # Одна экономичная модель вместо 4 параллельных
+        models_to_query = ["claude-haiku"]
 
-        # Параллельные запросы
         tasks = [
             self._query_model(model_key, niche, context)
             for model_key in models_to_query
@@ -145,6 +148,53 @@ class JudgeProtocol:
 
         return verdict
 
+    async def evaluate_niche_deep(
+        self, niche: str, context: dict[str, Any] | None = None
+    ) -> JudgeVerdict:
+        """Полная оценка ниши через 4 модели параллельно (~$0.20).
+
+        Вызывать только по явному запросу владельца.
+        """
+        logger.info(
+            f"DEEP оценка ниши: {niche}",
+            extra={"event": "niche_evaluation_deep_start", "context": {"niche": niche}},
+        )
+
+        models_to_query = ["claude-opus", "gpt-o3", "perplexity", "claude-sonnet"]
+        tasks = [
+            self._query_model(model_key, niche, context)
+            for model_key in models_to_query
+        ]
+        votes = await asyncio.gather(*tasks, return_exceptions=True)
+
+        valid_votes: list[JudgeVote] = []
+        for v in votes:
+            if isinstance(v, JudgeVote):
+                valid_votes.append(v)
+
+        scores = [v.score.weighted_score for v in valid_votes if v.error is None]
+        avg_score = sum(scores) / len(scores) if scores else 0
+        approved = avg_score > NICHE_THRESHOLD
+        recommendation = self._generate_recommendation(niche, avg_score, valid_votes)
+
+        verdict = JudgeVerdict(
+            niche=niche, votes=valid_votes, avg_score=avg_score,
+            recommendation=recommendation, approved=approved,
+        )
+
+        if self.memory:
+            try:
+                self.memory.save_pattern(
+                    category="niche_evaluation_deep",
+                    key=niche[:100],
+                    value=json.dumps({"avg_score": avg_score, "approved": approved, "votes": len(valid_votes)}),
+                    confidence=avg_score / 100,
+                )
+            except Exception:
+                pass
+
+        return verdict
+
     async def _query_model(
         self, model_key: str, niche: str, context: dict[str, Any] | None
     ) -> JudgeVote:
@@ -167,9 +217,11 @@ class JudgeProtocol:
         )
 
         try:
-            response = await self.llm_router._call_provider(model, prompt, "You are a market analysis expert.")
-            if not response:
+            response_tuple = await self.llm_router._call_provider(model, prompt, "You are a market analysis expert.")
+            if not response_tuple:
                 return JudgeVote(model=model_key, score=NicheScore(), error="Empty response")
+
+            response = response_tuple[0]  # (text, cost) tuple
 
             # Parse JSON
             text = response.strip()

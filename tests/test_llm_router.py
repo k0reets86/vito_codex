@@ -33,7 +33,7 @@ def router(tmp_db):
 
 
 def test_model_registry_has_all_models():
-    expected = {"claude-sonnet", "claude-opus", "claude-haiku", "gpt-o3", "perplexity"}
+    expected = {"claude-sonnet", "claude-opus", "claude-haiku", "gpt-o3", "perplexity", "gemini-flash"}
     assert set(MODEL_REGISTRY.keys()) == expected
 
 
@@ -76,7 +76,7 @@ def test_select_model_research(router):
 
 def test_select_model_routine(router):
     result = router.select_model(TaskType.ROUTINE)
-    assert "haiku" in result.model.model_id.lower()
+    assert "gemini" in result.model.model_id.lower() or "haiku" in result.model.model_id.lower()
 
 
 def test_select_model_needs_approval_high_cost(router):

@@ -15,7 +15,7 @@ import time
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 import anthropic
 import openai
@@ -25,6 +25,9 @@ from config.logger import get_logger
 from config.settings import settings
 
 logger = get_logger("llm_router", agent="llm_router")
+
+# Sentinel: no financial controller attached yet
+_NO_FINANCE = object()
 
 
 class TaskType(Enum):
@@ -87,6 +90,14 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         cost_per_1k_output=0.015,
         max_tokens=4096,
     ),
+    "gemini-flash": ModelConfig(
+        provider="google",
+        model_id="gemini-2.0-flash",
+        display_name="Gemini 2.0 Flash",
+        cost_per_1k_input=0.0,
+        cost_per_1k_output=0.0,
+        max_tokens=8192,
+    ),
 }
 
 # Маппинг: тип задачи → основная модель (+ fallback)
@@ -95,7 +106,7 @@ TASK_MODEL_MAP: dict[TaskType, list[str]] = {
     TaskType.STRATEGY: ["claude-opus", "claude-sonnet"],
     TaskType.CODE: ["gpt-o3", "claude-sonnet"],
     TaskType.RESEARCH: ["perplexity", "claude-sonnet"],
-    TaskType.ROUTINE: ["claude-haiku", "claude-sonnet"],
+    TaskType.ROUTINE: ["gemini-flash", "claude-haiku"],
 }
 
 
@@ -109,13 +120,19 @@ class RouteResult:
 
 
 class LLMRouter:
-    def __init__(self, sqlite_path: str | None = None):
+    def __init__(self, sqlite_path: str | None = None, finance=None):
         self._anthropic: anthropic.AsyncAnthropic | None = None
         self._openai: AsyncOpenAI | None = None
+        self._google: Any | None = None
         self._sqlite_path = sqlite_path or settings.SQLITE_PATH
         self._sqlite_conn: sqlite3.Connection | None = None
+        self._finance = finance  # FinancialController — set via set_finance()
         self._init_spend_table()
         logger.info("LLMRouter инициализирован", extra={"event": "init"})
+
+    def set_finance(self, finance) -> None:
+        """Attach FinancialController for budget enforcement."""
+        self._finance = finance
 
     def _get_sqlite(self) -> sqlite3.Connection:
         if self._sqlite_conn is None:
@@ -213,15 +230,32 @@ class LLMRouter:
         estimated_tokens: int = 2000,
     ) -> Optional[str]:
         """Вызывает LLM с автоматическим выбором модели и fallback."""
+        # ── Budget enforcement: блокируем если лимит исчерпан ──
+        if not self.check_daily_limit():
+            logger.warning(
+                "call_llm заблокирован: дневной лимит исчерпан",
+                extra={"event": "call_blocked_budget"},
+            )
+            return None
+
         route = self.select_model(task_type, estimated_tokens)
         model = route.model
+
+        # Проверка через FinancialController (если подключён)
+        if self._finance and route.estimated_cost_usd > 0:
+            budget_check = self._finance.check_expense(route.estimated_cost_usd)
+            if not budget_check["allowed"]:
+                logger.warning(
+                    f"call_llm заблокирован финконтроллером: {budget_check['reason']}",
+                    extra={"event": "call_blocked_finance", "context": budget_check},
+                )
+                return None
 
         if route.needs_approval:
             logger.warning(
                 f"Операция требует одобрения: ${route.estimated_cost_usd:.2f}",
                 extra={"event": "approval_required"},
             )
-            # TODO: интеграция с comms_agent для запроса одобрения через Telegram
             return None
 
         start = time.monotonic()
@@ -311,6 +345,28 @@ class LLMRouter:
                     model, response.usage.prompt_tokens, response.usage.completion_tokens
                 )
             return response.choices[0].message.content, cost
+
+        elif model.provider == "google":
+            if self._google is None:
+                from google import genai
+                self._google = genai.Client(api_key=settings.GOOGLE_API_KEY)
+            contents = prompt
+            if system_prompt:
+                contents = f"{system_prompt}\n\n{prompt}"
+            response = self._google.models.generate_content(
+                model=model.model_id,
+                contents=contents,
+            )
+            # Gemini free tier — cost = 0
+            cost = 0.0
+            if hasattr(response, "usage_metadata") and response.usage_metadata:
+                um = response.usage_metadata
+                cost = self._calc_cost(
+                    model,
+                    getattr(um, "prompt_token_count", 0),
+                    getattr(um, "candidates_token_count", 0),
+                )
+            return response.text, cost
 
         elif model.provider == "perplexity":
             if not hasattr(self, "_perplexity") or self._perplexity is None:

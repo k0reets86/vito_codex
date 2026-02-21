@@ -418,7 +418,11 @@ class ConversationEngine:
         # Judge Protocol
         if action == "analyze_niche" and self.judge_protocol:
             topic = params.get("topic", "digital products")
-            verdict = await self.judge_protocol.evaluate_niche(topic)
+            deep = params.get("deep", False)
+            if deep:
+                verdict = await self.judge_protocol.evaluate_niche_deep(topic)
+            else:
+                verdict = await self.judge_protocol.evaluate_niche(topic)
             return self.judge_protocol.format_verdict_for_telegram(verdict)
 
         # Knowledge Update
@@ -452,7 +456,7 @@ class ConversationEngine:
         if self.self_healer:
             actions.append("check_errors() — проверить ошибки системы")
         if self.judge_protocol:
-            actions.append("analyze_niche(topic) — глубокий анализ ниши (4 модели)")
+            actions.append("analyze_niche(topic, deep=false) — анализ ниши (1 модель, deep=true для 4 моделей)")
         if self.knowledge_updater:
             actions.append("update_knowledge() — обновить базу знаний и цены моделей")
         if self.self_updater:
