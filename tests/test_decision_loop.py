@@ -1,10 +1,11 @@
 """Тесты decision_loop.py."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from decision_loop import DecisionLoop, TaskType, TICK_INTERVAL
+from decision_loop import DecisionLoop, TaskType, TICK_INTERVAL, STEP_TIMEOUT, STEP_MAX_RETRIES
 from goal_engine import GoalEngine, GoalPriority, GoalStatus
 
 
@@ -240,3 +241,83 @@ async def test_learn_partial_failure(dl):
     await dl._learn_from_goal(goal, results)
     assert goal.status == GoalStatus.FAILED
     dl.memory.log_error.assert_called()
+
+
+# ── Retry & Timeout ──
+
+@pytest.mark.asyncio
+async def test_execute_step_with_retry_succeeds_first_try(dl):
+    goal = dl.goal_engine.create_goal("Retry", "desc")
+    result = await dl._execute_step_with_retry(goal, "Research market", 1)
+    assert result["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_execute_step_with_retry_succeeds_on_second(dl):
+    """Step fails first, succeeds on second attempt."""
+    call_count = 0
+
+    async def flaky_step(g, s):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return {"status": "failed", "error": "transient"}
+        return {"status": "completed", "output": "ok"}
+
+    with patch.object(dl, "_execute_step", side_effect=flaky_step):
+        goal = dl.goal_engine.create_goal("Retry2", "desc")
+        result = await dl._execute_step_with_retry(goal, "do thing", 1)
+
+    assert result["status"] == "completed"
+    assert call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_execute_step_with_retry_exhausted(dl):
+    """Fails all STEP_MAX_RETRIES attempts."""
+    async def always_fail(g, s):
+        return {"status": "failed", "error": "persistent"}
+
+    with patch.object(dl, "_execute_step", side_effect=always_fail):
+        goal = dl.goal_engine.create_goal("Fail", "desc")
+        result = await dl._execute_step_with_retry(goal, "do thing", 1)
+
+    assert result["status"] == "failed"
+    assert "persistent" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_execute_step_with_retry_timeout(dl):
+    """Step hangs beyond STEP_TIMEOUT → retried."""
+    call_count = 0
+
+    async def slow_then_ok(g, s):
+        nonlocal call_count
+        call_count += 1
+        if call_count <= 2:
+            await asyncio.sleep(999)  # will be cancelled by timeout
+        return {"status": "completed", "output": "finally"}
+
+    with patch.object(dl, "_execute_step", side_effect=slow_then_ok), \
+         patch("decision_loop.STEP_TIMEOUT", 0.05):
+        goal = dl.goal_engine.create_goal("Slow", "desc")
+        result = await dl._execute_step_with_retry(goal, "slow step", 1)
+
+    assert result["status"] == "completed"
+    assert call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_execute_step_with_retry_all_timeout(dl):
+    """All retries time out."""
+    async def always_slow(g, s):
+        await asyncio.sleep(999)
+        return {"status": "completed", "output": "never"}
+
+    with patch.object(dl, "_execute_step", side_effect=always_slow), \
+         patch("decision_loop.STEP_TIMEOUT", 0.05):
+        goal = dl.goal_engine.create_goal("AllSlow", "desc")
+        result = await dl._execute_step_with_retry(goal, "infinite step", 1)
+
+    assert result["status"] == "failed"
+    assert "Таймаут" in result["error"]

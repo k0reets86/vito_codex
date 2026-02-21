@@ -24,6 +24,8 @@ from llm_router import LLMRouter, TaskType
 from memory.memory_manager import MemoryManager
 
 TICK_INTERVAL = 300  # 5 минут
+STEP_TIMEOUT = 60    # секунд на один шаг
+STEP_MAX_RETRIES = 3 # попыток на один шаг
 
 logger = get_logger("decision_loop", agent="decision_loop")
 
@@ -40,10 +42,15 @@ class DecisionLoop:
         self.llm_router = llm_router
         self.memory = memory
         self.agent_registry = agent_registry
+        self.self_healer = None
         self.running = False
         self._tick_count = 0
         self._consecutive_idle = 0
         logger.info("DecisionLoop инициализирован", extra={"event": "init"})
+
+    def set_self_healer(self, self_healer) -> None:
+        """Устанавливает SelfHealer для самолечения."""
+        self.self_healer = self_healer
 
     async def run(self) -> None:
         """Основной цикл. Работает пока self.running == True."""
@@ -59,6 +66,13 @@ class DecisionLoop:
                     extra={"event": "tick_error"},
                     exc_info=True,
                 )
+                if self.self_healer:
+                    try:
+                        await self.self_healer.handle_error(
+                            "decision_loop", e, {"tick": self._tick_count}
+                        )
+                    except Exception:
+                        pass
                 self.memory.log_error(
                     module="decision_loop",
                     error_type=type(e).__name__,
@@ -193,13 +207,13 @@ class DecisionLoop:
                 },
             )
 
-            step_result = await self._execute_step(goal, step)
+            step_result = await self._execute_step_with_retry(goal, step, i + 1)
             results[f"step_{i + 1}"] = step_result
             results["steps_completed"] = i + 1
 
             if step_result.get("status") == "failed":
                 logger.warning(
-                    f"[{goal.goal_id}] Шаг {i + 1} провалился: {step_result.get('error')}",
+                    f"[{goal.goal_id}] Шаг {i + 1} провалился после {STEP_MAX_RETRIES} попыток: {step_result.get('error')}",
                     extra={"event": "step_failed", "context": {"goal_id": goal.goal_id, "step": i + 1}},
                 )
                 break
@@ -226,9 +240,45 @@ class DecisionLoop:
 
         return results
 
+    async def _execute_step_with_retry(self, goal: Goal, step: str, step_num: int) -> dict[str, Any]:
+        """Обёртка: retry до STEP_MAX_RETRIES раз с таймаутом STEP_TIMEOUT."""
+        last_result: dict[str, Any] = {"status": "failed", "error": "no attempts made"}
+
+        for attempt in range(1, STEP_MAX_RETRIES + 1):
+            try:
+                last_result = await asyncio.wait_for(
+                    self._execute_step(goal, step),
+                    timeout=STEP_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                last_result = {"status": "failed", "error": f"Таймаут {STEP_TIMEOUT}s"}
+                logger.warning(
+                    f"[{goal.goal_id}] Шаг {step_num} таймаут (попытка {attempt}/{STEP_MAX_RETRIES})",
+                    extra={"event": "step_timeout", "context": {"goal_id": goal.goal_id, "step": step_num, "attempt": attempt}},
+                )
+
+            if last_result.get("status") != "failed":
+                return last_result
+
+            if attempt < STEP_MAX_RETRIES:
+                logger.info(
+                    f"[{goal.goal_id}] Шаг {step_num} retry {attempt + 1}/{STEP_MAX_RETRIES}",
+                    extra={"event": "step_retry", "context": {"goal_id": goal.goal_id, "step": step_num, "attempt": attempt + 1}},
+                )
+
+        return last_result
+
     async def _execute_step(self, goal: Goal, step: str) -> dict[str, Any]:
-        """Выполняет один шаг плана. Сначала через AgentRegistry, fallback на LLM."""
+        """Выполняет один шаг плана. Навык → AgentRegistry → LLM fallback."""
         try:
+            # Проверяем навыки в памяти
+            skills = self.memory.search_skills(step) if hasattr(self.memory, 'search_skills') else []
+            if skills:
+                logger.debug(
+                    f"Найден навык: {skills[0]['name']}",
+                    extra={"event": "skill_found", "context": {"skill": skills[0]["name"]}},
+                )
+
             # Попытка диспатча через реестр агентов
             if self.agent_registry:
                 try:
@@ -265,6 +315,14 @@ class DecisionLoop:
             return {"status": "failed", "error": "LLM не вернул ответ"}
 
         except Exception as e:
+            if self.self_healer:
+                try:
+                    await self.self_healer.handle_error(
+                        "decision_loop", e,
+                        {"step": step, "goal": goal.title},
+                    )
+                except Exception:
+                    pass
             return {"status": "failed", "error": str(e)}
 
     async def _learn_from_goal(self, goal: Goal, results: dict[str, Any]) -> None:
