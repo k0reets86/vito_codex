@@ -409,14 +409,41 @@ class CommsAgent:
             )
             return
 
-        # 2. Pending approvals — да/нет
+        # 2. Pending approvals — да/нет/✅/❌
+        lower = text.strip().lower()
         if self._pending_approvals:
-            lower = text.lower()
-            if lower in ("да", "yes", "ок", "ok", "approve"):
+            if lower in ("да", "yes", "ок", "ok", "approve", "✅", "👍"):
                 await self._cmd_approve(update, context)
                 return
-            elif lower in ("нет", "no", "reject", "отмена"):
+            elif lower in ("нет", "no", "reject", "отмена", "❌", "👎"):
                 await self._cmd_reject(update, context)
+                return
+
+        # 2.5. Goal approval — approve goals in WAITING_APPROVAL status
+        if lower in ("да", "yes", "ок", "ok", "approve", "✅", "👍") and self._goal_engine:
+            from goal_engine import GoalStatus
+            waiting = [g for g in self._goal_engine.get_all_goals()
+                       if g.status == GoalStatus.WAITING_APPROVAL]
+            if waiting:
+                goal = waiting[0]  # Approve the most recent waiting goal
+                goal.status = GoalStatus.PENDING  # Move to PENDING so DecisionLoop picks it up
+                self._goal_engine._persist_goal(goal)
+                await update.message.reply_text(
+                    f"✅ Одобрено: {goal.title}\nПриступаю к выполнению.",
+                    reply_markup=self._main_keyboard(),
+                )
+                return
+        elif lower in ("нет", "no", "reject", "отмена", "❌", "👎") and self._goal_engine:
+            from goal_engine import GoalStatus
+            waiting = [g for g in self._goal_engine.get_all_goals()
+                       if g.status == GoalStatus.WAITING_APPROVAL]
+            if waiting:
+                goal = waiting[0]
+                self._goal_engine.fail_goal(goal.goal_id, "Отклонено владельцем")
+                await update.message.reply_text(
+                    f"❌ Отклонено: {goal.title}",
+                    reply_markup=self._main_keyboard(),
+                )
                 return
 
         # 3. ConversationEngine — живой разговор
@@ -428,14 +455,23 @@ class CommsAgent:
                 if result.get("pass_through"):
                     pass  # Уже обработано правилами выше
                 elif result.get("create_goal") and self._goal_engine:
-                    from goal_engine import GoalPriority
+                    from goal_engine import GoalPriority, GoalStatus
+                    priority_map = {"CRITICAL": GoalPriority.CRITICAL, "HIGH": GoalPriority.HIGH,
+                                    "MEDIUM": GoalPriority.MEDIUM, "LOW": GoalPriority.LOW}
                     goal = self._goal_engine.create_goal(
                         title=result.get("goal_title", text[:100]),
                         description=result.get("goal_description", text),
-                        priority=GoalPriority.HIGH,
+                        priority=priority_map.get(result.get("goal_priority", "HIGH"), GoalPriority.HIGH),
                         source="owner",
+                        estimated_cost_usd=result.get("estimated_cost_usd", 0.05),
                     )
+                    # Approval workflow: set goal to WAITING_APPROVAL
+                    if result.get("needs_approval", False):
+                        goal.status = GoalStatus.WAITING_APPROVAL
+                        self._goal_engine._persist_goal(goal)
                     response = result.get("response", f"Цель создана: {goal.title}")
+                    if result.get("needs_approval"):
+                        response += "\n\nОтветь ✅ чтобы одобрить или ❌ чтобы отклонить."
                     await update.message.reply_text(response, reply_markup=self._main_keyboard())
                 elif result.get("response"):
                     await update.message.reply_text(

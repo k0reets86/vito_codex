@@ -93,8 +93,21 @@ class SelfUpdater:
         return {"success": False, "error": "Tests failed after update", "tests": test_result, "rolled_back": True}
 
     async def apply_patch(self, patch_content: str, source: str = "manual") -> dict[str, Any]:
-        """Применяет патч: backup → apply → test → keep/rollback."""
+        """Применяет патч: проверка protected → backup → apply → test → keep/rollback."""
         logger.info(f"Применение патча из {source}", extra={"event": "patch_start"})
+
+        # Проверка PROTECTED_FILES
+        from code_generator import PROTECTED_FILES
+        for line in patch_content.split("\n"):
+            if line.startswith("+++ b/") or line.startswith("--- a/"):
+                filepath = line.split("/", 1)[-1] if "/" in line else ""
+                filepath = filepath.strip()
+                if filepath in PROTECTED_FILES:
+                    logger.warning(
+                        f"Патч затрагивает защищённый файл: {filepath}",
+                        extra={"event": "protected_file_in_patch", "context": {"file": filepath}},
+                    )
+                    return {"success": False, "error": f"Protected file: {filepath}"}
 
         backup_path = self.backup_current_code()
         if not backup_path:
@@ -187,7 +200,7 @@ class SelfUpdater:
         """Запускает pytest и возвращает результат."""
         try:
             proc = subprocess.run(
-                ["python3", "-m", "pytest", test_path, "-v", "--tb=short", "-q"],
+                ["python3", "-m", "pytest", test_path, "-n", "1", "-v", "--tb=short", "-q"],
                 capture_output=True, text=True, timeout=300,
                 cwd=str(PROJECT_ROOT),
             )

@@ -7,6 +7,8 @@
   - Quality Judge оценивает результат перед публикацией
 """
 
+import json
+import sqlite3
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -58,10 +60,119 @@ class Goal:
 
 
 class GoalEngine:
-    def __init__(self):
+    def __init__(self, sqlite_path: str = ""):
         self._goals: dict[str, Goal] = {}
         self._active_goal: Optional[str] = None
-        logger.info("GoalEngine инициализирован", extra={"event": "init"})
+        self._sqlite_path = sqlite_path or settings.SQLITE_PATH
+        self._conn: Optional[sqlite3.Connection] = None
+        self._init_goals_db()
+        self._load_goals()
+        logger.info(
+            f"GoalEngine инициализирован, загружено {len(self._goals)} целей",
+            extra={"event": "init", "context": {"loaded_goals": len(self._goals)}},
+        )
+
+    def _init_goals_db(self) -> None:
+        """Создаёт таблицу goals в SQLite."""
+        self._conn = sqlite3.connect(self._sqlite_path)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS goals (
+                goal_id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                priority INTEGER DEFAULT 3,
+                status TEXT DEFAULT 'pending',
+                source TEXT DEFAULT 'system',
+                estimated_cost_usd REAL DEFAULT 0,
+                estimated_roi REAL DEFAULT 0,
+                plan TEXT DEFAULT '[]',
+                results TEXT DEFAULT '{}',
+                lessons_learned TEXT DEFAULT '',
+                parent_goal_id TEXT,
+                created_at TEXT,
+                started_at TEXT,
+                completed_at TEXT
+            )
+        """)
+        self._conn.commit()
+
+    def _load_goals(self) -> None:
+        """Загружает non-terminal цели из SQLite при старте."""
+        try:
+            rows = self._conn.execute(
+                "SELECT * FROM goals WHERE status NOT IN ('completed', 'failed', 'cancelled')"
+            ).fetchall()
+            for row in rows:
+                row_dict = dict(row)
+                goal = Goal(
+                    goal_id=row_dict["goal_id"],
+                    title=row_dict["title"],
+                    description=row_dict["description"] or "",
+                    priority=GoalPriority(row_dict["priority"]),
+                    status=GoalStatus(row_dict["status"]),
+                    source=row_dict["source"] or "system",
+                    estimated_cost_usd=row_dict["estimated_cost_usd"] or 0.0,
+                    estimated_roi=row_dict["estimated_roi"] or 0.0,
+                    plan=json.loads(row_dict["plan"] or "[]"),
+                    results=json.loads(row_dict["results"] or "{}"),
+                    lessons_learned=row_dict["lessons_learned"] or "",
+                    parent_goal_id=row_dict["parent_goal_id"],
+                )
+                if row_dict["created_at"]:
+                    try:
+                        goal.created_at = datetime.fromisoformat(row_dict["created_at"])
+                    except (ValueError, TypeError):
+                        pass
+                if row_dict["started_at"]:
+                    try:
+                        goal.started_at = datetime.fromisoformat(row_dict["started_at"])
+                    except (ValueError, TypeError):
+                        pass
+                if row_dict["completed_at"]:
+                    try:
+                        goal.completed_at = datetime.fromisoformat(row_dict["completed_at"])
+                    except (ValueError, TypeError):
+                        pass
+                self._goals[goal.goal_id] = goal
+            if rows:
+                logger.info(
+                    f"Загружено {len(rows)} целей из SQLite",
+                    extra={"event": "goals_loaded", "context": {"count": len(rows)}},
+                )
+        except Exception as e:
+            logger.error(f"Ошибка загрузки целей: {e}", extra={"event": "goals_load_error"}, exc_info=True)
+
+    def _persist_goal(self, goal: Goal) -> None:
+        """Сохраняет одну цель в SQLite (INSERT OR REPLACE)."""
+        try:
+            self._conn.execute(
+                """INSERT OR REPLACE INTO goals
+                   (goal_id, title, description, priority, status, source,
+                    estimated_cost_usd, estimated_roi, plan, results,
+                    lessons_learned, parent_goal_id, created_at, started_at, completed_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    goal.goal_id,
+                    goal.title,
+                    goal.description,
+                    goal.priority.value,
+                    goal.status.value,
+                    goal.source,
+                    goal.estimated_cost_usd,
+                    goal.estimated_roi,
+                    json.dumps(goal.plan, ensure_ascii=False),
+                    json.dumps(goal.results, ensure_ascii=False),
+                    goal.lessons_learned,
+                    goal.parent_goal_id,
+                    goal.created_at.isoformat() if goal.created_at else None,
+                    goal.started_at.isoformat() if goal.started_at else None,
+                    goal.completed_at.isoformat() if goal.completed_at else None,
+                ),
+            )
+            self._conn.commit()
+        except Exception as e:
+            logger.error(f"Ошибка сохранения цели {goal.goal_id}: {e}", extra={"event": "goal_persist_error"}, exc_info=True)
 
     def create_goal(
         self,
@@ -85,6 +196,7 @@ class GoalEngine:
             parent_goal_id=parent_goal_id,
         )
         self._goals[goal.goal_id] = goal
+        self._persist_goal(goal)
         logger.info(
             f"Цель создана: [{goal.goal_id}] {title}",
             extra={
@@ -108,6 +220,7 @@ class GoalEngine:
 
         goal.plan = steps
         goal.status = GoalStatus.PLANNING
+        self._persist_goal(goal)
         logger.info(
             f"План составлен для [{goal_id}]: {len(steps)} шагов",
             extra={
@@ -132,11 +245,13 @@ class GoalEngine:
                 },
             )
             goal.status = GoalStatus.WAITING_APPROVAL
+            self._persist_goal(goal)
             return False
 
         goal.status = GoalStatus.EXECUTING
         goal.started_at = datetime.now(timezone.utc)
         self._active_goal = goal_id
+        self._persist_goal(goal)
         logger.info(
             f"Выполнение начато: [{goal_id}] {goal.title}",
             extra={"event": "goal_execution_started", "context": {"goal_id": goal_id}},
@@ -162,6 +277,7 @@ class GoalEngine:
         if self._active_goal == goal_id:
             self._active_goal = None
 
+        self._persist_goal(goal)
         logger.info(
             f"Цель завершена: [{goal_id}] {goal.title}",
             extra={
@@ -187,6 +303,7 @@ class GoalEngine:
         if self._active_goal == goal_id:
             self._active_goal = None
 
+        self._persist_goal(goal)
         logger.warning(
             f"Цель провалена: [{goal_id}] {reason}",
             extra={"event": "goal_failed", "context": {"goal_id": goal_id, "reason": reason}},

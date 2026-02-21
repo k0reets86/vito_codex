@@ -33,6 +33,8 @@ class Settings:
     MEDIUM_TOKEN: str = os.getenv("MEDIUM_TOKEN", "")
 
     # Email & Social
+    GMAIL_ADDRESS: str = os.getenv("GMAIL_ADDRESS", "")
+    GMAIL_PASSWORD: str = os.getenv("GMAIL_PASSWORD", "")
     SENDGRID_API_KEY: str = os.getenv("SENDGRID_API_KEY", "")
     REDDIT_CLIENT_ID: str = os.getenv("REDDIT_CLIENT_ID", "")
     REDDIT_CLIENT_SECRET: str = os.getenv("REDDIT_CLIENT_SECRET", "")
@@ -59,6 +61,11 @@ class Settings:
     CLOUDINARY_CLOUD_NAME: str = os.getenv("CLOUDINARY_CLOUD_NAME", "")
     CLOUDINARY_API_KEY: str = os.getenv("CLOUDINARY_API_KEY", "")
     CLOUDINARY_API_SECRET: str = os.getenv("CLOUDINARY_API_SECRET", "")
+
+    # Image Generation
+    REPLICATE_API_TOKEN: str = os.getenv("REPLICATE_API_TOKEN", "")
+    BFL_API_KEY: str = os.getenv("BFL_API_KEY", "")
+    WAVESPEED_API_KEY: str = os.getenv("WAVESPEED_API_KEY", "")
 
     # Financial limits (USD)
     # Hierarchy: OPERATION_MAX < OPERATION_NOTIFY < DAILY_LIMIT < OPERATION_APPROVE

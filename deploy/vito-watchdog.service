@@ -1,0 +1,20 @@
+[Unit]
+Description=VITO RAM Watchdog — kills runaway processes when RAM < 1GB
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/home/vito/vito-agent/deploy/watchdog.sh
+Restart=always
+RestartSec=5
+
+# Watchdog сам лёгкий — 64MB макс
+MemoryMax=64M
+TasksMax=10
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vito-watchdog
+
+[Install]
+WantedBy=multi-user.target

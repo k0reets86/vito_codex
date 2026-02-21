@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from config.logger import get_logger
+from config.resource_guard import resource_guard
 from config.settings import settings
 from goal_engine import Goal, GoalEngine, GoalPriority, GoalStatus
 from llm_router import LLMRouter, TaskType
@@ -94,6 +95,16 @@ class DecisionLoop:
             extra={"event": "tick_start", "context": {"tick": self._tick_count}},
         )
 
+        # 0. Проверка ресурсов — БЛОКИРУЕМ если RAM < порога
+        if not resource_guard.can_proceed(estimated_mb=100):
+            logger.warning(
+                "Недостаточно RAM — пропускаем тик",
+                extra={"event": "resource_guard_skip_tick",
+                       "context": resource_guard.status()},
+            )
+            self._log_tick_done(tick_start, idle=True)
+            return
+
         # 1. Проверка финансового лимита — БЛОКИРУЕМ если исчерпан
         if not self.llm_router.check_daily_limit():
             logger.warning(
@@ -169,14 +180,32 @@ class DecisionLoop:
                 f"- {doc['text'][:200]}" for doc in similar
             )
 
+        # Ищем релевантные навыки
+        skills = self.memory.search_skills(f"{goal.title} {goal.description}", limit=3)
+        skills_context = ""
+        if skills:
+            skills_context = "\nИмеющиеся навыки:\n" + "\n".join(
+                f"- {s['name']}: {s['description'][:150]} (успех: {s.get('success_count', 0)})"
+                for s in skills
+            )
+            logger.info(
+                f"[{goal.goal_id}] Найдено {len(skills)} релевантных навыков для планирования",
+                extra={"event": "skills_found_for_plan", "context": {"skills": [s['name'] for s in skills]}},
+            )
+
+        time_ctx = self.get_time_context()
         prompt = (
-            f"Составь план выполнения задачи для автономного агента VITO.\n\n"
-            f"Задача: {goal.title}\n"
-            f"Описание: {goal.description}\n"
-            f"Бюджет: ${goal.estimated_cost_usd:.2f}\n"
-            f"{context_from_memory}\n\n"
-            f"Верни план в виде пронумерованного списка шагов (3-7 шагов). "
-            f"Только шаги, без пояснений."
+            f"Create an execution plan for VITO autonomous agent.\n\n"
+            f"Task: {goal.title}\n"
+            f"Description: {goal.description}\n"
+            f"Budget: ${goal.estimated_cost_usd:.2f}\n"
+            f"Current time: {time_ctx['utc_time']} ({time_ctx['weekday']}, {time_ctx['period']})\n"
+            f"US business hours: {'Yes' if time_ctx['is_business_hours_us'] else 'No'}\n"
+            f"{context_from_memory}{skills_context}\n\n"
+            f"IMPORTANT: All content/products must be in ENGLISH (target market: US/CA/EU).\n"
+            f"Return a numbered list of steps (3-7 steps). "
+            f"Use existing skills where possible. "
+            f"Steps only, no explanations."
         )
 
         response = await self.llm_router.call_llm(
@@ -271,78 +300,443 @@ class DecisionLoop:
         return last_result
 
     async def _execute_step(self, goal: Goal, step: str) -> dict[str, Any]:
-        """Выполняет один шаг плана. Навык → AgentRegistry → LLM fallback."""
+        """Выполняет один шаг плана.
+
+        Chain: Smart Route → Agent Registry → LLM fallback → Research-Learn.
+        """
         try:
-            # Проверяем навыки в памяти
-            skills = self.memory.search_skills(step) if hasattr(self.memory, 'search_skills') else []
-            if skills:
-                logger.debug(
-                    f"Найден навык: {skills[0]['name']}",
-                    extra={"event": "skill_found", "context": {"skill": skills[0]["name"]}},
-                )
+            # 1. Smart routing — map step to specific agent + capability
+            routed = await self._route_to_agent(goal, step)
+            if routed:
+                return routed
 
-            # Попытка диспатча через реестр агентов
+            # 2. Agent Registry dispatch by capability keyword
             if self.agent_registry:
-                try:
-                    result = await self.agent_registry.dispatch(
-                        step, step=step, goal_title=goal.title
-                    )
-                    if result and result.success:
-                        output = result.output
-                        if isinstance(output, str):
-                            output = output[:500]
-                        return {"status": "completed", "output": output, "agent": "registry"}
-                except Exception as e:
-                    logger.debug(
-                        f"Registry dispatch failed, falling back to LLM: {e}",
-                        extra={"event": "registry_fallback"},
-                    )
+                capability = self._step_to_capability(step)
+                if capability:
+                    try:
+                        result = await self.agent_registry.dispatch(
+                            capability, step=step, goal_title=goal.title, content=step,
+                        )
+                        if result and result.success and self._validate_result(result, step):
+                            output = result.output
+                            if isinstance(output, str):
+                                output = output[:500]
+                            return {"status": "completed", "output": output, "agent": "registry"}
+                    except Exception as e:
+                        logger.debug(f"Registry dispatch failed: {e}", extra={"event": "registry_fallback"})
 
-            # Fallback: прямой вызов LLM
+            # 3. LLM fallback — generate content/analysis
             task_type = self._classify_step(step)
-
             response = await self.llm_router.call_llm(
                 task_type=task_type,
                 prompt=(
-                    f"Ты VITO — автономный агент. Выполни этот шаг:\n"
-                    f"Контекст цели: {goal.title}\n"
-                    f"Шаг: {step}\n"
-                    f"Дай конкретный результат выполнения."
+                    f"You are VITO — an autonomous AI agent. Execute this step:\n"
+                    f"Goal context: {goal.title}\n"
+                    f"Step: {step}\n"
+                    f"IMPORTANT: All content/products must be in ENGLISH (target: US/CA/EU market).\n"
+                    f"Give a concrete execution result."
                 ),
                 estimated_tokens=1500,
             )
-
             if response:
-                return {"status": "completed", "output": response[:500]}
-            return {"status": "failed", "error": "LLM не вернул ответ"}
+                # Save LLM result to file if it looks like content
+                file_path = await self._save_step_output(goal, step, response)
+                result_data = {"status": "completed", "output": response[:500]}
+                if file_path:
+                    result_data["file_path"] = file_path
+                return result_data
+
+            # 4. Research-Learn-Apply
+            return await self._research_and_learn(goal, step)
 
         except Exception as e:
             if self.self_healer:
                 try:
-                    await self.self_healer.handle_error(
-                        "decision_loop", e,
-                        {"step": step, "goal": goal.title},
-                    )
+                    await self.self_healer.handle_error("decision_loop", e, {"step": step, "goal": goal.title})
                 except Exception:
                     pass
             return {"status": "failed", "error": str(e)}
+
+    async def _route_to_agent(self, goal: Goal, step: str) -> dict[str, Any] | None:
+        """Smart routing: map step text to specific agent calls (no LLM).
+
+        Returns result dict or None if no match.
+        """
+        s = step.lower()
+
+        # --- Research/analysis (FIRST — should catch "анализ", "исследов", "тренд") ---
+        if any(w in s for w in ("исследов", "анализ", "проанализ", "тренд", "reddit",
+                                "конкурент", "research", "analyz", "competitor", "trend")):
+            if self.agent_registry:
+                result = await self.agent_registry.dispatch(
+                    "research", step=step, goal_title=goal.title, content=step,
+                )
+                if result and result.success:
+                    logger.info(f"Routed to research_agent: {step[:60]}", extra={"event": "smart_route_research"})
+                    return self._format_result(result, "research_agent")
+
+        # --- Image generation (cover, обложка, изображение) ---
+        if any(w in s for w in ("обложк", "cover", "изображен", "image_generator",
+                                "картинк", "сгенерировать изображ", "generate image",
+                                "create image", "design")):
+            if hasattr(self, '_image_generator') and self._image_generator:
+                try:
+                    img_result = await self._image_generator.generate(
+                        prompt=f"Professional digital product cover, modern clean design for: {goal.title}",
+                        style="professional", filename=f"cover_{goal.goal_id[:8]}",
+                    )
+                    if img_result.get("path"):
+                        logger.info(f"Image generated: {img_result['path']}", extra={"event": "smart_route_image"})
+                        return {"status": "completed", "output": img_result, "agent": "image_generator",
+                                "file_path": img_result["path"]}
+                except Exception as e:
+                    logger.warning(f"Image generation failed: {e}")
+
+        # --- Content creation (ebook, template, product) ---
+        if any(w in s for w in ("создать продукт", "ebook", "шаблон", "template", "книг",
+                                "создать контент", "создать простой", "цифровой продукт",
+                                "описание продукт", "product description", "create product",
+                                "write content", "create content", "digital product")):
+            if self.agent_registry:
+                result = await self.agent_registry.dispatch(
+                    "content_creation", step=step, goal_title=goal.title,
+                    content=step, content_type="product_description",
+                )
+                if result and result.success:
+                    logger.info(f"Routed to content_creator: {step[:60]}", extra={"event": "smart_route_content"})
+                    return self._format_result(result, "content_creator")
+
+        # --- Gumroad publish ---
+        if any(w in s for w in ("gumroad", "опубликовать продукт", "publish product",
+                                "опубликовать на gumroad", "draft", "publish on gumroad",
+                                "create listing", "upload product")):
+            if hasattr(self, '_platforms') and self._platforms.get("gumroad"):
+                gumroad = self._platforms["gumroad"]
+                try:
+                    pub_result = await gumroad.publish({
+                        "name": goal.title[:100],
+                        "description": goal.description[:500],
+                        "price": 0,
+                    })
+                    if pub_result.get("status") in ("created", "published", "prepared"):
+                        logger.info(f"Gumroad: {pub_result.get('status')}", extra={"event": "smart_route_gumroad"})
+                        return {"status": "completed", "output": pub_result, "agent": "gumroad",
+                                "file_path": pub_result.get("file_path", "")}
+                except Exception as e:
+                    logger.warning(f"Gumroad publish failed: {e}")
+
+        # --- Twitter post ---
+        if any(w in s for w in ("twitter", "твит", "tweet", "пост для twitter", "@bot_vito",
+                                "post to twitter", "create tweet", "social media post")):
+            if self.agent_registry:
+                result = await self.agent_registry.dispatch(
+                    "social_media", step=step, goal_title=goal.title,
+                    platform="twitter", content=step,
+                )
+                if result and result.success:
+                    logger.info(f"Routed to smm_agent/twitter: {step[:60]}", extra={"event": "smart_route_twitter"})
+                    return self._format_result(result, "smm_agent")
+
+        # --- Send report to owner (Telegram) ---
+        if any(w in s for w in ("отчёт", "отчет", "владельц", "telegram",
+                                "отправить владельцу", "report", "notify",
+                                "send report", "notify owner", "telegram report")):
+            if hasattr(self, '_comms') and self._comms:
+                try:
+                    report_text = (
+                        f"Отчёт по цели: {goal.title}\n\n"
+                        f"Описание: {goal.description[:300]}\n"
+                        f"Шагов выполнено: {len([k for k in (goal.results or {}) if 'step_' in str(k)])}\n"
+                        f"Статус: в процессе"
+                    )
+                    await self._comms.send_message(report_text)
+                    logger.info("Report sent to owner via Telegram", extra={"event": "smart_route_report"})
+                    return {"status": "completed", "output": "Report sent to owner", "agent": "comms"}
+                except Exception as e:
+                    logger.warning(f"Report send failed: {e}")
+
+        return None  # No smart route matched
+
+    @staticmethod
+    def _step_to_capability(step: str) -> str:
+        """Map step text to the closest agent capability keyword."""
+        s = step.lower()
+        mapping = [
+            (("исследов", "анализ", "research", "analyz"), "research"),
+            (("тренд", "reddit", "rss", "trend", "niche"), "trend_scan"),
+            (("контент", "стать", "content", "article", "ebook"), "content_creation"),
+            (("пост", "twitter", "instagram", "social"), "social_media"),
+            (("gumroad", "etsy", "листинг", "listing", "ecommerce"), "listing_create"),
+            (("seo", "keyword", "ключев"), "seo"),
+            (("маркетинг", "воронк", "marketing", "funnel"), "marketing_strategy"),
+            (("email", "рассылк", "newsletter"), "email"),
+            (("перевод", "translat", "localiz"), "translate"),
+            (("код", "скрипт", "code", "script", "implement"), "shell"),
+            (("аналитик", "прогноз", "analytics", "forecast"), "analytics"),
+        ]
+        for keywords, capability in mapping:
+            if any(w in s for w in keywords):
+                return capability
+        return ""
+
+    @staticmethod
+    def _format_result(result, agent_name: str) -> dict[str, Any]:
+        """Format TaskResult into step result dict."""
+        output = result.output
+        if isinstance(output, str):
+            output = output[:500]
+        data = {"status": "completed", "output": output, "agent": agent_name}
+        if result.metadata and result.metadata.get("file_path"):
+            data["file_path"] = result.metadata["file_path"]
+        return data
+
+    async def _save_step_output(self, goal: Goal, step: str, content: str) -> str:
+        """Save LLM-generated content to file if applicable. Returns file path or empty string."""
+        from pathlib import Path
+        s = step.lower()
+
+        # Determine output type
+        if any(w in s for w in ("продукт", "ebook", "шаблон", "product", "template")):
+            out_dir = Path("/home/vito/vito-agent/output/products")
+        elif any(w in s for w in ("пост", "twitter", "social", "tweet")):
+            out_dir = Path("/home/vito/vito-agent/output/social")
+        elif any(w in s for w in ("стать", "article", "контент", "content")):
+            out_dir = Path("/home/vito/vito-agent/output/articles")
+        elif any(w in s for w in ("отчёт", "отчет", "report", "анализ", "analysis")):
+            out_dir = Path("/home/vito/vito-agent/output/articles")
+        else:
+            return ""  # Don't save generic LLM output
+
+        out_dir.mkdir(parents=True, exist_ok=True)
+        import re, time as _time
+        slug = re.sub(r'[^a-zA-Zа-яА-Я0-9]', '_', goal.title[:30]).strip('_')
+        ts = int(_time.time())
+        file_path = out_dir / f"{slug}_{ts}.md"
+        file_path.write_text(content, encoding="utf-8")
+        logger.info(f"Step output saved: {file_path}", extra={"event": "step_output_saved"})
+        return str(file_path)
+
+    def _validate_result(self, result, step: str) -> bool:
+        """Validate that a TaskResult represents real work, not a mock.
+
+        Returns False if the result looks like a fake/stub response.
+        """
+        if not result or not result.success:
+            return False
+
+        output = result.output
+        metadata = result.metadata or {}
+
+        # Check for file creation tasks — file must exist
+        if metadata.get("file_path"):
+            from pathlib import Path
+            if not Path(metadata["file_path"]).exists():
+                logger.warning(f"Validation: file not found: {metadata['file_path']}")
+                return False
+
+        # Check for platform publish results
+        if isinstance(output, dict):
+            status = output.get("status", "")
+            platform = output.get("platform", "")
+
+            # Mock indicators: status="created"/"published" but no real IDs
+            if status in ("created", "published") and platform:
+                # Must have a real ID or URL
+                has_id = any(
+                    output.get(k) and output.get(k) != "0"
+                    for k in ("post_id", "listing_id", "product_id", "tweet_id", "story_id")
+                )
+                has_url = bool(output.get("url", ""))
+                if not has_id and not has_url:
+                    logger.warning(f"Validation: {platform} result has no real ID/URL — likely mock")
+                    return False
+
+            # Explicit error states
+            if status in ("not_configured", "not_authenticated", "needs_oauth"):
+                return False
+
+        # String output from LLM is considered valid (it's real generated content)
+        return True
+
+    async def _research_and_learn(self, goal: Goal, step: str) -> dict[str, Any]:
+        """Цикл: не знаю → ищу через Perplexity → учусь → сохраняю навык."""
+        logger.info(
+            f"[{goal.goal_id}] Research-Learn-Apply для шага: {step[:80]}",
+            extra={"event": "research_learn_start", "context": {"goal_id": goal.goal_id, "step": step[:100]}},
+        )
+
+        # 1. Исследование через Perplexity (TaskType.RESEARCH)
+        research_prompt = (
+            f"How to do this programmatically or as a digital product business task:\n"
+            f"Goal: {goal.title}\n"
+            f"Step: {step}\n\n"
+            f"Give a concrete, actionable answer with specific tools, APIs, or methods. "
+            f"Include code examples if relevant."
+        )
+        try:
+            research_result = await self.llm_router.call_llm(
+                task_type=TaskType.RESEARCH,
+                prompt=research_prompt,
+                estimated_tokens=2000,
+            )
+        except Exception as e:
+            logger.warning(f"Research failed: {e}", extra={"event": "research_failed"})
+            return {"status": "failed", "error": f"Research failed: {e}"}
+
+        if not research_result:
+            return {"status": "failed", "error": "Research вернул пустой ответ"}
+
+        # 2. Сохранить результат в ChromaDB
+        self.memory.store_knowledge(
+            doc_id=f"research_{goal.goal_id}_{hash(step) % 10000}",
+            text=f"Исследование для '{step}': {research_result[:2000]}",
+            metadata={
+                "type": "research_learn",
+                "goal_id": goal.goal_id,
+                "step": step[:200],
+            },
+        )
+
+        # 3. Попробовать выполнить на основе исследования
+        execute_prompt = (
+            f"Ты VITO — автономный агент. На основе исследования выполни шаг.\n"
+            f"Контекст цели: {goal.title}\n"
+            f"Шаг: {step}\n\n"
+            f"Результат исследования:\n{research_result[:1500]}\n\n"
+            f"Дай конкретный результат выполнения."
+        )
+        try:
+            execution_result = await self.llm_router.call_llm(
+                task_type=TaskType.ROUTINE,
+                prompt=execute_prompt,
+                estimated_tokens=1500,
+            )
+        except Exception:
+            execution_result = None
+
+        if execution_result:
+            # 4. Успех — сохраняем как actionable skill
+            skill_name = f"learned_{step[:40]}"
+            self.memory.save_skill(
+                name=skill_name,
+                description=f"Изучено: {step}. Метод: {research_result[:200]}",
+                agent="research_learn",
+                task_type=self._classify_step(step).value,
+                method={
+                    "source": "research_and_learn",
+                    "research_summary": research_result[:500],
+                    "step": step[:200],
+                },
+            )
+            logger.info(
+                f"[{goal.goal_id}] Research-Learn-Apply успех, навык '{skill_name}' сохранён",
+                extra={"event": "research_learn_success", "context": {"skill": skill_name}},
+            )
+
+            # 5. Если исследование предлагает улучшение кода — сохраняем как pattern
+            target_file = self._detect_target_file(step, goal.title)
+            if target_file:
+                self.memory.save_pattern(
+                    category="code_improvement",
+                    key=f"improve_{target_file}_{hash(step) % 1000}",
+                    value=f"Для {target_file}: {research_result[:300]}",
+                    confidence=0.6,
+                )
+
+            return {"status": "completed", "output": execution_result[:500], "agent": "research_learn"}
+
+        return {"status": "failed", "error": "Research-Learn-Apply: выполнение не удалось"}
+
+    @staticmethod
+    def _detect_target_file(step: str, goal_title: str) -> str:
+        """Определяет целевой файл по ключевым словам в шаге/цели."""
+        combined = f"{step} {goal_title}".lower()
+        file_map = {
+            "gumroad": "platforms/gumroad.py",
+            "etsy": "platforms/etsy.py",
+            "kofi": "platforms/kofi.py",
+            "ko-fi": "platforms/kofi.py",
+            "wordpress": "platforms/wordpress.py",
+            "medium": "platforms/medium.py",
+            "printful": "platforms/printful.py",
+            "amazon": "platforms/amazon_kdp.py",
+            "kdp": "platforms/amazon_kdp.py",
+            "youtube": "platforms/youtube.py",
+            "substack": "platforms/substack.py",
+            "research": "agents/research_agent.py",
+            "trend": "agents/trend_scout.py",
+            "browser": "agents/browser_agent.py",
+            "content": "agents/content_creator.py",
+            "seo": "agents/seo_agent.py",
+            "ecommerce": "agents/ecommerce_agent.py",
+        }
+        for keyword, filepath in file_map.items():
+            if keyword in combined:
+                return filepath
+        return ""
 
     async def _learn_from_goal(self, goal: Goal, results: dict[str, Any]) -> None:
         """Фаза LEARN: извлекаем уроки и сохраняем в память."""
         all_completed = results.get("steps_completed", 0) == results.get("steps_total", 0)
 
+        skill_name = f"goal_{goal.title[:50]}"
+
         if all_completed:
             lesson = f"Цель '{goal.title}' выполнена. План из {len(goal.plan)} шагов сработал."
             self.goal_engine.complete_goal(goal.goal_id, results, lessons=lesson)
 
-            # Сохраняем навык
+            # Mark calendar task as completed if this goal came from weekly_calendar
+            if goal.source == "weekly_calendar":
+                self._mark_today_calendar_completed(goal.title)
+
+            # Notify owner with actual results (files, URLs)
+            await self._notify_goal_completed(goal, results)
+
+            # Actionable skill: сохраняем агента, тип задачи, метод
+            successful_agents = [
+                results.get(f"step_{i + 1}", {}).get("agent", "llm_fallback")
+                for i in range(len(goal.plan))
+            ]
             self.memory.save_skill(
-                name=f"goal_{goal.title[:50]}",
+                name=skill_name,
                 description=f"Успешно: {', '.join(goal.plan[:3])}",
+                agent=successful_agents[0] if successful_agents else "",
+                task_type=self._classify_step(goal.plan[0]).value if goal.plan else "routine",
+                method={
+                    "plan": goal.plan,
+                    "steps_count": len(goal.plan),
+                    "duration_ms": results.get("duration_ms", 0),
+                    "successful_agents": successful_agents,
+                },
+            )
+            logger.info(
+                f"[{goal.goal_id}] Навык '{skill_name}' — успех",
+                extra={"event": "skill_success_updated"},
             )
         else:
             reason = f"Выполнено {results.get('steps_completed')}/{results.get('steps_total')} шагов"
             self.goal_engine.fail_goal(goal.goal_id, reason)
+
+            # Сначала создаём/обновляем навык (если не существует — INSERT)
+            # Затем записываем провал
+            existing = self.memory.get_skill(skill_name)
+            if existing:
+                self.memory.update_skill_success(skill_name, success=False)
+            else:
+                # Создаём запись навыка с описанием провала
+                self.memory.save_skill(
+                    name=skill_name,
+                    description=f"Провал: {reason}. План: {', '.join(goal.plan[:3])}",
+                )
+                # save_skill ставит success_count=0 для новых,
+                # но ON CONFLICT делает +1 к success — нужно скорректировать
+                # Записываем провал
+                self.memory.update_skill_success(skill_name, success=False)
+            logger.info(
+                f"[{goal.goal_id}] Навык '{skill_name}' — провал",
+                extra={"event": "skill_failure_updated"},
+            )
 
             self.memory.log_error(
                 module="decision_loop",
@@ -383,25 +777,215 @@ class DecisionLoop:
     # ── Idle: нет задач — исследуем ──
 
     async def _idle_action(self) -> None:
-        """Когда нет задач — VITO не простаивает."""
-        if self._consecutive_idle <= 1:
-            logger.debug("Нет задач — ожидание", extra={"event": "idle"})
+        """Когда нет задач — VITO работает по недельному плану.
+
+        Логика:
+        - Calendar tasks (weekly_calendar) подхватываются сразу (2-й idle тик)
+        - Daily fallback — только если нет calendar task и прошло 30 мин idle
+        - Не создаём новых целей пока есть активные
+        """
+        # Check if there's already an active goal
+        existing = self.goal_engine.get_all_goals()
+        active = [
+            g for g in existing
+            if g.status not in (GoalStatus.COMPLETED, GoalStatus.FAILED, GoalStatus.CANCELLED)
+        ]
+        if active:
+            return  # Don't create new goals while others are in progress
+
+        # 1. Calendar task — check immediately when idle
+        if self._consecutive_idle >= 1:
+            today_task = self._get_today_calendar_task()
+            if today_task:
+                logger.info(
+                    f"Календарная задача: {today_task['title']}",
+                    extra={"event": "calendar_task", "context": {"task": today_task["title"]}},
+                )
+                # Mark calendar entry as in_progress to prevent re-creation
+                self._update_calendar_status(today_task.get("id"), "in_progress")
+                self.goal_engine.create_goal(
+                    title=today_task["title"],
+                    description=today_task["description"],
+                    priority=GoalPriority.MEDIUM,
+                    source="weekly_calendar",
+                    estimated_cost_usd=today_task.get("cost", 0.05),
+                    estimated_roi=today_task.get("roi", 5.0),
+                )
+                return
+
+        # 2. Daily fallback — once per 30 min (6 ticks), only if no calendar
+        if self._consecutive_idle < 6 or self._consecutive_idle % 6 != 0:
             return
 
-        # Каждые 3 idle-тика (15 мин) создаём исследовательскую задачу
-        if self._consecutive_idle % 3 == 0:
-            logger.info(
-                "Простой — создаю исследовательскую задачу",
-                extra={"event": "idle_research"},
+        import hashlib
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        # Check we haven't already created a daily task today
+        already_today = any(
+            g.source == "proactive_daily"
+            and g.created_at and today_str in g.created_at
+            for g in existing
+        )
+        if already_today:
+            return
+
+        day_hash = int(hashlib.md5(today_str.encode()).hexdigest()[:8], 16)
+
+        daily_tasks = [
+            {
+                "title": "Trend research & digital product idea",
+                "description": (
+                    "1. Scan Reddit RSS (r/entrepreneur, r/passive_income, r/ecommerce). "
+                    "2. Find 1 concrete digital product idea for US/CA/EU market. "
+                    "3. Create product description IN ENGLISH, save to output/products/. "
+                    "4. Send Telegram report to owner with the idea for approval. "
+                    "5. DO NOT publish without owner approval."
+                ),
+            },
+            {
+                "title": "Twitter content & product SEO",
+                "description": (
+                    "1. Create 3 English tweets for @bot_vito on AI/business topics. "
+                    "2. Save tweets to output/social/ for owner review. "
+                    "3. Check SEO of existing product descriptions on Gumroad. "
+                    "4. Report results to owner via Telegram."
+                ),
+            },
+            {
+                "title": "Competitor analysis & niche research",
+                "description": (
+                    "1. Find 3 competitors on Gumroad/Etsy in digital products niche. "
+                    "2. Analyze their prices, descriptions, sales volume. "
+                    "3. Find a niche with high demand and low competition. "
+                    "4. Prepare product proposal IN ENGLISH for owner approval."
+                ),
+            },
+        ]
+
+        task = daily_tasks[day_hash % len(daily_tasks)]
+
+        logger.info(
+            f"Дневная задача: {task['title']}",
+            extra={"event": "daily_proactive", "context": {"task": task["title"]}},
+        )
+        self.goal_engine.create_goal(
+            title=task["title"],
+            description=task["description"],
+            priority=GoalPriority.BACKGROUND,
+            source="proactive_daily",
+            estimated_cost_usd=0.05,
+            estimated_roi=5.0,
+        )
+
+    def _get_today_calendar_task(self) -> dict | None:
+        """Read today's task from weekly_calendar table in SQLite (no LLM)."""
+        try:
+            import sqlite3
+            conn = sqlite3.connect(settings.SQLITE_PATH)
+            conn.row_factory = sqlite3.Row
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            row = conn.execute(
+                "SELECT * FROM weekly_calendar WHERE date = ? AND status = 'pending' LIMIT 1",
+                (today,),
+            ).fetchone()
+            conn.close()
+            if row:
+                return dict(row)
+        except Exception as e:
+            logger.debug(f"Calendar read error: {e}")
+
+    def _update_calendar_status(self, task_id: int | None, status: str) -> None:
+        """Update weekly_calendar task status (no LLM)."""
+        if not task_id:
+            return
+        try:
+            import sqlite3
+            conn = sqlite3.connect(settings.SQLITE_PATH)
+            conn.execute(
+                "UPDATE weekly_calendar SET status = ? WHERE id = ?",
+                (status, task_id),
             )
-            self.goal_engine.create_goal(
-                title="Исследование новых ниш",
-                description="Поиск перспективных ниш для цифровых продуктов на основе текущих трендов",
-                priority=GoalPriority.BACKGROUND,
-                source="decision_loop",
-                estimated_cost_usd=0.05,
-                estimated_roi=5.0,
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+    def _mark_today_calendar_completed(self, goal_title: str) -> None:
+        """Mark today's calendar task as completed after goal finishes."""
+        try:
+            import sqlite3
+            conn = sqlite3.connect(settings.SQLITE_PATH)
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            conn.execute(
+                "UPDATE weekly_calendar SET status = 'completed' WHERE date = ? AND title = ?",
+                (today, goal_title),
             )
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+        return None
+
+    async def _notify_goal_completed(self, goal: Goal, results: dict[str, Any]) -> None:
+        """Send Telegram notification to owner with actual deliverables."""
+        if not hasattr(self, '_comms') or not self._comms:
+            return
+        try:
+            # Collect file paths and URLs from step results
+            files = []
+            urls = []
+            for key, val in results.items():
+                if not isinstance(val, dict):
+                    continue
+                if val.get("file_path"):
+                    files.append(val["file_path"])
+                out = val.get("output", {})
+                if isinstance(out, dict):
+                    if out.get("url"):
+                        urls.append(out["url"])
+                    if out.get("file_path"):
+                        files.append(out["file_path"])
+
+            msg = f"✅ Цель выполнена: {goal.title}\n"
+            msg += f"Шагов: {results.get('steps_completed', 0)}/{results.get('steps_total', 0)}\n"
+            if files:
+                msg += "\nФайлы:\n" + "\n".join(f"  📄 {f}" for f in files[:5])
+            if urls:
+                msg += "\nСсылки:\n" + "\n".join(f"  🔗 {u}" for u in urls[:5])
+            if not files and not urls:
+                msg += "\n(Результаты сохранены в памяти)"
+
+            await self._comms.send_message(msg)
+        except Exception as e:
+            logger.debug(f"Goal notification failed: {e}")
+
+    # ── Time awareness (no LLM) ──
+
+    @staticmethod
+    def get_time_context() -> dict[str, Any]:
+        """Current time info for VITO — pure Python, no LLM calls."""
+        now = datetime.now(timezone.utc)
+        hour = now.hour
+        weekday = now.strftime("%A")  # Monday, Tuesday, etc.
+
+        if 6 <= hour < 12:
+            period = "morning"
+        elif 12 <= hour < 18:
+            period = "afternoon"
+        elif 18 <= hour < 22:
+            period = "evening"
+        else:
+            period = "night"
+
+        return {
+            "utc_time": now.isoformat(),
+            "hour_utc": hour,
+            "weekday": weekday,
+            "period": period,
+            "is_business_hours_us": 14 <= hour <= 23,  # 9 AM - 6 PM EST
+            "is_weekend": weekday in ("Saturday", "Sunday"),
+            "date": now.strftime("%Y-%m-%d"),
+        }
 
     # ── Утилиты ──
 

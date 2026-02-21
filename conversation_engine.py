@@ -39,7 +39,14 @@ VITO_PERSONALITY = (
     "менять приоритеты целей, анализировать ниши. "
     "Отвечай на русском. Давай КОНКРЕТНЫЕ цифры и данные из системы. "
     "Не говори 'я не могу посмотреть' — ты ВСЁ видишь. "
-    "Тон: дружелюбный, деловой, без лишней воды."
+    "Тон: дружелюбный, деловой, без лишней воды.\n\n"
+    "ВАЖНО — ПРАВИЛА СОЗДАНИЯ КОНТЕНТА:\n"
+    "1. Все цифровые продукты, описания, статьи — ТОЛЬКО на АНГЛИЙСКОМ языке. "
+    "Целевой рынок: US, Canada, EU. Русский — только для общения с владельцем.\n"
+    "2. Workflow для продуктов: идея → утверждение владельцем → создание → "
+    "утверждение готового продукта → публикация → линк.\n"
+    "3. Правило 'не уверен — спроси': если неопределённость > 40%, "
+    "спроси владельца перед действием. Со временем учись его предпочтениям."
 )
 
 MAX_CONTEXT_TURNS = 20
@@ -67,7 +74,8 @@ class ConversationEngine:
     def __init__(self, llm_router: LLMRouter, memory, goal_engine=None,
                  finance=None, agent_registry=None, decision_loop=None,
                  self_healer=None, self_updater=None,
-                 knowledge_updater=None, judge_protocol=None):
+                 knowledge_updater=None, judge_protocol=None,
+                 code_generator=None):
         self.llm_router = llm_router
         self.memory = memory
         self.goal_engine = goal_engine
@@ -78,6 +86,7 @@ class ConversationEngine:
         self.self_updater = self_updater
         self.knowledge_updater = knowledge_updater
         self.judge_protocol = judge_protocol
+        self.code_generator = code_generator
         self._context: list[Turn] = []
         logger.info("ConversationEngine инициализирован", extra={"event": "init"})
 
@@ -90,6 +99,17 @@ class ConversationEngine:
 
         # 2. Save user turn
         self._add_turn("user", text, intent)
+
+        # 2.5. Сохраняем важные запросы владельца в долгосрочную память
+        if intent in (Intent.GOAL_REQUEST, Intent.QUESTION, Intent.SYSTEM_ACTION) and self.memory:
+            try:
+                self.memory.store_knowledge(
+                    doc_id=f"user_msg_{int(time.time())}",
+                    text=f"Владелец: {text}",
+                    metadata={"type": "user_request", "intent": intent.value},
+                )
+            except Exception:
+                pass
 
         # 3. Process by intent
         result = await self._process_by_intent(intent, text)
@@ -114,6 +134,11 @@ class ConversationEngine:
             return Intent.COMMAND
 
         lower = stripped.lower()
+
+        # Time queries — no LLM needed
+        time_words = ("время", "час", "дата", "time", "what time", "date", "сколько время")
+        if any(w in lower for w in time_words) and len(lower) < 40:
+            return Intent.QUESTION
         approval_words = {"да", "нет", "ок", "ok", "yes", "no", "approve", "reject",
                           "отмена", "одобряю", "отклоняю"}
         if lower in approval_words:
@@ -193,6 +218,15 @@ class ConversationEngine:
                     )
             except Exception:
                 pass
+            try:
+                skills = self.memory.search_skills(text, limit=3)
+                if skills:
+                    context_from_memory += "\n\nНавыки VITO:\n" + "\n".join(
+                        f"- {s['name']}: {s['description'][:150]} (успех: {s.get('success_count', 0)})"
+                        for s in skills
+                    )
+            except Exception:
+                pass
 
         system_context = self._format_system_context()
         prompt = (
@@ -259,41 +293,102 @@ class ConversationEngine:
         }
 
     async def _handle_goal_request(self, text: str) -> dict[str, Any]:
-        """Извлекает цель и подтверждает."""
+        """Владелец просит что-то сделать → VITO предлагает план → ждёт одобрения.
+
+        Approval workflow:
+        1. Владелец описывает задачу
+        2. VITO формирует план и оценку
+        3. Отправляет на одобрение: "Вот план. Делаем? ✅/❌"
+        4. После одобрения — выполняет
+        5. По завершении — показывает результат + ссылку
+
+        "Не уверен — спроси" rule: если задача неясна или есть несколько
+        вариантов — VITO уточняет у владельца перед началом.
+        """
         system_context = self._format_system_context()
+
+        # Проверяем навыки и знания для этой задачи (no extra LLM call)
+        skills_context = ""
+        owner_prefs = ""
+        if self.memory:
+            try:
+                skills = self.memory.search_skills(text, limit=3)
+                if skills:
+                    skills_context = "\nНавыки: " + ", ".join(s['name'] for s in skills)
+            except Exception:
+                pass
+            # Check owner preferences from memory
+            try:
+                prefs = self.memory.search_knowledge("owner preference", n_results=3)
+                if prefs:
+                    owner_prefs = "\nПредпочтения владельца:\n" + "\n".join(
+                        f"- {p['text'][:150]}" for p in prefs
+                    )
+            except Exception:
+                pass
+
         prompt = (
             f"{VITO_PERSONALITY}\n\n"
             f"=== СОСТОЯНИЕ СИСТЕМЫ ===\n{system_context}\n=== КОНЕЦ ===\n\n"
-            f"Владелец просит выполнить задачу: \"{text}\"\n\n"
-            f"1. Сформулируй краткое название цели (до 100 символов)\n"
-            f"2. Напиши подтверждение (учитывай существующие цели и бюджет)\n\n"
-            f"Ответь в JSON: {{\"goal_title\": \"...\", \"confirmation\": \"...\"}}"
+            f"{skills_context}{owner_prefs}\n\n"
+            f"Владелец просит: \"{text}\"\n\n"
+            f"ПРАВИЛА:\n"
+            f"1. Все продукты/контент — на АНГЛИЙСКОМ (US/CA/EU market)\n"
+            f"2. НЕ начинай сразу. Сформируй план и предложи на одобрение\n"
+            f"3. Если что-то неясно — задай вопрос владельцу (на русском)\n"
+            f"4. План должен завершаться конкретным результатом: файл, ссылка, публикация\n\n"
+            f"Доступные инструменты:\n"
+            f"- 23 агента (content_creator, smm_agent, research_agent, browser_agent и др.)\n"
+            f"- Платформы: Gumroad, Printful, Twitter\n"
+            f"- Генерация изображений: Replicate, BFL, WaveSpeed, DALL-E\n"
+            f"- CodeGenerator: может дописать код VITO\n"
+            f"- BrowserAgent: может зарегистрироваться на сайтах, заполнять формы\n\n"
+            f"Ответь JSON:\n"
+            f'{{"goal_title": "краткое название (English)", '
+            f'"goal_description": "план 5-7 шагов (English content, but plan itself in Russian for owner)", '
+            f'"confirmation": "предложение владельцу на русском: вот план, что думаешь?", '
+            f'"needs_approval": true, '
+            f'"estimated_cost_usd": 0.05, '
+            f'"priority": "HIGH"}}'
         )
 
         response = await self.llm_router.call_llm(
             task_type=TaskType.ROUTINE,
             prompt=prompt,
-            estimated_tokens=300,
+            estimated_tokens=600,
         )
 
         goal_title = text[:100]
-        confirmation = f"Принял! Создаю цель: \"{goal_title}\""
+        goal_description = text
+        confirmation = f"Принял задачу: \"{goal_title}\"\n\nГотовлю план. Отправлю на одобрение."
+        priority = "HIGH"
+        needs_approval = True
+        estimated_cost = 0.05
 
         if response:
             try:
                 data = self._extract_json(response)
                 if data:
                     goal_title = data.get("goal_title", goal_title)
+                    goal_description = data.get("goal_description", text)
                     confirmation = data.get("confirmation", confirmation)
+                    priority = data.get("priority", "HIGH")
+                    needs_approval = data.get("needs_approval", True)
+                    estimated_cost = data.get("estimated_cost_usd", 0.05)
             except Exception:
                 pass
 
+        # If needs_approval — create goal in WAITING_APPROVAL state
+        # The goal will wait for owner's ✅ before execution
         return {
             "intent": Intent.GOAL_REQUEST.value,
             "response": confirmation,
             "create_goal": True,
             "goal_title": goal_title,
-            "goal_description": text,
+            "goal_description": goal_description,
+            "goal_priority": priority,
+            "needs_approval": needs_approval,
+            "estimated_cost_usd": estimated_cost,
         }
 
     async def _handle_feedback(self, text: str) -> dict[str, Any]:
@@ -435,6 +530,17 @@ class ConversationEngine:
             path = self.self_updater.backup_current_code()
             return f"Бэкап: {path}" if path else "Бэкап не удался"
 
+        # Code changes
+        if action == "apply_code_change" and self.code_generator:
+            target_file = params.get("file", "")
+            instruction = params.get("instruction", "")
+            if not target_file or not instruction:
+                return "Нужны параметры: file и instruction"
+            result = await self.code_generator.apply_change(target_file, instruction)
+            if result.get("success"):
+                return f"Код изменён: {target_file}"
+            return f"Не удалось изменить: {result.get('error', 'unknown')}"
+
         return ""
 
     def _get_available_actions(self) -> str:
@@ -461,6 +567,8 @@ class ConversationEngine:
             actions.append("update_knowledge() — обновить базу знаний и цены моделей")
         if self.self_updater:
             actions.append("create_backup() — создать бэкап кода")
+        if self.code_generator:
+            actions.append("apply_code_change(file, instruction) — изменить код файла через LLM (backup + test)")
         return "\n".join(f"  - {a}" for a in actions) if actions else "(нет действий)"
 
     # ── Полное состояние системы ──
@@ -468,6 +576,13 @@ class ConversationEngine:
     def _format_system_context(self) -> str:
         """ПОЛНЫЙ контекст: расходы, модели, финансы, цели, агенты, ошибки, навыки."""
         parts = []
+
+        # 0. Time awareness (no LLM)
+        now = datetime.now(timezone.utc)
+        parts.append(
+            f"Текущее время: {now.strftime('%Y-%m-%d %H:%M UTC')} "
+            f"({now.strftime('%A')})"
+        )
 
         # 1. Расходы по моделям (из spend_log)
         try:

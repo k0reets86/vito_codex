@@ -21,7 +21,7 @@ from config.settings import settings
 from decision_loop import DecisionLoop
 from financial_controller import FinancialController
 from goal_engine import GoalEngine
-from llm_router import LLMRouter
+from llm_router import LLMRouter, TaskType
 from memory.memory_manager import MemoryManager
 
 from agents.agent_registry import AgentRegistry
@@ -59,7 +59,10 @@ from platforms.amazon_kdp import AmazonKDPPlatform
 from platforms.youtube import YouTubePlatform
 from platforms.substack import SubstackPlatform
 from platforms.creative_fabrica import CreativeFabricaPlatform
+from platforms.twitter import TwitterPlatform
+from platforms.image_generator import ImageGenerator
 
+from code_generator import CodeGenerator
 from self_healer import SelfHealer
 from self_updater import SelfUpdater
 from knowledge_updater import KnowledgeUpdater
@@ -93,6 +96,9 @@ class VITO:
         self.self_updater = SelfUpdater(
             memory=self.memory, comms=self.comms
         )
+        self.code_generator = CodeGenerator(
+            llm_router=self.llm_router, self_updater=self.self_updater, comms=self.comms
+        )
         self.knowledge_updater = KnowledgeUpdater(
             llm_router=self.llm_router, memory=self.memory
         )
@@ -101,6 +107,7 @@ class VITO:
             finance=self.finance, agent_registry=self.registry,
             self_healer=self.self_healer, self_updater=self.self_updater,
             knowledge_updater=self.knowledge_updater,
+            code_generator=self.code_generator,
         )
         self.judge_protocol = JudgeProtocol(
             llm_router=self.llm_router, memory=self.memory, comms=self.comms
@@ -113,6 +120,11 @@ class VITO:
             agent_registry=self.registry,
         )
         self.decision_loop.set_self_healer(self.self_healer)
+        self.decision_loop._code_generator = self.code_generator
+        # Smart routing: give decision_loop access to platforms
+        self.decision_loop._platforms = self._platforms_commerce
+        self.decision_loop._image_generator = self._image_generator
+        self.decision_loop._comms = self.comms
         self.conversation_engine.decision_loop = self.decision_loop
         self.conversation_engine.judge_protocol = self.judge_protocol
 
@@ -153,6 +165,12 @@ class VITO:
         platforms_publish["substack"] = SubstackPlatform(browser_agent=browser)
         # YouTube — read-only (trend analysis)
         self._youtube = YouTubePlatform()
+        # Twitter/X — real posting
+        self._twitter = TwitterPlatform()
+        # Image Generator — Replicate/BFL/WaveSpeed/DALL-E + Cloudinary
+        self._image_generator = ImageGenerator()
+        # Social media platforms for SMMAgent
+        social_platforms = {"twitter": self._twitter}
         quality_judge = QualityJudge(**deps)
 
         # All agents
@@ -160,7 +178,7 @@ class VITO:
             VITOCore(registry=self.registry, **deps),                          # 00
             TrendScout(browser_agent=browser, **deps),                         # 01
             ContentCreator(quality_judge=quality_judge, **deps),               # 02
-            SMMAgent(**deps),                                                  # 03
+            SMMAgent(platforms=social_platforms, **deps),                       # 03
             MarketingAgent(**deps),                                            # 04
             ECommerceAgent(platforms=platforms_commerce, **deps),               # 05
             SEOAgent(**deps),                                                  # 06
@@ -184,6 +202,9 @@ class VITO:
 
         for agent in agents:
             self.registry.register(agent)
+
+        # Store platforms for later injection into decision_loop
+        self._platforms_commerce = platforms_commerce
 
     async def startup(self) -> None:
         """Инициализация всех подсистем."""
@@ -344,7 +365,7 @@ class VITO:
             logger.warning(f"Ошибка аудита безопасности: {e}", extra={"event": "security_audit_error"})
 
     async def _morning_scout(self) -> None:
-        """06:00 — trend_scout + knowledge_updater (по понедельникам)."""
+        """06:00 — trend_scout + knowledge_updater (по понедельникам) + weekly planning."""
         logger.info("Утренняя разведка начата", extra={"event": "scout_start"})
         try:
             result = await self.registry.dispatch("trend_scan")
@@ -356,8 +377,8 @@ class VITO:
         now = datetime.now(timezone.utc)
         if now.weekday() == 0:  # понедельник
             logger.info(
-                "Понедельник — запуск обновления базы знаний",
-                extra={"event": "knowledge_update_trigger"},
+                "Понедельник — обновление знаний + недельное планирование",
+                extra={"event": "monday_planning"},
             )
             try:
                 results = await self.knowledge_updater.run_weekly_update()
@@ -367,7 +388,164 @@ class VITO:
                 )
             except Exception as e:
                 logger.warning(f"Knowledge update ошибка: {e}", extra={"event": "knowledge_update_error"})
+
+            # Weekly planning — create calendar for the week
+            await self._weekly_planning()
+
         logger.info("Утренняя разведка завершена", extra={"event": "scout_done"})
+
+    async def _weekly_planning(self) -> None:
+        """Понедельник: создание недельного контент-плана и расписания.
+
+        Использует LLM 1 раз на всю неделю (экономия!) + результаты TrendScout.
+        Сохраняет в SQLite weekly_calendar — Decision Loop читает оттуда.
+        """
+        import sqlite3
+        from datetime import timedelta
+
+        logger.info("Недельное планирование начато", extra={"event": "weekly_plan_start"})
+
+        # 1. Init calendar table (no LLM)
+        conn = sqlite3.connect(settings.SQLITE_PATH)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS weekly_calendar (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                day_of_week TEXT NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                task_type TEXT DEFAULT 'production',
+                cost REAL DEFAULT 0.05,
+                roi REAL DEFAULT 5.0,
+                status TEXT DEFAULT 'pending',
+                result TEXT DEFAULT '',
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.commit()
+
+        # 2. Get context from memory (no LLM)
+        trends_context = ""
+        try:
+            trends = self.memory.search_knowledge("тренды ниши продукты", n_results=5)
+            if trends:
+                trends_context = "\n".join(f"- {t['text'][:150]}" for t in trends)
+        except Exception:
+            pass
+
+        skills_context = ""
+        try:
+            skills = self.memory.get_top_skills(limit=5)
+            if skills:
+                skills_context = "\n".join(f"- {s['name']}: {s['description'][:100]}" for s in skills)
+        except Exception:
+            pass
+
+        # 3. Generate weekly plan via LLM (1 call for whole week)
+        now = datetime.now(timezone.utc)
+        week_dates = [(now + timedelta(days=i)).strftime("%Y-%m-%d (%A)") for i in range(7)]
+
+        prompt = (
+            "Ты VITO — автономный AI-агент для заработка на цифровых продуктах.\n\n"
+            "Создай конкретный план на неделю. Каждый день — ОДНА задача.\n"
+            "Платформы: Gumroad (продукты), Printful (принты одежды), Twitter (контент), Etsy (листинги).\n\n"
+            f"Тренды из разведки:\n{trends_context or '(нет данных)'}\n\n"
+            f"Навыки:\n{skills_context or '(нет навыков)'}\n\n"
+            "Даты:\n" + "\n".join(week_dates) + "\n\n"
+            "ВАЖНО:\n"
+            "- Понедельник: разведка трендов и планирование\n"
+            "- Вторник-Четверг: создание продуктов и контента\n"
+            "- Пятница: публикация и SEO\n"
+            "- Суббота: аналитика и оптимизация\n"
+            "- Воскресенье: продвижение в соцсетях\n\n"
+            "Формат ответа — по строкам, каждая:\n"
+            "ДАТА | ЗАГОЛОВОК | ОПИСАНИЕ (3-4 предложения с конкретными шагами)\n"
+            "Без лишних слов, только 7 строк."
+        )
+
+        try:
+            response = await self.llm_router.call_llm(
+                task_type=TaskType.ROUTINE,
+                prompt=prompt,
+                estimated_tokens=1500,
+            )
+        except Exception as e:
+            logger.warning(f"Weekly planning LLM error: {e}")
+            response = None
+
+        if not response:
+            # Fallback: hardcoded week template (no LLM cost)
+            self._create_default_weekly_calendar(conn, now)
+            conn.close()
+            return
+
+        # 4. Parse LLM response and insert into calendar
+        # Clear old entries for this week first
+        week_start = now.strftime("%Y-%m-%d")
+        week_end = (now + timedelta(days=7)).strftime("%Y-%m-%d")
+        conn.execute(
+            "DELETE FROM weekly_calendar WHERE date >= ? AND date < ?",
+            (week_start, week_end),
+        )
+
+        day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        lines = [l.strip() for l in response.strip().split("\n") if l.strip() and "|" in l]
+
+        for i, line in enumerate(lines[:7]):
+            parts = line.split("|")
+            if len(parts) >= 3:
+                date_str = (now + timedelta(days=i)).strftime("%Y-%m-%d")
+                title = parts[1].strip()
+                description = parts[2].strip()
+                day_name = day_names[i] if i < len(day_names) else "Day"
+
+                conn.execute(
+                    "INSERT INTO weekly_calendar (date, day_of_week, title, description) VALUES (?, ?, ?, ?)",
+                    (date_str, day_name, title, description),
+                )
+
+        conn.commit()
+        conn.close()
+
+        # 5. Notify owner
+        plan_summary = "\n".join(lines[:7]) if lines else "(план не удалось распарсить)"
+        await self.comms.send_message(
+            f"VITO Недельный план:\n\n{plan_summary[:800]}"
+        )
+        logger.info(
+            f"Недельный план создан: {len(lines)} задач",
+            extra={"event": "weekly_plan_done", "context": {"tasks": len(lines)}},
+        )
+
+    def _create_default_weekly_calendar(self, conn, now) -> None:
+        """Fallback weekly calendar without LLM."""
+        from datetime import timedelta
+
+        defaults = [
+            ("Monday", "Разведка трендов и анализ рынка",
+             "Просканировать Reddit, проанализировать конкурентов на Gumroad, найти новые ниши."),
+            ("Tuesday", "Создание цифрового продукта",
+             "На основе разведки создать ebook/шаблон/планировщик. Сохранить в output/."),
+            ("Wednesday", "Создание принтов для Printful",
+             "Исследовать мемы, создать 3 дизайна для футболок/кружек. Рассчитать себестоимость."),
+            ("Thursday", "Контент и статьи",
+             "Написать статью по теме продуктов. Подготовить 5 постов для Twitter."),
+            ("Friday", "Публикация и SEO",
+             "Опубликовать продукт на Gumroad. Оптимизировать описания. Опубликовать пост в Twitter."),
+            ("Saturday", "Аналитика и оптимизация",
+             "Проверить продажи, проанализировать расходы, оптимизировать SEO."),
+            ("Sunday", "Продвижение и соцсети",
+             "Продвижение продуктов в Twitter. Подготовка к следующей неделе."),
+        ]
+
+        for i, (day, title, desc) in enumerate(defaults):
+            date_str = (now + timedelta(days=i)).strftime("%Y-%m-%d")
+            conn.execute(
+                "INSERT OR REPLACE INTO weekly_calendar (date, day_of_week, title, description) VALUES (?, ?, ?, ?)",
+                (date_str, day, title, desc),
+            )
+        conn.commit()
+        logger.info("Fallback weekly calendar created", extra={"event": "weekly_plan_fallback"})
 
     async def _morning_report(self) -> None:
         """08:00 — утренний отчёт владельцу в Telegram."""

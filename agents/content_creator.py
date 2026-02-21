@@ -1,6 +1,11 @@
-"""ContentCreator — Agent 02: создание контента (статьи, ebook, описания)."""
+"""ContentCreator — Agent 02: создание контента (статьи, ebook, описания).
 
+Saves all output to /home/vito/vito-agent/output/ directory.
+"""
+
+import re
 import time
+from pathlib import Path
 from typing import Any, Optional
 
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
@@ -8,6 +13,21 @@ from config.logger import get_logger
 from llm_router import TaskType
 
 logger = get_logger("content_creator", agent="content_creator")
+
+OUTPUT_BASE = Path("/home/vito/vito-agent/output")
+ARTICLES_DIR = OUTPUT_BASE / "articles"
+EBOOKS_DIR = OUTPUT_BASE / "ebooks"
+PRODUCTS_DIR = OUTPUT_BASE / "products"
+
+for d in (ARTICLES_DIR, EBOOKS_DIR, PRODUCTS_DIR):
+    d.mkdir(parents=True, exist_ok=True)
+
+
+def _slugify(text: str, max_len: int = 50) -> str:
+    """Convert text to safe filename slug."""
+    slug = re.sub(r"[^\w\s-]", "", text.lower().strip())
+    slug = re.sub(r"[\s_]+", "_", slug)
+    return slug[:max_len]
 
 
 class ContentCreator(BaseAgent):
@@ -47,8 +67,21 @@ class ContentCreator(BaseAgent):
         response = await self.llm_router.call_llm(task_type=TaskType.CONTENT, prompt=prompt, estimated_tokens=4000)
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
+
+        # Save to file
+        slug = _slugify(topic)
+        ts = int(time.time())
+        file_path = ARTICLES_DIR / f"{slug}_{ts}.md"
+        file_path.write_text(response, encoding="utf-8")
+        logger.info(f"Article saved: {file_path}", extra={"event": "article_saved", "context": {"path": str(file_path)}})
+
         self._record_expense(0.02, f"Article: {topic[:50]}")
-        return TaskResult(success=True, output=response, cost_usd=0.02)
+        return TaskResult(
+            success=True,
+            output=response,
+            cost_usd=0.02,
+            metadata={"file_path": str(file_path), "topic": topic},
+        )
 
     async def create_ebook(self, topic: str, chapters: int = 5) -> TaskResult:
         if not self.llm_router:
@@ -67,9 +100,24 @@ class ContentCreator(BaseAgent):
                 break
         if not parts:
             return TaskResult(success=False, error="Не удалось сгенерировать ebook")
+
+        full_text = "\n\n---\n\n".join(parts)
+
+        # Save to file
+        slug = _slugify(topic)
+        ts = int(time.time())
+        file_path = EBOOKS_DIR / f"{slug}_{ts}.md"
+        file_path.write_text(full_text, encoding="utf-8")
+        logger.info(f"Ebook saved: {file_path}", extra={"event": "ebook_saved", "context": {"path": str(file_path), "chapters": len(parts)}})
+
         cost = 0.02 * len(parts)
         self._record_expense(cost, f"Ebook: {topic[:50]}")
-        return TaskResult(success=True, output="\n\n---\n\n".join(parts), cost_usd=cost)
+        return TaskResult(
+            success=True,
+            output=full_text,
+            cost_usd=cost,
+            metadata={"file_path": str(file_path), "chapters": len(parts), "topic": topic},
+        )
 
     async def create_product_description(self, product: str, platform: str) -> TaskResult:
         if not self.llm_router:
@@ -78,5 +126,18 @@ class ContentCreator(BaseAgent):
         response = await self.llm_router.call_llm(task_type=TaskType.CONTENT, prompt=prompt, estimated_tokens=1500)
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
+
+        # Save to file
+        slug = _slugify(product)
+        ts = int(time.time())
+        file_path = PRODUCTS_DIR / f"{platform}_{slug}_{ts}.md"
+        file_path.write_text(response, encoding="utf-8")
+        logger.info(f"Product description saved: {file_path}", extra={"event": "product_desc_saved"})
+
         self._record_expense(0.01, f"Product description: {product[:50]}")
-        return TaskResult(success=True, output=response, cost_usd=0.01)
+        return TaskResult(
+            success=True,
+            output=response,
+            cost_usd=0.01,
+            metadata={"file_path": str(file_path), "product": product, "platform": platform},
+        )

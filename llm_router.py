@@ -107,7 +107,7 @@ TASK_MODEL_MAP: dict[TaskType, list[str]] = {
     TaskType.STRATEGY: ["claude-opus", "claude-sonnet"],
     TaskType.CODE: ["gpt-o3", "claude-sonnet"],
     TaskType.RESEARCH: ["perplexity", "claude-sonnet"],
-    TaskType.ROUTINE: ["gemini-flash", "claude-haiku"],
+    TaskType.ROUTINE: ["claude-haiku", "gemini-flash"],
 }
 
 
@@ -277,44 +277,60 @@ class LLMRouter:
         start = time.monotonic()
         model_keys = TASK_MODEL_MAP[task_type]
 
+        retry_delays = [5, 15, 30]  # exponential backoff for 529/overloaded
+
         for attempt, key in enumerate(model_keys):
             model = MODEL_REGISTRY[key]
-            try:
-                text, real_cost = await self._call_provider(model, prompt, system_prompt)
-                duration_ms = int((time.monotonic() - start) * 1000)
-                self._record_spend(
-                    model_name=model.display_name,
-                    task_type=task_type.value,
-                    input_tokens=0,  # detailed tracking done inside _call_provider
-                    output_tokens=0,
-                    cost_usd=real_cost,
-                )
+            for retry in range(len(retry_delays) + 1):
+                try:
+                    text, real_cost = await self._call_provider(model, prompt, system_prompt)
+                    duration_ms = int((time.monotonic() - start) * 1000)
+                    self._record_spend(
+                        model_name=model.display_name,
+                        task_type=task_type.value,
+                        input_tokens=0,
+                        output_tokens=0,
+                        cost_usd=real_cost,
+                    )
 
-                logger.info(
-                    f"LLM ответ получен от {model.display_name}",
-                    extra={
-                        "event": "llm_call_success",
-                        "duration_ms": duration_ms,
-                        "context": {
-                            "model": model.display_name,
-                            "attempt": attempt + 1,
-                            "real_cost": real_cost,
-                            "daily_spend": self.get_daily_spend(),
+                    logger.info(
+                        f"LLM ответ получен от {model.display_name}",
+                        extra={
+                            "event": "llm_call_success",
+                            "duration_ms": duration_ms,
+                            "context": {
+                                "model": model.display_name,
+                                "attempt": attempt + 1,
+                                "retry": retry,
+                                "real_cost": real_cost,
+                                "daily_spend": self.get_daily_spend(),
+                            },
                         },
-                    },
-                )
-                return text
+                    )
+                    return text
 
-            except Exception as e:
-                logger.error(
-                    f"Ошибка вызова {model.display_name}: {e}",
-                    extra={
-                        "event": "llm_call_failed",
-                        "context": {"model": model.display_name, "attempt": attempt + 1},
-                    },
-                    exc_info=True,
-                )
-                continue
+                except Exception as e:
+                    error_str = str(e)
+                    # Retry on 529 (overloaded) and 500 (server error)
+                    is_retryable = any(code in error_str for code in ("529", "overloaded", "500", "503", "rate_limit"))
+                    if is_retryable and retry < len(retry_delays):
+                        delay = retry_delays[retry]
+                        logger.warning(
+                            f"{model.display_name} overloaded, retry {retry + 1} in {delay}s",
+                            extra={"event": "llm_retry", "context": {"delay": delay}},
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+
+                    logger.error(
+                        f"Ошибка вызова {model.display_name}: {e}",
+                        extra={
+                            "event": "llm_call_failed",
+                            "context": {"model": model.display_name, "attempt": attempt + 1},
+                        },
+                        exc_info=True,
+                    )
+                    break  # move to next model
 
         logger.critical(
             "Все модели недоступны для задачи",
@@ -367,8 +383,7 @@ class LLMRouter:
                 try:
                     from google import genai
                 except ImportError:
-                    logger.warning("google-genai не установлен, Gemini недоступен", extra={"event": "gemini_import_error"})
-                    return None
+                    raise RuntimeError("google-genai не установлен, Gemini недоступен")
                 self._google = genai.Client(api_key=settings.GOOGLE_API_KEY)
             contents = prompt
             if system_prompt:

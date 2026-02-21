@@ -118,7 +118,10 @@ class MemoryManager:
                 success_count INTEGER DEFAULT 0,
                 fail_count INTEGER DEFAULT 0,
                 last_used TEXT,
-                created_at TEXT DEFAULT (datetime('now'))
+                created_at TEXT DEFAULT (datetime('now')),
+                agent TEXT DEFAULT '',
+                task_type TEXT DEFAULT '',
+                method_json TEXT DEFAULT '{}'
             );
             CREATE TABLE IF NOT EXISTS errors (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -141,21 +144,47 @@ class MemoryManager:
             );
         """)
         conn.commit()
+        # Миграция: добавить колонки если их нет (для существующих БД)
+        try:
+            conn.execute("SELECT agent FROM skills LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute("ALTER TABLE skills ADD COLUMN agent TEXT DEFAULT ''")
+            conn.execute("ALTER TABLE skills ADD COLUMN task_type TEXT DEFAULT ''")
+            conn.execute("ALTER TABLE skills ADD COLUMN method_json TEXT DEFAULT '{}'")
+            conn.commit()
+            logger.info("Миграция skills: добавлены agent, task_type, method_json", extra={"event": "skills_migration"})
 
-    def save_skill(self, name: str, description: str) -> None:
+    def save_skill(self, name: str, description: str, agent: str = "",
+                   task_type: str = "", method: dict | None = None) -> None:
         conn = self._get_sqlite()
+        method_json = json.dumps(method, ensure_ascii=False) if method else "{}"
         try:
             conn.execute(
-                """INSERT INTO skills (name, description, last_used)
-                   VALUES (?, ?, datetime('now'))
+                """INSERT INTO skills (name, description, last_used, agent, task_type, method_json)
+                   VALUES (?, ?, datetime('now'), ?, ?, ?)
                    ON CONFLICT(name) DO UPDATE SET
                      description = excluded.description,
                      success_count = success_count + 1,
-                     last_used = datetime('now')""",
-                (name, description),
+                     last_used = datetime('now'),
+                     agent = CASE WHEN excluded.agent != '' THEN excluded.agent ELSE skills.agent END,
+                     task_type = CASE WHEN excluded.task_type != '' THEN excluded.task_type ELSE skills.task_type END,
+                     method_json = CASE WHEN excluded.method_json != '{}' THEN excluded.method_json ELSE skills.method_json END""",
+                (name, description, agent, task_type, method_json),
             )
             conn.commit()
-            logger.info(f"Навык сохранён: {name}", extra={"event": "skill_saved"})
+            # Дублируем в ChromaDB для семантического поиска
+            try:
+                collection = self._get_chroma()
+                collection.upsert(
+                    ids=[f"skill_{name}"],
+                    documents=[f"Навык: {name}. {description}"],
+                    metadatas=[{"type": "skill", "skill_name": name,
+                                "agent": agent,
+                                "stored_at": datetime.now(timezone.utc).isoformat()}],
+                )
+            except Exception as e:
+                logger.debug(f"Не удалось сохранить навык в ChromaDB: {e}")
+            logger.info(f"Навык сохранён: {name}", extra={"event": "skill_saved", "context": {"agent": agent, "task_type": task_type}})
         except Exception as e:
             logger.error(f"Ошибка сохранения навыка: {e}", extra={"event": "skill_save_failed"}, exc_info=True)
             raise
@@ -166,16 +195,61 @@ class MemoryManager:
         return dict(row) if row else None
 
     def search_skills(self, query: str, limit: int = 5) -> list[dict]:
-        """Поиск навыков по ключевым словам."""
-        conn = self._get_sqlite()
-        rows = conn.execute(
-            """SELECT * FROM skills
-               WHERE name LIKE ? OR description LIKE ?
-               ORDER BY success_count DESC, last_used DESC
-               LIMIT ?""",
-            (f"%{query[:50]}%", f"%{query[:50]}%", limit),
-        ).fetchall()
-        return [dict(r) for r in rows]
+        """Семантический поиск навыков: ChromaDB → обогащение из SQLite."""
+        results = []
+        seen_names = set()
+
+        # 1. Семантический поиск через ChromaDB
+        try:
+            collection = self._get_chroma()
+            chroma_results = collection.query(
+                query_texts=[query],
+                n_results=limit,
+                where={"type": "skill"},
+            )
+            if chroma_results and chroma_results["ids"] and chroma_results["ids"][0]:
+                conn = self._get_sqlite()
+                for i, doc_id in enumerate(chroma_results["ids"][0]):
+                    meta = chroma_results["metadatas"][0][i] if chroma_results["metadatas"] else {}
+                    skill_name = meta.get("skill_name", doc_id.replace("skill_", "", 1))
+                    if skill_name in seen_names:
+                        continue
+                    seen_names.add(skill_name)
+                    # Обогащаем данными из SQLite (success_count, fail_count)
+                    row = conn.execute(
+                        "SELECT * FROM skills WHERE name = ?", (skill_name,)
+                    ).fetchone()
+                    if row:
+                        results.append(dict(row))
+                    else:
+                        results.append({
+                            "name": skill_name,
+                            "description": chroma_results["documents"][0][i],
+                            "success_count": 0, "fail_count": 0,
+                        })
+        except Exception as e:
+            logger.debug(f"Семантический поиск навыков не удался: {e}")
+
+        # 2. Fallback: LIKE-поиск в SQLite (если ChromaDB не нашёл достаточно)
+        if len(results) < limit:
+            try:
+                conn = self._get_sqlite()
+                rows = conn.execute(
+                    """SELECT * FROM skills
+                       WHERE name LIKE ? OR description LIKE ?
+                       ORDER BY success_count DESC, last_used DESC
+                       LIMIT ?""",
+                    (f"%{query[:50]}%", f"%{query[:50]}%", limit),
+                ).fetchall()
+                for r in rows:
+                    row_dict = dict(r)
+                    if row_dict["name"] not in seen_names:
+                        seen_names.add(row_dict["name"])
+                        results.append(row_dict)
+            except Exception:
+                pass
+
+        return results[:limit]
 
     def update_skill_success(self, name: str, success: bool) -> None:
         """Обновляет счётчик успешности навыка."""

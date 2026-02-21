@@ -51,7 +51,18 @@ class ResearchAgent(BaseAgent):
             return TaskResult(success=False, error="LLM не вернул ответ")
         self._record_expense(0.02, f"Deep research: {topic[:50]}")
         if self.memory:
-            self.memory.store_knowledge(doc_id=f"research_{hash(topic) % 10000}", text=f"Исследование: {topic}. {response[:500]}", metadata={"type": "research", "topic": topic})
+            self.memory.store_knowledge(
+                doc_id=f"research_{hash(topic) % 10000}",
+                text=f"Исследование: {topic}. {response[:2000]}",
+                metadata={"type": "research", "topic": topic},
+            )
+            self.memory.save_skill(
+                name=f"research_{topic[:40]}",
+                description=f"Исследование: {topic}. Ключевые выводы: {response[:200]}",
+                agent="research_agent",
+                task_type="research",
+                method={"approach": "deep_research", "topic": topic[:100]},
+            )
         return TaskResult(success=True, output=response, cost_usd=0.02)
 
     async def competitor_analysis(self, niche: str) -> TaskResult:
@@ -65,6 +76,19 @@ class ResearchAgent(BaseAgent):
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
         self._record_expense(0.02, f"Competitor analysis: {niche[:50]}")
+        if self.memory:
+            self.memory.store_knowledge(
+                doc_id=f"competitors_{hash(niche) % 10000}",
+                text=f"Анализ конкурентов: {niche}. {response[:2000]}",
+                metadata={"type": "competitor_analysis", "niche": niche},
+            )
+            self.memory.save_skill(
+                name=f"competitors_{niche[:40]}",
+                description=f"Анализ конкурентов в нише: {niche}. {response[:200]}",
+                agent="research_agent",
+                task_type="competitor_analysis",
+                method={"approach": "competitor_analysis", "niche": niche[:100]},
+            )
         return TaskResult(success=True, output=response, cost_usd=0.02)
 
     async def market_analysis(self, product_type: str) -> TaskResult:
@@ -78,4 +102,17 @@ class ResearchAgent(BaseAgent):
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
         self._record_expense(0.03, f"Market analysis: {product_type[:50]}")
+        if self.memory:
+            self.memory.store_knowledge(
+                doc_id=f"market_{hash(product_type) % 10000}",
+                text=f"Анализ рынка: {product_type}. {response[:2000]}",
+                metadata={"type": "market_analysis", "product_type": product_type},
+            )
+            self.memory.save_skill(
+                name=f"market_{product_type[:40]}",
+                description=f"Анализ рынка: {product_type}. {response[:200]}",
+                agent="research_agent",
+                task_type="market_analysis",
+                method={"approach": "market_analysis", "product_type": product_type[:100]},
+            )
         return TaskResult(success=True, output=response, cost_usd=0.03)

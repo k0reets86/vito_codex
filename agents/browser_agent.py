@@ -21,6 +21,7 @@ from typing import Any, Optional
 
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
+from config.resource_guard import resource_guard
 
 logger = get_logger("browser_agent", agent="browser_agent")
 
@@ -111,6 +112,15 @@ class BrowserAgent(BaseAgent):
         await super().start()
         try:
             from playwright.async_api import async_playwright
+
+            # Resource guard: проверяем есть ли RAM для Chromium (~300MB)
+            if not resource_guard.can_proceed(estimated_mb=300):
+                logger.warning(
+                    "Недостаточно RAM для запуска Chromium, пропускаю",
+                    extra={"event": "browser_skip_low_ram"},
+                )
+                self._status = AgentStatus.IDLE
+                return
 
             # Watchdog: clean up orphan processes before launching
             _kill_orphan_headless_shells()
