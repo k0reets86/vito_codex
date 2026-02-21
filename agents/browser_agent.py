@@ -7,14 +7,13 @@ OOM Protection:
 - Singleton pattern: max 1 browser instance
 - --single-process + --disable-dev-shm-usage Chrome flags
 - Watchdog: kills orphan headless_shell processes (max 2 allowed)
-- Memory limit: 600MB per process via resource.setrlimit
+- Memory limit: systemd MemoryMax=2G (RLIMIT_AS breaks V8/Node)
 - Guaranteed cleanup in finally blocks
 """
 
 import asyncio
 import os
 import platform
-import resource
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -31,23 +30,15 @@ MEMORY_LIMIT_BYTES = 600 * 1024 * 1024  # 600 MB
 
 
 def _set_memory_limit() -> None:
-    """Set virtual memory limit for the current process (Linux only)."""
-    if platform.system() != "Linux":
-        return
-    try:
-        soft, hard = resource.getrlimit(resource.RLIMIT_AS)
-        # Only tighten the limit, never loosen it
-        if hard == resource.RLIM_INFINITY or hard > MEMORY_LIMIT_BYTES:
-            new_hard = MEMORY_LIMIT_BYTES
-        else:
-            new_hard = hard
-        resource.setrlimit(resource.RLIMIT_AS, (MEMORY_LIMIT_BYTES, new_hard))
-        logger.info(
-            f"Memory limit set: {MEMORY_LIMIT_BYTES // (1024*1024)}MB",
-            extra={"event": "memory_limit_set"},
-        )
-    except (ValueError, OSError) as e:
-        logger.warning(f"Could not set memory limit: {e}", extra={"event": "memory_limit_failed"})
+    """Log memory limit status.
+
+    NOTE: RLIMIT_AS (virtual memory) kills Node.js/V8 which needs large virtual
+    address space. Memory is instead limited by systemd MemoryMax=2G cgroup.
+    """
+    logger.info(
+        "Memory limited by systemd cgroup (MemoryMax=2G), RLIMIT_AS skipped (breaks V8)",
+        extra={"event": "memory_limit_info"},
+    )
 
 
 def _kill_orphan_headless_shells() -> int:

@@ -147,45 +147,11 @@ class TestOOMProtection:
             killed = _kill_orphan_headless_shells()
             assert killed == 0
 
-    def test_set_memory_limit_linux(self):
-        """Memory limit is set on Linux."""
-        from agents.browser_agent import _set_memory_limit, MEMORY_LIMIT_BYTES
-
-        with patch("agents.browser_agent.platform") as mock_platform, \
-             patch("agents.browser_agent.resource") as mock_resource:
-            mock_platform.system.return_value = "Linux"
-            mock_resource.RLIMIT_AS = 9  # actual value on Linux
-            mock_resource.RLIM_INFINITY = -1
-            mock_resource.getrlimit.return_value = (-1, -1)
-
-            _set_memory_limit()
-            mock_resource.setrlimit.assert_called_once_with(
-                9, (MEMORY_LIMIT_BYTES, MEMORY_LIMIT_BYTES)
-            )
-
-    def test_set_memory_limit_not_linux(self):
-        """Memory limit is a no-op on non-Linux."""
+    def test_set_memory_limit_logs_info(self):
+        """Memory limit function logs info (no RLIMIT_AS, relies on systemd cgroup)."""
         from agents.browser_agent import _set_memory_limit
-
-        with patch("agents.browser_agent.platform") as mock_platform, \
-             patch("agents.browser_agent.resource") as mock_resource:
-            mock_platform.system.return_value = "Darwin"
-            _set_memory_limit()
-            mock_resource.setrlimit.assert_not_called()
-
-    def test_set_memory_limit_error_handled(self):
-        """setrlimit errors are handled gracefully (no crash)."""
-        from agents.browser_agent import _set_memory_limit
-
-        with patch("agents.browser_agent.platform") as mock_platform, \
-             patch("agents.browser_agent.resource") as mock_resource:
-            mock_platform.system.return_value = "Linux"
-            mock_resource.RLIMIT_AS = 9
-            mock_resource.RLIM_INFINITY = -1
-            mock_resource.getrlimit.return_value = (-1, -1)
-            mock_resource.setrlimit.side_effect = OSError("Permission denied")
-            # Should not raise
-            _set_memory_limit()
+        # Should not raise — just logs
+        _set_memory_limit()
 
     def test_singleton_pattern(self, mock_llm_router, mock_memory, mock_finance, mock_comms):
         """Only one BrowserAgent instance exists."""
