@@ -148,7 +148,6 @@ class LLMRouter:
             reasoning,
             extra={
                 "event": "model_selected",
-                "agent": "llm_router",
                 "context": {
                     "task_type": task_type.value,
                     "model": model.display_name,
@@ -180,7 +179,7 @@ class LLMRouter:
         if route.needs_approval:
             logger.warning(
                 f"Операция требует одобрения: ${route.estimated_cost_usd:.2f}",
-                extra={"event": "approval_required", "agent": "llm_router"},
+                extra={"event": "approval_required"},
             )
             # TODO: интеграция с comms_agent для запроса одобрения через Telegram
             return None
@@ -199,7 +198,6 @@ class LLMRouter:
                     f"LLM ответ получен от {model.display_name}",
                     extra={
                         "event": "llm_call_success",
-                        "agent": "llm_router",
                         "duration_ms": duration_ms,
                         "context": {
                             "model": model.display_name,
@@ -215,7 +213,6 @@ class LLMRouter:
                     f"Ошибка вызова {model.display_name}: {e}",
                     extra={
                         "event": "llm_call_failed",
-                        "agent": "llm_router",
                         "context": {"model": model.display_name, "attempt": attempt + 1},
                     },
                     exc_info=True,
@@ -224,7 +221,7 @@ class LLMRouter:
 
         logger.critical(
             "Все модели недоступны для задачи",
-            extra={"event": "all_models_failed", "agent": "llm_router"},
+            extra={"event": "all_models_failed"},
         )
         return None
 
@@ -279,7 +276,7 @@ class LLMRouter:
         if self._daily_spend >= settings.DAILY_LIMIT_USD:
             logger.warning(
                 f"Дневной лимит достигнут: ${self._daily_spend:.2f}/${settings.DAILY_LIMIT_USD}",
-                extra={"event": "daily_limit_reached", "agent": "llm_router"},
+                extra={"event": "daily_limit_reached"},
             )
             return False
         return True
