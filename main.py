@@ -421,8 +421,10 @@ class VITO:
 
     async def shutdown(self) -> None:
         """Корректное завершение всех подсистем."""
-        logger.info("VITO завершает работу...", extra={"event": "shutdown_start"})
+        if not self.running:
+            return
         self.running = False
+        logger.info("VITO завершает работу...", extra={"event": "shutdown_start"})
         self.decision_loop.stop()
         await self.registry.stop_all()
         await self.comms.stop()
@@ -436,22 +438,23 @@ async def main() -> None:
 
     loop = asyncio.get_running_loop()
 
-    def handle_signal(sig: int) -> None:
-        logger.info(
-            f"Получен сигнал {signal.Signals(sig).name}",
-            extra={"event": "signal_received", "context": {"signal": sig}},
-        )
-        asyncio.ensure_future(vito.shutdown())
-
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, handle_signal, sig)
-
     await vito.startup()
 
     tasks = [
         asyncio.create_task(vito.decision_loop.run(), name="decision_loop"),
         asyncio.create_task(vito.scheduler(), name="scheduler"),
     ]
+
+    def handle_signal(sig: int) -> None:
+        logger.info(
+            f"Получен сигнал {signal.Signals(sig).name}",
+            extra={"event": "signal_received", "context": {"signal": sig}},
+        )
+        for t in tasks:
+            t.cancel()
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, handle_signal, sig)
 
     try:
         await asyncio.gather(*tasks)
