@@ -157,9 +157,11 @@ class ConversationEngine:
             except Exception:
                 pass
 
+        goals_context = self._format_goals_context()
         prompt = (
             f"{VITO_PERSONALITY}\n\n"
             f"История разговора:\n{self._format_context()}\n\n"
+            f"{goals_context}\n\n"
             f"{context_from_memory}\n\n"
             f"Вопрос владельца: {text}\n\n"
             f"Дай конкретный ответ."
@@ -178,11 +180,13 @@ class ConversationEngine:
 
     async def _handle_goal_request(self, text: str) -> dict[str, Any]:
         """Извлекает цель и подтверждает естественным языком."""
+        goals_context = self._format_goals_context()
         prompt = (
             f"{VITO_PERSONALITY}\n\n"
+            f"{goals_context}\n\n"
             f"Владелец просит выполнить задачу: \"{text}\"\n\n"
             f"1. Сформулируй краткое название цели (до 100 символов)\n"
-            f"2. Напиши подтверждение естественным языком\n\n"
+            f"2. Напиши подтверждение естественным языком (учитывай уже существующие цели)\n\n"
             f"Ответь в JSON: {{\"goal_title\": \"...\", \"confirmation\": \"...\"}}"
         )
 
@@ -251,9 +255,11 @@ class ConversationEngine:
 
     async def _handle_conversation(self, text: str) -> dict[str, Any]:
         """Свободный разговор с личностью VITO."""
+        goals_context = self._format_goals_context()
         prompt = (
             f"{VITO_PERSONALITY}\n\n"
             f"История разговора:\n{self._format_context()}\n\n"
+            f"{goals_context}\n\n"
             f"Владелец: {text}\n\n"
             f"Ответь естественно, как коллега."
         )
@@ -275,6 +281,24 @@ class ConversationEngine:
         # Ограничиваем историю
         if len(self._context) > MAX_CONTEXT_TURNS:
             self._context = self._context[-MAX_CONTEXT_TURNS:]
+
+    def _format_goals_context(self) -> str:
+        """Форматирует активные цели для включения в промпт."""
+        if not self.goal_engine:
+            return ""
+        try:
+            goals = self.goal_engine.get_all_goals()
+            if not goals:
+                return ""
+            active = [g for g in goals if g.status.value not in ("completed", "failed", "cancelled")]
+            if not active:
+                return ""
+            lines = ["Активные цели VITO:"]
+            for g in active[:10]:
+                lines.append(f"- [{g.status.value}] {g.title} (приоритет: {g.priority.name}, ${g.estimated_cost_usd:.2f})")
+            return "\n".join(lines)
+        except Exception:
+            return ""
 
     def _format_context(self) -> str:
         """Форматирует контекст для промпта."""
