@@ -144,9 +144,19 @@ class ConversationEngine:
         if lower in approval_words:
             return Intent.APPROVAL
 
-        # Ключевые слова действий
+        # Goal request keywords (product creation, tasks, publishing)
+        goal_keywords = [
+            "создай", "сделай", "опубликуй", "напиши", "разработай",
+            "запусти продукт", "запусти товар", "продукт", "ebook",
+            "create", "make", "publish", "build", "launch",
+            "write an", "write a", "design", "generate",
+        ]
+        if any(kw in lower for kw in goal_keywords):
+            return Intent.GOAL_REQUEST
+
+        # System action keywords (internal operations)
         action_keywords = [
-            "запусти", "останови", "просканируй", "проанализируй",
+            "запусти агент", "останови", "просканируй", "проанализируй",
             "используй", "переключи", "смени модель", "сканируй тренды",
             "проверь ошибки", "сделай бэкап", "откати", "обнови",
         ]
