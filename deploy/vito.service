@@ -1,0 +1,27 @@
+[Unit]
+Description=VITO Autonomous AI Agent
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/vito/vito-agent
+EnvironmentFile=/home/vito/vito-agent/.env
+ExecStart=/usr/bin/python3 main.py
+Restart=on-failure
+RestartSec=10
+
+# OOM Protection — systemd cgroup limits
+MemoryMax=2G
+MemoryHigh=1536M
+
+# Graceful shutdown via SIGTERM (main.py handles it)
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# Logging to journald
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vito
+
+[Install]
+WantedBy=default.target
