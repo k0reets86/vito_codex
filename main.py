@@ -97,6 +97,8 @@ class VITO:
         self.conversation_engine = ConversationEngine(
             llm_router=self.llm_router, memory=self.memory, goal_engine=self.goal_engine,
             finance=self.finance, agent_registry=self.registry,
+            self_healer=self.self_healer, self_updater=self.self_updater,
+            knowledge_updater=self.knowledge_updater,
         )
         self.judge_protocol = JudgeProtocol(
             llm_router=self.llm_router, memory=self.memory, comms=self.comms
@@ -110,6 +112,7 @@ class VITO:
         )
         self.decision_loop.set_self_healer(self.self_healer)
         self.conversation_engine.decision_loop = self.decision_loop
+        self.conversation_engine.judge_protocol = self.judge_protocol
 
         self.comms.set_modules(
             goal_engine=self.goal_engine,
