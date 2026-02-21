@@ -37,10 +37,34 @@ class Settings:
     REDDIT_CLIENT_ID: str = os.getenv("REDDIT_CLIENT_ID", "")
     REDDIT_CLIENT_SECRET: str = os.getenv("REDDIT_CLIENT_SECRET", "")
 
+    # X.com (Twitter)
+    TWITTER_BEARER_TOKEN: str = os.getenv("TWITTER_BEARER_TOKEN", "")
+    TWITTER_CONSUMER_KEY: str = os.getenv("TWITTER_CONSUMER_KEY", "")
+    TWITTER_CONSUMER_SECRET: str = os.getenv("TWITTER_CONSUMER_SECRET", "")
+    TWITTER_ACCESS_TOKEN: str = os.getenv("TWITTER_ACCESS_TOKEN", "")
+    TWITTER_ACCESS_SECRET: str = os.getenv("TWITTER_ACCESS_SECRET", "")
+
+    # Reddit RSS
+    REDDIT_RSS_ENTREPRENEUR: str = os.getenv("REDDIT_RSS_ENTREPRENEUR", "")
+    REDDIT_RSS_PASSIVE: str = os.getenv("REDDIT_RSS_PASSIVE", "")
+    REDDIT_RSS_ECOMMERCE: str = os.getenv("REDDIT_RSS_ECOMMERCE", "")
+
+    # New platforms
+    PRINTFUL_API_KEY: str = os.getenv("PRINTFUL_API_KEY", "")
+    ETSY_KEYSTRING: str = os.getenv("ETSY_KEYSTRING", "")
+    ETSY_SHARED_SECRET: str = os.getenv("ETSY_SHARED_SECRET", "")
+    GUMROAD_APP_ID: str = os.getenv("GUMROAD_APP_ID", "")
+    GUMROAD_APP_SECRET: str = os.getenv("GUMROAD_APP_SECRET", "")
+    KOFI_PAGE_ID: str = os.getenv("KOFI_PAGE_ID", "")
+    CLOUDINARY_CLOUD_NAME: str = os.getenv("CLOUDINARY_CLOUD_NAME", "")
+    CLOUDINARY_API_KEY: str = os.getenv("CLOUDINARY_API_KEY", "")
+    CLOUDINARY_API_SECRET: str = os.getenv("CLOUDINARY_API_SECRET", "")
+
     # Financial limits (USD)
-    DAILY_LIMIT_USD: float = float(os.getenv("DAILY_LIMIT_USD", "10"))
+    DAILY_LIMIT_USD: float = float(os.getenv("DAILY_LIMIT_USD", "5"))
     OPERATION_NOTIFY_USD: float = float(os.getenv("OPERATION_NOTIFY_USD", "20"))
     OPERATION_APPROVE_USD: float = float(os.getenv("OPERATION_APPROVE_USD", "50"))
+    OPERATION_MAX_USD: float = float(os.getenv("OPERATION_MAX_USD", "2"))
 
 
 settings = Settings()

@@ -165,6 +165,40 @@ class MemoryManager:
         row = conn.execute("SELECT * FROM skills WHERE name = ?", (name,)).fetchone()
         return dict(row) if row else None
 
+    def search_skills(self, query: str, limit: int = 5) -> list[dict]:
+        """Поиск навыков по ключевым словам."""
+        conn = self._get_sqlite()
+        rows = conn.execute(
+            """SELECT * FROM skills
+               WHERE name LIKE ? OR description LIKE ?
+               ORDER BY success_count DESC, last_used DESC
+               LIMIT ?""",
+            (f"%{query[:50]}%", f"%{query[:50]}%", limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def update_skill_success(self, name: str, success: bool) -> None:
+        """Обновляет счётчик успешности навыка."""
+        conn = self._get_sqlite()
+        field = "success_count" if success else "fail_count"
+        conn.execute(
+            f"UPDATE skills SET {field} = {field} + 1, last_used = datetime('now') WHERE name = ?",
+            (name,),
+        )
+        conn.commit()
+
+    def get_top_skills(self, limit: int = 10) -> list[dict]:
+        """Возвращает топ навыков по успешности."""
+        conn = self._get_sqlite()
+        rows = conn.execute(
+            """SELECT *, CAST(success_count AS REAL) / MAX(success_count + fail_count, 1) as success_rate
+               FROM skills
+               ORDER BY success_rate DESC, success_count DESC
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def log_error(self, module: str, error_type: str, message: str, resolution: str = "") -> int:
         conn = self._get_sqlite()
         cursor = conn.execute(

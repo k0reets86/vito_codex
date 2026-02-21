@@ -238,6 +238,20 @@ class FinancialController:
         daily_spent = self.get_daily_spent()
         new_total = daily_spent + amount_usd
 
+        # Per-operation max limit
+        if amount_usd > settings.OPERATION_MAX_USD:
+            logger.info(
+                f"Операция ${amount_usd:.2f} превышает per-op лимит ${settings.OPERATION_MAX_USD:.2f} — запрос одобрения",
+                extra={"event": "per_op_limit"},
+            )
+            return {
+                "allowed": False,
+                "action": "approve",
+                "reason": f"Операция ${amount_usd:.2f} превышает лимит на операцию (${settings.OPERATION_MAX_USD:.2f})",
+                "daily_spent": daily_spent,
+                "remaining": max(settings.DAILY_LIMIT_USD - daily_spent, 0),
+            }
+
         # Дневной лимит
         if new_total > settings.DAILY_LIMIT_USD:
             logger.warning(

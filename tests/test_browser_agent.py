@@ -29,7 +29,17 @@ class TestBrowserAgent:
 
     @pytest.mark.asyncio
     async def test_start_stop(self, agent):
-        await agent.start()
+        mock_context = AsyncMock()
+        mock_browser = AsyncMock()
+        mock_browser.new_context = AsyncMock(return_value=mock_context)
+        mock_pw = AsyncMock()
+        mock_pw.chromium.launch = AsyncMock(return_value=mock_browser)
+
+        mock_pw_factory = MagicMock()
+        mock_pw_factory.return_value.start = AsyncMock(return_value=mock_pw)
+
+        with patch("playwright.async_api.async_playwright", mock_pw_factory):
+            await agent.start()
         status = agent.get_status()
         assert status["status"] == "idle"
         await agent.stop()

@@ -63,7 +63,7 @@ def test_record_multiple_sales_same_product(fc):
 # ── Лимиты ──
 
 def test_check_expense_auto(fc):
-    result = fc.check_expense(5.0)
+    result = fc.check_expense(1.50)
     assert result["allowed"] is True
     assert result["action"] == "auto"
 
@@ -78,6 +78,7 @@ def test_check_expense_blocked_over_daily(fc):
 def test_check_expense_approve_threshold(fc):
     with patch("financial_controller.settings") as s:
         s.DAILY_LIMIT_USD = 1000.0
+        s.OPERATION_MAX_USD = 100.0
         s.OPERATION_NOTIFY_USD = 20.0
         s.OPERATION_APPROVE_USD = 50.0
         result = fc.check_expense(55.0)
@@ -88,6 +89,7 @@ def test_check_expense_approve_threshold(fc):
 def test_check_expense_notify_threshold(fc):
     with patch("financial_controller.settings") as s:
         s.DAILY_LIMIT_USD = 1000.0
+        s.OPERATION_MAX_USD = 100.0
         s.OPERATION_NOTIFY_USD = 20.0
         s.OPERATION_APPROVE_USD = 50.0
         result = fc.check_expense(25.0)

@@ -1,15 +1,26 @@
-"""TrendScout — Agent 01: сканирование трендов и предложение ниш."""
+"""TrendScout — Agent 01: сканирование трендов и предложение ниш.
+
+v0.3.0: добавлены Google News, RSS feeds, pytrends.
+"""
 
 import json
 import time
 import uuid
 from typing import Any, Optional
 
+import aiohttp
+
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
+from config.settings import settings
 from llm_router import TaskType
 
 logger = get_logger("trend_scout", agent="trend_scout")
+
+DEFAULT_RSS_FEEDS = [
+    "https://www.producthunt.com/feed",
+    "https://hnrss.org/frontpage",
+]
 
 
 class TrendScout(BaseAgent):
@@ -19,7 +30,7 @@ class TrendScout(BaseAgent):
 
     @property
     def capabilities(self) -> list[str]:
-        return ["trend_scan", "niche_research"]
+        return ["trend_scan", "niche_research", "google_news", "rss_scan"]
 
     async def execute_task(self, task_type: str, **kwargs) -> TaskResult:
         self._status = AgentStatus.RUNNING
@@ -29,6 +40,13 @@ class TrendScout(BaseAgent):
                 result = await self.scan_google_trends(kwargs.get("keywords", ["digital products", "AI tools"]))
             elif task_type == "niche_research":
                 result = await self.suggest_niches()
+            elif task_type == "google_news":
+                result = await self.scan_google_news(
+                    kwargs.get("query", "digital products"),
+                    kwargs.get("language", "en"),
+                )
+            elif task_type == "rss_scan":
+                result = await self.scan_rss_feeds(kwargs.get("feeds", DEFAULT_RSS_FEEDS))
             else:
                 result = await self.scan_google_trends(kwargs.get("keywords", ["digital products"]))
             result.duration_ms = int((time.monotonic() - start) * 1000)
@@ -72,3 +90,132 @@ class TrendScout(BaseAgent):
             return TaskResult(success=False, error="LLM не вернул ответ")
         self._record_expense(0.03, "Suggest niches")
         return TaskResult(success=True, output=response, cost_usd=0.03)
+
+    async def scan_google_news(self, query: str, language: str = "en") -> TaskResult:
+        """Сканирование Google News через Custom Search API (tbm=nws)."""
+        api_key = getattr(settings, "GOOGLE_API_KEY", "")
+        if not api_key:
+            return TaskResult(success=False, error="GOOGLE_API_KEY не задан")
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                params = {
+                    "key": api_key,
+                    "cx": "search",  # Custom Search Engine ID (fallback)
+                    "q": query,
+                    "tbm": "nws",
+                    "num": 10,
+                    "hl": language,
+                }
+                async with session.get(
+                    "https://www.googleapis.com/customsearch/v1", params=params
+                ) as resp:
+                    if resp.status != 200:
+                        # Fallback: use LLM to summarize news
+                        return await self._news_via_llm(query, language)
+                    data = await resp.json()
+
+            items = data.get("items", [])
+            news = [
+                {"title": item.get("title", ""), "link": item.get("link", ""), "snippet": item.get("snippet", "")}
+                for item in items
+            ]
+
+            output = json.dumps(news, ensure_ascii=False)
+            if self.memory:
+                self.memory.store_knowledge(
+                    doc_id=f"gnews_{uuid.uuid4().hex[:8]}",
+                    text=f"Google News '{query}': {output[:500]}",
+                    metadata={"type": "news", "query": query, "language": language},
+                )
+
+            self._record_expense(0.01, f"Google News: {query}")
+            return TaskResult(success=True, output=output, cost_usd=0.01)
+
+        except Exception as e:
+            logger.warning(f"Google News error: {e}", extra={"event": "gnews_error"})
+            return await self._news_via_llm(query, language)
+
+    async def _news_via_llm(self, query: str, language: str) -> TaskResult:
+        """Fallback: получение новостей через LLM (Perplexity)."""
+        if not self.llm_router:
+            return TaskResult(success=False, error="LLM Router недоступен")
+        prompt = f"Найди последние новости по теме: {query} (язык: {language}). Дай топ-10 новостей с заголовками и краткими описаниями."
+        response = await self.llm_router.call_llm(task_type=TaskType.RESEARCH, prompt=prompt, estimated_tokens=2000)
+        if not response:
+            return TaskResult(success=False, error="LLM не вернул ответ")
+        self._record_expense(0.02, f"News via LLM: {query}")
+        return TaskResult(success=True, output=response, cost_usd=0.02)
+
+    async def scan_rss_feeds(self, feeds: list[str] | None = None) -> TaskResult:
+        """Сканирование RSS feeds (Product Hunt, Indie Hackers, etc.)."""
+        feeds = feeds or DEFAULT_RSS_FEEDS
+        all_entries = []
+
+        try:
+            import feedparser
+        except ImportError:
+            # Fallback without feedparser
+            return await self._rss_via_llm(feeds)
+
+        for feed_url in feeds:
+            try:
+                parsed = feedparser.parse(feed_url)
+                for entry in parsed.entries[:5]:
+                    all_entries.append({
+                        "title": entry.get("title", ""),
+                        "link": entry.get("link", ""),
+                        "summary": entry.get("summary", "")[:200],
+                        "published": entry.get("published", ""),
+                        "source": feed_url,
+                    })
+            except Exception as e:
+                logger.debug(f"RSS feed error {feed_url}: {e}", extra={"event": "rss_feed_error"})
+
+        if not all_entries:
+            return await self._rss_via_llm(feeds)
+
+        output = json.dumps(all_entries, ensure_ascii=False)
+        if self.memory:
+            self.memory.store_knowledge(
+                doc_id=f"rss_{uuid.uuid4().hex[:8]}",
+                text=f"RSS scan: {output[:500]}",
+                metadata={"type": "rss", "feeds": len(feeds)},
+            )
+
+        return TaskResult(success=True, output=output, cost_usd=0.0)
+
+    async def _rss_via_llm(self, feeds: list[str]) -> TaskResult:
+        """Fallback: RSS через LLM."""
+        if not self.llm_router:
+            return TaskResult(success=False, error="LLM Router недоступен")
+        prompt = f"Проанализируй топ продукты и тренды на Product Hunt и Indie Hackers за последнюю неделю."
+        response = await self.llm_router.call_llm(task_type=TaskType.RESEARCH, prompt=prompt, estimated_tokens=2000)
+        if not response:
+            return TaskResult(success=False, error="LLM не вернул ответ")
+        self._record_expense(0.02, "RSS via LLM")
+        return TaskResult(success=True, output=response, cost_usd=0.02)
+
+    async def scan_free_trend_apis(self) -> TaskResult:
+        """Сканирование бесплатных API для трендов (pytrends - Google Trends)."""
+        try:
+            from pytrends.request import TrendReq
+            pytrends = TrendReq(hl="en-US", tz=360)
+            # Получаем текущие тренды
+            trending = pytrends.trending_searches(pn="united_states")
+            trends_list = trending[0].tolist()[:20]
+
+            output = json.dumps({"trending_searches": trends_list}, ensure_ascii=False)
+            if self.memory:
+                self.memory.store_knowledge(
+                    doc_id=f"pytrends_{uuid.uuid4().hex[:8]}",
+                    text=f"Google Trends trending: {', '.join(trends_list[:10])}",
+                    metadata={"type": "pytrends", "source": "google_trends"},
+                )
+            return TaskResult(success=True, output=output, cost_usd=0.0)
+
+        except ImportError:
+            return TaskResult(success=False, error="pytrends не установлен")
+        except Exception as e:
+            logger.warning(f"pytrends error: {e}", extra={"event": "pytrends_error"})
+            return TaskResult(success=False, error=str(e))

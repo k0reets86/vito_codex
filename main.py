@@ -54,8 +54,19 @@ from platforms.etsy import EtsyPlatform
 from platforms.kofi import KofiPlatform
 from platforms.wordpress import WordPressPlatform
 from platforms.medium import MediumPlatform
+from platforms.printful import PrintfulPlatform
+from platforms.amazon_kdp import AmazonKDPPlatform
+from platforms.youtube import YouTubePlatform
+from platforms.substack import SubstackPlatform
+from platforms.creative_fabrica import CreativeFabricaPlatform
 
-VERSION = "0.2.0"
+from self_healer import SelfHealer
+from self_updater import SelfUpdater
+from knowledge_updater import KnowledgeUpdater
+from conversation_engine import ConversationEngine
+from judge_protocol import JudgeProtocol
+
+VERSION = "0.3.0"
 
 logger = get_logger("main", agent="vito_core")
 
@@ -73,17 +84,41 @@ class VITO:
         self.registry = AgentRegistry()
         self._init_agents()
 
+        # v0.3.0: Новые модули
+        self.self_healer = SelfHealer(
+            llm_router=self.llm_router, memory=self.memory, comms=self.comms
+        )
+        self.self_updater = SelfUpdater(
+            memory=self.memory, comms=self.comms
+        )
+        self.knowledge_updater = KnowledgeUpdater(
+            llm_router=self.llm_router, memory=self.memory
+        )
+        self.conversation_engine = ConversationEngine(
+            llm_router=self.llm_router, memory=self.memory, goal_engine=self.goal_engine
+        )
+        self.judge_protocol = JudgeProtocol(
+            llm_router=self.llm_router, memory=self.memory, comms=self.comms
+        )
+
         self.decision_loop = DecisionLoop(
             goal_engine=self.goal_engine,
             llm_router=self.llm_router,
             memory=self.memory,
             agent_registry=self.registry,
         )
+        self.decision_loop.set_self_healer(self.self_healer)
+
         self.comms.set_modules(
             goal_engine=self.goal_engine,
             llm_router=self.llm_router,
             decision_loop=self.decision_loop,
             agent_registry=self.registry,
+            self_healer=self.self_healer,
+            self_updater=self.self_updater,
+            conversation_engine=self.conversation_engine,
+            judge_protocol=self.judge_protocol,
+            finance=self.finance,
         )
 
     def _init_agents(self) -> None:
@@ -95,6 +130,7 @@ class VITO:
             "gumroad": GumroadPlatform(),
             "etsy": EtsyPlatform(),
             "kofi": KofiPlatform(),
+            "printful": PrintfulPlatform(),
         }
         platforms_publish = {
             "wordpress": WordPressPlatform(),
@@ -103,6 +139,13 @@ class VITO:
 
         # Infrastructure
         browser = BrowserAgent(**deps)
+
+        # Browser-based platforms (v0.3.0)
+        platforms_commerce["amazon_kdp"] = AmazonKDPPlatform(browser_agent=browser)
+        platforms_commerce["creative_fabrica"] = CreativeFabricaPlatform(browser_agent=browser)
+        platforms_publish["substack"] = SubstackPlatform(browser_agent=browser)
+        # YouTube — read-only (trend analysis)
+        self._youtube = YouTubePlatform()
         quality_judge = QualityJudge(**deps)
 
         # All agents
@@ -195,7 +238,7 @@ class VITO:
     # ── Расписание периодических задач ──
 
     async def scheduler(self) -> None:
-        """Планировщик задач по расписанию: 03:00, 06:00, 08:00."""
+        """Планировщик задач по расписанию: 02:00-08:00 + проактивность каждые 4ч."""
         last_run: dict[str, str] = {}
 
         while self.running:
@@ -218,6 +261,13 @@ class VITO:
             if hour == 8 and last_run.get("morning_report") != today:
                 last_run["morning_report"] = today
                 await self._morning_report()
+
+            # v0.3.0: Проактивные проверки каждые 4 часа (10, 14, 18, 22)
+            if hour in (10, 14, 18, 22):
+                proactive_key = f"proactive_{hour}"
+                if last_run.get(proactive_key) != today:
+                    last_run[proactive_key] = today
+                    await self._proactive_check()
 
             await asyncio.sleep(60)
 
@@ -258,6 +308,14 @@ class VITO:
                 "Понедельник — запуск обновления базы знаний",
                 extra={"event": "knowledge_update_trigger"},
             )
+            try:
+                results = await self.knowledge_updater.run_weekly_update()
+                logger.info(
+                    f"Knowledge update завершён: {results}",
+                    extra={"event": "knowledge_update_done", "context": results},
+                )
+            except Exception as e:
+                logger.warning(f"Knowledge update ошибка: {e}", extra={"event": "knowledge_update_error"})
         logger.info("Утренняя разведка завершена", extra={"event": "scout_done"})
 
     async def _morning_report(self) -> None:
@@ -278,6 +336,35 @@ class VITO:
             extra={"event": "morning_report", "context": {"report": report}},
         )
         await self.comms.send_morning_report(report)
+
+    async def _proactive_check(self) -> None:
+        """v0.3.0: Проактивная проверка каждые 4 часа — делится достижениями, предлагает шаги."""
+        logger.info("Проактивная проверка", extra={"event": "proactive_check_start"})
+        try:
+            stats = self.goal_engine.get_stats()
+            completed_today = stats.get("completed", 0)
+
+            if completed_today > 0:
+                await self.comms.send_message(
+                    f"VITO Проактивный отчёт\n\n"
+                    f"Выполнено целей: {completed_today}\n"
+                    f"Потрачено: ${self.llm_router.get_daily_spend():.2f}\n"
+                    f"Рекомендую: продолжать работу по текущим целям."
+                )
+
+            # Предложение следующих шагов если нет задач
+            pending = stats.get("pending", 0)
+            executing = stats.get("executing", 0)
+            if pending == 0 and executing == 0:
+                await self.comms.send_message(
+                    "VITO: Нет активных задач. Предлагаю:\n"
+                    "1. /trends — просканировать новые тренды\n"
+                    "2. /deep <тема> — анализ перспективной ниши\n"
+                    "3. /goal <задача> — создать новую цель"
+                )
+
+        except Exception as e:
+            logger.warning(f"Проактивная проверка ошибка: {e}", extra={"event": "proactive_check_error"})
 
     # ── Shutdown ──
 
