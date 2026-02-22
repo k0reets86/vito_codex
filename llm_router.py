@@ -384,7 +384,9 @@ class LLMRouter:
                     from google import genai
                 except ImportError:
                     raise RuntimeError("google-genai не установлен, Gemini недоступен")
-                self._google = genai.Client(api_key=settings.GOOGLE_API_KEY)
+                # Prefer GEMINI_API_KEY (AI Studio) over GOOGLE_API_KEY (Custom Search)
+                gemini_key = settings.GEMINI_API_KEY or settings.GOOGLE_API_KEY
+                self._google = genai.Client(api_key=gemini_key)
             contents = prompt
             if system_prompt:
                 contents = f"{system_prompt}\n\n{prompt}"

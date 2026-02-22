@@ -203,6 +203,12 @@ class DecisionLoop:
             f"US business hours: {'Yes' if time_ctx['is_business_hours_us'] else 'No'}\n"
             f"{context_from_memory}{skills_context}\n\n"
             f"IMPORTANT: All content/products must be in ENGLISH (target market: US/CA/EU).\n"
+            f"CONSTRAINTS:\n"
+            f"- Research steps MUST use real data sources (Reddit, Google Trends, Product Hunt)\n"
+            f"- Revenue projections MUST be realistic for solo creator ($0-500 first month)\n"
+            f"- Products must be in $5-50 price range unless owner specified otherwise\n"
+            f"- Each step must be concrete and actionable, not 'analyze market'\n"
+            f"- No hallucinated numbers or fictional competitors\n\n"
             f"Return a numbered list of steps (3-7 steps). "
             f"Use existing skills where possible. "
             f"Steps only, no explanations."
@@ -927,33 +933,67 @@ class DecisionLoop:
         return None
 
     async def _notify_goal_completed(self, goal: Goal, results: dict[str, Any]) -> None:
-        """Send Telegram notification to owner with actual deliverables."""
+        """Send human-like completion report to owner via Telegram.
+
+        Instead of raw file paths, sends: what was done + key findings + proposals.
+        """
         if not hasattr(self, '_comms') or not self._comms:
             return
         try:
-            # Collect file paths and URLs from step results
-            files = []
-            urls = []
+            # Collect step outputs, files, URLs
+            all_outputs: list[str] = []
+            files: list[str] = []
             for key, val in results.items():
                 if not isinstance(val, dict):
                     continue
                 if val.get("file_path"):
                     files.append(val["file_path"])
-                out = val.get("output", {})
-                if isinstance(out, dict):
+                out = val.get("output", "")
+                if isinstance(out, str) and len(out) > 50:
+                    all_outputs.append(out[:500])
+                elif isinstance(out, dict):
                     if out.get("url"):
-                        urls.append(out["url"])
+                        files.append(out["url"])
                     if out.get("file_path"):
                         files.append(out["file_path"])
+                    # Check for executive_summary in metadata
+                    exec_sum = val.get("executive_summary", "")
+                    if exec_sum:
+                        all_outputs.insert(0, exec_sum)
 
-            msg = f"✅ Цель выполнена: {goal.title}\n"
-            msg += f"Шагов: {results.get('steps_completed', 0)}/{results.get('steps_total', 0)}\n"
+            # Generate executive summary via cheap LLM
+            combined_output = "\n---\n".join(all_outputs[:5])
+            summary = None
+            if combined_output and self.llm_router:
+                summary_prompt = (
+                    f"Goal completed: {goal.title}\n"
+                    f"Description: {goal.description[:200]}\n\n"
+                    f"Step outputs:\n{combined_output[:3000]}\n\n"
+                    f"Write a SHORT Telegram message (max 500 chars) for the owner:\n"
+                    f"1. One sentence: what was done\n"
+                    f"2. 2-3 key findings (bullet points)\n"
+                    f"3. 1-2 concrete proposals: 'I suggest we do X. Reply 1 or 2 to choose.'\n"
+                    f"Write in Russian (owner prefers Russian for communication).\n"
+                    f"Be conversational, like a business partner reporting results."
+                )
+                try:
+                    summary = await self.llm_router.call_llm(
+                        task_type=TaskType.ROUTINE,
+                        prompt=summary_prompt,
+                        estimated_tokens=300,
+                    )
+                except Exception:
+                    summary = None
+
+            if summary:
+                msg = summary
+            else:
+                # Fallback: simple but still better than raw dumps
+                msg = f"Готово: {goal.title}\n"
+                msg += f"Выполнено {results.get('steps_completed', 0)} шагов.\n"
+
             if files:
-                msg += "\nФайлы:\n" + "\n".join(f"  📄 {f}" for f in files[:5])
-            if urls:
-                msg += "\nСсылки:\n" + "\n".join(f"  🔗 {u}" for u in urls[:5])
-            if not files and not urls:
-                msg += "\n(Результаты сохранены в памяти)"
+                msg += "\n" + "\n".join(f"📎 {f}" for f in files[:3])
 
             await self._comms.send_message(msg)
         except Exception as e:
