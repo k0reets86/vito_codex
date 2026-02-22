@@ -4,4 +4,8 @@ __pycache__/
 .pytest_cache/
 logs/
 memory/chroma_db/
+memory/vito_local.db
 .claude/
+backups/
+output/
+<MagicMock */
