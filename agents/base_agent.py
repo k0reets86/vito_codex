@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
+from config.agent_prompts import AGENT_PROMPTS
 from config.logger import get_logger
 
 
@@ -53,6 +54,7 @@ class BaseAgent(ABC):
         self.memory = memory
         self.finance = finance
         self.comms = comms
+        self.system_prompt = AGENT_PROMPTS.get(name, "")
         self._status = AgentStatus.STOPPED
         self._tasks_completed = 0
         self._tasks_failed = 0
@@ -117,6 +119,22 @@ class BaseAgent(ABC):
         if not self.finance:
             return {"allowed": True, "action": "auto", "reason": "No finance controller"}
         return self.finance.check_expense(amount_usd)
+
+    async def _call_llm(self, task_type, prompt, system_prompt=None, estimated_tokens=2000):
+        """Call LLM via router with agent's system prompt.
+
+        If system_prompt is explicitly passed, it overrides the agent default.
+        Otherwise uses self.system_prompt loaded from AGENT_PROMPTS.
+        """
+        if not self.llm_router:
+            return None
+        sp = system_prompt if system_prompt is not None else self.system_prompt
+        return await self.llm_router.call_llm(
+            task_type=task_type,
+            prompt=prompt,
+            system_prompt=sp,
+            estimated_tokens=estimated_tokens,
+        )
 
     def _track_result(self, result: TaskResult) -> None:
         """Обновляет внутреннюю статистику после выполнения задачи."""

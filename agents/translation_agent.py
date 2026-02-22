@@ -40,7 +40,7 @@ class TranslationAgent(BaseAgent):
     async def translate(self, text: str, source_lang: str, target_lang: str) -> TaskResult:
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
-        response = await self.llm_router.call_llm(task_type=TaskType.CONTENT, prompt=f"Переведи с {source_lang} на {target_lang}. Сохрани стиль и тон.\n\nТекст:\n{text}", estimated_tokens=2000)
+        response = await self._call_llm(task_type=TaskType.CONTENT, prompt=f"Переведи с {source_lang} на {target_lang}. Сохрани стиль и тон.\n\nТекст:\n{text}", estimated_tokens=2000)
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
         self._record_expense(0.01, f"Translate {source_lang}->{target_lang}")
@@ -50,7 +50,7 @@ class TranslationAgent(BaseAgent):
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
         text = "\n".join(f"{k}: {v}" for k, v in listing_data.items())
-        response = await self.llm_router.call_llm(task_type=TaskType.CONTENT, prompt=f"Локализуй листинг на {target_lang}. Адаптируй для местного рынка.\n\n{text}", estimated_tokens=2000)
+        response = await self._call_llm(task_type=TaskType.CONTENT, prompt=f"Локализуй листинг на {target_lang}. Адаптируй для местного рынка.\n\n{text}", estimated_tokens=2000)
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
         return TaskResult(success=True, output=response, cost_usd=0.01)
@@ -58,7 +58,7 @@ class TranslationAgent(BaseAgent):
     async def detect_language(self, text: str) -> TaskResult:
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
-        response = await self.llm_router.call_llm(task_type=TaskType.ROUTINE, prompt=f"Определи язык текста. Ответь одним кодом (en/de/ua/pl/ru/другой):\n{text[:500]}", estimated_tokens=100)
+        response = await self._call_llm(task_type=TaskType.ROUTINE, prompt=f"Определи язык текста. Ответь одним кодом (en/de/ua/pl/ru/другой):\n{text[:500]}", estimated_tokens=100)
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
         return TaskResult(success=True, output=response.strip().lower()[:5])

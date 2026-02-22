@@ -43,7 +43,7 @@ class PartnershipAgent(BaseAgent):
     async def find_affiliates(self, niche: str) -> TaskResult:
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
-        response = await self.llm_router.call_llm(
+        response = await self._call_llm(
             task_type=TaskType.RESEARCH,
             prompt=f"Найди партнёрские программы для ниши: {niche}\nДай топ-5 с: комиссией, условиями, ссылкой для регистрации.",
             estimated_tokens=2000,
@@ -59,7 +59,7 @@ class PartnershipAgent(BaseAgent):
     async def propose_collaboration(self, partner: str) -> TaskResult:
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
-        response = await self.llm_router.call_llm(
+        response = await self._call_llm(
             task_type=TaskType.CONTENT,
             prompt=f"Напиши предложение о сотрудничестве для: {partner}\nТон: профессиональный, дружелюбный. Включи: взаимные выгоды, предложение, CTA.",
             estimated_tokens=1500,

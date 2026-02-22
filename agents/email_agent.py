@@ -40,7 +40,7 @@ class EmailAgent(BaseAgent):
     async def create_newsletter(self, topic: str, audience: str, tone: str = "professional") -> TaskResult:
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
-        response = await self.llm_router.call_llm(task_type=TaskType.CONTENT, prompt=f"Напиши email-рассылку.\nТема: {topic}\nАудитория: {audience}\nТон: {tone}\nВключи: subject line, preheader, тело письма, CTA.", estimated_tokens=2000)
+        response = await self._call_llm(task_type=TaskType.CONTENT, prompt=f"Напиши email-рассылку.\nТема: {topic}\nАудитория: {audience}\nТон: {tone}\nВключи: subject line, preheader, тело письма, CTA.", estimated_tokens=2000)
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
         self._record_expense(0.01, f"Newsletter: {topic[:50]}")
@@ -49,7 +49,7 @@ class EmailAgent(BaseAgent):
     async def create_sequence(self, goal: str, emails_count: int = 5) -> TaskResult:
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
-        response = await self.llm_router.call_llm(task_type=TaskType.CONTENT, prompt=f"Создай email-автосерию из {emails_count} писем.\nЦель: {goal}\nДля каждого: subject, тело, CTA, интервал отправки.", estimated_tokens=3000)
+        response = await self._call_llm(task_type=TaskType.CONTENT, prompt=f"Создай email-автосерию из {emails_count} писем.\nЦель: {goal}\nДля каждого: subject, тело, CTA, интервал отправки.", estimated_tokens=3000)
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
         self._record_expense(0.02, f"Email sequence: {goal[:50]}")

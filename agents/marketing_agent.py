@@ -39,7 +39,7 @@ class MarketingAgent(BaseAgent):
     async def create_strategy(self, product: str, target_audience: str, budget_usd: float = 100) -> TaskResult:
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
-        response = await self.llm_router.call_llm(task_type=TaskType.STRATEGY, prompt=f"Создай маркетинговую стратегию для продукта: {product}\nЦА: {target_audience}\nБюджет: ${budget_usd}\nВключи: каналы, тактики, KPI, timeline.", estimated_tokens=3000)
+        response = await self._call_llm(task_type=TaskType.STRATEGY, prompt=f"Создай маркетинговую стратегию для продукта: {product}\nЦА: {target_audience}\nБюджет: ${budget_usd}\nВключи: каналы, тактики, KPI, timeline.", estimated_tokens=3000)
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
         self._record_expense(0.03, f"Marketing strategy: {product[:50]}")
@@ -49,7 +49,7 @@ class MarketingAgent(BaseAgent):
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
         stages_str = f"Этапы: {', '.join(stages)}" if stages else "Стандартная воронка: awareness → interest → desire → action"
-        response = await self.llm_router.call_llm(task_type=TaskType.STRATEGY, prompt=f"Спроектируй воронку продаж для: {product}\n{stages_str}\nОпиши каждый этап, контент, метрики.", estimated_tokens=2500)
+        response = await self._call_llm(task_type=TaskType.STRATEGY, prompt=f"Спроектируй воронку продаж для: {product}\n{stages_str}\nОпиши каждый этап, контент, метрики.", estimated_tokens=2500)
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
         return TaskResult(success=True, output=response, cost_usd=0.02)
@@ -57,7 +57,7 @@ class MarketingAgent(BaseAgent):
     async def create_ad_copy(self, product: str, platform: str, style: str = "direct") -> TaskResult:
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
-        response = await self.llm_router.call_llm(task_type=TaskType.CONTENT, prompt=f"Напиши рекламный текст для {platform}. Продукт: {product}. Стиль: {style}. 3 варианта.", estimated_tokens=1500)
+        response = await self._call_llm(task_type=TaskType.CONTENT, prompt=f"Напиши рекламный текст для {platform}. Продукт: {product}. Стиль: {style}. 3 варианта.", estimated_tokens=1500)
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
         return TaskResult(success=True, output=response, cost_usd=0.01)
@@ -65,5 +65,5 @@ class MarketingAgent(BaseAgent):
     async def suggest_channels(self, product: str, budget_usd: float = 100) -> TaskResult:
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
-        response = await self.llm_router.call_llm(task_type=TaskType.STRATEGY, prompt=f"Предложи лучшие маркетинговые каналы для: {product}, бюджет ${budget_usd}.", estimated_tokens=1500)
+        response = await self._call_llm(task_type=TaskType.STRATEGY, prompt=f"Предложи лучшие маркетинговые каналы для: {product}, бюджет ${budget_usd}.", estimated_tokens=1500)
         return TaskResult(success=True, output=response or "No response", cost_usd=0.01)

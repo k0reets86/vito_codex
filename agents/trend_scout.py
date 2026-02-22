@@ -74,7 +74,7 @@ class TrendScout(BaseAgent):
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
         prompt = f"Проанализируй текущие тренды Google Trends для ключевых слов: {', '.join(keywords)} (регион: {geo}). Дай топ-10 растущих запросов и ниш."
-        response = await self.llm_router.call_llm(task_type=TaskType.RESEARCH, prompt=prompt, estimated_tokens=2000)
+        response = await self._call_llm(task_type=TaskType.RESEARCH, prompt=prompt, estimated_tokens=2000)
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
         self._record_expense(0.02, f"Google Trends scan: {', '.join(keywords[:3])}")
@@ -107,7 +107,7 @@ class TrendScout(BaseAgent):
             f"Какие темы обсуждаются чаще всего? Какие возможности для цифровых продуктов?"
             f"{rss_context}"
         )
-        response = await self.llm_router.call_llm(task_type=TaskType.RESEARCH, prompt=prompt, estimated_tokens=2000)
+        response = await self._call_llm(task_type=TaskType.RESEARCH, prompt=prompt, estimated_tokens=2000)
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
         self._record_expense(0.02, f"Reddit scan: {', '.join(subs[:3])}")
@@ -119,7 +119,7 @@ class TrendScout(BaseAgent):
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
         prompt = "Предложи 5-7 перспективных ниш для цифровых продуктов (ebooks, templates, курсы, SaaS). Для каждой укажи: название, уровень конкуренции, потенциал монетизации, рекомендуемые продукты."
-        response = await self.llm_router.call_llm(task_type=TaskType.STRATEGY, prompt=prompt, estimated_tokens=2500)
+        response = await self._call_llm(task_type=TaskType.STRATEGY, prompt=prompt, estimated_tokens=2500)
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
         self._record_expense(0.03, "Suggest niches")
@@ -175,7 +175,7 @@ class TrendScout(BaseAgent):
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
         prompt = f"Найди последние новости по теме: {query} (язык: {language}). Дай топ-10 новостей с заголовками и краткими описаниями."
-        response = await self.llm_router.call_llm(task_type=TaskType.RESEARCH, prompt=prompt, estimated_tokens=2000)
+        response = await self._call_llm(task_type=TaskType.RESEARCH, prompt=prompt, estimated_tokens=2000)
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
         self._record_expense(0.02, f"News via LLM: {query}")
@@ -224,7 +224,7 @@ class TrendScout(BaseAgent):
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
         prompt = f"Проанализируй топ продукты и тренды на Product Hunt и Indie Hackers за последнюю неделю."
-        response = await self.llm_router.call_llm(task_type=TaskType.RESEARCH, prompt=prompt, estimated_tokens=2000)
+        response = await self._call_llm(task_type=TaskType.RESEARCH, prompt=prompt, estimated_tokens=2000)
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
         self._record_expense(0.02, "RSS via LLM")

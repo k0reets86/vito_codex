@@ -77,7 +77,7 @@ class SecurityAgent(BaseAgent):
         checks.append({"check": ".env file exists", "status": "found" if env_file else "not_found"})
         gitignore = os.path.exists(".gitignore")
         checks.append({"check": ".gitignore exists", "status": "ok" if gitignore else "warning"})
-        response = await self.llm_router.call_llm(
+        response = await self._call_llm(
             task_type=TaskType.ROUTINE,
             prompt=f"Проанализируй результаты проверки безопасности и дай рекомендации:\n{checks}",
             estimated_tokens=500,

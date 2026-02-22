@@ -157,7 +157,7 @@ class VITOCore(BaseAgent):
         # 3. Fallback на LLM
         if self.llm_router:
             task_type_llm = self._map_to_task_type(step or task_type)
-            response = await self.llm_router.call_llm(
+            response = await self._call_llm(
                 task_type=task_type_llm,
                 prompt=f"Контекст: {goal_title}\nЗадача: {step or task_type}\nДай конкретный результат.",
                 estimated_tokens=1500,

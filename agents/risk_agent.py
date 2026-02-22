@@ -40,7 +40,7 @@ class RiskAgent(BaseAgent):
     async def assess_risk(self, action: str) -> TaskResult:
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
-        response = await self.llm_router.call_llm(
+        response = await self._call_llm(
             task_type=TaskType.STRATEGY,
             prompt=f"Оцени риски действия: {action}\nОтветь в формате JSON:\n{{\"risk_level\": \"low/medium/high\", \"factors\": [...], \"recommendation\": \"...\"}}",
             estimated_tokens=1000,
@@ -53,7 +53,7 @@ class RiskAgent(BaseAgent):
     async def monitor_reputation(self) -> TaskResult:
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
-        response = await self.llm_router.call_llm(
+        response = await self._call_llm(
             task_type=TaskType.ROUTINE,
             prompt="Составь чеклист мониторинга репутации для AI-бизнеса:\n- Отзывы на платформах\n- Упоминания в соцсетях\n- Рейтинги\nДай текущий статус: positive/neutral/negative.",
             estimated_tokens=1000,
@@ -66,7 +66,7 @@ class RiskAgent(BaseAgent):
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
         complaint_text = "\n".join(f"{k}: {v}" for k, v in complaint.items())
-        response = await self.llm_router.call_llm(
+        response = await self._call_llm(
             task_type=TaskType.CONTENT,
             prompt=f"Составь ответ на жалобу клиента:\n{complaint_text}\nТон: вежливый, решение-ориентированный. Предложи компенсацию если уместно.",
             estimated_tokens=1000,

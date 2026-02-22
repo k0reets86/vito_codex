@@ -59,7 +59,7 @@ class SMMAgent(BaseAgent):
         style_note = f" Стиль: {style}." if style else ""
         char_limit = 280 if platform == "twitter" else 2200
 
-        response = await self.llm_router.call_llm(
+        response = await self._call_llm(
             task_type=TaskType.CONTENT,
             prompt=f"Создай пост для {platform} (макс {char_limit} символов).{style_note}\nТема: {content}",
             estimated_tokens=1000,
@@ -131,7 +131,7 @@ class SMMAgent(BaseAgent):
     async def suggest_hashtags(self, content: str, platform: str = "twitter") -> TaskResult:
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
-        response = await self.llm_router.call_llm(task_type=TaskType.CONTENT, prompt=f"Подбери 15-20 хэштегов для {platform} по теме: {content[:500]}", estimated_tokens=500)
+        response = await self._call_llm(task_type=TaskType.CONTENT, prompt=f"Подбери 15-20 хэштегов для {platform} по теме: {content[:500]}", estimated_tokens=500)
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
         return TaskResult(success=True, output=response, cost_usd=0.003)

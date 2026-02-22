@@ -64,7 +64,7 @@ class ContentCreator(BaseAgent):
             return TaskResult(success=False, error="LLM Router недоступен")
         kw = f"\nКлючевые слова: {', '.join(keywords)}" if keywords else ""
         prompt = f"Напиши подробную статью на тему: {topic}{kw}\nСтруктура: заголовок, введение, 3-5 разделов, заключение. 1500-2000 слов."
-        response = await self.llm_router.call_llm(task_type=TaskType.CONTENT, prompt=prompt, estimated_tokens=4000)
+        response = await self._call_llm(task_type=TaskType.CONTENT, prompt=prompt, estimated_tokens=4000)
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
 
@@ -92,7 +92,7 @@ class ContentCreator(BaseAgent):
                 logger.warning(f"Ebook остановлен на главе {i}/{chapters}: бюджет исчерпан", extra={"event": "ebook_budget_stop"})
                 break
             prompt = f"Напиши главу {i} из {chapters} для ebook на тему: {topic}. 800-1200 слов, с подзаголовками."
-            response = await self.llm_router.call_llm(task_type=TaskType.CONTENT, prompt=prompt, estimated_tokens=3000)
+            response = await self._call_llm(task_type=TaskType.CONTENT, prompt=prompt, estimated_tokens=3000)
             if response:
                 parts.append(f"# Глава {i}\n\n{response}")
             else:
@@ -123,7 +123,7 @@ class ContentCreator(BaseAgent):
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
         prompt = f"Напиши продающее описание для {platform}: {product}\nВключи: заголовок, описание, ключевые особенности, CTA."
-        response = await self.llm_router.call_llm(task_type=TaskType.CONTENT, prompt=prompt, estimated_tokens=1500)
+        response = await self._call_llm(task_type=TaskType.CONTENT, prompt=prompt, estimated_tokens=1500)
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
 

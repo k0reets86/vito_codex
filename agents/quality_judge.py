@@ -45,7 +45,7 @@ class QualityJudge(BaseAgent):
             f"Верни JSON: {{\"score\": 1-10, \"feedback\": \"описание\", \"issues\": [\"проблема1\"]}}\n"
             f"Только JSON."
         )
-        response = await self.llm_router.call_llm(
+        response = await self._call_llm(
             task_type=TaskType.CONTENT, prompt=prompt,
             system_prompt="Ты — строгий редактор. Оценивай объективно. JSON only.",
             estimated_tokens=1000,

@@ -62,7 +62,7 @@ class AnalyticsAgent(BaseAgent):
                 stats["daily_spend"] = self.finance.get_daily_spend()
             except Exception:
                 pass
-        response = await self.llm_router.call_llm(
+        response = await self._call_llm(
             task_type=TaskType.ROUTINE,
             prompt=f"Проанализируй метрики и найди аномалии:\n{stats}\nОтветь кратко: есть ли отклонения?",
             estimated_tokens=500,
@@ -74,7 +74,7 @@ class AnalyticsAgent(BaseAgent):
     async def forecast_revenue(self, days: int = 30) -> TaskResult:
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
-        response = await self.llm_router.call_llm(
+        response = await self._call_llm(
             task_type=TaskType.STRATEGY,
             prompt=f"Спрогнозируй выручку на {days} дней. Учти текущие тренды. Дай оценку в USD.",
             estimated_tokens=1000,

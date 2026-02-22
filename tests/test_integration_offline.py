@@ -606,3 +606,75 @@ class TestFinancialControllerIntegration:
         text = finance.format_morning_finance()
         assert "Расходы" in text
         assert "$" in text
+
+
+# ═══════════════════════════════════════════════════════════
+# TEST 12: System prompts loaded for all agents
+# ═══════════════════════════════════════════════════════════
+
+class TestAgentSystemPrompts:
+    def test_all_agents_have_system_prompt(self, full_registry):
+        """Every registered agent should have a non-empty system_prompt."""
+        # Agents that have no LLM calls don't strictly need a prompt,
+        # but we still assign them for consistency.
+        for name, agent in full_registry.agents.items():
+            assert hasattr(agent, "system_prompt"), f"Agent {name} missing system_prompt attribute"
+            assert isinstance(agent.system_prompt, str), f"Agent {name} system_prompt is not a string"
+            assert len(agent.system_prompt) > 0, f"Agent {name} has empty system_prompt"
+
+    def test_system_prompt_matches_agent_name(self, full_registry):
+        """Each agent's system_prompt should come from AGENT_PROMPTS[agent.name]."""
+        from config.agent_prompts import AGENT_PROMPTS
+        for name, agent in full_registry.agents.items():
+            expected = AGENT_PROMPTS.get(name, "")
+            assert agent.system_prompt == expected, (
+                f"Agent {name}: system_prompt mismatch. "
+                f"Got {agent.system_prompt[:50]}..., expected {expected[:50]}..."
+            )
+
+    def test_agent_prompts_covers_all_registered(self, full_registry):
+        """AGENT_PROMPTS should have an entry for every registered agent."""
+        from config.agent_prompts import AGENT_PROMPTS
+        for name in full_registry.agents:
+            assert name in AGENT_PROMPTS, f"Agent {name} missing from AGENT_PROMPTS"
+
+    @pytest.mark.asyncio
+    async def test_call_llm_passes_system_prompt(self, full_registry, llm_router):
+        """_call_llm() should pass the agent's system_prompt to llm_router."""
+        captured = {}
+
+        async def spy_call_llm(task_type, prompt, system_prompt="", estimated_tokens=2000):
+            captured["system_prompt"] = system_prompt
+            return "mocked response"
+
+        llm_router.call_llm = spy_call_llm
+
+        trend_scout = full_registry.get("trend_scout")
+        assert trend_scout is not None
+        result = await trend_scout._call_llm(TaskType.RESEARCH, "test prompt")
+        assert captured["system_prompt"] == trend_scout.system_prompt
+        assert len(captured["system_prompt"]) > 100  # Non-trivial prompt
+
+    @pytest.mark.asyncio
+    async def test_call_llm_override_system_prompt(self, full_registry, llm_router):
+        """Explicit system_prompt in _call_llm() should override the default."""
+        captured = {}
+
+        async def spy_call_llm(task_type, prompt, system_prompt="", estimated_tokens=2000):
+            captured["system_prompt"] = system_prompt
+            return "mocked response"
+
+        llm_router.call_llm = spy_call_llm
+
+        research = full_registry.get("research_agent")
+        custom_prompt = "Custom research prompt override"
+        await research._call_llm(TaskType.RESEARCH, "test", system_prompt=custom_prompt)
+        assert captured["system_prompt"] == custom_prompt
+
+    @pytest.mark.asyncio
+    async def test_call_llm_returns_none_without_router(self):
+        """_call_llm() should return None when llm_router is None."""
+        from agents.trend_scout import TrendScout
+        agent = TrendScout(llm_router=None)
+        result = await agent._call_llm(TaskType.RESEARCH, "test")
+        assert result is None

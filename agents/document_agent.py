@@ -43,7 +43,7 @@ class DocumentAgent(BaseAgent):
         context_text = ""
         if context:
             context_text = "\nКонтекст:\n" + "\n".join(f"- {k}: {v}" for k, v in context.items())
-        response = await self.llm_router.call_llm(
+        response = await self._call_llm(
             task_type=TaskType.CONTENT,
             prompt=f"Создай документ.\nНазвание: {title}\nТип: {content_type}{context_text}\nФормат: Markdown с заголовками, списками, примерами кода если нужно.",
             estimated_tokens=3000,
@@ -59,7 +59,7 @@ class DocumentAgent(BaseAgent):
         data_text = ""
         if data:
             data_text = "\nДанные:\n" + "\n".join(f"- {k}: {v}" for k, v in data.items())
-        response = await self.llm_router.call_llm(
+        response = await self._call_llm(
             task_type=TaskType.CONTENT,
             prompt=f"Сгенерируй отчёт типа: {report_type}{data_text}\nВключи: резюме, ключевые метрики, выводы, рекомендации.",
             estimated_tokens=2500,

@@ -263,7 +263,7 @@ class ResearchAgent(BaseAgent):
             f"If data is limited, say so honestly. Write in English (target market: US/CA/EU)."
         )
 
-        response = await self.llm_router.call_llm(
+        response = await self._call_llm(
             task_type=TaskType.RESEARCH,
             prompt=prompt,
             system_prompt=(
@@ -331,7 +331,7 @@ class ResearchAgent(BaseAgent):
             f"Write in English (target: US/CA/EU)."
         )
 
-        response = await self.llm_router.call_llm(
+        response = await self._call_llm(
             task_type=TaskType.RESEARCH,
             prompt=prompt,
             system_prompt=(
@@ -395,7 +395,7 @@ class ResearchAgent(BaseAgent):
             f"Write in English (target: US/CA/EU)."
         )
 
-        response = await self.llm_router.call_llm(
+        response = await self._call_llm(
             task_type=TaskType.STRATEGY,
             prompt=prompt,
             system_prompt=(

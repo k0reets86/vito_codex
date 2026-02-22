@@ -78,7 +78,7 @@ class HRAgent(BaseAgent):
         if self.registry:
             statuses = self.registry.get_all_statuses()
         stats_text = "\n".join(f"- {s.get('name', '?')}: completed={s.get('tasks_completed', 0)}, failed={s.get('tasks_failed', 0)}, cost=${s.get('total_cost', 0):.2f}" for s in statuses) or "Нет данных"
-        response = await self.llm_router.call_llm(
+        response = await self._call_llm(
             task_type=TaskType.STRATEGY,
             prompt=f"Проанализируй производительность агентов и дай рекомендации:\n{stats_text}\nПредложи: что улучшить, какие агенты неэффективны, как оптимизировать.",
             estimated_tokens=1500,

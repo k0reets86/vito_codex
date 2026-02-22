@@ -40,7 +40,7 @@ class SEOAgent(BaseAgent):
     async def keyword_research(self, topic: str, language: str = "en") -> TaskResult:
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
-        response = await self.llm_router.call_llm(task_type=TaskType.RESEARCH, prompt=f"Keyword research для: {topic} (язык: {language}). Дай 10 primary keywords, 10 long-tail, 5 LSI.", estimated_tokens=2000)
+        response = await self._call_llm(task_type=TaskType.RESEARCH, prompt=f"Keyword research для: {topic} (язык: {language}). Дай 10 primary keywords, 10 long-tail, 5 LSI.", estimated_tokens=2000)
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
         self._record_expense(0.01, f"Keyword research: {topic[:50]}")
@@ -49,7 +49,7 @@ class SEOAgent(BaseAgent):
     async def optimize_content(self, content: str, keywords: list[str]) -> TaskResult:
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
-        response = await self.llm_router.call_llm(task_type=TaskType.CONTENT, prompt=f"Оптимизируй контент для SEO. Keywords: {', '.join(keywords)}\n\nКонтент:\n{content[:5000]}", estimated_tokens=3000)
+        response = await self._call_llm(task_type=TaskType.CONTENT, prompt=f"Оптимизируй контент для SEO. Keywords: {', '.join(keywords)}\n\nКонтент:\n{content[:5000]}", estimated_tokens=3000)
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
         self._record_expense(0.01, "SEO optimize content")
@@ -58,7 +58,7 @@ class SEOAgent(BaseAgent):
     async def analyze_rankings(self, url: str) -> TaskResult:
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
-        response = await self.llm_router.call_llm(task_type=TaskType.RESEARCH, prompt=f"Проанализируй SEO для URL: {url}. Оцени on-page факторы, дай рекомендации.", estimated_tokens=2000)
+        response = await self._call_llm(task_type=TaskType.RESEARCH, prompt=f"Проанализируй SEO для URL: {url}. Оцени on-page факторы, дай рекомендации.", estimated_tokens=2000)
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
         return TaskResult(success=True, output=response, cost_usd=0.01)
@@ -66,7 +66,7 @@ class SEOAgent(BaseAgent):
     async def generate_meta(self, content: str, keywords: list[str]) -> TaskResult:
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
-        response = await self.llm_router.call_llm(task_type=TaskType.CONTENT, prompt=f"Сгенерируй SEO мета-теги (title <=60, description <=160) для:\n{content[:3000]}\nKeywords: {', '.join(keywords)}", estimated_tokens=1000)
+        response = await self._call_llm(task_type=TaskType.CONTENT, prompt=f"Сгенерируй SEO мета-теги (title <=60, description <=160) для:\n{content[:3000]}\nKeywords: {', '.join(keywords)}", estimated_tokens=1000)
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
         return TaskResult(success=True, output=response, cost_usd=0.005)

@@ -41,7 +41,7 @@ class LegalAgent(BaseAgent):
     async def check_tos(self, platform: str) -> TaskResult:
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
-        response = await self.llm_router.call_llm(
+        response = await self._call_llm(
             task_type=TaskType.RESEARCH,
             prompt=f"Проанализируй Terms of Service платформы {platform}.\nПроверь: можно ли продавать AI-контент, ограничения, риски бана, комиссии.\nДай краткий вердикт: compliant/risk/violation.",
             estimated_tokens=2000,
@@ -54,7 +54,7 @@ class LegalAgent(BaseAgent):
     async def check_copyright(self, content: str) -> TaskResult:
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
-        response = await self.llm_router.call_llm(
+        response = await self._call_llm(
             task_type=TaskType.ROUTINE,
             prompt=f"Проверь контент на потенциальные нарушения авторских прав:\n{content[:2000]}\nОтветь: safe/risk/violation с пояснением.",
             estimated_tokens=1000,
@@ -66,7 +66,7 @@ class LegalAgent(BaseAgent):
     async def gdpr_audit(self) -> TaskResult:
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
-        response = await self.llm_router.call_llm(
+        response = await self._call_llm(
             task_type=TaskType.RESEARCH,
             prompt="Проведи GDPR-аудит для AI-бизнеса, который:\n- Собирает email подписчиков\n- Хранит данные в PostgreSQL\n- Использует внешние API\nДай чеклист соответствия.",
             estimated_tokens=2000,

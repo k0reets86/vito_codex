@@ -40,7 +40,7 @@ class EconomicsAgent(BaseAgent):
     async def suggest_price(self, product: str) -> TaskResult:
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
-        response = await self.llm_router.call_llm(
+        response = await self._call_llm(
             task_type=TaskType.STRATEGY,
             prompt=f"Предложи оптимальную цену для продукта: {product}\nУчти: конкурентов, ценность, целевую аудиторию, маржу.\nДай 3 варианта: economy, standard, premium.",
             estimated_tokens=1500,
@@ -53,7 +53,7 @@ class EconomicsAgent(BaseAgent):
     async def unit_economics(self, product: str) -> TaskResult:
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
-        response = await self.llm_router.call_llm(
+        response = await self._call_llm(
             task_type=TaskType.STRATEGY,
             prompt=f"Рассчитай юнит-экономику для: {product}\nВключи: CAC, LTV, margin, breakeven point, payback period.",
             estimated_tokens=1500,
@@ -67,7 +67,7 @@ class EconomicsAgent(BaseAgent):
         if not self.llm_router:
             return TaskResult(success=False, error="LLM Router недоступен")
         scenario_text = "\n".join(f"{k}: {v}" for k, v in scenario.items())
-        response = await self.llm_router.call_llm(
+        response = await self._call_llm(
             task_type=TaskType.STRATEGY,
             prompt=f"Смоделируй P&L для сценария:\n{scenario_text}\nДай прогноз: выручка, расходы, прибыль, ROI на 3/6/12 месяцев.",
             estimated_tokens=2000,
