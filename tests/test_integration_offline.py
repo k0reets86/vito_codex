@@ -1,4 +1,4 @@
-"""Офлайн интеграционный тест VITO.
+"""Офлайн интеграционный тест VITO (v2).
 
 Проверяет ВСЕХ 23 агентов через оркестратор (VITOCore) без единого API-вызова.
 Полный цикл: Telegram message → ConversationEngine → intent → goal → plan → execute → agent dispatch.
@@ -510,8 +510,8 @@ class TestJudgeProtocolCheap:
         assert verdict.avg_score > 0
 
     @pytest.mark.asyncio
-    async def test_evaluate_deep_uses_four_models(self, llm_router, memory, comms):
-        """evaluate_niche_deep should call 4 models."""
+    async def test_evaluate_deep_uses_three_models(self, llm_router, memory, comms):
+        """evaluate_niche_deep should call 3 models (Opus + GPT-4o + Perplexity)."""
         call_count = 0
 
         async def counting_provider(model, prompt, system_prompt):
@@ -526,7 +526,7 @@ class TestJudgeProtocolCheap:
         judge = JudgeProtocol(llm_router, memory, comms)
 
         verdict = await judge.evaluate_niche_deep("Digital planners")
-        assert call_count == 4, f"Expected 4 model calls, got {call_count}"
+        assert call_count == 3, f"Expected 3 model calls (Opus+GPT-4o+Perplexity), got {call_count}"
 
 
 # ═══════════════════════════════════════════════════════════

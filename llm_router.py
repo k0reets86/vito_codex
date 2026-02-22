@@ -1,11 +1,13 @@
 """LLM Router — умный выбор модели для каждой задачи.
 
-Маппинг типов задач на оптимальные модели:
-  content  → Claude Sonnet (лучшее качество/цена для текста)
-  strategy → Claude Opus (глубокий анализ)
-  code     → o3 / OpenAI Codex
-  research → Claude Sonnet + Perplexity API
-  routine  → Claude Haiku (дёшево и быстро)
+Градация моделей (от дешёвых к дорогим):
+  routine   → Gemini Flash (бесплатный, чат, сообщения, простые задачи)
+  content   → Claude Sonnet 4.6 (качественные тексты)
+  code      → OpenAI o3 (код, большие изменения)
+  research  → Perplexity Sonar Pro (исследования с источниками)
+  self_heal → OpenAI o3 → Claude Opus (код-фиксы, серьёзные правки)
+  strategy  → Claude Opus 4.6 (реализация после brainstorm)
+              Brainstorm: Sonnet → Perplexity → GPT-5+Opus+Perplexity → Opus (через JudgeProtocol)
 
 Прямые API предпочтительнее. OpenRouter — только как fallback.
 """
@@ -37,6 +39,7 @@ class TaskType(Enum):
     CODE = "code"
     RESEARCH = "research"
     ROUTINE = "routine"
+    SELF_HEAL = "self_heal"
 
 
 @dataclass
@@ -51,46 +54,7 @@ class ModelConfig:
 
 # Таблица моделей — обновляется knowledge_updater.py каждый понедельник
 MODEL_REGISTRY: dict[str, ModelConfig] = {
-    "claude-sonnet": ModelConfig(
-        provider="anthropic",
-        model_id="claude-sonnet-4-20250514",
-        display_name="Claude Sonnet 4",
-        cost_per_1k_input=0.003,
-        cost_per_1k_output=0.015,
-        max_tokens=8192,
-    ),
-    "claude-opus": ModelConfig(
-        provider="anthropic",
-        model_id="claude-opus-4-20250514",
-        display_name="Claude Opus 4",
-        cost_per_1k_input=0.015,
-        cost_per_1k_output=0.075,
-        max_tokens=4096,
-    ),
-    "claude-haiku": ModelConfig(
-        provider="anthropic",
-        model_id="claude-haiku-4-5-20251001",
-        display_name="Claude Haiku 4.5",
-        cost_per_1k_input=0.0008,
-        cost_per_1k_output=0.004,
-        max_tokens=8192,
-    ),
-    "gpt-o3": ModelConfig(
-        provider="openai",
-        model_id="o3",
-        display_name="OpenAI o3",
-        cost_per_1k_input=0.010,
-        cost_per_1k_output=0.040,
-        max_tokens=4096,
-    ),
-    "perplexity": ModelConfig(
-        provider="perplexity",
-        model_id="sonar-pro",
-        display_name="Perplexity Sonar Pro",
-        cost_per_1k_input=0.003,
-        cost_per_1k_output=0.015,
-        max_tokens=4096,
-    ),
+    # -- Бесплатный / рутинный уровень --
     "gemini-flash": ModelConfig(
         provider="google",
         model_id="gemini-2.0-flash",
@@ -99,15 +63,85 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         cost_per_1k_output=0.0,
         max_tokens=8192,
     ),
+    # -- Умеренный уровень (дёшево, но умнее) --
+    "claude-haiku": ModelConfig(
+        provider="anthropic",
+        model_id="claude-haiku-4-5-20251001",
+        display_name="Claude Haiku 4.5",
+        cost_per_1k_input=0.0008,
+        cost_per_1k_output=0.004,
+        max_tokens=8192,
+    ),
+    "gpt-4o-mini": ModelConfig(
+        provider="openai",
+        model_id="gpt-4o-mini",
+        display_name="GPT-4o Mini",
+        cost_per_1k_input=0.00015,
+        cost_per_1k_output=0.0006,
+        max_tokens=4096,
+    ),
+    # -- Качественный контент --
+    "claude-sonnet": ModelConfig(
+        provider="anthropic",
+        model_id="claude-sonnet-4-6",
+        display_name="Claude Sonnet 4.6",
+        cost_per_1k_input=0.003,
+        cost_per_1k_output=0.015,
+        max_tokens=8192,
+    ),
+    # -- Код / self-healing (Codex) --
+    "gpt-o3": ModelConfig(
+        provider="openai",
+        model_id="o3",
+        display_name="OpenAI o3",
+        cost_per_1k_input=0.010,
+        cost_per_1k_output=0.040,
+        max_tokens=4096,
+    ),
+    # -- Strategy brainstorm --
+    "gpt-5": ModelConfig(
+        provider="openai",
+        model_id="gpt-5",
+        display_name="ChatGPT 5.2",
+        cost_per_1k_input=0.0025,
+        cost_per_1k_output=0.010,
+        max_tokens=4096,
+    ),
+    # -- Стратегия + большие изменения --
+    "claude-opus": ModelConfig(
+        provider="anthropic",
+        model_id="claude-opus-4-6",
+        display_name="Claude Opus 4.6",
+        cost_per_1k_input=0.015,
+        cost_per_1k_output=0.075,
+        max_tokens=4096,
+    ),
+    # -- Исследования --
+    "perplexity": ModelConfig(
+        provider="perplexity",
+        model_id="sonar-pro",
+        display_name="Perplexity Sonar Pro",
+        cost_per_1k_input=0.003,
+        cost_per_1k_output=0.015,
+        max_tokens=4096,
+    ),
 }
 
-# Маппинг: тип задачи → основная модель (+ fallback)
+# Маппинг: тип задачи → приоритетный список моделей (первая = default, остальные = fallback)
+#
+# Gemini Flash (бесплатный) → рутина, чат, сообщения
+# Haiku / GPT-4o-mini       → умеренные задачи (fallback для рутины)
+# Sonnet 4.6                → качественный контент
+# o3 (Codex)                → код и self-healing
+# Opus 4.6                  → стратегия и большие изменения
+# Brainstorm (Sonnet → Perplexity → GPT-5+Opus+Perplexity → Opus) → через JudgeProtocol
 TASK_MODEL_MAP: dict[TaskType, list[str]] = {
+    TaskType.ROUTINE: ["gemini-flash", "claude-haiku", "gpt-4o-mini"],
     TaskType.CONTENT: ["claude-sonnet", "claude-haiku"],
-    TaskType.STRATEGY: ["claude-opus", "claude-sonnet"],
     TaskType.CODE: ["gpt-o3", "claude-sonnet"],
     TaskType.RESEARCH: ["perplexity", "claude-sonnet"],
-    TaskType.ROUTINE: ["claude-haiku", "gemini-flash"],
+    TaskType.STRATEGY: ["claude-opus", "claude-sonnet"],
+    TaskType.SELF_HEAL: ["gpt-o3", "claude-opus"],
 }
 
 
@@ -292,6 +326,19 @@ class LLMRouter:
                         output_tokens=0,
                         cost_usd=real_cost,
                     )
+
+                    # Bridge: record in FinancialController for unified P&L
+                    if self._finance and real_cost > 0:
+                        try:
+                            from financial_controller import ExpenseCategory
+                            self._finance.record_expense(
+                                amount_usd=real_cost,
+                                category=ExpenseCategory.API,
+                                agent=f"llm_{task_type.value}",
+                                description=f"{model.display_name}: {task_type.value}",
+                            )
+                        except Exception:
+                            pass
 
                     logger.info(
                         f"LLM ответ получен от {model.display_name}",

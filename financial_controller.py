@@ -21,6 +21,8 @@ from config.settings import settings
 
 logger = get_logger("financial_controller", agent="financial_controller")
 
+FINANCIAL_LOG = "/home/vito/vito-agent/logs/financial.log"
+
 
 class TransactionType(Enum):
     EXPENSE = "expense"
@@ -101,6 +103,15 @@ class FinancialController:
     def set_pg_pool(self, pool) -> None:
         self._pg_pool = pool
 
+    def _log_to_file(self, line: str) -> None:
+        """Append human-readable line to financial.log."""
+        try:
+            with open(FINANCIAL_LOG, "a", encoding="utf-8") as f:
+                ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                f.write(f"[{ts}] {line}\n")
+        except Exception:
+            pass
+
     # ── Запись транзакций ──
 
     def record_expense(
@@ -144,6 +155,7 @@ class FinancialController:
                 },
             },
         )
+        self._log_to_file(f"EXPENSE ${amount_usd:.4f} [{category.value}] agent={agent} | {description}")
         return tx_id
 
     def record_income(
@@ -188,6 +200,7 @@ class FinancialController:
                 },
             },
         )
+        self._log_to_file(f"INCOME  ${amount_usd:.2f} [{source.value}] {product_name} | {description}")
         return tx_id
 
     def _update_daily_budget(self, amount_usd: float, is_expense: bool) -> None:

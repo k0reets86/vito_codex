@@ -206,6 +206,51 @@ class CommsAgent:
             return False
         return update.effective_chat.id == self._owner_id
 
+    async def _send_response(self, update: Update, text: str) -> None:
+        """Send response with smart file handling.
+
+        Detects file paths in text → sends actual file content inline or as document.
+        """
+        import re
+
+        file_pattern = re.compile(r"(/home/vito/vito-agent/\S+\.(?:txt|md|json|py|csv))")
+        found_files = file_pattern.findall(text)
+
+        # Clean file paths from message text
+        clean_text = text
+        for fp in found_files:
+            # Remove "📎 /path" patterns and bare paths
+            clean_text = clean_text.replace(f"\U0001f4ce {fp}", "").replace(fp, "")
+        # Remove empty lines left over
+        clean_text = "\n".join(line for line in clean_text.split("\n") if line.strip())
+
+        # Send main text (respect Telegram 4096 char limit)
+        if clean_text:
+            if len(clean_text) > 4000:
+                clean_text = clean_text[:4000] + "..."
+            await update.message.reply_text(clean_text, reply_markup=self._main_keyboard())
+
+        # Send each file as inline content or document
+        for fp in found_files:
+            path = Path(fp)
+            if not path.exists():
+                continue
+            try:
+                content = path.read_text(encoding="utf-8").strip()
+                if not content:
+                    continue
+                if len(content) < 3500:
+                    # Short file — show inline
+                    await update.message.reply_text(
+                        f"\U0001f4c4 {path.name}:\n\n{content}",
+                        reply_markup=self._main_keyboard(),
+                    )
+                else:
+                    # Long file — send as Telegram document
+                    await self.send_file(fp, caption=path.name)
+            except Exception as e:
+                logger.warning(f"Cannot send file {fp}: {e}", extra={"event": "file_inline_error"})
+
     async def _reject_stranger(self, update: Update) -> bool:
         """Отклоняет сообщения от не-владельцев."""
         if self._is_owner(update):
@@ -474,9 +519,7 @@ class CommsAgent:
                         response += "\n\nОтветь ✅ чтобы одобрить или ❌ чтобы отклонить."
                     await update.message.reply_text(response, reply_markup=self._main_keyboard())
                 elif result.get("response"):
-                    await update.message.reply_text(
-                        result["response"], reply_markup=self._main_keyboard()
-                    )
+                    await self._send_response(update, result["response"])
                 else:
                     await update.message.reply_text(
                         "Понял. Чем могу помочь?", reply_markup=self._main_keyboard()
@@ -630,13 +673,35 @@ class CommsAgent:
         if not self._judge_protocol:
             await update.message.reply_text("JudgeProtocol не подключён.", reply_markup=self._main_keyboard())
             return
-        await update.message.reply_text(f"Анализирую нишу: {text}...", reply_markup=self._main_keyboard())
-        try:
-            verdict = await self._judge_protocol.evaluate_niche(text)
-            formatted = self._judge_protocol.format_verdict_for_telegram(verdict)
-            await update.message.reply_text(formatted, reply_markup=self._main_keyboard())
-        except Exception as e:
-            await update.message.reply_text(f"Ошибка анализа: {e}", reply_markup=self._main_keyboard())
+        # /deep brainstorm <тема> — полный brainstorm с ролями
+        # /deep <тема> — быстрая оценка ниши
+        if text.lower().startswith("brainstorm "):
+            topic = text[len("brainstorm "):].strip()
+            await update.message.reply_text(
+                f"Запускаю brainstorm: {topic}\n"
+                f"(Opus → GPT-4o → Perplexity → Opus, ~$0.50)",
+                reply_markup=self._main_keyboard(),
+            )
+            try:
+                result = await self._judge_protocol.brainstorm(topic)
+                formatted = self._judge_protocol.format_brainstorm_for_telegram(result)
+                # Split if too long for Telegram
+                if len(formatted) > 4000:
+                    parts = [formatted[i:i+4000] for i in range(0, len(formatted), 4000)]
+                    for part in parts:
+                        await update.message.reply_text(part, reply_markup=self._main_keyboard())
+                else:
+                    await update.message.reply_text(formatted, reply_markup=self._main_keyboard())
+            except Exception as e:
+                await update.message.reply_text(f"Ошибка brainstorm: {e}", reply_markup=self._main_keyboard())
+        else:
+            await update.message.reply_text(f"Анализирую нишу: {text}...", reply_markup=self._main_keyboard())
+            try:
+                verdict = await self._judge_protocol.evaluate_niche(text)
+                formatted = self._judge_protocol.format_verdict_for_telegram(verdict)
+                await update.message.reply_text(formatted, reply_markup=self._main_keyboard())
+            except Exception as e:
+                await update.message.reply_text(f"Ошибка анализа: {e}", reply_markup=self._main_keyboard())
         logger.info(f"Команда /deep выполнена: {text[:50]}", extra={"event": "cmd_deep"})
 
     async def _cmd_healer(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

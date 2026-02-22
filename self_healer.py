@@ -178,7 +178,7 @@ class SelfHealer:
 
         try:
             response = await self.llm_router.call_llm(
-                task_type=TaskType.CODE,
+                task_type=TaskType.SELF_HEAL,
                 prompt=prompt,
                 estimated_tokens=500,
             )

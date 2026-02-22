@@ -222,6 +222,112 @@ class EtsyPlatform(BasePlatform):
             logger.error(f"Etsy publish error: {e}", exc_info=True)
             return {"platform": "etsy", "status": "error", "error": str(e)}
 
+    async def start_oauth2_pkce(self) -> dict:
+        """Start OAuth2 PKCE flow. Returns auth_url for owner to visit.
+
+        Etsy requires PKCE for all write operations (create listings, upload images).
+        Flow: 1) start_oauth2_pkce() → auth_url  2) owner visits URL  3) complete_oauth2(code)
+        """
+        import secrets
+        import hashlib
+        import base64
+
+        code_verifier = secrets.token_urlsafe(64)
+        code_challenge = base64.urlsafe_b64encode(
+            hashlib.sha256(code_verifier.encode()).digest()
+        ).rstrip(b"=").decode()
+
+        self._code_verifier = code_verifier
+
+        redirect_uri = "https://localhost:3000/oauth/callback"
+        scopes = "listings_w%20listings_r%20transactions_r%20shops_r"
+
+        auth_url = (
+            f"https://www.etsy.com/oauth/connect"
+            f"?response_type=code"
+            f"&redirect_uri={redirect_uri}"
+            f"&scope={scopes}"
+            f"&client_id={self._keystring}"
+            f"&state=vito_etsy_auth"
+            f"&code_challenge={code_challenge}"
+            f"&code_challenge_method=S256"
+        )
+
+        logger.info("Etsy OAuth2 PKCE flow started", extra={"event": "etsy_oauth_start"})
+        return {
+            "auth_url": auth_url,
+            "code_verifier": code_verifier,
+            "note": "Owner must visit auth_url, authorize, and provide the code from callback URL",
+        }
+
+    async def complete_oauth2(self, auth_code: str, code_verifier: str = "") -> bool:
+        """Exchange auth code for access token (step 2 of PKCE flow)."""
+        verifier = code_verifier or getattr(self, "_code_verifier", "")
+        if not verifier:
+            logger.warning("No code_verifier for Etsy OAuth2", extra={"event": "etsy_oauth_no_verifier"})
+            return False
+
+        try:
+            session = await self._get_session()
+            async with session.post(
+                "https://api.etsy.com/v3/public/oauth/token",
+                json={
+                    "grant_type": "authorization_code",
+                    "client_id": self._keystring,
+                    "redirect_uri": "https://localhost:3000/oauth/callback",
+                    "code": auth_code,
+                    "code_verifier": verifier,
+                },
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    self._oauth_token = data.get("access_token", "")
+                    self._refresh_token = data.get("refresh_token", "")
+                    logger.info(
+                        "Etsy OAuth2 completed successfully",
+                        extra={"event": "etsy_oauth_ok"},
+                    )
+                    return True
+                else:
+                    body = await resp.text()
+                    logger.warning(
+                        f"Etsy OAuth2 failed: {resp.status} {body[:200]}",
+                        extra={"event": "etsy_oauth_fail"},
+                    )
+                    return False
+        except Exception as e:
+            logger.error(f"Etsy OAuth2 error: {e}", exc_info=True)
+            return False
+
+    async def refresh_oauth_token(self) -> bool:
+        """Refresh expired OAuth2 token."""
+        refresh_token = getattr(self, "_refresh_token", "")
+        if not refresh_token:
+            return False
+
+        try:
+            session = await self._get_session()
+            async with session.post(
+                "https://api.etsy.com/v3/public/oauth/token",
+                json={
+                    "grant_type": "refresh_token",
+                    "client_id": self._keystring,
+                    "refresh_token": refresh_token,
+                },
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    self._oauth_token = data.get("access_token", "")
+                    self._refresh_token = data.get("refresh_token", self._refresh_token)
+                    logger.info("Etsy OAuth2 refreshed", extra={"event": "etsy_oauth_refreshed"})
+                    return True
+                return False
+        except Exception as e:
+            logger.error(f"Etsy token refresh error: {e}", exc_info=True)
+            return False
+
     async def get_analytics(self) -> dict:
         """Get shop analytics (requires shop_id and OAuth)."""
         if not self._shop_id:

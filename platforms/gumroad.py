@@ -129,14 +129,28 @@ class GumroadPlatform(BasePlatform):
 
                 if resp.status == 200 and data.get("success"):
                     product = data.get("product", {})
+                    product_id = product.get("id")
                     logger.info(
                         f"Gumroad продукт создан: {product.get('name')} (${product.get('price', 0) / 100:.2f})",
-                        extra={"event": "gumroad_publish_ok", "context": {"product_id": product.get("id")}},
+                        extra={"event": "gumroad_publish_ok", "context": {"product_id": product_id}},
                     )
+
+                    # Auto-publish: enable the product after creation
+                    if product_id:
+                        enable_result = await self.enable_product(product_id)
+                        if enable_result.get("status") == "published":
+                            return {
+                                "platform": "gumroad",
+                                "status": "published",
+                                "product_id": product_id,
+                                "url": enable_result.get("url") or product.get("short_url", ""),
+                                "data": product,
+                            }
+
                     return {
                         "platform": "gumroad",
                         "status": "created",
-                        "product_id": product.get("id"),
+                        "product_id": product_id,
                         "url": product.get("short_url", ""),
                         "data": product,
                     }
@@ -147,6 +161,45 @@ class GumroadPlatform(BasePlatform):
                 return {"platform": "gumroad", "status": "error", "error": data.get("message", str(resp.status))}
         except Exception as e:
             logger.error(f"Gumroad publish error: {e}", extra={"event": "gumroad_publish_error"}, exc_info=True)
+            return {"platform": "gumroad", "status": "error", "error": str(e)}
+
+    async def enable_product(self, product_id: str) -> dict:
+        """PUT /v2/products/{id} — publish a draft product (set published=true)."""
+        if not self._authenticated:
+            auth_ok = await self.authenticate()
+            if not auth_ok:
+                return {"platform": "gumroad", "status": "not_authenticated"}
+
+        try:
+            session = await self._get_session()
+            async with session.put(
+                f"{API_BASE}/products/{product_id}",
+                data={**self._params(), "published": "true"},
+            ) as resp:
+                if resp.content_type and "json" in resp.content_type:
+                    data = await resp.json()
+                else:
+                    text = await resp.text()
+                    logger.warning(f"Gumroad enable unexpected: {resp.status} {text[:200]}")
+                    return {"platform": "gumroad", "status": "error", "error": f"HTTP {resp.status}"}
+
+                if resp.status == 200 and data.get("success"):
+                    product = data.get("product", {})
+                    logger.info(
+                        f"Gumroad product published: {product.get('name')}",
+                        extra={"event": "gumroad_enable_ok", "context": {"product_id": product_id}},
+                    )
+                    return {
+                        "platform": "gumroad",
+                        "status": "published",
+                        "product_id": product_id,
+                        "url": product.get("short_url", ""),
+                    }
+                error = data.get("message", str(resp.status))
+                logger.warning(f"Gumroad enable failed: {error}", extra={"event": "gumroad_enable_fail"})
+                return {"platform": "gumroad", "status": "error", "error": error}
+        except Exception as e:
+            logger.error(f"Gumroad enable error: {e}", extra={"event": "gumroad_enable_error"}, exc_info=True)
             return {"platform": "gumroad", "status": "error", "error": str(e)}
 
     async def get_analytics(self) -> dict:

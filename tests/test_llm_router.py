@@ -33,7 +33,7 @@ def router(tmp_db):
 
 
 def test_model_registry_has_all_models():
-    expected = {"claude-sonnet", "claude-opus", "claude-haiku", "gpt-o3", "perplexity", "gemini-flash"}
+    expected = {"claude-sonnet", "claude-opus", "claude-haiku", "gpt-o3", "gpt-5", "gpt-4o-mini", "perplexity", "gemini-flash"}
     assert set(MODEL_REGISTRY.keys()) == expected
 
 
@@ -76,7 +76,12 @@ def test_select_model_research(router):
 
 def test_select_model_routine(router):
     result = router.select_model(TaskType.ROUTINE)
-    assert "gemini" in result.model.model_id.lower() or "haiku" in result.model.model_id.lower()
+    assert "gemini" in result.model.model_id.lower()  # Gemini Flash must be first (free tier)
+
+
+def test_select_model_self_heal(router):
+    result = router.select_model(TaskType.SELF_HEAL)
+    assert result.model.provider == "openai"  # o3 / Codex first, Claude last resort
 
 
 def test_select_model_needs_approval_high_cost(router):
