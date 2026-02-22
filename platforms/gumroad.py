@@ -1,10 +1,12 @@
-"""GumroadPlatform — интеграция с Gumroad API v2.
+"""GumroadPlatform — интеграция с Gumroad API v2 + Playwright browser automation.
 
-Gumroad API docs: https://app.gumroad.com/api
-Авторизация: access_token (creator token из Settings → Advanced → Application).
-Fallback: GUMROAD_APP_SECRET если GUMROAD_API_KEY не задан.
+API: GET products, enable/disable/delete. POST/PUT products = 404 (removed by Gumroad).
+Product creation: ONLY via Playwright + session cookie (browser automation).
+See memory/gumroad_publishing.md for full experience log.
 """
 
+import asyncio
+from pathlib import Path
 from typing import Any
 
 import aiohttp
@@ -15,6 +17,7 @@ from platforms.base_platform import BasePlatform
 
 logger = get_logger("gumroad", agent="gumroad")
 API_BASE = "https://api.gumroad.com/v2"
+COOKIE_FILE = Path("/tmp/gumroad_cookie.txt")
 
 
 class GumroadPlatform(BasePlatform):
@@ -68,103 +71,214 @@ class GumroadPlatform(BasePlatform):
             return False
 
     async def publish(self, content: dict) -> dict:
-        """POST /v2/products — создание продукта.
+        """Create and publish a product on Gumroad via Playwright browser automation.
 
-        content: {name, price (cents), description, url (optional)}
+        content: {
+            name: str,               # Product title
+            price: int,              # Price in dollars (not cents)
+            description: str,        # Product description text
+            summary: str,            # Short summary (1-2 sentences)
+            pdf_path: str,           # Path to PDF file
+            cover_path: str,         # Path to cover image (1280x720)
+            thumb_path: str,         # Path to thumbnail (600x600)
+        }
+
+        Gumroad API does NOT support product creation (404). Uses Playwright + session cookie.
         """
         if not self._authenticated:
             auth_ok = await self.authenticate()
             if not auth_ok:
                 return {"platform": "gumroad", "status": "not_authenticated"}
 
-        product_data = {
-            "name": content.get("name", "VITO Product"),
-            "price": content.get("price", 0),  # в центах
-            "description": content.get("description", ""),
-        }
-        if content.get("url"):
-            product_data["url"] = content["url"]
-        if content.get("preview_url"):
-            product_data["preview_url"] = content["preview_url"]
+        # Try browser-based creation
+        return await self._publish_via_browser(content)
+
+    async def _publish_via_browser(self, content: dict) -> dict:
+        """Create product via Playwright using session cookie from owner's browser.
+
+        Cookie file: /tmp/gumroad_cookie.txt (_gumroad_app_session value)
+        """
+        cookie = ""
+        if COOKIE_FILE.exists():
+            cookie = COOKIE_FILE.read_text().strip()
+        if not cookie:
+            logger.warning("No Gumroad session cookie. Owner must provide _gumroad_app_session.")
+            return {
+                "platform": "gumroad",
+                "status": "need_cookie",
+                "error": "No session cookie. Ask owner for _gumroad_app_session from browser.",
+            }
+
+        name = content.get("name", "VITO Product")
+        price = str(content.get("price", 9))
+        description = content.get("description", "")
+        summary = content.get("summary", "")
+        pdf_path = content.get("pdf_path", "")
+        cover_path = content.get("cover_path", "")
+        thumb_path = content.get("thumb_path", "")
 
         try:
-            session = await self._get_session()
-            async with session.post(
-                f"{API_BASE}/products",
-                data={**self._params(), **product_data},
-            ) as resp:
-                if resp.status == 404:
-                    # Gumroad API no longer supports product creation via API.
-                    # Save product details for manual upload or browser_agent.
-                    logger.info(
-                        f"Gumroad API: product creation not available via API. Saving for manual upload.",
-                        extra={"event": "gumroad_api_no_create"},
-                    )
-                    from pathlib import Path
-                    import time as _time
-                    out = Path("/home/vito/vito-agent/output/products")
-                    out.mkdir(parents=True, exist_ok=True)
-                    fp = out / f"gumroad_{int(_time.time())}.md"
-                    fp.write_text(
-                        f"# {product_data['name']}\n\n"
-                        f"**Price:** ${product_data['price'] / 100:.2f}\n\n"
-                        f"{product_data.get('description', '')}\n\n"
-                        f"---\nUpload to: https://gumroad.com/products/new\n",
-                        encoding="utf-8",
-                    )
-                    return {
-                        "platform": "gumroad",
-                        "status": "prepared",
-                        "file_path": str(fp),
-                        "url": "https://gumroad.com/products/new",
-                        "note": "Gumroad API does not support product creation. File saved for manual upload.",
-                    }
+            from playwright.async_api import async_playwright
+        except ImportError:
+            logger.error("playwright not installed")
+            return {"platform": "gumroad", "status": "error", "error": "playwright not installed"}
 
-                if resp.content_type and "json" in resp.content_type:
-                    data = await resp.json()
-                else:
-                    text = await resp.text()
-                    logger.warning(f"Gumroad unexpected response: {resp.status} {text[:200]}")
-                    return {"platform": "gumroad", "status": "error", "error": f"HTTP {resp.status}"}
-
-                if resp.status == 200 and data.get("success"):
-                    product = data.get("product", {})
-                    product_id = product.get("id")
-                    logger.info(
-                        f"Gumroad продукт создан: {product.get('name')} (${product.get('price', 0) / 100:.2f})",
-                        extra={"event": "gumroad_publish_ok", "context": {"product_id": product_id}},
-                    )
-
-                    # Auto-publish: enable the product after creation
-                    if product_id:
-                        enable_result = await self.enable_product(product_id)
-                        if enable_result.get("status") == "published":
-                            return {
-                                "platform": "gumroad",
-                                "status": "published",
-                                "product_id": product_id,
-                                "url": enable_result.get("url") or product.get("short_url", ""),
-                                "data": product,
-                            }
-
-                    return {
-                        "platform": "gumroad",
-                        "status": "created",
-                        "product_id": product_id,
-                        "url": product.get("short_url", ""),
-                        "data": product,
-                    }
-                logger.warning(
-                    f"Gumroad publish failed: {data.get('message', resp.status)}",
-                    extra={"event": "gumroad_publish_fail"},
+        try:
+            async with async_playwright() as p:
+                br = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+                ctx = await br.new_context(
+                    viewport={"width": 1280, "height": 1400},
+                    user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
                 )
-                return {"platform": "gumroad", "status": "error", "error": data.get("message", str(resp.status))}
+                await ctx.add_cookies([{
+                    "name": "_gumroad_app_session", "value": cookie,
+                    "domain": ".gumroad.com", "path": "/", "httpOnly": True,
+                    "secure": True, "sameSite": "Lax",
+                }])
+                page = await ctx.new_page()
+                page.set_default_timeout(20000)
+
+                # Step 1: Create product
+                await page.goto("https://gumroad.com/products/new", wait_until="networkidle")
+                await asyncio.sleep(2)
+                if "login" in page.url:
+                    await br.close()
+                    return {"platform": "gumroad", "status": "cookie_expired", "error": "Session cookie expired."}
+
+                # Fill name
+                name_el = page.locator('input[placeholder*="name" i]').first
+                if await name_el.is_visible(timeout=5000):
+                    await name_el.fill(name)
+
+                # Click Next
+                for sel in ['button:has-text("Next")', 'button:has-text("Create")', 'button[type="submit"]']:
+                    try:
+                        btn = page.locator(sel).first
+                        if await btn.is_visible(timeout=3000):
+                            await btn.click()
+                            await asyncio.sleep(3)
+                            break
+                    except Exception:
+                        continue
+
+                # Fill price
+                inputs = await page.evaluate("""() => {
+                    return Array.from(document.querySelectorAll('input:not([type="hidden"]):not([type="file"])')).map(
+                        (el, i) => ({i, value: el.value, visible: el.offsetParent !== null})
+                    );
+                }""")
+                for info in inputs:
+                    if info.get("value") == "0" and info.get("visible"):
+                        all_inputs = page.locator('input:not([type="hidden"]):not([type="file"])')
+                        await all_inputs.nth(info["i"]).fill(price)
+                        break
+
+                # Fill summary
+                summary_el = page.locator('input[placeholder*="You\'ll get"]').first
+                try:
+                    if await summary_el.is_visible(timeout=3000):
+                        await summary_el.fill(summary)
+                except Exception:
+                    pass
+
+                # Fill description
+                desc_el = page.locator('[contenteditable="true"]').first
+                try:
+                    if await desc_el.is_visible(timeout=3000):
+                        await desc_el.click()
+                        await page.keyboard.press("Control+a")
+                        await page.keyboard.press("Backspace")
+                        for line in description.strip().split("\n"):
+                            if line.strip():
+                                await page.keyboard.type(line, delay=1)
+                            await page.keyboard.press("Enter")
+                except Exception:
+                    pass
+
+                # Upload cover (file input [2] — accepts video formats)
+                if cover_path and Path(cover_path).exists():
+                    fi = await page.locator('input[type="file"]').all()
+                    for f in fi:
+                        accept = await f.evaluate("el => el.accept || ''")
+                        if ".mov" in accept or ".mp4" in accept:
+                            await f.set_input_files(cover_path)
+                            await asyncio.sleep(4)
+                            break
+
+                # Upload thumbnail (single image input, not multiple)
+                if thumb_path and Path(thumb_path).exists():
+                    fi = await page.locator('input[type="file"]').all()
+                    for f in fi:
+                        attrs = await f.evaluate("el => ({accept: el.accept, multiple: el.multiple})")
+                        if not attrs.get("multiple") and ".jpg" in (attrs.get("accept") or ""):
+                            await f.set_input_files(thumb_path)
+                            await asyncio.sleep(4)
+                            break
+
+                # Save
+                save = page.locator('button:has-text("Save")').first
+                try:
+                    await save.click()
+                    await asyncio.sleep(4)
+                except Exception:
+                    pass
+
+                # Go to Content tab and upload PDF
+                if pdf_path and Path(pdf_path).exists():
+                    content_tab = page.locator('button:has-text("Content"), a:has-text("Content")').first
+                    try:
+                        await content_tab.click()
+                        await asyncio.sleep(3)
+                    except Exception:
+                        pass
+
+                    upload_btn = page.locator('button:has-text("Upload your files")').first
+                    try:
+                        if await upload_btn.is_visible(timeout=5000):
+                            await upload_btn.click()
+                            await asyncio.sleep(2)
+                            fi = await page.locator('input[type="file"]').all()
+                            for f in fi:
+                                accept = await f.evaluate("el => el.accept || ''")
+                                if "image" not in accept and "audio" not in accept:
+                                    await f.set_input_files(pdf_path)
+                                    await asyncio.sleep(5)
+                                    break
+                    except Exception:
+                        pass
+
+                    # Save content
+                    try:
+                        save2 = page.locator('button:has-text("Save")').first
+                        await save2.click()
+                        await asyncio.sleep(3)
+                    except Exception:
+                        pass
+
+                slug = page.url.split("/products/")[-1].split("/")[0] if "/products/" in page.url else ""
+                await br.close()
+
+            # Publish via API
+            products = await self.get_products()
+            for prod in products:
+                if prod.get("name") == name or (slug and slug in prod.get("short_url", "")):
+                    pid = prod.get("id")
+                    enable_result = await self.enable_product(pid)
+                    return {
+                        "platform": "gumroad",
+                        "status": enable_result.get("status", "created"),
+                        "product_id": pid,
+                        "url": prod.get("short_url", ""),
+                    }
+
+            return {"platform": "gumroad", "status": "created", "note": "Product created, check Gumroad dashboard."}
+
         except Exception as e:
-            logger.error(f"Gumroad publish error: {e}", extra={"event": "gumroad_publish_error"}, exc_info=True)
+            logger.error(f"Gumroad browser publish error: {e}", exc_info=True)
             return {"platform": "gumroad", "status": "error", "error": str(e)}
 
     async def enable_product(self, product_id: str) -> dict:
-        """PUT /v2/products/{id} — publish a draft product (set published=true)."""
+        """PUT /v2/products/{id}/enable — publish a draft product."""
         if not self._authenticated:
             auth_ok = await self.authenticate()
             if not auth_ok:
@@ -173,8 +287,8 @@ class GumroadPlatform(BasePlatform):
         try:
             session = await self._get_session()
             async with session.put(
-                f"{API_BASE}/products/{product_id}",
-                data={**self._params(), "published": "true"},
+                f"{API_BASE}/products/{product_id}/enable",
+                params=self._params(),
             ) as resp:
                 if resp.content_type and "json" in resp.content_type:
                     data = await resp.json()
