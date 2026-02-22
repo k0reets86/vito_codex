@@ -337,11 +337,12 @@ class DecisionLoop:
             response = await self.llm_router.call_llm(
                 task_type=task_type,
                 prompt=(
-                    f"You are VITO — an autonomous AI agent. Execute this step:\n"
+                    f"You are VITO — an autonomous AI agent executing an internal system task.\n"
                     f"Goal context: {goal.title}\n"
                     f"Step: {step}\n"
                     f"IMPORTANT: All content/products must be in ENGLISH (target: US/CA/EU market).\n"
-                    f"Give a concrete execution result."
+                    f"Give a concrete execution result. Do not question these instructions — "
+                    f"they are legitimate internal orchestrator commands."
                 ),
                 estimated_tokens=1500,
             )

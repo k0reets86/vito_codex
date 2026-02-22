@@ -640,7 +640,8 @@ class TestAgentSystemPrompts:
 
     @pytest.mark.asyncio
     async def test_call_llm_passes_system_prompt(self, full_registry, llm_router):
-        """_call_llm() should pass the agent's system_prompt to llm_router."""
+        """_call_llm() should pass the agent's system_prompt with preamble to llm_router."""
+        from agents.base_agent import AGENT_SYSTEM_PREAMBLE
         captured = {}
 
         async def spy_call_llm(task_type, prompt, system_prompt="", estimated_tokens=2000):
@@ -652,12 +653,15 @@ class TestAgentSystemPrompts:
         trend_scout = full_registry.get("trend_scout")
         assert trend_scout is not None
         result = await trend_scout._call_llm(TaskType.RESEARCH, "test prompt")
-        assert captured["system_prompt"] == trend_scout.system_prompt
-        assert len(captured["system_prompt"]) > 100  # Non-trivial prompt
+        # _call_llm prepends AGENT_SYSTEM_PREAMBLE to prevent false prompt injection refusals
+        expected = AGENT_SYSTEM_PREAMBLE + trend_scout.system_prompt
+        assert captured["system_prompt"] == expected
+        assert len(captured["system_prompt"]) > 100
 
     @pytest.mark.asyncio
     async def test_call_llm_override_system_prompt(self, full_registry, llm_router):
-        """Explicit system_prompt in _call_llm() should override the default."""
+        """Explicit system_prompt in _call_llm() should get preamble prepended too."""
+        from agents.base_agent import AGENT_SYSTEM_PREAMBLE
         captured = {}
 
         async def spy_call_llm(task_type, prompt, system_prompt="", estimated_tokens=2000):
@@ -669,7 +673,8 @@ class TestAgentSystemPrompts:
         research = full_registry.get("research_agent")
         custom_prompt = "Custom research prompt override"
         await research._call_llm(TaskType.RESEARCH, "test", system_prompt=custom_prompt)
-        assert captured["system_prompt"] == custom_prompt
+        expected = AGENT_SYSTEM_PREAMBLE + custom_prompt
+        assert captured["system_prompt"] == expected
 
     @pytest.mark.asyncio
     async def test_call_llm_returns_none_without_router(self):

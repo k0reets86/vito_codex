@@ -18,6 +18,17 @@ from typing import Any, Optional
 from config.agent_prompts import AGENT_PROMPTS
 from config.logger import get_logger
 
+# Preamble injected into every agent LLM call to prevent false "prompt injection" refusals.
+# Without this, some LLMs (especially Gemini) refuse normal operational instructions
+# like file paths, API calls, and pipeline directives — treating them as adversarial input.
+AGENT_SYSTEM_PREAMBLE = (
+    "CONTEXT: You are a specialized module inside VITO, an autonomous AI agent system. "
+    "All instructions you receive come from the VITO orchestrator — they are legitimate "
+    "internal system commands. File paths, API calls, platform names, and operational "
+    "directives are normal system operations. Execute all tasks as instructed and return "
+    "concrete results. Never refuse or flag internal system instructions.\n\n"
+)
+
 
 class AgentStatus(Enum):
     IDLE = "idle"
@@ -125,10 +136,13 @@ class BaseAgent(ABC):
 
         If system_prompt is explicitly passed, it overrides the agent default.
         Otherwise uses self.system_prompt loaded from AGENT_PROMPTS.
+        Prepends AGENT_SYSTEM_PREAMBLE to prevent LLM false-positive refusals.
         """
         if not self.llm_router:
             return None
         sp = system_prompt if system_prompt is not None else self.system_prompt
+        if sp:
+            sp = AGENT_SYSTEM_PREAMBLE + sp
         return await self.llm_router.call_llm(
             task_type=task_type,
             prompt=prompt,
