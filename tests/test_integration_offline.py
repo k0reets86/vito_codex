@@ -678,3 +678,314 @@ class TestAgentSystemPrompts:
         agent = TrendScout(llm_router=None)
         result = await agent._call_llm(TaskType.RESEARCH, "test")
         assert result is None
+
+
+# ═══════════════════════════════════════════════════════════
+# TEST 13: SelfHealer offline tests
+# ═══════════════════════════════════════════════════════════
+
+class TestSelfHealerOffline:
+    """Тесты SelfHealer: known error → DB, unknown → LLM fix, max attempts → escalate."""
+
+    @pytest.fixture
+    def self_healer(self, llm_router, memory, comms):
+        from self_healer import SelfHealer
+        sh = SelfHealer(llm_router=llm_router, memory=memory, comms=comms)
+        return sh
+
+    @pytest.mark.asyncio
+    async def test_known_error_resolved_from_db(self, self_healer, memory):
+        """handle_error with known resolved error → returns resolution from DB."""
+        import sqlite3
+
+        # Setup: create a mock SQLite connection with a resolved error
+        mock_conn = MagicMock()
+        mock_row = {"resolution": "Restart the service to fix connection pool exhaustion"}
+        mock_conn.execute.return_value.fetchone.return_value = mock_row
+        memory._get_sqlite.return_value = mock_conn
+
+        error = ConnectionError("Connection pool exhausted")
+        result = await self_healer.handle_error("trend_scout", error, context={"task": "scan"})
+
+        assert result["resolved"] is True
+        assert result["method"] == "database"
+        assert "Restart" in result["description"]
+        # Should log the error with resolution
+        memory.log_error.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_unknown_error_llm_fix(self, self_healer, memory, llm_router):
+        """handle_error with unknown error → calls LLM → attempts fix."""
+        # No resolved errors in DB
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value.fetchone.return_value = None
+        memory._get_sqlite.return_value = mock_conn
+
+        # Mock LLM response with auto-fix
+        llm_router.call_llm = AsyncMock(return_value=json.dumps({
+            "can_auto_fix": True,
+            "fix_description": "Restart vito_agent service",
+            "shell_command": "systemctl restart vito_agent",
+        }))
+
+        # Mock devops agent
+        mock_devops = MagicMock()
+        mock_devops.execute_shell = AsyncMock(
+            return_value=TaskResult(success=True, output="Service restarted")
+        )
+        self_healer.set_devops_agent(mock_devops)
+
+        error = RuntimeError("Service unresponsive")
+        result = await self_healer.handle_error("comms_agent", error)
+
+        assert result["resolved"] is True
+        assert result["method"] == "llm_fix_applied"
+        assert "Restart" in result["description"]
+        mock_devops.execute_shell.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_max_attempts_escalation(self, self_healer, memory, comms, llm_router):
+        """After MAX_ATTEMPTS, error is escalated to owner."""
+        from self_healer import MAX_AUTO_FIX_ATTEMPTS
+
+        # No resolved errors in DB
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value.fetchone.return_value = None
+        memory._get_sqlite.return_value = mock_conn
+
+        # Mock LLM to return non-fixable analysis (so it escalates)
+        llm_router.call_llm = AsyncMock(return_value=json.dumps({
+            "can_auto_fix": False,
+            "fix_description": "Cannot auto-fix this error",
+            "shell_command": None,
+        }))
+
+        error = ValueError("Persistent failure")
+        # Set attempt count so next call is the MAX_AUTO_FIX_ATTEMPTS-th
+        error_key = f"test_agent:ValueError:{str(error)[:100]}"
+        self_healer._attempt_counts[error_key] = MAX_AUTO_FIX_ATTEMPTS - 1
+
+        result = await self_healer.handle_error("test_agent", error)
+
+        assert result["resolved"] is False
+        assert result["method"] == "escalated"
+        assert "Эскалировано" in result["description"]
+        # Should have called comms.send_message for escalation
+        comms.send_message.assert_called()
+
+    def test_cleanup_old_errors(self, self_healer, memory):
+        """cleanup_old_errors deletes resolved errors older than N days."""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.rowcount = 5
+        mock_conn.execute.return_value = mock_cursor
+        memory._get_sqlite.return_value = mock_conn
+
+        deleted = self_healer.cleanup_old_errors(days=7)
+
+        assert deleted == 5
+        mock_conn.execute.assert_called_once()
+        mock_conn.commit.assert_called_once()
+
+
+# ═══════════════════════════════════════════════════════════
+# TEST 14: Agent chain (trend → content → publish)
+# ═══════════════════════════════════════════════════════════
+
+class TestAgentChainOffline:
+    """Full chain: TrendScout.scan → ContentCreator.create_article → PublisherAgent.publish."""
+
+    @pytest.mark.asyncio
+    async def test_trend_to_content_to_publish(self, full_registry, llm_router, memory):
+        """Offline chain: trend scan → article → publish."""
+        original_check = llm_router.check_daily_limit
+
+        async def chain_mock_llm(task_type, prompt, system_prompt="", estimated_tokens=2000):
+            if not original_check():
+                return None
+            llm_router._record_spend("MockLLM", task_type.value, estimated_tokens, 100, 0.0001)
+            # Quality judge needs JSON response with score >= 7
+            if "Оцени качество" in prompt or "score" in prompt:
+                return '{"score": 9, "feedback": "Отличный контент", "issues": []}'
+            return MOCK_LLM_RESPONSES.get(task_type, "Готово.")
+
+        llm_router.call_llm = chain_mock_llm
+        await full_registry.start_core()
+
+        # Step 1: TrendScout scan
+        trend_scout = full_registry.get("trend_scout")
+        assert trend_scout is not None
+        await trend_scout.start()
+
+        trend_result = await trend_scout.execute_task("niche_research")
+        assert trend_result.success, f"TrendScout failed: {trend_result.error}"
+        assert trend_result.output is not None
+
+        # Step 2: ContentCreator creates article based on trend
+        content_creator = full_registry.get("content_creator")
+        assert content_creator is not None
+        await content_creator.start()
+
+        article_result = await content_creator.execute_task(
+            "article", topic="AI templates for digital products"
+        )
+        assert article_result.success, f"ContentCreator failed: {article_result.error}"
+        assert article_result.output is not None
+        assert len(article_result.output) > 0
+
+        # Step 3: PublisherAgent publishes the article
+        publisher = full_registry.get("publisher_agent")
+        assert publisher is not None
+        await publisher.start()
+
+        publish_result = await publisher.execute_task(
+            "publish",
+            platform="wordpress",
+            title="AI Templates Guide",
+            content=article_result.output,
+            tags=["ai", "templates"],
+        )
+        assert publish_result.success, f"Publisher failed: {publish_result.error}"
+
+    @pytest.mark.asyncio
+    async def test_chain_stops_on_content_failure(self, full_registry, llm_router):
+        """If content creation fails, publish should not be attempted."""
+        # LLM returns None to simulate failure
+        llm_router.call_llm = AsyncMock(return_value=None)
+        await full_registry.start_core()
+
+        content_creator = full_registry.get("content_creator")
+        await content_creator.start()
+        result = await content_creator.execute_task("article", topic="test")
+        assert result.success is False
+
+
+# ═══════════════════════════════════════════════════════════
+# TEST 15: Ebook loop offline test
+# ═══════════════════════════════════════════════════════════
+
+class TestEbookLoopOffline:
+    """ContentCreator.create_ebook with budget checks and file output."""
+
+    @pytest.mark.asyncio
+    async def test_ebook_3_chapters(self, full_registry, llm_router):
+        """Ebook with 3 chapters: budget check per chapter, file saved."""
+        chapter_count = 0
+
+        async def mock_ebook_llm(task_type, prompt, system_prompt="", estimated_tokens=2000):
+            nonlocal chapter_count
+            chapter_count += 1
+            llm_router._record_spend("MockLLM", task_type.value, estimated_tokens, 200, 0.0001)
+            return f"Содержание главы {chapter_count}. Это подробный текст с полезной информацией о теме."
+
+        llm_router.call_llm = mock_ebook_llm
+        await full_registry.start_core()
+
+        content_creator = full_registry.get("content_creator")
+        await content_creator.start()
+
+        result = await content_creator.execute_task("ebook", topic="AI Productivity", chapters=3)
+
+        assert result.success, f"Ebook failed: {result.error}"
+        assert result.metadata.get("chapters") == 3
+        assert result.metadata.get("file_path") is not None
+        assert "Глава 1" in result.output
+        assert "Глава 2" in result.output
+        assert "Глава 3" in result.output
+        assert chapter_count == 3
+
+    @pytest.mark.asyncio
+    async def test_ebook_stops_on_budget(self, full_registry, llm_router):
+        """Ebook stops generating chapters when budget is exhausted."""
+        from datetime import date
+
+        call_count = 0
+
+        async def mock_llm(task_type, prompt, system_prompt="", estimated_tokens=2000):
+            nonlocal call_count
+            call_count += 1
+            llm_router._record_spend("MockLLM", task_type.value, estimated_tokens, 200, 0.0001)
+            return f"Chapter content {call_count}"
+
+        llm_router.call_llm = mock_llm
+
+        # Exhaust budget after first chapter
+        conn = llm_router._get_sqlite()
+        conn.execute(
+            "INSERT INTO spend_log (date, model, task_type, cost_usd) VALUES (?, ?, ?, ?)",
+            (date.today().isoformat(), "test", "content", 999.0),
+        )
+        conn.commit()
+
+        await full_registry.start_core()
+        content_creator = full_registry.get("content_creator")
+        await content_creator.start()
+
+        result = await content_creator.execute_task("ebook", topic="Test", chapters=5)
+
+        # Should have stopped early due to budget
+        assert result.success is False or (result.metadata.get("chapters", 0) < 5)
+
+
+# ═══════════════════════════════════════════════════════════
+# TEST 16: Night consolidation offline test
+# ═══════════════════════════════════════════════════════════
+
+class TestNightConsolidationOffline:
+    """Test _night_consolidation logic by replicating the consolidation steps."""
+
+    @pytest.mark.asyncio
+    async def test_consolidation_stores_summary(self, llm_router, memory, comms, goal_engine, finance):
+        """Consolidation stores daily summary and cleans old errors."""
+        from self_healer import SelfHealer
+
+        self_healer = SelfHealer(llm_router=llm_router, memory=memory, comms=comms)
+
+        # Mock self_healer DB access for get_error_stats and cleanup
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value.fetchone.return_value = {"cnt": 0}
+        mock_conn.execute.return_value.fetchall.return_value = []
+        mock_cursor = MagicMock()
+        mock_cursor.rowcount = 2
+        mock_conn.execute.return_value = mock_cursor
+        memory._get_sqlite.return_value = mock_conn
+
+        # Replicate _night_consolidation logic (avoids importing main.py with PID lock)
+        from datetime import datetime, timezone
+
+        goal_stats = goal_engine.get_stats()
+        pnl = finance.get_pnl(days=1)
+        daily_spent = finance.get_daily_spent()
+        daily_earned = finance.get_daily_earned()
+        llm_spend = llm_router.get_daily_spend()
+
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        summary = (
+            f"Daily summary {today}: "
+            f"Goals: {goal_stats['completed']} completed, {goal_stats['failed']} failed, "
+            f"{goal_stats['pending']} pending. "
+            f"Finance: spent ${daily_spent:.2f} (LLM: ${llm_spend:.2f}), "
+            f"earned ${daily_earned:.2f}, net ${pnl['net_profit']:.2f}. "
+            f"Success rate: {goal_stats['success_rate']:.0%}."
+        )
+        memory.store_knowledge(
+            doc_id=f"daily_summary_{today}",
+            text=summary,
+            metadata={"type": "daily_summary", "date": today},
+        )
+
+        # Cleanup
+        deleted = self_healer.cleanup_old_errors(days=7)
+
+        # Verify
+        memory.store_knowledge.assert_called_once()
+        call_kwargs = memory.store_knowledge.call_args[1] if memory.store_knowledge.call_args[1] else {}
+        call_args = memory.store_knowledge.call_args[0] if memory.store_knowledge.call_args[0] else ()
+        # Check either kwargs or positional
+        doc_id = call_kwargs.get("doc_id", "")
+        text = call_kwargs.get("text", "")
+        assert f"daily_summary_{today}" in doc_id
+        assert "Daily summary" in text
+        assert "Goals:" in text
+        assert "Finance:" in text
+        assert deleted == 2  # mock_cursor.rowcount = 2

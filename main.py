@@ -380,15 +380,84 @@ class VITO:
             await asyncio.sleep(60)
 
     async def _night_consolidation(self) -> None:
-        """03:00 — анализ дня, сохранение навыков, обновление базы знаний."""
+        """03:00 — анализ дня, сохранение навыков, обновление базы знаний.
+
+        Steps:
+        1. Collect day stats (goals completed/failed, revenue, spend)
+        2. Store daily summary to knowledge base
+        3. Analyze errors → update patterns
+        4. Update skill base (successful strategies)
+        5. Cleanup old resolved errors
+        """
         logger.info("Ночная консолидация начата", extra={"event": "consolidation_start"})
-        stats = self.goal_engine.get_stats()
+
+        # 1. Collect day statistics
+        goal_stats = self.goal_engine.get_stats()
+        pnl = self.finance.get_pnl(days=1)
+        daily_spent = self.finance.get_daily_spent()
+        daily_earned = self.finance.get_daily_earned()
+        llm_spend = self.llm_router.get_daily_spend()
+
         logger.info(
-            f"Статистика дня: {stats}",
-            extra={"event": "daily_stats", "context": stats},
+            f"Статистика дня: goals={goal_stats}, P&L={pnl}",
+            extra={"event": "daily_stats", "context": {**goal_stats, **pnl}},
         )
 
-        # Cleanup resolved errors older than 7 days
+        # 2. Store daily summary to knowledge base
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        summary = (
+            f"Daily summary {today}: "
+            f"Goals: {goal_stats['completed']} completed, {goal_stats['failed']} failed, "
+            f"{goal_stats['pending']} pending. "
+            f"Finance: spent ${daily_spent:.2f} (LLM: ${llm_spend:.2f}), "
+            f"earned ${daily_earned:.2f}, net ${pnl['net_profit']:.2f}. "
+            f"Success rate: {goal_stats['success_rate']:.0%}."
+        )
+        try:
+            self.memory.store_knowledge(
+                doc_id=f"daily_summary_{today}",
+                text=summary,
+                metadata={"type": "daily_summary", "date": today, **goal_stats, **pnl},
+            )
+        except Exception as e:
+            logger.debug(f"Ошибка сохранения саммари: {e}", extra={"event": "summary_save_error"})
+
+        # 3. Analyze errors → update patterns
+        try:
+            error_stats = self.self_healer.get_error_stats()
+            if error_stats.get("unresolved", 0) > 0:
+                self.memory.save_pattern(
+                    category="errors",
+                    key=f"unresolved_{today}",
+                    value=f"{error_stats['unresolved']} unresolved errors, "
+                          f"resolution rate: {error_stats['resolution_rate']:.0%}",
+                    confidence=0.8,
+                )
+            if error_stats.get("by_module"):
+                top_module = error_stats["by_module"][0]
+                self.memory.save_pattern(
+                    category="error_hotspot",
+                    key=f"hotspot_{today}",
+                    value=f"Most errors from: {top_module['module']} ({top_module['cnt']} errors)",
+                    confidence=0.7,
+                )
+        except Exception as e:
+            logger.debug(f"Ошибка анализа ошибок: {e}", extra={"event": "error_analysis_error"})
+
+        # 4. Save successful strategies as skills
+        try:
+            if goal_stats["completed"] > 0 and goal_stats["success_rate"] > 0.5:
+                self.memory.save_skill(
+                    name=f"daily_execution_{today}",
+                    description=f"Day {today}: {goal_stats['completed']} goals completed with "
+                                f"{goal_stats['success_rate']:.0%} success rate. "
+                                f"Net: ${pnl['net_profit']:.2f}.",
+                    agent="system",
+                )
+        except Exception as e:
+            logger.debug(f"Ошибка сохранения навыков: {e}", extra={"event": "skill_save_error"})
+
+        # 5. Cleanup resolved errors older than 7 days
         try:
             deleted = self.self_healer.cleanup_old_errors(days=7)
             if deleted:
