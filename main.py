@@ -359,6 +359,11 @@ class VITO:
                 last_run["morning_report"] = today
                 await self._morning_report()
 
+            # Balance check at 12:00 — alerts only for low balances
+            if hour == 12 and last_run.get("balance_check") != today:
+                last_run["balance_check"] = today
+                await self._scheduled_balance_check()
+
             # v0.3.0: Проактивные проверки каждые 4 часа (10, 14, 18, 22)
             if hour in (10, 14, 18, 22):
                 proactive_key = f"proactive_{hour}"
@@ -676,11 +681,59 @@ class VITO:
             f"Успешность: {stats['success_rate']:.0%}"
         )
 
+        # Add balance check to morning report
+        try:
+            balance_block = await self._check_balances_report()
+            if balance_block:
+                report += f"\n\n{balance_block}"
+        except Exception as e:
+            logger.warning(f"Balance check in morning report failed: {e}")
+
         logger.info(
             f"Утренний отчёт сформирован",
             extra={"event": "morning_report", "context": {"report": report}},
         )
         await self.comms.send_morning_report(report)
+
+    async def _check_balances_report(self) -> str:
+        """Check external service balances and return formatted report block."""
+        try:
+            from modules.balance_checker import BalanceChecker
+            checker = BalanceChecker()
+            balances = await checker.check_all()
+
+            # Check for low balances and send alerts
+            alerts = checker.get_low_balance_alerts(balances)
+            if alerts:
+                logger.warning(f"Low balance alerts: {alerts}", extra={"event": "low_balance_alert"})
+
+            internal = {
+                "daily_spent": self.finance.get_daily_spent(),
+                "daily_earned": self.finance.get_daily_earned(),
+                "daily_limit": float(os.getenv("DAILY_LIMIT_USD", "3")),
+            }
+            return checker.format_report(balances, include_internal=internal)
+        except Exception as e:
+            logger.warning(f"Balance check failed: {e}", extra={"event": "balance_check_error"})
+            return ""
+
+    async def _scheduled_balance_check(self) -> None:
+        """12:00 — scheduled balance check, alert only on low balances."""
+        logger.info("Scheduled balance check", extra={"event": "balance_check_start"})
+        try:
+            from modules.balance_checker import BalanceChecker
+            checker = BalanceChecker()
+            balances = await checker.check_all()
+            alerts = checker.get_low_balance_alerts(balances)
+
+            if alerts:
+                msg = "VITO Balance Alert\n\n" + "\n".join(f"  {a}" for a in alerts)
+                await self.comms.send_message(msg)
+                logger.warning(f"Low balance alerts sent: {len(alerts)}", extra={"event": "low_balance_alert_sent"})
+            else:
+                logger.info("All balances OK", extra={"event": "balances_ok"})
+        except Exception as e:
+            logger.warning(f"Scheduled balance check error: {e}", extra={"event": "balance_check_error"})
 
     async def _proactive_check(self) -> None:
         """v0.3.0: Проактивная проверка каждые 4 часа — делится достижениями, предлагает шаги."""

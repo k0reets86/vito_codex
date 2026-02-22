@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Publish 'The AI Side Hustle Playbook' on Gumroad via Playwright browser automation.
 
-Uses playwright-stealth to avoid CAPTCHA/bot detection.
+Uses playwright-stealth to reduce detection and anti-captcha to solve CAPTCHAs.
 """
 
 import asyncio
@@ -9,11 +9,16 @@ import os
 import sys
 from pathlib import Path
 
+# Add project root to path for modules import
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 EMAIL = os.getenv("GUMROAD_EMAIL", "")
 PASSWORD = os.getenv("GUMROAD_PASSWORD", "")
+# 2FA code — pass via env var or CLI arg: python3 script.py --2fa 123456
+TWO_FA_CODE = os.getenv("GUMROAD_2FA", "")
 
 PDF_PATH = Path(__file__).resolve().parent.parent / "output/The_AI_Side_Hustle_Playbook_v2.pdf"
 SCREENSHOTS_DIR = Path(__file__).resolve().parent.parent / "output/screenshots"
@@ -44,14 +49,139 @@ Instant PDF download. 5 chapters. ~6,000 words. Zero fluff.
 Stop watching. Start earning. Your 30 days start now."""
 
 
-async def human_type(page, selector, text, delay=50):
-    """Type text character by character like a human."""
-    el = page.locator(selector).first
-    await el.click()
-    await asyncio.sleep(0.3)
-    for char in text:
-        await page.keyboard.press(char if len(char) == 1 else char)
-        await asyncio.sleep(delay / 1000 + (hash(char) % 30) / 1000)
+async def solve_captcha_on_page(page) -> str | None:
+    """Detect and solve CAPTCHA on page using anti-captcha service.
+
+    Returns the CAPTCHA token if solved, None on failure.
+    """
+    from modules.captcha_solver import CaptchaSolver
+
+    # Check for reCAPTCHA presence and extract sitekey
+    captcha_info = await page.evaluate("""() => {
+        // Try data-sitekey attribute
+        const el = document.querySelector('[data-sitekey]');
+        if (el) return {found: true, sitekey: el.getAttribute('data-sitekey')};
+        // Try iframe src parameter
+        const iframe = document.querySelector('iframe[src*="recaptcha"]');
+        if (iframe) {
+            const m = iframe.src.match(/[?&]k=([^&]+)/);
+            if (m) return {found: true, sitekey: m[1]};
+        }
+        // Check page source for recaptcha
+        if (document.body.innerHTML.includes('recaptcha') ||
+            document.body.innerHTML.includes('g-recaptcha')) {
+            return {found: true, sitekey: null};
+        }
+        return {found: false, sitekey: null};
+    }""")
+
+    if not captcha_info.get("found"):
+        print("  No CAPTCHA detected on page")
+        return "no_captcha"
+
+    sitekey = captcha_info.get("sitekey")
+    page_url = page.url
+    print(f"  reCAPTCHA detected! Sitekey: {sitekey}")
+    print(f"  Solving via anti-captcha for URL: {page_url}")
+
+    try:
+        solver = CaptchaSolver.get_instance()
+
+        if not sitekey:
+            print("  ERROR: Could not extract sitekey")
+            return None
+
+        # Solve reCAPTCHA v2 via anti-captcha API
+        token = solver.solve_recaptcha_v2(sitekey, page_url)
+
+        if not token:
+            print("  CAPTCHA solve failed — no token returned")
+            return None
+
+        print(f"  CAPTCHA solved! Token: {token[:40]}...")
+
+        # Inject token and trigger callback to close the CAPTCHA widget
+        injected = await page.evaluate("""(token) => {
+            let success = false;
+
+            // 1. Set all g-recaptcha-response textareas
+            document.querySelectorAll('[name="g-recaptcha-response"], #g-recaptcha-response').forEach(el => {
+                el.value = token;
+                el.style.display = 'block';
+                success = true;
+            });
+
+            // Also try hidden textarea inside the reCAPTCHA widget
+            document.querySelectorAll('textarea').forEach(el => {
+                if (el.id && el.id.includes('g-recaptcha-response')) {
+                    el.value = token;
+                    success = true;
+                }
+            });
+
+            // 2. Try to call the reCAPTCHA callback
+            // Method A: via ___grecaptcha_cfg
+            if (typeof ___grecaptcha_cfg !== 'undefined' && ___grecaptcha_cfg.clients) {
+                const clients = ___grecaptcha_cfg.clients;
+                Object.keys(clients).forEach(key => {
+                    const findAndCall = (obj, depth) => {
+                        if (depth > 8 || !obj) return;
+                        Object.keys(obj).forEach(k => {
+                            if (typeof obj[k] === 'function') {
+                                try { obj[k](token); } catch(e) {}
+                            } else if (typeof obj[k] === 'object' && obj[k] !== null) {
+                                findAndCall(obj[k], depth + 1);
+                            }
+                        });
+                    };
+                    findAndCall(clients[key], 0);
+                });
+            }
+
+            // Method B: via grecaptcha.enterprise or grecaptcha callback
+            try {
+                if (typeof grecaptcha !== 'undefined') {
+                    // Try getting the callback from the widget
+                    const widgetId = 0;
+                    const callback = grecaptcha.getResponse ? null : null;
+                }
+            } catch(e) {}
+
+            // 3. Try to close the CAPTCHA challenge popup
+            // Remove the challenge iframe overlay
+            document.querySelectorAll('iframe[src*="recaptcha/api2/bframe"], iframe[src*="recaptcha/enterprise/bframe"]').forEach(iframe => {
+                let container = iframe;
+                for (let i = 0; i < 10; i++) {
+                    container = container.parentElement;
+                    if (!container || container === document.body) break;
+                    if (container.style.visibility === 'visible' ||
+                        getComputedStyle(container).position === 'absolute' ||
+                        getComputedStyle(container).position === 'fixed') {
+                        container.style.display = 'none';
+                        container.style.visibility = 'hidden';
+                        break;
+                    }
+                }
+            });
+
+            // Remove any overlay divs
+            document.querySelectorAll('div[style*="visibility: visible"]').forEach(el => {
+                if (el.querySelector('iframe[src*="recaptcha"]')) {
+                    el.style.display = 'none';
+                    el.style.visibility = 'hidden';
+                }
+            });
+
+            return success;
+        }""", token)
+
+        print(f"  Token injected: {injected}")
+        await asyncio.sleep(2)
+        return token
+
+    except Exception as e:
+        print(f"  CAPTCHA solve error: {e}")
+        return None
 
 
 async def run():
@@ -90,7 +220,7 @@ async def run():
 
         page = await context.new_page()
 
-        # Apply stealth to avoid bot detection
+        # Apply stealth to reduce bot detection
         stealth = Stealth()
         await stealth.apply_stealth_async(page)
 
@@ -99,11 +229,11 @@ async def run():
         try:
             # === STEP 1: LOGIN ===
             print("\n[1/6] Logging into Gumroad...")
-            await page.goto("https://app.gumroad.com/login", wait_until="networkidle")
+            await page.goto("https://gumroad.com/login", wait_until="networkidle")
             await asyncio.sleep(2)
             await page.screenshot(path=str(SCREENSHOTS_DIR / "01_login_page.png"))
 
-            # Fill email with human-like typing
+            # Fill email
             email_field = page.locator('input[type="email"], input[name="email"]').first
             await email_field.click()
             await asyncio.sleep(0.5)
@@ -131,40 +261,147 @@ async def run():
             current_url = page.url
             print(f"  After login URL: {current_url}")
 
-            # Check for CAPTCHA
-            captcha_visible = await page.locator('iframe[src*="recaptcha"], iframe[title*="recaptcha"], .g-recaptcha').count()
-            if captcha_visible > 0 or "login" in current_url.lower():
+            # Check for CAPTCHA and solve it
+            if "login" in current_url.lower():
                 body = await page.content()
                 if "captcha" in body.lower() or "recaptcha" in body.lower():
-                    print("  CAPTCHA detected! Stealth mode wasn't enough.")
-                    print("  Trying alternative approach...")
+                    print("  CAPTCHA detected after login attempt!")
+                    await page.screenshot(path=str(SCREENSHOTS_DIR / "03b_captcha_detected.png"))
 
-                    # Check if still on login page
-                    if "login" in current_url.lower():
-                        print("  Still on login page. Login may have failed.")
-                        # Check for error messages
-                        errors = await page.locator('.error, .alert-danger, [role="alert"]').all_text_contents()
-                        if errors:
-                            print(f"  Errors: {errors}")
+                    token = await solve_captcha_on_page(page)
 
-                        await page.screenshot(path=str(SCREENSHOTS_DIR / "03b_captcha_block.png"))
-                        print("\n  === CAPTCHA WORKAROUND ===")
-                        print("  Gumroad blocks headless browsers with CAPTCHA.")
-                        print("  Trying to get session cookies via alternative method...")
+                    if token and token != "no_captcha":
+                        print("  CAPTCHA solved. Submitting login...")
+                        await page.screenshot(path=str(SCREENSHOTS_DIR / "03c_captcha_solved.png"))
 
-                        # The CAPTCHA prevents automated login.
-                        # Return False so we can try alternative approaches
+                        # Remove overlays and submit form
+                        await page.evaluate("""() => {
+                            document.querySelectorAll('div').forEach(el => {
+                                const style = getComputedStyle(el);
+                                const z = parseInt(style.zIndex) || 0;
+                                if ((style.position === 'fixed' || style.position === 'absolute') &&
+                                    z > 100 && el.querySelector('iframe')) {
+                                    el.remove();
+                                }
+                            });
+                        }""")
+                        await asyncio.sleep(1)
+
+                        # Click login button
+                        try:
+                            login_btn = page.locator('button[type="submit"]').first
+                            await login_btn.click(force=True, timeout=5000)
+                        except Exception:
+                            await page.evaluate("document.querySelector('button[type=\"submit\"]')?.click()")
+
+                        await asyncio.sleep(5)
+                        try:
+                            await page.wait_for_load_state("networkidle", timeout=15000)
+                        except Exception:
+                            pass
+
+                        current_url = page.url
+                        print(f"  URL after login submit: {current_url}")
+                        await page.screenshot(path=str(SCREENSHOTS_DIR / "03d_after_submit.png"))
+
+                        # Handle Stripe Connect page — click "Return to Gumroad"
+                        if "stripe.com" in current_url:
+                            print("  On Stripe Connect page. Looking for 'Return to Gumroad'...")
+                            body_text = await page.inner_text("body")
+                            print(f"  Stripe body: {body_text[:300]}")
+                            await page.screenshot(path=str(SCREENSHOTS_DIR / "03e_stripe_page.png"))
+
+                            # Try clicking "Return to Gumroad" link
+                            return_selectors = [
+                                'a:has-text("Return to Gumroad")',
+                                'a:has-text("return to")',
+                                'a:has-text("Go back")',
+                                'a[href*="gumroad"]',
+                            ]
+                            for sel in return_selectors:
+                                try:
+                                    el = page.locator(sel).first
+                                    if await el.is_visible(timeout=3000):
+                                        href = await el.get_attribute("href")
+                                        print(f"  Found return link: {sel} → {href}")
+                                        await el.click()
+                                        await asyncio.sleep(3)
+                                        await page.wait_for_load_state("networkidle")
+                                        break
+                                except Exception:
+                                    continue
+
+                            current_url = page.url
+                            print(f"  URL after return: {current_url}")
+                            await page.screenshot(path=str(SCREENSHOTS_DIR / "03f_after_stripe_return.png"))
+
+                        # Handle 2FA page if needed
+                        body_text = await page.inner_text("body")
+                        if any(kw in body_text.lower() for kw in ["two-factor", "2fa", "verification code", "authenticat", "one-time"]):
+                            print("  2FA page detected!")
+                            await page.screenshot(path=str(SCREENSHOTS_DIR / "03g_2fa_page.png"))
+
+                            tfa_code = TWO_FA_CODE or ""
+                            for i, arg in enumerate(sys.argv):
+                                if arg == "--2fa" and i + 1 < len(sys.argv):
+                                    tfa_code = sys.argv[i + 1]
+                            if not tfa_code:
+                                tfa_file = Path("/tmp/gumroad_2fa.txt")
+                                if tfa_file.exists():
+                                    tfa_code = tfa_file.read_text().strip()
+
+                            if tfa_code:
+                                print(f"  Entering 2FA code: {tfa_code}")
+                                tfa_selectors = ['input[name*="otp"]', 'input[name*="code"]', 'input[name*="token"]',
+                                                 'input[type="text"]', 'input[type="number"]', 'input[inputmode="numeric"]']
+                                for sel in tfa_selectors:
+                                    try:
+                                        el = page.locator(sel).first
+                                        if await el.is_visible(timeout=2000):
+                                            await el.fill(tfa_code)
+                                            print(f"    Filled via: {sel}")
+                                            break
+                                    except Exception:
+                                        continue
+                                try:
+                                    submit_btn = page.locator('button[type="submit"]').first
+                                    await submit_btn.click()
+                                    await asyncio.sleep(3)
+                                    await page.wait_for_load_state("networkidle")
+                                    current_url = page.url
+                                    print(f"  URL after 2FA: {current_url}")
+                                    await page.screenshot(path=str(SCREENSHOTS_DIR / "03h_after_2fa.png"))
+                                except Exception as e:
+                                    print(f"  2FA submit error: {e}")
+                            else:
+                                print("  No 2FA code! Set GUMROAD_2FA env var or write to /tmp/gumroad_2fa.txt")
+                                await browser.close()
+                                return False
+
+                        # If still on login page, try navigating to products
+                        current_url = page.url
+                        if "login" in current_url:
+                            print("  Still on login. Navigating to products...")
+                            await page.goto("https://gumroad.com/products", wait_until="networkidle")
+                            await asyncio.sleep(2)
+                            current_url = page.url
+                            print(f"  URL at products: {current_url}")
+                            await page.screenshot(path=str(SCREENSHOTS_DIR / "03i_products.png"))
+                    elif token is None:
+                        print("  Failed to solve CAPTCHA. Cannot login.")
+                        await page.screenshot(path=str(SCREENSHOTS_DIR / "03e_captcha_failed.png"))
                         await browser.close()
-                        return await try_cookie_approach()
+                        return False
 
+            # Check final login state
             if "login" not in current_url.lower() or "dashboard" in current_url.lower() or "products" in current_url.lower():
                 print("  Login successful!")
                 return await create_product(page, context, browser)
             else:
                 print("  Login did not redirect. Checking page state...")
-                await page.screenshot(path=str(SCREENSHOTS_DIR / "03c_login_state.png"))
+                await page.screenshot(path=str(SCREENSHOTS_DIR / "03f_login_failed.png"))
                 body_text = await page.inner_text("body")
-                print(f"  Body text snippet: {body_text[:200]}")
+                print(f"  Body text snippet: {body_text[:300]}")
                 await browser.close()
                 return False
 
@@ -182,68 +419,11 @@ async def run():
                 pass
 
 
-async def try_cookie_approach():
-    """Alternative: try to get an authenticated session using the API token."""
-    print("\n=== Trying Cookie-Based Approach ===")
-    from playwright.async_api import async_playwright
-    from playwright_stealth import Stealth
-
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
-                   "--disable-blink-features=AutomationControlled"],
-        )
-        context = await browser.new_context(
-            viewport={"width": 1280, "height": 900},
-            user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        )
-
-        page = await context.new_page()
-        stealth_inst = Stealth()
-        await stealth_inst.apply_stealth_async(page)
-
-        # Try setting the API token as a cookie
-        api_token = os.getenv("GUMROAD_API_KEY", "")
-        if api_token:
-            # Set various possible cookie names
-            for name in ["_gumroad_app_session", "access_token", "token", "_gumroad_session"]:
-                await context.add_cookies([{
-                    "name": name,
-                    "value": api_token,
-                    "domain": ".gumroad.com",
-                    "path": "/",
-                }])
-
-        # Try navigating to dashboard
-        await page.goto("https://app.gumroad.com/products")
-        await page.wait_for_load_state("networkidle")
-        await asyncio.sleep(2)
-        await page.screenshot(path=str(SCREENSHOTS_DIR / "04_cookie_attempt.png"))
-
-        current_url = page.url
-        print(f"  URL after cookie approach: {current_url}")
-
-        if "login" not in current_url.lower():
-            print("  Cookie approach worked!")
-            return await create_product(page, context, browser)
-        else:
-            print("  Cookie approach failed — redirected to login")
-            print("\n  === MANUAL LOGIN REQUIRED ===")
-            print("  Gumroad has CAPTCHA on login that blocks automation.")
-            print("  Options:")
-            print("  1. Owner logs in manually in a browser, exports cookies")
-            print("  2. Owner creates the product manually (2 min)")
-            print("  3. Use a CAPTCHA solving service")
-            await browser.close()
-            return False
-
-
 async def create_product(page, context, browser):
     """Create and publish the product (assumes already logged in)."""
 
     print("\n[2/6] Navigating to new product page...")
-    await page.goto("https://app.gumroad.com/products/new")
+    await page.goto("https://gumroad.com/products/new")
     await page.wait_for_load_state("networkidle")
     await asyncio.sleep(2)
     await page.screenshot(path=str(SCREENSHOTS_DIR / "05_new_product.png"))
@@ -251,7 +431,6 @@ async def create_product(page, context, browser):
 
     # === FILL NAME ===
     print("\n[3/6] Filling product name...")
-    # Try various selectors for the name field
     name_selectors = [
         'input[name="name"]',
         'input[placeholder*="name" i]',
@@ -273,7 +452,6 @@ async def create_product(page, context, browser):
 
     if not name_filled:
         print("  WARNING: Could not find name input")
-        # Dump page structure for debugging
         inputs = await page.locator("input").all()
         for i, inp in enumerate(inputs):
             attrs = await inp.evaluate("""el => ({
@@ -346,7 +524,6 @@ async def create_product(page, context, browser):
                 else:
                     await el.click()
                     await page.keyboard.press("Control+a")
-                    # Type in chunks to avoid issues
                     for line in PRODUCT_DESCRIPTION.split("\n"):
                         await page.keyboard.type(line, delay=5)
                         await page.keyboard.press("Enter")
@@ -357,14 +534,12 @@ async def create_product(page, context, browser):
 
     # === UPLOAD FILE ===
     print("\n[6/6] Uploading PDF...")
-    # Look for file input (might be hidden)
     file_inputs = await page.locator('input[type="file"]').all()
     if file_inputs:
         await file_inputs[0].set_input_files(str(PDF_PATH))
         print(f"  File set: {PDF_PATH.name}")
         await asyncio.sleep(5)
     else:
-        # Try clicking upload area/button first
         upload_triggers = [
             'button:has-text("Upload")',
             'button:has-text("Add file")',
@@ -431,11 +606,11 @@ async def create_product(page, context, browser):
 
     # === VERIFY ===
     import requests
-    api_token = os.getenv("GUMROAD_API_KEY", "")
+    api_token = os.getenv("GUMROAD_OAUTH_TOKEN", "")
     if api_token:
         resp = requests.get(
             "https://api.gumroad.com/v2/products",
-            params={"access_token": api_token},
+            headers={"Authorization": f"Bearer {api_token}"},
         )
         if resp.status_code == 200:
             products = resp.json().get("products", [])
@@ -451,7 +626,7 @@ async def create_product(page, context, browser):
 
 def main():
     print("=" * 60)
-    print("Gumroad Product Publisher (Playwright + Stealth)")
+    print("Gumroad Product Publisher (Playwright + Anti-Captcha)")
     print("=" * 60)
     result = asyncio.run(run())
     print("\n" + "=" * 60)

@@ -154,6 +154,7 @@ class CommsAgent:
         self._app.add_handler(CommandHandler("rollback", self._cmd_rollback))
         self._app.add_handler(CommandHandler("health", self._cmd_health))
         self._app.add_handler(CommandHandler("errors", self._cmd_errors))
+        self._app.add_handler(CommandHandler("balances", self._cmd_balances))
         self._app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_message)
         )
@@ -183,6 +184,7 @@ class CommsAgent:
             BotCommand("rollback", "Откат кода"),
             BotCommand("health", "Проверка здоровья"),
             BotCommand("errors", "Последние ошибки"),
+            BotCommand("balances", "Балансы сервисов"),
         ])
 
         await self._app.start()
@@ -451,8 +453,13 @@ class CommsAgent:
             )
             return
 
-        # 2. Pending approvals — да/нет/✅/❌
+        # 1.5. Natural language shortcuts (balance check, etc.)
         lower = text.strip().lower()
+        if any(kw in lower for kw in ["баланс", "balance", "balances", "остатки", "сколько на счетах", "сколько осталось"]):
+            await self._cmd_balances(update, context)
+            return
+
+        # 2. Pending approvals — да/нет/✅/❌
         if self._pending_approvals:
             if lower in ("да", "yes", "ок", "ok", "approve", "✅", "👍"):
                 await self._cmd_approve(update, context)
@@ -826,6 +833,29 @@ class CommsAgent:
             lines.append(f"  [{e.get('module', '?')}] {e.get('error_type', '?')}: {e.get('message', '?')[:80]}")
         await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
         logger.info("Команда /errors выполнена", extra={"event": "cmd_errors"})
+
+    async def _cmd_balances(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Check balances across all external services."""
+        if await self._reject_stranger(update):
+            return
+        await update.message.reply_text("Проверяю балансы...", reply_markup=self._main_keyboard())
+        try:
+            from modules.balance_checker import BalanceChecker
+            checker = BalanceChecker()
+            balances = await checker.check_all()
+
+            # Add internal VITO spend data
+            internal = {}
+            if self._finance:
+                internal["daily_spent"] = self._finance.get_daily_spent()
+                internal["daily_earned"] = self._finance.get_daily_earned()
+                internal["daily_limit"] = settings.DAILY_LIMIT_USD
+
+            report = checker.format_report(balances, include_internal=internal)
+            await update.message.reply_text(report, reply_markup=self._main_keyboard())
+        except Exception as e:
+            await update.message.reply_text(f"Ошибка проверки балансов: {e}", reply_markup=self._main_keyboard())
+        logger.info("Команда /balances выполнена", extra={"event": "cmd_balances"})
 
     # ── Inline callback ──
 

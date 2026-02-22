@@ -291,6 +291,25 @@ class BrowserAgent(BaseAgent):
             except Exception:
                 pass
 
+    async def solve_captcha(self, page) -> Optional[str]:
+        """Detect and solve CAPTCHA on a Playwright page.
+
+        Uses the global CaptchaSolver singleton. Returns the token if solved, None otherwise.
+        Works with reCAPTCHA v2, v3, and hCaptcha.
+        """
+        try:
+            from modules.captcha_solver import CaptchaSolver
+            solver = CaptchaSolver.get_instance()
+            token = await solver.solve_playwright_recaptcha(page)
+            if token:
+                logger.info(f"CAPTCHA solved on {page.url}", extra={"event": "captcha_solved"})
+            else:
+                logger.warning(f"CAPTCHA solve failed on {page.url}", extra={"event": "captcha_failed"})
+            return token
+        except Exception as e:
+            logger.error(f"CAPTCHA solve error: {e}", extra={"event": "captcha_error"})
+            return None
+
     async def execute_task(self, task_type: str, **kwargs) -> TaskResult:
         self._status = AgentStatus.RUNNING
         try:
@@ -304,6 +323,12 @@ class BrowserAgent(BaseAgent):
                 return await self.fill_form(kwargs.get("url", ""), kwargs.get("data", {}))
             elif task_type == "upload_file":
                 return await self.upload_file(kwargs.get("url", ""), kwargs.get("file_path", ""))
+            elif task_type == "solve_captcha":
+                page = kwargs.get("page")
+                if not page:
+                    return TaskResult(success=False, error="No page provided for solve_captcha")
+                token = await self.solve_captcha(page)
+                return TaskResult(success=bool(token), output=token)
             return TaskResult(success=False, error=f"Неизвестный task_type: {task_type}")
         except Exception as e:
             return TaskResult(success=False, error=str(e))
