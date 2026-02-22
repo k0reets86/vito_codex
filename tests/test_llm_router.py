@@ -76,7 +76,7 @@ def test_select_model_research(router):
 
 def test_select_model_routine(router):
     result = router.select_model(TaskType.ROUTINE)
-    assert "gemini" in result.model.model_id.lower()  # Gemini Flash must be first (free tier)
+    assert "gemini" in result.model.model_id.lower()  # Gemini 2.5 Flash Lite must be first (free tier)
 
 
 def test_select_model_self_heal(router):

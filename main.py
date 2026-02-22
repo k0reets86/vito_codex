@@ -11,9 +11,58 @@
 """
 
 import asyncio
+import atexit
+import fcntl
+import os
 import signal
 import sys
 from datetime import datetime, timezone
+
+# ── Защита от дублирования процессов ──
+PIDFILE = "/tmp/vito_agent.pid"
+
+def _acquire_pidlock() -> int:
+    """Acquire exclusive PID lock. Kills stale process if pidfile exists."""
+    # Check for stale PID
+    if os.path.exists(PIDFILE):
+        try:
+            with open(PIDFILE) as f:
+                old_pid = int(f.read().strip())
+            # Check if old process is still alive
+            os.kill(old_pid, 0)
+            # Still alive — kill it
+            print(f"[VITO] Killing stale process PID {old_pid}")
+            os.kill(old_pid, signal.SIGTERM)
+            import time
+            time.sleep(2)
+            try:
+                os.kill(old_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        except (ValueError, ProcessLookupError, PermissionError):
+            pass  # stale pidfile, old process gone
+
+    # Write our PID
+    fd = open(PIDFILE, "w")
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("[VITO] Another instance is running. Exiting.")
+        sys.exit(1)
+    fd.write(str(os.getpid()))
+    fd.flush()
+    # Keep fd open to hold the lock
+    return fd  # type: ignore
+
+_pidlock_fd = _acquire_pidlock()
+
+def _cleanup_pidfile():
+    try:
+        os.unlink(PIDFILE)
+    except OSError:
+        pass
+
+atexit.register(_cleanup_pidfile)
 
 from comms_agent import CommsAgent
 from config.logger import get_logger

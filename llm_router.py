@@ -1,7 +1,7 @@
 """LLM Router — умный выбор модели для каждой задачи.
 
 Градация моделей (от дешёвых к дорогим):
-  routine   → Gemini Flash (бесплатный, чат, сообщения, простые задачи)
+  routine   → Gemini 2.5 Flash Lite (бесплатный, чат, сообщения, простые задачи)
   content   → Claude Sonnet 4.6 (качественные тексты)
   code      → OpenAI o3 (код, большие изменения)
   research  → Perplexity Sonar Pro (исследования с источниками)
@@ -57,8 +57,8 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
     # -- Бесплатный / рутинный уровень --
     "gemini-flash": ModelConfig(
         provider="google",
-        model_id="gemini-2.0-flash",
-        display_name="Gemini 2.0 Flash",
+        model_id="gemini-2.5-flash-lite",
+        display_name="Gemini 2.5 Flash Lite",
         cost_per_1k_input=0.0,
         cost_per_1k_output=0.0,
         max_tokens=8192,
