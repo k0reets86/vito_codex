@@ -209,47 +209,44 @@ class CommsAgent:
     async def _send_response(self, update: Update, text: str) -> None:
         """Send response with smart file handling.
 
-        Detects file paths in text → sends actual file content inline or as document.
+        Detects file paths in text → reads file content and sends inline.
+        Short files (<500 chars): full content in chat.
+        Long files: first 500 chars + "полный текст сохранён в <relative path>".
+        NEVER sends raw file paths to owner.
         """
         import re
 
-        file_pattern = re.compile(r"(/home/vito/vito-agent/\S+\.(?:txt|md|json|py|csv))")
+        file_pattern = re.compile(r"(/home/vito/vito-agent/\S+\.(?:txt|md|json|py|csv|log))")
         found_files = file_pattern.findall(text)
 
-        # Clean file paths from message text
+        # Replace file paths with inline content in message
         clean_text = text
         for fp in found_files:
-            # Remove "📎 /path" patterns and bare paths
-            clean_text = clean_text.replace(f"\U0001f4ce {fp}", "").replace(fp, "")
-        # Remove empty lines left over
+            path = Path(fp)
+            replacement = ""
+            if path.exists():
+                try:
+                    content = path.read_text(encoding="utf-8").strip()
+                    if content:
+                        rel_path = fp.replace("/home/vito/vito-agent/", "")
+                        if len(content) <= 500:
+                            replacement = f"\n{content}\n"
+                        else:
+                            replacement = f"\n{content[:500]}...\n(полный текст: {rel_path})\n"
+                except Exception:
+                    pass
+            # Remove "📎 /path" patterns and bare paths, insert content
+            clean_text = clean_text.replace(f"\U0001f4ce {fp}", replacement)
+            clean_text = clean_text.replace(fp, replacement)
+
+        # Remove excessive empty lines
         clean_text = "\n".join(line for line in clean_text.split("\n") if line.strip())
 
-        # Send main text (respect Telegram 4096 char limit)
+        # Send (respect Telegram 4096 char limit)
         if clean_text:
             if len(clean_text) > 4000:
                 clean_text = clean_text[:4000] + "..."
             await update.message.reply_text(clean_text, reply_markup=self._main_keyboard())
-
-        # Send each file as inline content or document
-        for fp in found_files:
-            path = Path(fp)
-            if not path.exists():
-                continue
-            try:
-                content = path.read_text(encoding="utf-8").strip()
-                if not content:
-                    continue
-                if len(content) < 3500:
-                    # Short file — show inline
-                    await update.message.reply_text(
-                        f"\U0001f4c4 {path.name}:\n\n{content}",
-                        reply_markup=self._main_keyboard(),
-                    )
-                else:
-                    # Long file — send as Telegram document
-                    await self.send_file(fp, caption=path.name)
-            except Exception as e:
-                logger.warning(f"Cannot send file {fp}: {e}", extra={"event": "file_inline_error"})
 
     async def _reject_stranger(self, update: Update) -> bool:
         """Отклоняет сообщения от не-владельцев."""
@@ -874,16 +871,52 @@ class CommsAgent:
 
     # ── API для других модулей ──
 
+    def _inline_file_paths(self, text: str) -> str:
+        """Replace file paths in text with inline content.
+
+        Short files (<500 chars): full content.
+        Long files: first 500 chars + relative path reference.
+        """
+        import re
+
+        file_pattern = re.compile(r"(/home/vito/vito-agent/\S+\.(?:txt|md|json|py|csv|log))")
+        found = file_pattern.findall(text)
+        if not found:
+            return text
+
+        result = text
+        for fp in found:
+            path = Path(fp)
+            replacement = ""
+            if path.exists():
+                try:
+                    content = path.read_text(encoding="utf-8").strip()
+                    if content:
+                        rel_path = fp.replace("/home/vito/vito-agent/", "")
+                        if len(content) <= 500:
+                            replacement = f"\n{content}\n"
+                        else:
+                            replacement = f"\n{content[:500]}...\n(полный текст: {rel_path})\n"
+                except Exception:
+                    pass
+            result = result.replace(f"\U0001f4ce {fp}", replacement)
+            result = result.replace(fp, replacement)
+
+        return "\n".join(line for line in result.split("\n") if line.strip())
+
     async def send_message(self, text: str) -> bool:
-        """Отправляет сообщение владельцу."""
+        """Отправляет сообщение владельцу. File paths auto-inlined."""
         if not self._bot:
             logger.warning("Бот не запущен — сообщение не отправлено", extra={"event": "send_no_bot"})
             return False
         try:
-            await self._bot.send_message(chat_id=self._owner_id, text=text)
+            clean = self._inline_file_paths(text)
+            if len(clean) > 4000:
+                clean = clean[:4000] + "..."
+            await self._bot.send_message(chat_id=self._owner_id, text=clean)
             logger.info(
-                f"Сообщение отправлено ({len(text)} символов)",
-                extra={"event": "message_sent", "context": {"length": len(text)}},
+                f"Сообщение отправлено ({len(clean)} символов)",
+                extra={"event": "message_sent", "context": {"length": len(clean)}},
             )
             return True
         except Exception as e:

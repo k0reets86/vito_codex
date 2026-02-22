@@ -32,8 +32,15 @@ class EtsyPlatform(BasePlatform):
         return self._session
 
     def _headers(self, write: bool = False) -> dict[str, str]:
-        """Headers for API requests. write=True requires OAuth token."""
-        headers = {"x-api-key": self._keystring}
+        """Headers for API requests.
+
+        Etsy API v3 requires x-api-key = keystring:shared_secret.
+        write=True requires OAuth token.
+        """
+        api_key = self._keystring
+        if self._shared_secret:
+            api_key = f"{self._keystring}:{self._shared_secret}"
+        headers = {"x-api-key": api_key}
         if write and self._oauth_token:
             headers["Authorization"] = f"Bearer {self._oauth_token}"
         return headers

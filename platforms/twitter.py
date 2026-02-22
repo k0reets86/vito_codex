@@ -163,11 +163,37 @@ class TwitterPlatform(BasePlatform):
                 else:
                     error = data.get("detail", data.get("title", str(resp.status)))
                     logger.warning(f"Tweet failed: {error}", extra={"event": "twitter_publish_fail"})
+
+                    # Save to file if permissions/billing issue — don't claim published
+                    if "permission" in error.lower() or "oauth1" in error.lower() or "credit" in error.lower() or resp.status == 403:
+                        return await self._save_draft_tweet(text, error)
+
                     return {"platform": "twitter", "status": "error", "error": error}
 
         except Exception as e:
             logger.error(f"Twitter publish error: {e}", exc_info=True)
             return {"platform": "twitter", "status": "error", "error": str(e)}
+
+    async def _save_draft_tweet(self, text: str, error: str) -> dict:
+        """Save tweet to file when write permissions are not available."""
+        from pathlib import Path
+        import time as _time
+
+        out = Path("/home/vito/vito-agent/output/tweets")
+        out.mkdir(parents=True, exist_ok=True)
+        fp = out / f"tweet_{int(_time.time())}.txt"
+        fp.write_text(text, encoding="utf-8")
+        logger.info(
+            f"Tweet saved to file (no write perms): {fp}",
+            extra={"event": "twitter_draft_saved", "context": {"path": str(fp)}},
+        )
+        return {
+            "platform": "twitter",
+            "status": "draft_saved",
+            "file_path": str(fp),
+            "text": text,
+            "note": f"Готово к публикации, жду разрешения. Ошибка: {error}",
+        }
 
     async def get_analytics(self) -> dict:
         """Get basic account metrics."""

@@ -840,31 +840,44 @@ class DecisionLoop:
 
         daily_tasks = [
             {
-                "title": "Trend research & digital product idea",
+                "title": "Full product cycle: research → create → prepare",
                 "description": (
-                    "1. Scan Reddit RSS (r/entrepreneur, r/passive_income, r/ecommerce). "
-                    "2. Find 1 concrete digital product idea for US/CA/EU market. "
-                    "3. Create product description IN ENGLISH, save to output/products/. "
-                    "4. Send Telegram report to owner with the idea for approval. "
-                    "5. DO NOT publish without owner approval."
+                    "FULL PRODUCT PIPELINE (all steps in one report):\n"
+                    "1. NICHE ANALYSIS: Scan Reddit RSS + trends. Find niche with high demand, low competition.\n"
+                    "2. COMPETITOR CHECK: Find 3 competitors on Gumroad/Etsy, analyze prices and sales.\n"
+                    "3. PRODUCT CHOICE: Pick 1 specific digital product (ebook/template/guide) for US/EU market.\n"
+                    "4. CONTENT: Write full product content IN ENGLISH, save to output/products/.\n"
+                    "5. SEO: Title, description, tags optimized for marketplace search.\n"
+                    "6. PRICING: Set price based on competitor analysis ($5-29 range).\n"
+                    "7. PUBLISH PLAN: Which platforms (Gumroad/Ko-fi), launch timeline.\n"
+                    "8. REPORT: Send ONE complete report to owner via Telegram with ALL above.\n"
+                    "9. DO NOT publish without owner approval. DO NOT send separate pieces."
                 ),
             },
             {
-                "title": "Twitter content & product SEO",
+                "title": "Content + social media package",
                 "description": (
-                    "1. Create 3 English tweets for @bot_vito on AI/business topics. "
-                    "2. Save tweets to output/social/ for owner review. "
-                    "3. Check SEO of existing product descriptions on Gumroad. "
-                    "4. Report results to owner via Telegram."
+                    "FULL CONTENT PIPELINE (all steps in one report):\n"
+                    "1. Pick topic from existing product ideas or trending niche.\n"
+                    "2. Write article/guide (1500+ words) IN ENGLISH, save to output/articles/.\n"
+                    "3. Create 3-5 tweets for @bot_vito promoting the content.\n"
+                    "4. Save tweets to output/tweets/ (not published until approved).\n"
+                    "5. SEO keywords for the article.\n"
+                    "6. REPORT: Send ONE complete report to owner via Telegram.\n"
+                    "7. DO NOT publish without owner approval."
                 ),
             },
             {
-                "title": "Competitor analysis & niche research",
+                "title": "Market analysis + product improvement",
                 "description": (
-                    "1. Find 3 competitors on Gumroad/Etsy in digital products niche. "
-                    "2. Analyze their prices, descriptions, sales volume. "
-                    "3. Find a niche with high demand and low competition. "
-                    "4. Prepare product proposal IN ENGLISH for owner approval."
+                    "FULL ANALYSIS PIPELINE (all steps in one report):\n"
+                    "1. Analyze existing products on Gumroad (if any). Check views, sales.\n"
+                    "2. Find 5 competitors in same niche, compare prices and features.\n"
+                    "3. Identify gaps: what competitors don't offer that we can.\n"
+                    "4. Propose improvements or new product variant.\n"
+                    "5. Updated pricing strategy based on market data.\n"
+                    "6. REPORT: Send ONE complete report to owner via Telegram.\n"
+                    "7. DO NOT change anything without owner approval."
                 ),
             },
         ]
