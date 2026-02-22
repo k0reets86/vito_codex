@@ -25,7 +25,7 @@ from llm_router import LLMRouter, TaskType
 from memory.memory_manager import MemoryManager
 
 TICK_INTERVAL = 300  # 5 минут
-STEP_TIMEOUT = 60    # секунд на один шаг
+STEP_TIMEOUT = 120   # секунд на один шаг (LLM content needs time)
 STEP_MAX_RETRIES = 3 # попыток на один шаг
 
 logger = get_logger("decision_loop", agent="decision_loop")
@@ -819,8 +819,8 @@ class DecisionLoop:
                 )
                 return
 
-        # 2. Daily fallback — once per 30 min (6 ticks), only if no calendar
-        if self._consecutive_idle < 6 or self._consecutive_idle % 6 != 0:
+        # 2. Daily fallback — once per 10 min (2 ticks), only if no calendar
+        if self._consecutive_idle < 2 or self._consecutive_idle % 6 != 0:
             return
 
         import hashlib
@@ -829,7 +829,8 @@ class DecisionLoop:
         # Check we haven't already created a daily task today
         already_today = any(
             g.source == "proactive_daily"
-            and g.created_at and today_str in g.created_at
+            and g.created_at
+            and today_str in (g.created_at if isinstance(g.created_at, str) else g.created_at.isoformat())
             for g in existing
         )
         if already_today:

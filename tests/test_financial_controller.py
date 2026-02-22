@@ -98,9 +98,11 @@ def test_check_expense_notify_threshold(fc):
 
 
 def test_check_expense_remaining(fc):
+    from config.settings import settings
     fc.record_expense(3.0, ExpenseCategory.API)
     result = fc.check_expense(2.0)
-    assert result["remaining"] == 5.0  # 10 - 3 - 2 = 5
+    expected_remaining = max(settings.DAILY_LIMIT_USD - 3.0 - 2.0, 0)
+    assert result["remaining"] == expected_remaining
 
 
 def test_check_monthly_card_ok(fc):

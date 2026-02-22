@@ -24,7 +24,10 @@ class TestIntentDetection:
 
     def test_no_rule_match(self, engine):
         assert engine._detect_intent_rules("Привет, как дела?") is None
-        assert engine._detect_intent_rules("Сделай отчёт") is None
+
+    def test_goal_request_intent(self, engine):
+        # "Сделай" is a goal request keyword
+        assert engine._detect_intent_rules("Сделай отчёт") == Intent.GOAL_REQUEST
 
     @pytest.mark.asyncio
     async def test_llm_intent_question(self, engine):

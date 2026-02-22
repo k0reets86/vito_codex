@@ -10,9 +10,9 @@ from goal_engine import GoalEngine, GoalPriority, GoalStatus
 
 
 @pytest.fixture
-def loop_deps():
-    """Зависимости DecisionLoop с моками."""
-    ge = GoalEngine()
+def loop_deps(tmp_path):
+    """Зависимости DecisionLoop с моками и изолированной SQLite."""
+    ge = GoalEngine(sqlite_path=str(tmp_path / "dl_test.db"))
     llm = MagicMock()
     llm.check_daily_limit.return_value = True
     llm.get_daily_spend.return_value = 0.0
@@ -20,6 +20,7 @@ def loop_deps():
 
     mem = MagicMock()
     mem.search_knowledge.return_value = []
+    mem.search_skills = MagicMock(return_value=[])
     mem.store_knowledge = MagicMock()
     mem.save_skill = MagicMock()
     mem.log_error = MagicMock()
@@ -123,17 +124,17 @@ async def test_idle_no_action_first_time(dl):
 
 
 @pytest.mark.asyncio
-async def test_idle_creates_research_every_3(dl):
-    dl._consecutive_idle = 6  # кратно 3
+async def test_idle_creates_research_every_6(dl):
+    dl._consecutive_idle = 6  # кратно 6
     await dl._idle_action()
     assert len(dl.goal_engine._goals) == 1
     goal = list(dl.goal_engine._goals.values())[0]
     assert goal.priority == GoalPriority.BACKGROUND
-    assert goal.source == "decision_loop"
+    assert goal.source == "proactive_daily"
 
 
 @pytest.mark.asyncio
-async def test_idle_skips_non_multiple_of_3(dl):
+async def test_idle_skips_non_multiple_of_6(dl):
     dl._consecutive_idle = 4
     await dl._idle_action()
     assert len(dl.goal_engine._goals) == 0

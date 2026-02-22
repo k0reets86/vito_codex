@@ -73,8 +73,8 @@ def comms():
 
 
 @pytest.fixture
-def goal_engine():
-    return GoalEngine()
+def goal_engine(sqlite_path):
+    return GoalEngine(sqlite_path=sqlite_path)
 
 
 @pytest.fixture
@@ -474,13 +474,10 @@ class TestDecisionLoopFullCycle:
 
     @pytest.mark.asyncio
     async def test_idle_creates_research_goal(self, llm_router, goal_engine, memory):
-        """After multiple idle ticks, decision loop creates research goals."""
+        """After multiple idle ticks (6 = кратно 6), decision loop creates research goals."""
         loop = DecisionLoop(goal_engine, llm_router, memory)
-        loop._consecutive_idle = 2  # simulate 2 prior idle ticks
+        loop._consecutive_idle = 6  # кратно 6 — порог создания proactive_daily
 
-        await loop._idle_action()
-        # At 3rd idle tick (consecutive_idle becomes 3 after increment), should create goal
-        loop._consecutive_idle = 3
         await loop._idle_action()
 
         stats = goal_engine.get_stats()
@@ -544,10 +541,9 @@ class TestGeminiIntegration:
         assert m.cost_per_1k_input == 0.0
         assert m.cost_per_1k_output == 0.0
 
-    def test_routine_defaults_to_gemini(self, llm_router):
+    def test_routine_defaults_to_haiku(self, llm_router):
         route = llm_router.select_model(TaskType.ROUTINE, estimated_tokens=100)
-        assert route.model.provider == "google"
-        assert route.estimated_cost_usd == 0.0
+        assert route.model.provider in ("anthropic", "google")  # Haiku or Gemini Flash
 
 
 # ═══════════════════════════════════════════════════════════

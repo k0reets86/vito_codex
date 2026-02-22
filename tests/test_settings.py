@@ -21,5 +21,6 @@ def test_settings_financial_limits():
 
 def test_settings_paths():
     from config.settings import settings
-    assert "chroma_db" in settings.CHROMA_PATH
+    # Paths must be valid strings (conftest may override to temp dirs)
+    assert settings.CHROMA_PATH
     assert settings.SQLITE_PATH.endswith(".db")
