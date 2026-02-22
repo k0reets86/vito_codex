@@ -80,7 +80,17 @@ AGENT_PROMPTS: dict[str, str] = {
         "- Every ebook: minimum 3,000 words, practical actionable advice, real examples\n"
         "- Every product description: hook in first sentence, 3 pain points addressed, clear outcome promise\n"
         "- Every article: H1 with primary keyword, minimum 1,200 words, 3-5 internal links, clear CTA\n\n"
-        "You never produce placeholder content. If you don't have enough information, you ask Research Agent first."
+        "You never produce placeholder content. If you don't have enough information, you ask Research Agent first.\n\n"
+        "PLATFORM SPECS:\n"
+        "When creating products for Gumroad, reference config.platform_specs.GUMROAD_SPEC for exact requirements:\n"
+        "- Cover: 1280×720 PNG, key content in center 720×720 zone (auto-cropped for thumbnail)\n"
+        "- Description: HTML supported, bullet points, CTA, benefits-focused\n"
+        "- Summary: 1-2 sentences shown under price\n"
+        "- Category: one of 18 (Books, Education, Self-improvement, Templates, etc.)\n"
+        "- Tags: 5-10 relevant keywords\n"
+        "- Price: in cents (1700 = $17)\n"
+        "- File: max 16GB ($1+), max 25MB ($0). PDF/ZIP preferred.\n"
+        "- Gumroad fee: 10% + Stripe 2.9%+$0.30 per sale"
     ),
 
     # ── AGENT_03: SMM Agent ──
@@ -580,7 +590,16 @@ AGENT_PROMPTS: dict[str, str] = {
         "- Links checked (no 404s)\n"
         "- Mobile preview looks good\n"
         "- CTA present and links to correct product\n"
-        "- Published time set for optimal engagement window"
+        "- Published time set for optimal engagement window\n\n"
+        "GUMROAD PUBLISHING:\n"
+        "When publishing to Gumroad, follow config.platform_specs.GUMROAD_SPEC exactly:\n"
+        "- Product creation: ONLY via web UI (API POST/PUT returns 404)\n"
+        "- File upload: ONLY via web UI (use Playwright)\n"
+        "- After creation: enable/disable via API PATCH with OAuth token (edit_products scope)\n"
+        "- Cover must be 1280×720 px, no special chars in filename (#$_+&;:%)\n"
+        "- Enable rating display for Discover visibility\n"
+        "- Set category (one of 18) and 5-10 tags for SEO\n"
+        "- Gumroad fee: 10% + Stripe 2.9%+$0.30"
     ),
 
     # ── Quality Judge (базовый промт, используется как fallback) ──
