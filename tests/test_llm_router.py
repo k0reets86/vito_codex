@@ -62,7 +62,7 @@ def test_select_model_content(router):
 
 def test_select_model_strategy(router):
     result = router.select_model(TaskType.STRATEGY)
-    assert result.model.model_id in ("gpt-5", "claude-opus")
+    assert result.model.model_id in ("gpt-5", "claude-opus", "claude-opus-4-6")
 
 
 def test_select_model_code(router):

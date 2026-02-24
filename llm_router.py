@@ -1,13 +1,12 @@
 """LLM Router — умный выбор модели для каждой задачи.
 
-Градация моделей (от дешёвых к дорогим):
-  routine   → Gemini 2.5 Flash Lite (бесплатный, чат, сообщения, простые задачи)
-  content   → Claude Sonnet 4.6 (качественные тексты)
-  code      → OpenAI o3 (код, большие изменения)
+Целевые роли моделей:
+  routine   → Gemini 2.5 Flash Lite (бесплатный, чат/рутина/классификация)
+  content   → Claude Sonnet 4.6 (качественные коммерческие тексты/карточки товаров)
+  code      → OpenAI o3 (кодинг, рефакторинг, сложные правки)
+  self_heal → OpenAI o3 (самолечение/исправления), далее fallback
   research  → Perplexity Sonar Pro (исследования с источниками)
-  self_heal → OpenAI o3 → Claude Opus (код-фиксы, серьёзные правки)
-  strategy  → Claude Opus 4.6 (реализация после brainstorm)
-              Brainstorm: Sonnet → Perplexity → GPT-5+Opus+Perplexity → Opus (через JudgeProtocol)
+  strategy  → Claude Opus 4.6 (стратегия), а мультиролевой brainstorm — через JudgeProtocol
 
 Прямые API предпочтительнее. OpenRouter — только как fallback.
 """
@@ -130,20 +129,14 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
 }
 
 # Маппинг: тип задачи → приоритетный список моделей (первая = default, остальные = fallback)
-#
-# Gemini Flash (бесплатный) → рутина, чат, сообщения
-# Haiku / GPT-4o-mini       → умеренные задачи (fallback для рутины)
-# Sonnet 4.6                → качественный контент
-# o3 (Codex)                → код и self-healing
-# Opus 4.6                  → стратегия и большие изменения
-# Brainstorm (Sonnet → Perplexity → GPT-5+Opus+Perplexity → Opus) → через JudgeProtocol
+# Важно: для коммерческих текстов first = Sonnet, для кода/self-heal first = o3.
 TASK_MODEL_MAP: dict[TaskType, list[str]] = {
-    TaskType.ROUTINE: ["gemini-flash"],
-    TaskType.CONTENT: ["claude-sonnet"],
-    TaskType.CODE: ["gpt-o3"],
-    TaskType.RESEARCH: ["perplexity"],
-    TaskType.STRATEGY: ["gpt-5"],
-    TaskType.SELF_HEAL: ["gpt-o3"],
+    TaskType.ROUTINE: ["gemini-flash", "gpt-4o-mini", "claude-haiku"],
+    TaskType.CONTENT: ["claude-sonnet", "claude-haiku", "gemini-flash"],
+    TaskType.CODE: ["gpt-o3", "claude-sonnet", "gpt-5"],
+    TaskType.RESEARCH: ["perplexity", "gemini-flash", "claude-sonnet"],
+    TaskType.STRATEGY: ["claude-opus", "gpt-5", "claude-sonnet"],
+    TaskType.SELF_HEAL: ["gpt-o3", "claude-sonnet", "gpt-5"],
 }
 
 
