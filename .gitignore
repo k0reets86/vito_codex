@@ -1,11 +1,9 @@
 .env
+venv/
 __pycache__/
 *.pyc
-.pytest_cache/
-logs/
-memory/chroma_db/
-memory/vito_local.db
-.claude/
-backups/
+*.db
+*.sqlite
+*.log
+chroma_db/
 output/
-<MagicMock */
