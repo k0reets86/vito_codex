@@ -7,3 +7,8 @@ __pycache__/
 *.log
 chroma_db/
 output/
+.claude/
+backups/
+input/
+logs/
+<MagicMock*/
