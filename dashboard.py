@@ -9,7 +9,7 @@ import os
 import sqlite3
 import subprocess
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -61,6 +61,15 @@ def _html_table(headers, rows) -> str:
         "<tr>" + "".join(f"<td>{html.escape(str(c))}</td>" for c in r) + "</tr>" for r in rows
     )
     return f"<table><thead><tr>{th}</tr></thead><tbody>{tr}</tbody></table>"
+
+
+def _status_dot(status: str) -> str:
+    s = (status or "").lower()
+    if s in {"active", "running", "ok"}:
+        return "good"
+    if s in {"failed", "inactive", "error"}:
+        return "bad"
+    return "warn"
 
 
 def _system_status():
@@ -134,6 +143,24 @@ def _finance_kpi():
     return rows
 
 
+def _finance_summary(kpi_rows: list[tuple]) -> dict:
+    spent = 0.0
+    for row in kpi_rows:
+        try:
+            spent += float(row[1] or 0)
+        except Exception:
+            pass
+    env = _read_env()
+    try:
+        limit = float(env.get("DAILY_LIMIT_USD", "3") or 3)
+    except Exception:
+        limit = 3.0
+    earned = 0.0
+    total = earned - spent
+    pct = min(100.0, (spent / limit) * 100.0) if limit > 0 else 0.0
+    return {"spent": spent, "earned": earned, "total": total, "limit": limit, "pct": pct}
+
+
 def _recent_events():
     lines = []
     if LOG_DIR.exists():
@@ -149,9 +176,52 @@ def _recent_events():
     return lines[-50:]
 
 
+def _format_size(size: int) -> str:
+    units = ["B", "KB", "MB", "GB"]
+    v = float(size)
+    for u in units:
+        if v < 1024.0 or u == units[-1]:
+            return f"{v:.1f}{u}"
+        v /= 1024.0
+    return f"{size}B"
+
+
+def _module_status(name: str) -> str:
+    lower = name.lower()
+    if "core" in lower or "decision" in lower or "memory" in lower or "router" in lower:
+        return "active"
+    if "error" in lower or "fail" in lower:
+        return "error"
+    return "idle"
+
+
+def _platform_meta(filename: str) -> tuple[str, str]:
+    name = filename.replace(".py", "").lower()
+    mapping = [
+        ("gumroad", "🛒"),
+        ("etsy", "🧶"),
+        ("shopify", "🛍️"),
+        ("amazon", "📚"),
+        ("kdp", "📚"),
+        ("youtube", "▶️"),
+        ("wordpress", "📰"),
+        ("medium", "✍️"),
+        ("twitter", "🐦"),
+        ("kofi", "☕"),
+        ("threads", "🧵"),
+        ("instagram", "📸"),
+        ("linkedin", "💼"),
+        ("pinterest", "📌"),
+    ]
+    for key, icon in mapping:
+        if key in name:
+            return icon, key
+    return "🌐", name
+
+
 HTML_TEMPLATE = Template(r"""
 <!doctype html>
-<html lang="en">
+<html lang="ru">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -255,6 +325,43 @@ HTML_TEMPLATE = Template(r"""
     .dot.good { background: var(--good); }
     .dot.bad { background: var(--bad); }
     .dot.warn { background: var(--warn); }
+    .metrics { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:10px; margin-bottom:10px; }
+    .metric {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      background: #10151c;
+    }
+    .metric .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+    .metric .v { font-size: 16px; font-weight: 700; margin-top: 4px; }
+    .cards { display:grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }
+    .mini-card {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      background: #10151c;
+    }
+    .mini-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+    .mini-title { font-weight: 700; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+    .mini-value { font-size: 22px; font-weight: 800; }
+    .agent-grid { display:grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; margin-bottom: 10px; }
+    .agent-card {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px;
+      background: #10151c;
+    }
+    .agent-card .name { font-weight: 700; font-size: 13px; word-break: break-word; }
+    .agent-card .meta { color: var(--muted); font-size: 11px; margin-top: 4px; }
+    .task {
+      border: 1px solid #2f3f57;
+      border-radius: 8px;
+      padding: 10px;
+      background: #112033;
+      margin-bottom: 10px;
+    }
+    .progress { width: 100%; background: #0b0e12; border:1px solid var(--border); border-radius: 999px; height: 8px; overflow: hidden; }
+    .progress > div { height: 100%; background: linear-gradient(90deg,#00ff88,#1fbf8f); }
     table { width: 100%; border-collapse: collapse; font-size: 12px; }
     th, td { padding: 8px 6px; border-bottom: 1px solid var(--border); text-align: left; }
     th { color: var(--muted); font-weight: 700; }
@@ -272,6 +379,9 @@ HTML_TEMPLATE = Template(r"""
     .section { scroll-margin-top: 16px; }
     @media (max-width: 1200px) {
       .grid { grid-template-columns: 1fr; }
+      .metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }
+      .cards { grid-template-columns: 1fr; }
+      .agent-grid { grid-template-columns: 1fr; }
     }
     @media (max-width: 900px) {
       .layout { grid-template-columns: 1fr; }
@@ -303,94 +413,99 @@ HTML_TEMPLATE = Template(r"""
     <aside class="sidebar">
       <div class="logo">VITO</div>
       <nav class="nav">
-        <a class="active" href="#status">Status</a>
-        <a href="#agents">Agents</a>
-        <a href="#goals">Goals</a>
-        <a href="#platforms">Platforms</a>
-        <a href="#finance">Finance</a>
-        <a href="#events">Events</a>
-        <a href="#config">Config</a>
-        <a href="#output">Output</a>
+        <a class="active" href="#status">Статус</a>
+        <a href="#agents">Агенты</a>
+        <a href="#goals">Цели</a>
+        <a href="#platforms">Платформы</a>
+        <a href="#finance">Финансы</a>
+        <a href="#events">События</a>
+        <a href="#config">Конфиг</a>
+        <a href="#output">Файлы</a>
       </nav>
     </aside>
     <main class="main">
       <div class="header">
         <div class="title">VITO Dashboard</div>
-        <div class="meta">Last updated: $updated · Auto-refresh in <span id="countdown">30s</span></div>
+        <div class="meta">Обновлено: $updated · Автообновление через <span id="countdown">30s</span></div>
       </div>
 
       <div class="grid">
         <section id="status" class="card section">
           <div class="card-header">
-            <div class="card-title">✅ System Status</div>
+            <div class="card-title">✅ Состояние системы</div>
             <div class="badge"><span class="dot $status_dot"></span> $status_badge</div>
           </div>
+          $status_metrics
+          $current_task
           $system_status
         </section>
 
         <section id="agents" class="card section">
           <div class="card-header">
-            <div class="card-title">🤖 Agents Status</div>
-            <div class="badge">modules</div>
+            <div class="card-title">🤖 Агенты</div>
+            <div class="badge">$agents_count модулей</div>
           </div>
+          $agents_cards
           $agents_status
         </section>
 
         <section id="goals" class="card section">
           <div class="card-header">
-            <div class="card-title">🎯 Goals (active)</div>
-            <div class="badge">pipeline</div>
+            <div class="card-title">🎯 Активные цели</div>
+            <div class="badge">$goals_count</div>
           </div>
           $goals
         </section>
 
         <section id="platforms" class="card section">
           <div class="card-header">
-            <div class="card-title">📋 Platforms</div>
-            <div class="badge">registry</div>
+            <div class="card-title">📋 Платформы</div>
+            <div class="badge">$platforms_count</div>
           </div>
+          $platform_cards
           $platforms
         </section>
 
         <section id="finance" class="card section">
           <div class="card-header">
-            <div class="card-title">💰 KPI / Finance</div>
-            <div class="badge">last 7d</div>
+            <div class="card-title">💰 KPI / Финансы</div>
+            <div class="badge">последние 7 дней</div>
           </div>
+          $finance_cards
           $kpi
         </section>
 
         <section id="events" class="card section">
           <div class="card-header">
-            <div class="card-title">⚠️ Recent Events</div>
-            <div class="badge">last 50</div>
+            <div class="card-title">⚠️ Последние события</div>
+            <div class="badge">последние 50</div>
           </div>
           <pre>$events</pre>
         </section>
 
         <section id="config" class="card section">
           <div class="card-header">
-            <div class="card-title">⚙️ Config (.env)</div>
-            <div class="badge">write safe</div>
+            <div class="card-title">⚙️ Конфиг (.env)</div>
+            <div class="badge">безопасная запись</div>
           </div>
           $config
           <form method="POST" action="/config" style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
             <input name="key" placeholder="KEY" style="flex:1; min-width:160px;" />
             <input name="value" placeholder="VALUE" style="flex:1; min-width:160px;" />
-            <button type="submit">Set</button>
+            <button type="submit">Сохранить</button>
           </form>
-          <div style="margin-top:8px; font-size:11px; color:var(--muted)">Secrets are write-only below.</div>
+          <div style="margin-top:8px; font-size:11px; color:var(--muted)">Секреты ниже отображаются как write-only.</div>
           <form method="POST" action="/secrets" style="margin-top:6px; display:flex; gap:8px; flex-wrap:wrap;">
             <input name="key" placeholder="KEY" style="flex:1; min-width:160px;" />
             <input name="value" placeholder="VALUE" style="flex:1; min-width:160px;" />
-            <button type="submit">Set</button>
+            <button type="submit">Сохранить</button>
           </form>
         </section>
 
         <section id="output" class="card section">
           <div class="card-header">
-            <div class="card-title">📁 Output Files</div>
-            <div class="badge">artifacts</div>
+            <div class="card-title">📁 Файлы output</div>
+            <div class="badge">$output_count</div>
           </div>
           $output
         </section>
@@ -436,22 +551,103 @@ class Handler(BaseHTTPRequestHandler):
         elif status_badge in {"inactive", "failed"}:
             status_dot = "bad"
 
+        goals_rows = _goals_active()
+        agents_rows = _agents_status()
+        platform_rows = _platforms_list()
+        kpi_rows = _finance_kpi()
+        output_rows = _output_list()
+
+        cpu, mem, etime = ("-", "-", "-")
+        raw_cpu_mem = (sys.get("cpu_mem") or "").split()
+        if len(raw_cpu_mem) >= 3:
+            cpu, mem, etime = raw_cpu_mem[0], raw_cpu_mem[1], raw_cpu_mem[2]
+
+        status_metrics = (
+            '<div class="metrics">'
+            f'<div class="metric"><div class="k">CPU</div><div class="v">{html.escape(cpu)}</div></div>'
+            f'<div class="metric"><div class="k">RAM</div><div class="v">{html.escape(mem)}</div></div>'
+            f'<div class="metric"><div class="k">Uptime</div><div class="v">{html.escape(etime)}</div></div>'
+            f'<div class="metric"><div class="k">PID</div><div class="v">{html.escape(sys.get("pid", "-"))}</div></div>'
+            "</div>"
+        )
+        current_task_html = "<div class='task'><div class='k'>Текущая задача</div><div class='v'>Нет активной цели</div></div>"
+        if goals_rows:
+            current_task_html = (
+                "<div class='task'>"
+                "<div class='k' style='color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em'>Текущая задача</div>"
+                f"<div class='v' style='margin-top:6px;font-weight:700'>{html.escape(str(goals_rows[0][1]))}</div>"
+                "</div>"
+            )
+
+        agent_cards = ["<div class='agent-grid'>"]
+        for name, modified in agents_rows:
+            st = _module_status(name)
+            dot = _status_dot(st)
+            label = "Активен" if st == "active" else ("Ошибка" if st == "error" else "Простой")
+            agent_cards.append(
+                "<div class='agent-card'>"
+                f"<div class='name'>{html.escape(name.replace('.py',''))}</div>"
+                f"<div class='meta'>{html.escape(modified)}</div>"
+                f"<div class='meta'><span class='dot {dot}'></span> {label}</div>"
+                "</div>"
+            )
+        agent_cards.append("</div>")
+        agents_cards_html = "".join(agent_cards)
+
+        platform_cards = ["<div class='cards'>"]
+        env = _read_env()
+        for (fname,) in platform_rows:
+            icon, key = _platform_meta(fname)
+            connected = any(k.startswith(key.upper()) and env.get(k) for k in env.keys())
+            dot = "good" if connected else "warn"
+            txt = "подключена" if connected else "без ключа"
+            platform_cards.append(
+                "<div class='mini-card'>"
+                f"<div class='mini-head'><div class='mini-title'>{icon} {html.escape(fname.replace('.py',''))}</div><span class='dot {dot}'></span></div>"
+                f"<div class='meta'>{txt}</div>"
+                "</div>"
+            )
+        platform_cards.append("</div>")
+        platform_cards_html = "".join(platform_cards)
+
+        summary = _finance_summary(kpi_rows)
+        finance_cards_html = (
+            "<div class='cards'>"
+            f"<div class='mini-card'><div class='mini-title'>Потрачено</div><div class='mini-value'>${summary['spent']:.2f}</div></div>"
+            f"<div class='mini-card'><div class='mini-title'>Заработано</div><div class='mini-value'>${summary['earned']:.2f}</div></div>"
+            f"<div class='mini-card'><div class='mini-title'>Итог</div><div class='mini-value'>${summary['total']:.2f}</div></div>"
+            "</div>"
+            "<div style='margin-top:8px'>"
+            f"<div class='meta'>Лимит дня: ${summary['limit']:.2f}</div>"
+            f"<div class='progress'><div style='width:{summary['pct']:.1f}%'></div></div>"
+            "</div>"
+        )
+
         system_table = _html_table(["Key", "Value"], list(sys.items()))
-        agents_table = _html_table(["Module", "Last Modified"], _agents_status())
-        platforms_table = _html_table(["File"], _platforms_list())
-        goals_table = _html_table(["ID", "Title", "Status", "Priority", "Cost", "Created"], _goals_active())
-        kpi_table = _html_table(["Date", "Spend"], _finance_kpi())
-        output_table = _html_table(["File", "Size", "Modified"], _output_list())
+        agents_table = _html_table(["Module", "Last Modified"], agents_rows)
+        platforms_table = _html_table(["File"], platform_rows)
+        goals_table = _html_table(["ID", "Title", "Status", "Priority", "Cost", "Created"], goals_rows)
+        kpi_table = _html_table(["Date", "Spend"], kpi_rows)
+        output_table = _html_table(["File", "Size", "Modified"], output_rows)
         env = _read_env()
         cfg_rows = [(k, _mask_value(k, v)) for k, v in env.items()]
         cfg_table = _html_table(["Key", "Value"], cfg_rows)
         events = "\n".join(_recent_events())
 
         html_out = HTML_TEMPLATE.safe_substitute(
-            updated=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+            updated=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
             status_badge=status_badge,
             status_dot=status_dot,
+            status_metrics=status_metrics,
+            current_task=current_task_html,
             system_status=system_table,
+            agents_count=len(agents_rows),
+            goals_count=len(goals_rows),
+            platforms_count=len(platform_rows),
+            output_count=len(output_rows),
+            agents_cards=agents_cards_html,
+            platform_cards=platform_cards_html,
+            finance_cards=finance_cards_html,
             agents_status=agents_table,
             platforms=platforms_table,
             goals=goals_table,
