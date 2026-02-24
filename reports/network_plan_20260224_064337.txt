@@ -1,0 +1,37 @@
+NETWORK ENABLEMENT PLAN
+
+Goal: VITO must have unrestricted outbound internet to open any site (including 18+, banking, trading), while only guarding risky actions.
+
+Current state (confirmed):
+- Local processes cannot create sockets: PermissionError [Errno 1] Operation not permitted.
+- /proc/<pid>/status shows Seccomp: 2 (active seccomp filter).
+- DNS via systemd-resolved works (resolvectl), but user processes cannot resolve domains due to seccomp.
+- This blocks Gumroad publish, news/trends, time sync, any web access.
+
+Plan A — Best/fastest (recommended):
+1) Remove seccomp socket restriction for this runtime.
+   - If running inside a container/sandbox: run without seccomp/apparmor filters, or allow socket syscalls.
+   - If systemd service has constraints: ensure no RestrictAddressFamilies/PrivateNetwork.
+2) Verify network:
+   - python socket() works
+   - DNS lookup works (socket.gethostbyname)
+   - HTTP works (curl https://gumroad.com)
+3) Install Playwright browsers:
+   - playwright install
+4) Re-run boevoy test:
+   - scripts/boevoy_gumroad_test.py
+5) Save success evidence and skill to memory.
+
+Plan B — Worker split (if you can’t remove seccomp):
+1) Run a separate “web-worker” VM/container with full internet.
+2) VITO sends browser tasks to worker via local queue/HTTP.
+3) Worker returns evidence (screens, URLs, IDs). VITO records ExecutionFacts.
+
+Security model (no site blocking):
+- Allow any domain by default.
+- Require confirmation only for risky actions: payments, bank transfers, account changes, password changes, purchases, posting content, deleting data.
+- Log all browser actions and keep screenshots for audit.
+
+Next actions for you:
+- Decide: remove seccomp restriction (Plan A) or set up web‑worker (Plan B).
+- After network is enabled, I’ll run the Gumroad end‑to‑end flow until it publishes.

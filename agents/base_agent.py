@@ -157,3 +157,15 @@ class BaseAgent(ABC):
         else:
             self._tasks_failed += 1
         self._total_cost += result.cost_usd
+        # Data Lake record (minimal event store)
+        try:
+            from modules.data_lake import DataLake
+            DataLake().record(
+                agent=self.name,
+                task_type=getattr(result, "metadata", {}).get("task_type", "unknown"),
+                status="success" if result.success else "failed",
+                output=result.output,
+                error=result.error or "",
+            )
+        except Exception:
+            pass

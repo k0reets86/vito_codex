@@ -9,20 +9,25 @@
   - Каждое изменение → Telegram уведомление владельцу
 """
 
+import time
 from pathlib import Path
 from typing import Any, Optional
 
 from config.logger import get_logger
+from modules.skill_security import scan_text
 from llm_router import LLMRouter, TaskType
 
 logger = get_logger("code_generator", agent="code_generator")
 
 PROJECT_ROOT = Path(__file__).parent
 
+ALWAYS_BLOCKED_FILES = frozenset({
+    ".env",
+})
+
 PROTECTED_FILES = frozenset({
     "comms_agent.py",
     "main.py",
-    ".env",
     "config/settings.py",
 })
 
@@ -37,7 +42,7 @@ class CodeGenerator:
         logger.info("CodeGenerator инициализирован", extra={"event": "init"})
 
     async def generate_patch(self, target_file: str, instruction: str,
-                             context: str = "") -> Optional[str]:
+                             context: str = "", allow_protected: bool = False) -> Optional[str]:
         """Генерирует unified diff для target_file через LLM.
 
         Returns:
@@ -45,13 +50,21 @@ class CodeGenerator:
         """
         # 1. Проверка PROTECTED_FILES
         normalized = target_file.replace("\\", "/")
-        for protected in PROTECTED_FILES:
-            if normalized == protected or normalized.endswith(f"/{protected}"):
+        for blocked in ALWAYS_BLOCKED_FILES:
+            if normalized == blocked or normalized.endswith(f"/{blocked}"):
                 logger.warning(
-                    f"Попытка изменить защищённый файл: {target_file}",
+                    f"Попытка изменить запрещённый файл: {target_file}",
                     extra={"event": "protected_file_blocked", "context": {"file": target_file}},
                 )
                 return None
+        if not allow_protected:
+            for protected in PROTECTED_FILES:
+                if normalized == protected or normalized.endswith(f"/{protected}"):
+                    logger.warning(
+                        f"Попытка изменить защищённый файл: {target_file}",
+                        extra={"event": "protected_file_blocked", "context": {"file": target_file}},
+                    )
+                    return None
 
         # 2. Прочитать текущий код
         file_path = PROJECT_ROOT / target_file
@@ -117,7 +130,8 @@ class CodeGenerator:
         return patch
 
     async def apply_change(self, target_file: str, instruction: str,
-                           context: str = "", notify: bool = True) -> dict[str, Any]:
+                           context: str = "", notify: bool = True,
+                           allow_protected: bool = False) -> dict[str, Any]:
         """Генерирует и применяет изменение: generate_patch → apply_patch → notify."""
         logger.info(
             f"Применение изменения: {target_file} — {instruction[:80]}",
@@ -125,14 +139,27 @@ class CodeGenerator:
         )
 
         # 1. Генерация
-        patch = await self.generate_patch(target_file, instruction, context)
+        patch = await self.generate_patch(target_file, instruction, context, allow_protected=allow_protected)
         if not patch:
             return {"success": False, "error": "Не удалось сгенерировать патч"}
 
-        # 2. Применение через SelfUpdater (backup → apply → test → rollback)
-        result = await self.self_updater.apply_patch(patch, source=f"code_generator:{target_file}")
+        # 2. Security scan on patch
+        sec_status, sec_notes = scan_text(patch)
+        if sec_status != "ok" and self.comms:
+            approved = await self.comms.request_approval(
+                request_id=f"security_review_{int(time.time())}",
+                message=f"Обнаружены потенциально опасные паттерны в патче для {target_file}:\n{sec_notes}\n\nПродолжить?",
+                timeout_seconds=3600,
+            )
+            if not approved:
+                return {"success": False, "error": "Security review rejected", "security_status": sec_status, "security_notes": sec_notes}
 
-        # 3. Telegram уведомление
+        # 3. Применение через SelfUpdater (backup → apply → test → rollback)
+        result = await self.self_updater.apply_patch(patch, source=f"code_generator:{target_file}")
+        result["security_status"] = sec_status
+        result["security_notes"] = sec_notes
+
+        # 4. Telegram уведомление
         if notify and self.comms:
             status = "успешно" if result.get("success") else "откат"
             tests_info = ""
@@ -152,6 +179,111 @@ class CodeGenerator:
             f"Изменение {'применено' if result.get('success') else 'откачено'}: {target_file}",
             extra={"event": "apply_change_done", "context": {"file": target_file, "success": result.get("success")}},
         )
+        return result
+
+    async def generate_repo_patch(self, instruction: str, context_files: list[str] | None = None,
+                                  allow_protected: bool = False) -> Optional[str]:
+        """Генерирует unified diff для репозитория (можно создавать новые файлы)."""
+        context_files = context_files or []
+        # Validate against blocked/protected files
+        for f in context_files:
+            normalized = f.replace("\\", "/")
+            for blocked in ALWAYS_BLOCKED_FILES:
+                if normalized == blocked or normalized.endswith(f"/{blocked}"):
+                    logger.warning(
+                        f"Попытка использовать запрещённый файл: {f}",
+                        extra={"event": "protected_file_blocked", "context": {"file": f}},
+                    )
+                    return None
+            if not allow_protected:
+                for protected in PROTECTED_FILES:
+                    if normalized == protected or normalized.endswith(f"/{protected}"):
+                        logger.warning(
+                            f"Попытка использовать защищённый файл: {f}",
+                            extra={"event": "protected_file_blocked", "context": {"file": f}},
+                        )
+                        return None
+
+        # Read context files (limited)
+        ctx_blocks = []
+        for f in context_files[:8]:
+            fp = PROJECT_ROOT / f
+            if not fp.exists():
+                continue
+            try:
+                content = fp.read_text(encoding="utf-8")
+                if len(content) > 6000:
+                    content = content[:6000]
+                ctx_blocks.append(f"--- {f} ---\n{content}\n")
+            except Exception:
+                continue
+
+        prompt = (
+            "Generate a unified diff (git diff format) for the following change across the repo.\n"
+            f"Instruction: {instruction}\n"
+        )
+        if ctx_blocks:
+            prompt += "\nContext files:\n" + "\n".join(ctx_blocks) + "\n"
+        prompt += (
+            "\nIMPORTANT:\n"
+            "- Output ONLY the unified diff, no explanations\n"
+            "- Use correct --- a/ and +++ b/ headers\n"
+            "- You MAY create new files if needed\n"
+            "- Make minimal changes to accomplish the instruction\n"
+        )
+
+        response = await self.llm_router.call_llm(
+            task_type=TaskType.CODE,
+            prompt=prompt,
+            estimated_tokens=2400,
+        )
+        if not response:
+            logger.warning("LLM не вернул патч (repo)", extra={"event": "patch_generation_failed"})
+            return None
+
+        patch = self._extract_diff(response)
+        if not patch:
+            logger.warning("Не удалось извлечь diff (repo)", extra={"event": "diff_extraction_failed"})
+            return None
+        if len(patch) > MAX_PATCH_SIZE:
+            logger.warning(
+                f"Патч слишком большой: {len(patch)} > {MAX_PATCH_SIZE}",
+                extra={"event": "patch_too_large"},
+            )
+            return None
+        return patch
+
+    async def apply_repo_change(self, instruction: str, context_files: list[str] | None = None,
+                                notify: bool = True, allow_protected: bool = False) -> dict[str, Any]:
+        """Генерирует и применяет репо-патч."""
+        patch = await self.generate_repo_patch(instruction, context_files=context_files, allow_protected=allow_protected)
+        if not patch:
+            return {"success": False, "error": "Не удалось сгенерировать репо-патч"}
+        sec_status, sec_notes = scan_text(patch)
+        if sec_status != "ok" and self.comms:
+            approved = await self.comms.request_approval(
+                request_id=f"security_review_{int(time.time())}",
+                message=f"Обнаружены потенциально опасные паттерны в репо-патче:\n{sec_notes}\n\nПродолжить?",
+                timeout_seconds=3600,
+            )
+            if not approved:
+                return {"success": False, "error": "Security review rejected", "security_status": sec_status, "security_notes": sec_notes}
+        result = await self.self_updater.apply_patch(patch, source="code_generator:repo")
+        result["security_status"] = sec_status
+        result["security_notes"] = sec_notes
+        if notify and self.comms:
+            status = "успешно" if result.get("success") else "откат"
+            tests_info = ""
+            if result.get("tests"):
+                t = result["tests"]
+                tests_info = f"\nТесты: {t.get('passed', 0)} passed, {t.get('failed', 0)} failed"
+            try:
+                await self.comms.send_message(
+                    f"VITO CodeGenerator | Изменение {status}\n\n"
+                    f"Что: {instruction[:200]}{tests_info}"
+                )
+            except Exception:
+                pass
         return result
 
     @staticmethod

@@ -6,11 +6,21 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import pytest
+
 from modules.balance_checker import BalanceChecker, ServiceBalance
 
 
+@pytest.mark.asyncio
 async def test_check_all():
-    """Check all service balances (real API calls)."""
+    """Check all service balances (real API calls).
+
+    Skipped by default to avoid external calls in CI/offline runs.
+    Set RUN_LIVE_BALANCE_TESTS=1 to enable.
+    """
+    import os
+    if os.getenv("RUN_LIVE_BALANCE_TESTS") != "1":
+        pytest.skip("Live balance checks disabled. Set RUN_LIVE_BALANCE_TESTS=1 to enable.")
     checker = BalanceChecker()
     balances = await checker.check_all()
 
@@ -39,7 +49,7 @@ async def test_check_all():
     else:
         print("\nNo low balance alerts.")
 
-    return balances
+    assert isinstance(balances, list)
 
 
 def test_format_report():

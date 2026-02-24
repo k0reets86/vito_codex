@@ -80,6 +80,26 @@ class SMMAgent(BaseAgent):
 
         if platform_obj:
             try:
+                # Owner approval gate for any publication
+                if self.comms:
+                    import uuid
+                    req_id = f"publish_{platform}_{uuid.uuid4().hex[:8]}"
+                    approved = await self.comms.request_approval_with_files(
+                        request_id=req_id,
+                        message=(
+                            f"[smm_agent] Запрос публикации в {platform}.\n"
+                            f"Подтверди ✅ или отклони ❌.\n"
+                            f"Текст:\n{post_text[:500]}"
+                        ),
+                        files=[str(file_path)],
+                        timeout_seconds=3600,
+                    )
+                    if approved is not True:
+                        return TaskResult(
+                            success=False,
+                            error="Owner approval rejected or timed out",
+                            metadata={"platform": platform, "file_path": str(file_path)},
+                        )
                 publish_result = await platform_obj.publish({"text": post_text})
                 if publish_result.get("status") in ("published", "created"):
                     logger.info(

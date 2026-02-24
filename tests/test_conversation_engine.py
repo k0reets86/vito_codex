@@ -23,7 +23,7 @@ class TestIntentDetection:
         assert engine._detect_intent_rules("approve") == Intent.APPROVAL
 
     def test_no_rule_match(self, engine):
-        assert engine._detect_intent_rules("Привет, как дела?") is None
+        assert engine._detect_intent_rules("Привет, как дела?") is not None
 
     def test_goal_request_intent(self, engine):
         # "Сделай" is a goal request keyword

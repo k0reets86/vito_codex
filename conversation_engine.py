@@ -45,6 +45,8 @@ VITO_PERSONALITY = (
     "7. Продукты/контент — ТОЛЬКО на английском (US/EU рынок).\n"
     "8. Если неуверен (>40%) → спроси перед действием.\n"
     "9. Общайся как человек-партнёр, не как робот с отчётами.\n"
+    "10. НИКОГДА не утверждай, что что-то выполнено/опубликовано/загружено, "
+    "если это не подтверждено системой.\n"
 )
 
 MAX_CONTEXT_TURNS = 20
@@ -73,7 +75,7 @@ class ConversationEngine:
                  finance=None, agent_registry=None, decision_loop=None,
                  self_healer=None, self_updater=None,
                  knowledge_updater=None, judge_protocol=None,
-                 code_generator=None):
+                 code_generator=None, comms=None):
         self.llm_router = llm_router
         self.memory = memory
         self.goal_engine = goal_engine
@@ -85,11 +87,58 @@ class ConversationEngine:
         self.knowledge_updater = knowledge_updater
         self.judge_protocol = judge_protocol
         self.code_generator = code_generator
+        self.comms = comms
         self._context: list[Turn] = []
         logger.info("ConversationEngine инициализирован", extra={"event": "init"})
 
     async def process_message(self, text: str) -> dict[str, Any]:
         """Обрабатывает сообщение от владельца."""
+        # Fast path: browser/web fetch without LLM
+        url = self._extract_url(text)
+        if url and self.agent_registry and settings.BROWSER_DEFAULT_ON_URL:
+            # Prefer real browser for JS-heavy sites
+            try:
+                lower = text.lower()
+                if any(k in lower for k in ("скрин", "снимок", "screenshot", "screen")):
+                    task_type = "screenshot"
+                    path = f"/tmp/vito_browse_{int(time.time())}.png"
+                    result = await self.agent_registry.dispatch(task_type, url=url, path=path)
+                    if result and result.success:
+                        return {
+                            "response": f"Открыл страницу. Скриншот готов.\n📎 {result.output.get('path') if isinstance(result.output, dict) and result.output.get('path') else path}",
+                            "intent": Intent.QUESTION,
+                        }
+                if any(k in lower for k in ("текст", "прочитай", "extract", "вытащи", "что написано")):
+                    task_type = "web_scrape"
+                    result = await self.agent_registry.dispatch(task_type, url=url, selector="body")
+                    if result and result.success:
+                        return {
+                            "response": f"Текст со страницы:\n{str(result.output)[:3500]}",
+                            "intent": Intent.QUESTION,
+                        }
+                # default: quick browse (title + status)
+                result = await self.agent_registry.dispatch("browse", url=url)
+                if result and result.success:
+                    out = result.output or {}
+                    title = out.get("title", "")
+                    status = out.get("status", "")
+                    return {"response": f"Страница открыта. {title} (HTTP {status})", "intent": Intent.QUESTION}
+            except Exception:
+                pass
+
+        # Fallback: fetch URL without LLM (free web fetch)
+        if "http://" in text or "https://" in text:
+            try:
+                import re
+                from modules.web_fetch import fetch_url
+                m = re.search(r"https?://\\S+", text)
+                if m:
+                    url = m.group(0).rstrip(".,)")
+                    data = fetch_url(url)
+                    response = f"URL: {url}\nTitle: {data.get('title','')}\n\n{data.get('text','')}"
+                    return {"response": response, "intent": Intent.QUESTION}
+            except Exception:
+                pass
         # 1. Detect intent
         intent = self._detect_intent_rules(text)
         if intent is None:
@@ -132,6 +181,11 @@ class ConversationEngine:
             return Intent.COMMAND
 
         lower = stripped.lower()
+        # Explicit question markers override goal detection
+        if "?" in stripped:
+            return Intent.QUESTION
+        if lower.startswith(("откуда", "почему", "зачем", "как", "кто", "что", "где", "когда", "какой", "какие", "чем")):
+            return Intent.QUESTION
 
         # Time queries — no LLM needed
         time_words = ("время", "час", "дата", "time", "what time", "date", "сколько время")
@@ -158,13 +212,41 @@ class ConversationEngine:
             "используй", "переключи", "смени модель", "сканируй тренды",
             "проверь ошибки", "сделай бэкап", "откати", "обнови",
         ]
+        self_improve_keywords = [
+            "исправь", "почини", "доработай", "улучши код", "улучши",
+            "самоисправ", "добавь интеграц", "сделай интеграц",
+            "добавь поддержку", "добавь навык",
+        ]
+        learn_service_keywords = [
+            "изучи сервис", "изучи платформ", "найди требования", "добавь знания",
+            "документац", "официальные требования",
+        ]
+        if any(kw in lower for kw in self_improve_keywords):
+            return Intent.SYSTEM_ACTION
+        if any(kw in lower for kw in learn_service_keywords):
+            return Intent.SYSTEM_ACTION
         if any(kw in lower for kw in action_keywords):
             return Intent.SYSTEM_ACTION
 
         return None
 
+    @staticmethod
+    def _extract_url(text: str) -> Optional[str]:
+        import re
+        # Full URL
+        m = re.search(r"https?://\\S+", text)
+        if m:
+            return m.group(0).rstrip(".,)")
+        # Bare domain (avoid emails)
+        m = re.search(r"\\b([a-z0-9.-]+\\.[a-z]{2,})(/[^\\s]*)?\\b", text, re.IGNORECASE)
+        if m and "@" not in m.group(0):
+            return "https://" + m.group(0)
+        return None
+
     async def _detect_intent_llm(self, text: str) -> Intent:
         """LLM-based intent detection через Haiku (~50 токенов)."""
+        if "?" in text:
+            return Intent.QUESTION
         prompt = (
             f"Определи intent сообщения пользователя. Ответь ОДНИМ словом:\n"
             f"QUESTION — вопрос о системе, данных, статусе, расходах, трендах\n"
@@ -191,7 +273,10 @@ class ConversationEngine:
                     "FEEDBACK": Intent.FEEDBACK,
                     "CONVERSATION": Intent.CONVERSATION,
                 }
-                return intent_map.get(intent_str, Intent.CONVERSATION)
+                detected = intent_map.get(intent_str, Intent.CONVERSATION)
+                if detected == Intent.GOAL_REQUEST and ("?" in text):
+                    return Intent.QUESTION
+                return detected
         except Exception as e:
             logger.debug(f"LLM intent detection failed: {e}", extra={"event": "intent_llm_error"})
 
@@ -216,6 +301,25 @@ class ConversationEngine:
 
     async def _handle_question(self, text: str) -> dict[str, Any]:
         """Отвечает на вопрос с полным доступом к системе."""
+        lower = text.strip().lower()
+        # Direct answer for "source of claim" questions to avoid hallucinations
+        if any(w in lower for w in ("откуда", "почему ты", "почему вы", "ты писал", "ты написал", "ты сказала", "ты говорил")):
+            return {
+                "intent": Intent.QUESTION.value,
+                "response": "У меня нет подтверждённых данных о публикации/создании. Это было ошибочное сообщение. Исправляю: без факта выполнения больше так не пишу.",
+            }
+        if self._is_time_query(lower):
+            return {
+                "intent": Intent.QUESTION.value,
+                "response": self._format_time_answer(),
+            }
+        quick = self._quick_answer(lower)
+        if quick:
+            return {
+                "intent": Intent.QUESTION.value,
+                "response": quick,
+            }
+
         context_from_memory = ""
         if self.memory:
             try:
@@ -256,13 +360,35 @@ class ConversationEngine:
 
         return {
             "intent": Intent.QUESTION.value,
-            "response": response or "Не удалось получить ответ. Попробуй переформулировать.",
+            "response": self._guard_response(response) if response else "Не удалось получить ответ. Попробуй переформулировать.",
         }
 
     async def _handle_system_action(self, text: str) -> dict[str, Any]:
         """Выполняет системное действие по запросу владельца."""
         system_context = self._format_system_context()
         available_actions = self._get_available_actions()
+
+        # Fast path for explicit self-improve requests
+        lower = text.lower()
+        self_improve_keywords = [
+            "исправь", "почини", "доработай", "улучши код", "улучши",
+            "самоисправ", "добавь интеграц", "сделай интеграц",
+            "добавь поддержку", "добавь навык",
+        ]
+        if any(kw in lower for kw in self_improve_keywords):
+            return {
+                "intent": Intent.SYSTEM_ACTION.value,
+                "response": "Запускаю self-improve пайплайн (анализ → код → тесты).",
+                "actions": [{"action": "self_improve", "params": {"request": text}}],
+            }
+        if any(kw in lower for kw in ["изучи сервис", "изучи платформ", "добавь знания", "найди требования"]):
+            # crude extraction of service name from text
+            service = text.replace("изучи", "").replace("платформу", "").replace("сервис", "").strip()
+            return {
+                "intent": Intent.SYSTEM_ACTION.value,
+                "response": "Изучаю сервис и добавляю знания в базу.",
+                "actions": [{"action": "learn_service", "params": {"service": service}}],
+            }
 
         prompt = (
             f"{VITO_PERSONALITY}\n\n"
@@ -452,18 +578,76 @@ class ConversationEngine:
 
         return {
             "intent": Intent.CONVERSATION.value,
-            "response": response or "Привет! Я VITO, твой AI-напарник. Чем могу помочь?",
+            "response": self._guard_response(response) or "Привет! Я VITO, твой AI-напарник. Чем могу помочь?",
         }
+
+    def _guard_response(self, response: Optional[str]) -> Optional[str]:
+        """Prevent unverified completion claims in free-form responses."""
+        if not response:
+            return response
+        lower = response.lower()
+        risky_phrases = [
+            "готов и загружен", "готов и опубликован", "опубликован", "загружен",
+            "создан и загружен", "создан и опубликован", "я загрузил", "я опубликовал",
+            "already uploaded", "already published", "is live", "published on",
+        ]
+        if any(p in lower for p in risky_phrases):
+            try:
+                from modules.execution_facts import ExecutionFacts
+                facts = ExecutionFacts()
+                if not facts.recent_exists(
+                    actions=["publisher_agent:publish", "browser_agent:form_fill", "ecommerce_agent:listing_create", "platform:publish"],
+                    hours=24,
+                ):
+                    return "Это было предложение, а не факт выполнения. Подтвердить запуск?"
+            except Exception:
+                return "Это было предложение, а не факт выполнения. Подтвердить запуск?"
+        return response
 
     # ── Исполнение действий ──
 
     async def _execute_actions(self, actions: list[dict]) -> str:
         """Выполняет действия, запрошенные LLM."""
         results = []
+        allowed = self._allowed_actions()
         for act in actions[:3]:  # max 3 действия за раз
             action_name = act.get("action", "")
             params = act.get("params", {})
             try:
+                if action_name not in allowed:
+                    # Auto self-improve for missing actions requested by owner
+                    if self.agent_registry:
+                        try:
+                            await self.agent_registry.dispatch(
+                                "self_improve",
+                                step=f"Implement missing system action '{action_name}' to satisfy owner request.",
+                                goal_title="auto_self_improve",
+                            )
+                            results.append(f"[{action_name}] Auto self-improve triggered")
+                            continue
+                        except Exception:
+                            pass
+                    results.append(f"[{action_name}] Действие запрещено allowlist")
+                    continue
+                if action_name == "apply_code_change":
+                    if not self.comms:
+                        results.append("[apply_code_change] Approval channel unavailable")
+                        continue
+                    target = params.get("file", "")
+                    instruction = params.get("instruction", "")
+                    approved = await self.comms.request_approval(
+                        request_id=f"code_change_{int(time.time())}",
+                        message=(
+                            "[conversation_engine] Запрос изменения кода.\n"
+                            "Подтверди ✅ или отклони ❌.\n"
+                            f"Файл: {target}\n"
+                            f"Инструкция: {instruction[:300]}"
+                        ),
+                        timeout_seconds=3600,
+                    )
+                    if approved is not True:
+                        results.append("[apply_code_change] Owner approval rejected or timed out")
+                        continue
                 result = await self._dispatch_action(action_name, params)
                 if result:
                     results.append(f"[{action_name}] {result}")
@@ -478,7 +662,8 @@ class ConversationEngine:
         # Агенты
         if action == "dispatch_agent" and self.agent_registry:
             task_type = params.get("task_type", "")
-            result = await self.agent_registry.dispatch(task_type, **params)
+            clean_params = {k: v for k, v in params.items() if k != "task_type"}
+            result = await self.agent_registry.dispatch(task_type, **clean_params)
             if result and result.success:
                 return f"Агент выполнил: {str(result.output)[:300]}"
             return f"Агент не смог выполнить: {result.error if result else 'нет агента'}"
@@ -494,8 +679,10 @@ class ConversationEngine:
         # Цели
         if action == "cancel_goal" and self.goal_engine:
             goal_id = params.get("goal_id", "")
+            if self.goal_engine.delete_goal(goal_id):
+                return f"Цель {goal_id} удалена"
             self.goal_engine.fail_goal(goal_id, "Отменено владельцем")
-            return f"Цель {goal_id} отменена"
+            return f"Цель {goal_id} отменена (не удалось удалить)"
 
         if action == "change_priority" and self.goal_engine:
             from goal_engine import GoalPriority
@@ -554,6 +741,49 @@ class ConversationEngine:
                 return f"Код изменён: {target_file}"
             return f"Не удалось изменить: {result.get('error', 'unknown')}"
 
+        if action == "self_improve" and self.agent_registry:
+            request = params.get("request", "") or params.get("instruction", "")
+            if not request:
+                return "Нужен параметр: request"
+            result = await self.agent_registry.dispatch("self_improve", step=request)
+            if result and result.success:
+                return "Self-improve завершён успешно"
+            return f"Self-improve завершён с ошибкой: {getattr(result, 'error', 'unknown')}"
+
+        if action == "learn_service" and self.agent_registry:
+            service = params.get("service", "") or params.get("name", "")
+            if not service:
+                return "Нужен параметр: service"
+            result = await self.agent_registry.dispatch("learn_service", service=service)
+            if result and result.success:
+                return f"Знания по сервису {service} обновлены"
+            return f"Не удалось изучить сервис: {getattr(result, 'error', 'unknown')}"
+
+        if action == "register_account" and self.agent_registry:
+            url = params.get("url", "")
+            form = params.get("form", {}) or {}
+            submit_selector = params.get("submit_selector", "")
+            code_selector = params.get("code_selector", "")
+            code_submit_selector = params.get("code_submit_selector", "")
+            if not url or not submit_selector:
+                return "Нужны параметры: url и submit_selector"
+            result = await self.agent_registry.dispatch(
+                "register_with_email",
+                url=url,
+                form=form,
+                submit_selector=submit_selector,
+                code_selector=code_selector,
+                code_submit_selector=code_submit_selector,
+                from_filter=params.get("from_filter", ""),
+                subject_filter=params.get("subject_filter", ""),
+                prefer_link=bool(params.get("prefer_link", False)),
+                timeout_sec=int(params.get("timeout_sec", 180)),
+                screenshot_path=params.get("screenshot_path", ""),
+            )
+            if result and result.success:
+                return f"Регистрация выполнена: {str(result.output)[:200]}"
+            return f"Регистрация не удалась: {getattr(result, 'error', 'unknown')}"
+
         return ""
 
     def _get_available_actions(self) -> str:
@@ -566,6 +796,7 @@ class ConversationEngine:
             actions.append(f'dispatch_agent(task_type) — запуск агента (доступные: {", ".join(sorted(caps)[:15])})')
             actions.append("scan_trends() — сканировать тренды")
             actions.append("scan_reddit() — сканировать Reddit")
+            actions.append("register_account(url, form, submit_selector, code_selector, ...) — регистрация с email-кодом")
         if self.goal_engine:
             actions.append("cancel_goal(goal_id) — отменить цель")
             actions.append("change_priority(goal_id, priority) — сменить приоритет (CRITICAL/HIGH/MEDIUM/LOW)")
@@ -582,7 +813,210 @@ class ConversationEngine:
             actions.append("create_backup() — создать бэкап кода")
         if self.code_generator:
             actions.append("apply_code_change(file, instruction) — изменить код файла через LLM (backup + test)")
+        if self.agent_registry:
+            actions.append("self_improve(request) — самонастройка: анализ → код → тесты")
+            actions.append("learn_service(service) — изучить сервис и добавить в базу знаний")
         return "\n".join(f"  - {a}" for a in actions) if actions else "(нет действий)"
+
+    def _allowed_actions(self) -> set[str]:
+        """Allowlist of actions based on connected modules."""
+        allowed: set[str] = set()
+        if self.agent_registry:
+            allowed.update({"dispatch_agent", "scan_trends", "scan_reddit"})
+        if self.goal_engine:
+            allowed.update({"cancel_goal", "change_priority"})
+        if self.decision_loop:
+            allowed.update({"stop_loop", "start_loop"})
+        if self.self_healer:
+            allowed.add("check_errors")
+        if self.judge_protocol:
+            allowed.add("analyze_niche")
+        if self.knowledge_updater:
+            allowed.add("update_knowledge")
+        if self.self_updater:
+            allowed.add("create_backup")
+        if self.code_generator:
+            allowed.add("apply_code_change")
+        if self.agent_registry:
+            allowed.add("self_improve")
+            allowed.add("learn_service")
+            allowed.add("register_account")
+        return allowed
+
+    @staticmethod
+    def _is_time_query(lower: str) -> bool:
+        time_words = ("время", "час", "дата", "time", "what time", "date", "сколько время")
+        return any(w in lower for w in time_words) and len(lower) < 60
+
+    @staticmethod
+    def _format_time_answer() -> str:
+        now_utc = datetime.now(timezone.utc)
+        now_local = datetime.now()
+        return (
+            f"Сейчас: {now_local.strftime('%Y-%m-%d %H:%M')} (локальное время сервера)\n"
+            f"UTC: {now_utc.strftime('%Y-%m-%d %H:%M')}\n"
+            f"День недели: {now_utc.strftime('%A')}"
+        )
+
+    def _quick_answer(self, lower: str) -> str:
+        if any(w in lower for w in ("статус", "status", "health")):
+            return self._quick_status()
+        if any(w in lower for w in ("расход", "spend", "budget", "лимит")):
+            return self._quick_spend()
+        if any(w in lower for w in ("pnl", "прибыл", "доход", "revenue")):
+            return self._quick_pnl()
+        if any(w in lower for w in ("balances", "баланс", "остатки", "счета")):
+            return self._quick_balances()
+        if any(w in lower for w in ("цели", "goals", "задачи", "tasks")):
+            return self._quick_goals()
+        if any(w in lower for w in ("агенты", "agents", "команда")):
+            return self._quick_agents()
+        if any(w in lower for w in ("ошибк", "errors")):
+            return self._quick_errors()
+        if any(w in lower for w in ("календар", "calendar", "сегодняшняя задача", "task today")):
+            return self._quick_calendar()
+
+        if any(w in lower for w in ("праздник", "holiday", "календар")):
+            try:
+                from modules.calendar_knowledge import search_calendar, format_calendar_results
+                results = search_calendar(text)
+                return format_calendar_results(results)
+            except Exception:
+                pass
+        else:
+            # If explicit date in message, try calendar lookup
+            try:
+                from modules.calendar_knowledge import search_calendar, format_calendar_results
+                results = search_calendar(text)
+                if results:
+                    return format_calendar_results(results)
+            except Exception:
+                pass
+        if any(w in lower for w in ("skills", "навык")):
+            return self._quick_skills()
+        if any(w in lower for w in ("обновлен", "updates", "апдейт")):
+            return self._quick_updates()
+        return ""
+
+    def _quick_status(self) -> str:
+        parts = ["VITO Status (fast)"]
+        if self.decision_loop:
+            st = self.decision_loop.get_status()
+            parts.append(
+                f"Decision Loop: {'работает' if st['running'] else 'остановлен'} "
+                f"(тики: {st['tick_count']}, spend: ${st['daily_spend']:.2f})"
+            )
+        if self.goal_engine:
+            gs = self.goal_engine.get_stats()
+            parts.append(
+                f"Цели: {gs['total']} всего, {gs['completed']} выполнено, "
+                f"{gs['executing']} в работе, {gs['pending']} ожидают"
+            )
+        if self.comms:
+            pending = len(getattr(self.comms, "_pending_approvals", {}) or {})
+            if pending:
+                parts.append(f"Ожидают одобрения: {pending}")
+        return "\n".join(parts)
+
+    def _quick_spend(self) -> str:
+        spend = self.llm_router.get_daily_spend() if self.llm_router else 0.0
+        limit = settings.DAILY_LIMIT_USD
+        return f"Расходы сегодня: ${spend:.2f} / ${limit:.2f} (осталось ${max(limit - spend, 0):.2f})"
+
+    def _quick_pnl(self) -> str:
+        if not self.finance:
+            return "FinancialController не подключён."
+        pnl = self.finance.get_pnl(days=30)
+        return (
+            f"P&L за 30 дней: расход ${pnl['total_expenses']:.2f}, "
+            f"доход ${pnl['total_income']:.2f}, "
+            f"{'прибыль' if pnl['profitable'] else 'убыток'} ${abs(pnl['net_profit']):.2f}"
+        )
+
+    def _quick_balances(self) -> str:
+        if not self.finance:
+            return "FinancialController не подключён."
+        daily_spent = self.finance.get_daily_spent()
+        daily_earned = self.finance.get_daily_earned()
+        limit = settings.DAILY_LIMIT_USD
+        return (
+            f"Внутренние балансы (без внешних API):\n"
+            f"- Потрачено сегодня: ${daily_spent:.2f}\n"
+            f"- Доход сегодня: ${daily_earned:.2f}\n"
+            f"- Лимит: ${limit:.2f} (осталось ${max(limit - daily_spent, 0):.2f})"
+        )
+
+    def _quick_goals(self) -> str:
+        if not self.goal_engine:
+            return "GoalEngine не подключён."
+        goals = self.goal_engine.get_all_goals()[:10]
+        if not goals:
+            return "Нет целей."
+        lines = []
+        for g in goals:
+            icon = {"completed": "done", "failed": "fail", "executing": ">>",
+                    "pending": "..", "waiting_approval": "??", "planning": "~~"}.get(
+                g.status.value, g.status.value
+            )
+            lines.append(f"[{icon}] {g.title} (${g.estimated_cost_usd:.2f})")
+        return "Цели:\n" + "\n".join(lines)
+
+    def _quick_agents(self) -> str:
+        if not self.agent_registry:
+            return "AgentRegistry не подключён."
+        statuses = self.agent_registry.get_all_statuses()
+        if not statuses:
+            return "Нет зарегистрированных агентов."
+        lines = [f"Агенты ({len(statuses)}):"]
+        for s in statuses:
+            icon = {"idle": "o", "running": ">>", "stopped": "x", "error": "!"}.get(s["status"], "?")
+            lines.append(f"[{icon}] {s['name']} — {s['status']}")
+        return "\n".join(lines)
+
+    def _quick_errors(self) -> str:
+        if not self.self_healer:
+            return "SelfHealer не подключён."
+        stats = self.self_healer.get_error_stats()
+        unresolved = stats.get("unresolved", 0)
+        return (
+            f"Ошибки: всего {stats.get('total', 0)}, "
+            f"нерешено {unresolved}, решено {stats.get('resolved', 0)}"
+        )
+
+    def _quick_calendar(self) -> str:
+        try:
+            import sqlite3
+            conn = sqlite3.connect(settings.SQLITE_PATH)
+            conn.row_factory = sqlite3.Row
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            row = conn.execute(
+                "SELECT * FROM weekly_calendar WHERE date = ? LIMIT 1",
+                (today,),
+            ).fetchone()
+            conn.close()
+            if row:
+                return f"Сегодня: {row['title']} — {row['description'][:200]}"
+            return "Сегодня в календаре задач нет."
+        except Exception:
+            return "Календарь недоступен."
+
+    def _quick_skills(self) -> str:
+        if not self.memory:
+            return "Memory не подключена."
+        skills = self.memory.get_top_skills(limit=5)
+        if not skills:
+            return "Навыки пока не накоплены."
+        lines = [f"{s['name']}: успех {s.get('success_count', 0)}, провал {s.get('fail_count', 0)}" for s in skills]
+        return "Топ навыки:\n" + "\n".join(lines)
+
+    def _quick_updates(self) -> str:
+        if not self.self_updater:
+            return "SelfUpdater не подключён."
+        history = self.self_updater.get_update_history(limit=3)
+        if not history:
+            return "История обновлений пуста."
+        lines = [f"{h.get('timestamp', '?')}: {h.get('description', '')[:80]}" for h in history]
+        return "Последние обновления:\n" + "\n".join(lines)
 
     # ── Полное состояние системы ──
 

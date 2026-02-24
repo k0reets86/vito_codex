@@ -15,7 +15,6 @@ def test_balance():
     balance = solver.get_balance()
     print(f"Anti-Captcha balance: ${balance:.4f}")
     assert balance >= 0, "Balance should be non-negative"
-    return balance
 
 
 def test_singleton():

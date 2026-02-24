@@ -96,6 +96,7 @@ def mock_comms():
     comms.send_message = AsyncMock(return_value=True)
     comms.send_file = AsyncMock(return_value=True)
     comms.request_approval = AsyncMock(return_value=True)
+    comms.request_approval_with_files = AsyncMock(return_value=True)
     comms.send_morning_report = AsyncMock(return_value=True)
     comms.notify_error = AsyncMock(return_value=True)
     return comms

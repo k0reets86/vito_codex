@@ -106,7 +106,7 @@ class BrowserAgent(BaseAgent):
 
     @property
     def capabilities(self) -> list[str]:
-        return ["browse", "web_scrape", "form_fill"]
+        return ["browse", "web_scrape", "form_fill", "register_with_email"]
 
     async def start(self) -> None:
         await super().start()
@@ -252,7 +252,7 @@ class BrowserAgent(BaseAgent):
             except Exception:
                 pass
 
-    async def fill_form(self, url: str, data: dict[str, str]) -> TaskResult:
+    async def fill_form(self, url: str, data: dict[str, str], screenshot_path: str = "") -> TaskResult:
         page = await self._new_page()
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -263,7 +263,14 @@ class BrowserAgent(BaseAgent):
                     filled += 1
                 except Exception:
                     pass
-            return TaskResult(success=True, output={"fields_filled": filled, "total": len(data)})
+            shot = ""
+            if screenshot_path:
+                try:
+                    await page.screenshot(path=screenshot_path, full_page=True)
+                    shot = screenshot_path
+                except Exception:
+                    pass
+            return TaskResult(success=True, output={"fields_filled": filled, "total": len(data), "screenshot_path": shot})
         except Exception as e:
             return TaskResult(success=False, error=str(e))
         finally:
@@ -272,7 +279,7 @@ class BrowserAgent(BaseAgent):
             except Exception:
                 pass
 
-    async def upload_file(self, url: str, file_path: str, selector: str = 'input[type="file"]') -> TaskResult:
+    async def upload_file(self, url: str, file_path: str, selector: str = 'input[type="file"]', screenshot_path: str = "") -> TaskResult:
         if not os.path.isfile(file_path):
             return TaskResult(success=False, error=f"Файл не найден: {file_path}")
         page = await self._new_page()
@@ -281,8 +288,96 @@ class BrowserAgent(BaseAgent):
             fi = await page.query_selector(selector)
             if fi:
                 await fi.set_input_files(file_path)
-                return TaskResult(success=True, output={"uploaded": True, "file": file_path})
+                shot = ""
+                if screenshot_path:
+                    try:
+                        await page.screenshot(path=screenshot_path, full_page=True)
+                        shot = screenshot_path
+                    except Exception:
+                        pass
+                return TaskResult(success=True, output={"uploaded": True, "file": file_path, "screenshot_path": shot})
             return TaskResult(success=False, error=f"Селектор не найден: {selector}")
+        except Exception as e:
+            return TaskResult(success=False, error=str(e))
+        finally:
+            try:
+                await page.close()
+            except Exception:
+                pass
+
+    async def register_with_email(
+        self,
+        url: str,
+        form: dict[str, str],
+        submit_selector: str,
+        code_selector: str = "",
+        code_submit_selector: str = "",
+        from_filter: str = "",
+        subject_filter: str = "",
+        prefer_link: bool = False,
+        timeout_sec: int = 180,
+        screenshot_path: str = "",
+    ) -> TaskResult:
+        """Generic registration flow: fill form, submit, fetch email code/link, submit."""
+        page = await self._new_page()
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            # Fill fields
+            filled = 0
+            for sel, val in (form or {}).items():
+                try:
+                    await page.fill(sel, val)
+                    filled += 1
+                except Exception:
+                    pass
+            # Submit form
+            try:
+                await page.click(submit_selector, timeout=5000)
+            except Exception:
+                pass
+
+            code_val = ""
+            if code_selector:
+                # Fetch email code/link via account_manager
+                try:
+                    from agents.account_manager import AccountManager
+                    mgr = AccountManager()
+                    res = await mgr.fetch_email_code(
+                        from_filter=from_filter,
+                        subject_filter=subject_filter,
+                        prefer_link=prefer_link,
+                        timeout_sec=timeout_sec,
+                    )
+                    if res and res.success and isinstance(res.output, dict):
+                        code_val = res.output.get("code") or ""
+                except Exception:
+                    pass
+                if code_val:
+                    try:
+                        await page.fill(code_selector, code_val)
+                    except Exception:
+                        pass
+                    if code_submit_selector:
+                        try:
+                            await page.click(code_submit_selector, timeout=5000)
+                        except Exception:
+                            pass
+            shot = ""
+            if screenshot_path:
+                try:
+                    await page.screenshot(path=screenshot_path, full_page=True)
+                    shot = screenshot_path
+                except Exception:
+                    pass
+            return TaskResult(
+                success=bool(filled),
+                output={
+                    "fields_filled": filled,
+                    "code_used": bool(code_val),
+                    "screenshot_path": shot,
+                    "url": page.url,
+                },
+            )
         except Exception as e:
             return TaskResult(success=False, error=str(e))
         finally:
@@ -320,9 +415,22 @@ class BrowserAgent(BaseAgent):
             elif task_type in ("web_scrape", "extract_text"):
                 return await self.extract_text(kwargs.get("url", ""), kwargs.get("selector", "body"))
             elif task_type == "form_fill":
-                return await self.fill_form(kwargs.get("url", ""), kwargs.get("data", {}))
+                return await self.fill_form(kwargs.get("url", ""), kwargs.get("data", {}), kwargs.get("screenshot_path", ""))
             elif task_type == "upload_file":
-                return await self.upload_file(kwargs.get("url", ""), kwargs.get("file_path", ""))
+                return await self.upload_file(kwargs.get("url", ""), kwargs.get("file_path", ""), kwargs.get("selector", 'input[type="file"]'), kwargs.get("screenshot_path", ""))
+            elif task_type == "register_with_email":
+                return await self.register_with_email(
+                    url=kwargs.get("url", ""),
+                    form=kwargs.get("form", {}) or {},
+                    submit_selector=kwargs.get("submit_selector", ""),
+                    code_selector=kwargs.get("code_selector", ""),
+                    code_submit_selector=kwargs.get("code_submit_selector", ""),
+                    from_filter=kwargs.get("from_filter", ""),
+                    subject_filter=kwargs.get("subject_filter", ""),
+                    prefer_link=bool(kwargs.get("prefer_link", False)),
+                    timeout_sec=int(kwargs.get("timeout_sec", 180)),
+                    screenshot_path=kwargs.get("screenshot_path", ""),
+                )
             elif task_type == "solve_captcha":
                 page = kwargs.get("page")
                 if not page:

@@ -156,6 +156,11 @@ class FinancialController:
             },
         )
         self._log_to_file(f"EXPENSE ${amount_usd:.4f} [{category.value}] agent={agent} | {description}")
+        try:
+            from modules.data_lake import DataLake
+            DataLake().record_budget(agent=agent, amount=amount_usd, category=category.value, description=description)
+        except Exception:
+            pass
         return tx_id
 
     def record_income(

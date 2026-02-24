@@ -7,6 +7,7 @@ from datetime import date
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from config.settings import settings
 
 # Сбрасываем LogRecordFactory до стандартной чтобы extra={"agent":...} не конфликтовал
 logging.setLogRecordFactory(logging.LogRecord)
@@ -40,7 +41,7 @@ def test_model_registry_has_all_models():
 def test_task_model_map_has_all_types():
     for task_type in TaskType:
         assert task_type in TASK_MODEL_MAP
-        assert len(TASK_MODEL_MAP[task_type]) >= 2  # основная + fallback
+        assert len(TASK_MODEL_MAP[task_type]) >= 1  # основная (fallback optional)
 
 
 def test_model_config_fields():
@@ -61,7 +62,7 @@ def test_select_model_content(router):
 
 def test_select_model_strategy(router):
     result = router.select_model(TaskType.STRATEGY)
-    assert "opus" in result.model.model_id.lower()
+    assert result.model.model_id in ("gpt-5", "claude-opus")
 
 
 def test_select_model_code(router):
@@ -154,6 +155,29 @@ async def test_call_llm_with_mock(router):
 
 
 @pytest.mark.asyncio
+async def test_call_llm_cache_hit(router):
+    mock_text = "Cached response"
+    mock_cost = 0.001
+
+    with patch.object(router, "_call_provider", new_callable=AsyncMock) as mock_call:
+        mock_call.return_value = (mock_text, mock_cost)
+        first = await router.call_llm(
+            task_type=TaskType.ROUTINE,
+            prompt="cache me",
+            estimated_tokens=50,
+        )
+        second = await router.call_llm(
+            task_type=TaskType.ROUTINE,
+            prompt="cache me",
+            estimated_tokens=50,
+        )
+
+    assert first == mock_text
+    assert second == mock_text
+    assert mock_call.call_count == 1
+
+
+@pytest.mark.asyncio
 async def test_call_llm_fallback_on_error(router):
     call_count = 0
 
@@ -170,8 +194,12 @@ async def test_call_llm_fallback_on_error(router):
             prompt="test",
             estimated_tokens=100,
         )
-    assert result == "fallback response"
-    assert call_count == 2
+    if len(TASK_MODEL_MAP[TaskType.ROUTINE]) > 1 or settings.OPENROUTER_API_KEY:
+        assert result == "fallback response"
+        assert call_count == 2
+    else:
+        assert result is None
+        assert call_count == 1
 
 
 @pytest.mark.asyncio

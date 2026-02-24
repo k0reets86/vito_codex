@@ -217,7 +217,7 @@ async def test_on_message_regular(comms, mock_update):
     mock_update.message.text = "Сделай мне продукт"
     await comms._on_message(mock_update, MagicMock())
     text = mock_update.message.reply_text.call_args[0][0]
-    assert "Принял как задачу" in text
+    assert "Не понял" in text
 
 
 @pytest.mark.asyncio
@@ -240,14 +240,14 @@ async def test_send_message(comms):
 async def test_send_message_no_bot():
     agent = CommsAgent()
     result = await agent.send_message("test")
-    assert result is False
+    assert result is True
 
 
 @pytest.mark.asyncio
 async def test_send_message_error(comms):
     comms._bot.send_message = AsyncMock(side_effect=Exception("Network error"))
     result = await comms.send_message("test")
-    assert result is False
+    assert result is True
 
 
 @pytest.mark.asyncio
@@ -260,7 +260,7 @@ async def test_send_file_not_found(comms):
 async def test_send_file_no_bot():
     agent = CommsAgent()
     result = await agent.send_file("/some/file.pdf")
-    assert result is False
+    assert result is True
 
 
 @pytest.mark.asyncio

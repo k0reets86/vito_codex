@@ -99,3 +99,19 @@ Roadmap фазы:
 - **Этап 2** (Масштабирование, $50-200): ~50% — код есть, реальные API не подключены
 - **Этап 3** (Автономия, $200-500): ~40% — компоненты готовы, не обкатаны в бою
 - **Этап 4** (Рост, $500-2000): ~10% — будущее
+
+## CURRENT STATUS (2026-02-23)
+
+Последняя сессия:
+- Усилена оркестрация: VITOCore планирует и распределяет задачи
+- Реализован replan при провале шага в Decision Loop
+- Навыки: версия + last_result, автосохранение по успешным dispatch
+- Approval gate: публикации требуют ✅ (ecommerce/publisher/smm/gumroad route)
+- ChromaDB: fallback на in-memory при ошибке FS
+
+Тесты:
+- `pytest -q -c /dev/null /home/vito/vito-agent/tests` → 534 passed (есть предупреждения из тестов)
+
+NEXT STEP:
+- Интегрировать skill-loop в Telegram flow (ConversationEngine)
+- Укрепить автопереобучение навыков (versioned upgrades)

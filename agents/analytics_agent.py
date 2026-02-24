@@ -10,8 +10,9 @@ logger = get_logger("analytics_agent", agent="analytics_agent")
 
 
 class AnalyticsAgent(BaseAgent):
-    def __init__(self, **kwargs):
+    def __init__(self, registry=None, **kwargs):
         super().__init__(name="analytics_agent", description="Аналитика: дашборд, аномалии, прогнозы, ROI", **kwargs)
+        self.registry = registry
 
     @property
     def capabilities(self) -> list[str]:
@@ -85,4 +86,20 @@ class AnalyticsAgent(BaseAgent):
         return TaskResult(success=True, output=response, cost_usd=0.01)
 
     async def agent_performance(self) -> TaskResult:
-        return TaskResult(success=True, output={"status": "no registry attached"})
+        if not self.registry:
+            return TaskResult(success=True, output={"status": "no registry attached"})
+        try:
+            statuses = self.registry.get_all_statuses()
+            summary = [
+                {
+                    "name": s.get("name"),
+                    "completed": s.get("tasks_completed", 0),
+                    "failed": s.get("tasks_failed", 0),
+                    "cost_usd": s.get("total_cost", 0),
+                    "status": s.get("status"),
+                }
+                for s in statuses
+            ]
+            return TaskResult(success=True, output=summary)
+        except Exception as e:
+            return TaskResult(success=False, error=str(e))

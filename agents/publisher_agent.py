@@ -2,6 +2,7 @@
 
 import time
 from typing import Any, Optional
+from pathlib import Path
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 
@@ -42,6 +43,33 @@ class PublisherAgent(BaseAgent):
         return await self.quality_judge.review(content, content_type)
 
     async def publish_wordpress(self, title: str, content: str, tags: list[str] = None) -> TaskResult:
+        if self.comms:
+            try:
+                import uuid
+                # Create preview file for full approval
+                preview_dir = Path("/home/vito/vito-agent/output/previews")
+                preview_dir.mkdir(parents=True, exist_ok=True)
+                preview_path = preview_dir / f"wordpress_preview_{uuid.uuid4().hex[:8]}.md"
+                preview_path.write_text(
+                    f"# {title}\n\n{content}\n\nTags: {', '.join(tags or [])}\n",
+                    encoding="utf-8",
+                )
+                request_id = f"publish_wordpress_{uuid.uuid4().hex[:8]}"
+                msg = (
+                    f"[publisher_agent] Запрос публикации WordPress.\n"
+                    f"Подтверди ✅ или отклони ❌.\n"
+                    f"Title: {title[:120]}"
+                )
+                approved = await self.comms.request_approval_with_files(
+                    request_id=request_id,
+                    message=msg,
+                    files=[str(preview_path)],
+                    timeout_seconds=3600,
+                )
+                if approved is not True:
+                    return TaskResult(success=False, error="Owner approval rejected or timed out")
+            except Exception:
+                return TaskResult(success=False, error="Owner approval failed")
         quality = await self._check_quality(content)
         if quality.success and not quality.output.get("approved", True):
             logger.warning(f"Качество не прошло: score={quality.output.get('score')}", extra={"event": "quality_rejected"})
@@ -57,6 +85,32 @@ class PublisherAgent(BaseAgent):
             return TaskResult(success=False, error=str(e))
 
     async def publish_medium(self, title: str, content: str, tags: list[str] = None) -> TaskResult:
+        if self.comms:
+            try:
+                import uuid
+                preview_dir = Path("/home/vito/vito-agent/output/previews")
+                preview_dir.mkdir(parents=True, exist_ok=True)
+                preview_path = preview_dir / f"medium_preview_{uuid.uuid4().hex[:8]}.md"
+                preview_path.write_text(
+                    f"# {title}\n\n{content}\n\nTags: {', '.join(tags or [])}\n",
+                    encoding="utf-8",
+                )
+                request_id = f"publish_medium_{uuid.uuid4().hex[:8]}"
+                msg = (
+                    f"[publisher_agent] Запрос публикации Medium.\n"
+                    f"Подтверди ✅ или отклони ❌.\n"
+                    f"Title: {title[:120]}"
+                )
+                approved = await self.comms.request_approval_with_files(
+                    request_id=request_id,
+                    message=msg,
+                    files=[str(preview_path)],
+                    timeout_seconds=3600,
+                )
+                if approved is not True:
+                    return TaskResult(success=False, error="Owner approval rejected or timed out")
+            except Exception:
+                return TaskResult(success=False, error="Owner approval failed")
         quality = await self._check_quality(content)
         if quality.success and not quality.output.get("approved", True):
             return TaskResult(success=False, error=f"Качество ниже порога: {quality.output.get('score')}/10")

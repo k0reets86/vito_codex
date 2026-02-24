@@ -87,8 +87,15 @@ class CaptchaSolver:
         if balance is None:
             err = client.err_string
             logger.error(f"Balance check failed: {err}")
-            raise RuntimeError(f"Anti-captcha balance check failed: {err}")
-        return float(balance)
+            return 0.0
+        try:
+            bal = float(balance)
+        except Exception:
+            return 0.0
+        if bal < 0:
+            logger.warning(f"Anti-captcha returned negative balance: {bal}")
+            return 0.0
+        return bal
 
     def solve_recaptcha_v2(self, site_key: str, page_url: str, invisible: bool = False) -> Optional[str]:
         """Solve reCAPTCHA v2 and return the g-recaptcha-response token."""

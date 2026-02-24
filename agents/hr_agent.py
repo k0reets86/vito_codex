@@ -16,7 +16,7 @@ class HRAgent(BaseAgent):
 
     @property
     def capabilities(self) -> list[str]:
-        return ["hr", "performance_evaluation"]
+        return ["hr", "performance_evaluation", "knowledge_audit", "agent_development"]
 
     async def execute_task(self, task_type: str, **kwargs) -> TaskResult:
         self._status = AgentStatus.RUNNING
@@ -28,6 +28,10 @@ class HRAgent(BaseAgent):
                 result = await self.evaluate_performance(kwargs.get("agent_name", ""))
             elif task_type == "improvements":
                 result = await self.suggest_improvements()
+            elif task_type == "knowledge_audit":
+                result = await self.audit_knowledge_base()
+            elif task_type == "agent_development":
+                result = await self.plan_agent_development()
             else:
                 result = await self.agent_ranking()
             result.duration_ms = int((time.monotonic() - start) * 1000)
@@ -83,6 +87,57 @@ class HRAgent(BaseAgent):
             prompt=f"Проанализируй производительность агентов и дай рекомендации:\n{stats_text}\nПредложи: что улучшить, какие агенты неэффективны, как оптимизировать.",
             estimated_tokens=1500,
         )
+        if not response:
+            return TaskResult(success=False, error="LLM не вернул ответ")
+        return TaskResult(success=True, output=response)
+
+    async def audit_knowledge_base(self) -> TaskResult:
+        """Audit knowledge/skills coverage and suggest updates."""
+        if not self.llm_router or not self.memory:
+            return TaskResult(success=False, error="LLM Router или Memory недоступны")
+        # Summarize current skills
+        try:
+            skills = self.memory.search_skills("platform integration", limit=10)
+        except Exception:
+            skills = []
+        skills_text = "\n".join([f"- {s.get('name')}: {s.get('description','')[:80]}" for s in skills]) or "Нет навыков"
+        platform_text = ""
+        try:
+            from modules.platform_registry import PlatformRegistry
+            reg = PlatformRegistry()
+            items = reg.list_platforms(limit=50)
+            if items:
+                lines = ["Платформы в реестре:"]
+                for p in items:
+                    lines.append(f"- {p['name']} ({'configured' if p['configured'] else 'not_configured'})")
+                platform_text = "\n".join(lines)
+        except Exception:
+            platform_text = ""
+        prompt = (
+            "Проведи аудит базы знаний и навыков VITO. "
+            "Укажи пробелы по платформам коммерции/контента и предложи что обновить.\n"
+            f"Навыки:\n{skills_text}\n"
+            f"{platform_text}\n"
+            "Ответ: краткий список пробелов + рекомендации."
+        )
+        response = await self._call_llm(task_type=TaskType.STRATEGY, prompt=prompt, estimated_tokens=800)
+        if not response:
+            return TaskResult(success=False, error="LLM не вернул ответ")
+        return TaskResult(success=True, output=response)
+
+    async def plan_agent_development(self) -> TaskResult:
+        """Plan periodic development goals for agents by domain."""
+        if not self.llm_router or not self.registry:
+            return TaskResult(success=False, error="LLM Router или Registry недоступны")
+        statuses = self.registry.get_all_statuses()
+        agents = ", ".join([s.get("name","?") for s in statuses]) or "None"
+        prompt = (
+            "Составь план развития агентов по доменам. "
+            "Цель: чтобы каждый агент развивался в своём направлении под оркестратором VITO.\n"
+            f"Агенты: {agents}\n"
+            "Ответ: краткий список действий/навыков для каждого домена."
+        )
+        response = await self._call_llm(task_type=TaskType.STRATEGY, prompt=prompt, estimated_tokens=900)
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
         return TaskResult(success=True, output=response)

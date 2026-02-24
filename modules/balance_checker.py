@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
+from modules.network_utils import network_available, network_status
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
@@ -48,9 +49,81 @@ class ServiceBalance:
 class BalanceChecker:
     """Check balances across all VITO external services."""
 
-    async def check_all(self) -> list[ServiceBalance]:
+    def _env_keys(self) -> set[str]:
+        """Return all keys present in .env file."""
+        env_path = Path(__file__).resolve().parent.parent / ".env"
+        keys = set()
+        try:
+            if env_path.exists():
+                for line in env_path.read_text().splitlines():
+                    if not line or line.strip().startswith("#") or "=" not in line:
+                        continue
+                    k = line.split("=", 1)[0].strip()
+                    if k:
+                        keys.add(k)
+        except Exception:
+            pass
+        return keys
+
+    def _service_key_map(self) -> dict[str, list[str]]:
+        """Map service names to possible env keys."""
+        return {
+            "anticaptcha": ["ANTI_CAPTCHA_KEY", "ANTICAPTCHA_KEY"],
+            "anthropic": ["ANTHROPIC_API_KEY"],
+            "openai": ["OPENAI_API_KEY"],
+            "replicate": ["REPLICATE_API_TOKEN"],
+            "gemini": ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+            "openrouter": ["OPENROUTER_API_KEY"],
+            "perplexity": ["PERPLEXITY_API_KEY"],
+            "gumroad": ["GUMROAD_API_KEY", "GUMROAD_OAUTH_TOKEN", "GUMROAD_REFRESH_TOKEN"],
+            "kofi": ["KOFI_API_KEY"],
+            "etsy": ["ETSY_API_KEY", "ETSY_API_SECRET", "ETSY_SHARED_SECRET"],
+            "printful": ["PRINTFUL_API_KEY"],
+            "medium": ["MEDIUM_API_KEY", "MEDIUM_ACCESS_TOKEN"],
+            "wordpress": ["WORDPRESS_API_KEY", "WORDPRESS_USER", "WORDPRESS_PASS"],
+            "twitter": [
+                "TWITTER_BEARER_TOKEN", "TWITTER_ACCESS_TOKEN", "TWITTER_ACCESS_SECRET",
+                "TWITTER_CLIENT_SECRET", "TWITTER_CONSUMER_KEY", "TWITTER_CONSUMER_SECRET",
+            ],
+            "cloudinary": ["CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET"],
+            "bfl": ["BFL_API_KEY"],
+            "wavespeed": ["WAVESPEED_API_KEY"],
+            "telegram": ["TELEGRAM_BOT_TOKEN"],
+            "gmail": ["GMAIL_PASSWORD"],
+            "google": ["GOOGLE_API_KEY"],
+            "shopify": ["SHOPIFY_ACCESS_TOKEN", "SHOPIFY_API_KEY"],
+            "pinterest": ["PINTEREST_ACCESS_TOKEN", "PINTEREST_APP_ID"],
+            "instagram": ["INSTAGRAM_ACCESS_TOKEN", "META_APP_ID"],
+            "threads": ["THREADS_ACCESS_TOKEN", "META_APP_ID"],
+            "linkedin": ["LINKEDIN_ACCESS_TOKEN", "LINKEDIN_CLIENT_ID"],
+        }
+
+    async def check_all(self, include_env_keys: bool = False) -> list[ServiceBalance]:
         """Check all service balances. Returns list of ServiceBalance."""
         results = []
+
+        net = network_status()
+        if not net["ok"]:
+            # Fast path: no DNS/network — report network_unavailable for configured services
+            env_keys = self._env_keys()
+            for service, keys in self._service_key_map().items():
+                present = any(os.getenv(k, "") for k in keys)
+                if present:
+                    results.append(ServiceBalance(
+                        name=service,
+                        error=f"network_unavailable:{net['reason']}",
+                        details={"status": "network_unavailable", "reason": net["reason"]},
+                    ))
+            # Optionally show raw env keys if explicitly requested
+            if include_env_keys:
+                for key in sorted(env_keys):
+                    if key.endswith("_KEY") or key.endswith("_TOKEN") or key.endswith("_SECRET") or key.endswith("_PASSWORD"):
+                        if os.getenv(key, ""):
+                            results.append(ServiceBalance(
+                                name=key.lower(),
+                                details={"status": "key_present", "note": "network_unavailable", "source": "env_key"},
+                            ))
+            return results
 
         # Check each service sequentially (8GB RAM constraint)
         checkers = [
@@ -58,6 +131,19 @@ class BalanceChecker:
             self._check_anthropic,
             self._check_openai,
             self._check_replicate,
+            self._check_gemini,
+            self._check_openrouter,
+            self._check_perplexity,
+            self._check_gumroad,
+            self._check_kofi,
+            self._check_etsy,
+            self._check_printful,
+            self._check_medium,
+            self._check_wordpress,
+            self._check_twitter,
+            self._check_cloudinary,
+            self._check_bfl,
+            self._check_wavespeed,
         ]
 
         for checker in checkers:
@@ -71,7 +157,169 @@ class BalanceChecker:
                     error=str(e),
                 ))
 
+        # Add services that have keys but no dedicated balance endpoint
+        known_names = {b.name for b in results}
+        env_keys = self._env_keys()
+        for service, keys in self._service_key_map().items():
+            if service in known_names:
+                continue
+            present = any(os.getenv(k, "") for k in keys)
+            if present:
+                results.append(ServiceBalance(
+                    name=service,
+                    details={"status": "active", "note": "no balance endpoint", "source": "service_map"},
+                ))
+
+        # Optionally add raw env keys (diagnostic)
+        if include_env_keys:
+            for key in sorted(env_keys):
+                if key.endswith("_KEY") or key.endswith("_TOKEN") or key.endswith("_SECRET") or key.endswith("_PASSWORD"):
+                    name = key.lower()
+                    if name in known_names:
+                        continue
+                    if os.getenv(key, ""):
+                        results.append(ServiceBalance(
+                            name=name,
+                            details={
+                                "status": "key_present",
+                                "note": "validation_not_implemented",
+                                "source": "env_key",
+                            },
+                        ))
+                    else:
+                        results.append(ServiceBalance(
+                            name=name,
+                            error=f"{key} not set",
+                            details={"source": "env_key"},
+                        ))
+
         return results
+
+    async def _check_gemini(self) -> ServiceBalance:
+        key = os.getenv("GEMINI_API_KEY", "") or os.getenv("GOOGLE_API_KEY", "")
+        if not key:
+            return ServiceBalance(name="gemini", error="GEMINI_API_KEY/GOOGLE_API_KEY not set")
+        try:
+            import httpx
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    f"https://generativelanguage.googleapis.com/v1/models?key={key}",
+                    timeout=10,
+                )
+                if resp.status_code == 200:
+                    return ServiceBalance(name="gemini", details={"status": "active"})
+                if resp.status_code == 401:
+                    return ServiceBalance(name="gemini", error="Invalid API key")
+                return ServiceBalance(name="gemini", error=f"HTTP {resp.status_code}")
+        except Exception as e:
+            return ServiceBalance(name="gemini", error=str(e))
+
+    async def _check_openrouter(self) -> ServiceBalance:
+        key = os.getenv("OPENROUTER_API_KEY", "")
+        if not key:
+            return ServiceBalance(name="openrouter", error="OPENROUTER_API_KEY not set")
+        try:
+            import requests
+            resp = requests.get(
+                "https://openrouter.ai/api/v1/models",
+                headers={"Authorization": f"Bearer {key}"},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                return ServiceBalance(name="openrouter", details={"status": "active"})
+            if resp.status_code == 401:
+                return ServiceBalance(name="openrouter", error="Invalid API key")
+            return ServiceBalance(name="openrouter", error=f"HTTP {resp.status_code}")
+        except Exception as e:
+            return ServiceBalance(name="openrouter", error=str(e))
+
+    async def _check_perplexity(self) -> ServiceBalance:
+        key = os.getenv("PERPLEXITY_API_KEY", "")
+        if not key:
+            return ServiceBalance(name="perplexity", error="PERPLEXITY_API_KEY not set")
+        # No official balance endpoint known in codebase
+        return ServiceBalance(name="perplexity", details={"status": "active", "note": "no balance endpoint"})
+
+    async def _check_gumroad(self) -> ServiceBalance:
+        try:
+            from platforms.gumroad import GumroadPlatform
+            p = GumroadPlatform()
+            ok = await p.authenticate()
+            return ServiceBalance(name="gumroad", details={"status": "active" if ok else "not_authenticated"})
+        except Exception as e:
+            return ServiceBalance(name="gumroad", error=str(e))
+
+    async def _check_kofi(self) -> ServiceBalance:
+        try:
+            from platforms.kofi import KofiPlatform
+            p = KofiPlatform()
+            ok = await p.authenticate()
+            return ServiceBalance(name="kofi", details={"status": "active" if ok else "not_authenticated"})
+        except Exception as e:
+            return ServiceBalance(name="kofi", error=str(e))
+
+    async def _check_etsy(self) -> ServiceBalance:
+        try:
+            from platforms.etsy import EtsyPlatform
+            p = EtsyPlatform()
+            ok = await p.authenticate()
+            return ServiceBalance(name="etsy", details={"status": "active" if ok else "not_authenticated"})
+        except Exception as e:
+            return ServiceBalance(name="etsy", error=str(e))
+
+    async def _check_printful(self) -> ServiceBalance:
+        try:
+            from platforms.printful import PrintfulPlatform
+            p = PrintfulPlatform()
+            ok = await p.authenticate()
+            return ServiceBalance(name="printful", details={"status": "active" if ok else "not_authenticated"})
+        except Exception as e:
+            return ServiceBalance(name="printful", error=str(e))
+
+    async def _check_medium(self) -> ServiceBalance:
+        try:
+            from platforms.medium import MediumPlatform
+            p = MediumPlatform()
+            ok = await p.authenticate()
+            return ServiceBalance(name="medium", details={"status": "active" if ok else "not_authenticated"})
+        except Exception as e:
+            return ServiceBalance(name="medium", error=str(e))
+
+    async def _check_wordpress(self) -> ServiceBalance:
+        try:
+            from platforms.wordpress import WordPressPlatform
+            p = WordPressPlatform()
+            ok = await p.authenticate()
+            return ServiceBalance(name="wordpress", details={"status": "active" if ok else "not_authenticated"})
+        except Exception as e:
+            return ServiceBalance(name="wordpress", error=str(e))
+
+    async def _check_twitter(self) -> ServiceBalance:
+        try:
+            from platforms.twitter import TwitterPlatform
+            p = TwitterPlatform()
+            ok = await p.authenticate()
+            return ServiceBalance(name="twitter", details={"status": "active" if ok else "not_authenticated"})
+        except Exception as e:
+            return ServiceBalance(name="twitter", error=str(e))
+
+    async def _check_cloudinary(self) -> ServiceBalance:
+        # No simple validation without signed request
+        if not all([os.getenv("CLOUDINARY_CLOUD_NAME", ""), os.getenv("CLOUDINARY_API_KEY", ""), os.getenv("CLOUDINARY_API_SECRET", "")]):
+            return ServiceBalance(name="cloudinary", error="CLOUDINARY_* not set")
+        return ServiceBalance(name="cloudinary", details={"status": "active", "note": "no balance endpoint"})
+
+    async def _check_bfl(self) -> ServiceBalance:
+        key = os.getenv("BFL_API_KEY", "")
+        if not key:
+            return ServiceBalance(name="bfl", error="BFL_API_KEY not set")
+        return ServiceBalance(name="bfl", details={"status": "active", "note": "no balance endpoint"})
+
+    async def _check_wavespeed(self) -> ServiceBalance:
+        key = os.getenv("WAVESPEED_API_KEY", "")
+        if not key:
+            return ServiceBalance(name="wavespeed", error="WAVESPEED_API_KEY not set")
+        return ServiceBalance(name="wavespeed", details={"status": "active", "note": "no balance endpoint"})
 
     async def _check_anticaptcha(self) -> ServiceBalance:
         """Check anti-captcha.com account balance."""
@@ -234,7 +482,12 @@ class BalanceChecker:
         except Exception as e:
             return ServiceBalance(name="replicate", error=str(e))
 
-    def format_report(self, balances: list[ServiceBalance], include_internal: dict | None = None) -> str:
+    def format_report(
+        self,
+        balances: list[ServiceBalance],
+        include_internal: dict | None = None,
+        show_env_keys: bool = False,
+    ) -> str:
         """Format balance report for Telegram.
 
         Args:
@@ -245,6 +498,8 @@ class BalanceChecker:
         has_low = False
 
         for b in balances:
+            if not show_env_keys and b.details.get("source") == "env_key":
+                continue
             if b.error:
                 lines.append(f"  {b.name}: ERROR — {b.error}")
             elif b.balance is not None:
@@ -273,6 +528,8 @@ class BalanceChecker:
         if has_low:
             lines.insert(1, "WARNING: Low balance detected!")
 
+        if len(lines) == 1:
+            lines.append("  Нет доступных проверок балансов")
         return "\n".join(lines)
 
     def get_low_balance_alerts(self, balances: list[ServiceBalance]) -> list[str]:

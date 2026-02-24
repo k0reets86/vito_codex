@@ -24,7 +24,7 @@ class AccountManager(BaseAgent):
 
     @property
     def capabilities(self) -> list[str]:
-        return ["account_management"]
+        return ["account_management", "email_code"]
 
     async def execute_task(self, task_type: str, **kwargs) -> TaskResult:
         self._status = AgentStatus.RUNNING
@@ -36,6 +36,13 @@ class AccountManager(BaseAgent):
                 result = await self.check_account(kwargs.get("platform", ""))
             elif task_type == "monitor_limits":
                 result = await self.monitor_limits()
+            elif task_type == "email_code":
+                result = await self.fetch_email_code(
+                    from_filter=kwargs.get("from_filter", ""),
+                    subject_filter=kwargs.get("subject_filter", ""),
+                    prefer_link=bool(kwargs.get("prefer_link", False)),
+                    timeout_sec=int(kwargs.get("timeout_sec", 120)),
+                )
             else:
                 result = await self.list_accounts()
             result.duration_ms = int((time.monotonic() - start) * 1000)
@@ -66,3 +73,28 @@ class AccountManager(BaseAgent):
             configured = bool(getattr(settings, env_var, ""))
             limits.append({"platform": platform, "configured": configured, "api_limits": "unknown"})
         return TaskResult(success=True, output=limits)
+
+    async def fetch_email_code(
+        self,
+        from_filter: str = "",
+        subject_filter: str = "",
+        prefer_link: bool = False,
+        timeout_sec: int = 120,
+    ) -> TaskResult:
+        """Fetch verification code or link from email inbox."""
+        from modules.email_inbox import wait_for_code
+        address = settings.GMAIL_ADDRESS
+        password = settings.GMAIL_PASSWORD
+        if not address or not password:
+            return TaskResult(success=False, error="GMAIL_ADDRESS/GMAIL_PASSWORD not set")
+        code, snippet = wait_for_code(
+            address=address,
+            password=password,
+            from_filter=from_filter,
+            subject_filter=subject_filter,
+            prefer_link=prefer_link,
+            timeout_sec=timeout_sec,
+        )
+        if not code:
+            return TaskResult(success=False, error="code_not_found")
+        return TaskResult(success=True, output={"code": code, "snippet": snippet})

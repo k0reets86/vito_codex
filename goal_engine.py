@@ -100,6 +100,7 @@ class GoalEngine:
     def _load_goals(self) -> None:
         """Загружает non-terminal цели из SQLite при старте."""
         try:
+            self._goals = {}
             rows = self._conn.execute(
                 "SELECT * FROM goals WHERE status NOT IN ('completed', 'failed', 'cancelled')"
             ).fetchall()
@@ -143,6 +144,10 @@ class GoalEngine:
         except Exception as e:
             logger.error(f"Ошибка загрузки целей: {e}", extra={"event": "goals_load_error"}, exc_info=True)
 
+    def reload_goals(self) -> None:
+        """Перезагружает цели из SQLite (non-terminal)."""
+        self._load_goals()
+
     def _persist_goal(self, goal: Goal) -> None:
         """Сохраняет одну цель в SQLite (INSERT OR REPLACE)."""
         try:
@@ -185,6 +190,22 @@ class GoalEngine:
         parent_goal_id: Optional[str] = None,
     ) -> Goal:
         """Создаёт новую цель."""
+        # Avoid duplicate active goals with identical title
+        try:
+            for g in self._goals.values():
+                if g.title == title and g.status in {
+                    GoalStatus.PENDING,
+                    GoalStatus.EXECUTING,
+                    GoalStatus.WAITING_APPROVAL,
+                    GoalStatus.PLANNING,
+                }:
+                    logger.info(
+                        f"Цель уже существует (active): [{g.goal_id}] {title}",
+                        extra={"event": "goal_duplicate_skipped", "context": {"goal_id": g.goal_id}},
+                    )
+                    return g
+        except Exception:
+            pass
         goal = Goal(
             goal_id=str(uuid.uuid4())[:8],
             title=title,
@@ -209,6 +230,12 @@ class GoalEngine:
                 },
             },
         )
+        try:
+            from modules.data_lake import DataLake
+            DataLake().record(agent="goal_engine", task_type="goal_created", status="success",
+                              output={"goal_id": goal.goal_id, "title": title, "priority": priority.name})
+        except Exception:
+            pass
         return goal
 
     def plan_goal(self, goal_id: str, steps: list[str]) -> None:
@@ -228,6 +255,12 @@ class GoalEngine:
                 "context": {"goal_id": goal_id, "steps_count": len(steps), "steps": steps},
             },
         )
+        try:
+            from modules.data_lake import DataLake
+            DataLake().record(agent="goal_engine", task_type="goal_planned", status="success",
+                              output={"goal_id": goal_id, "steps": steps[:10]})
+        except Exception:
+            pass
 
     def start_execution(self, goal_id: str) -> bool:
         """Фаза EXECUTE: начинает выполнение цели."""
@@ -256,6 +289,12 @@ class GoalEngine:
             f"Выполнение начато: [{goal_id}] {goal.title}",
             extra={"event": "goal_execution_started", "context": {"goal_id": goal_id}},
         )
+        try:
+            from modules.data_lake import DataLake
+            DataLake().record(agent="goal_engine", task_type="goal_execution_started", status="success",
+                              output={"goal_id": goal_id, "title": goal.title})
+        except Exception:
+            pass
         return True
 
     def complete_goal(self, goal_id: str, results: dict[str, Any], lessons: str = "") -> None:
@@ -289,6 +328,12 @@ class GoalEngine:
                 },
             },
         )
+        try:
+            from modules.data_lake import DataLake
+            DataLake().record(agent="goal_engine", task_type="goal_completed", status="success",
+                              output={"goal_id": goal_id, "title": goal.title, "lessons": lessons[:200]})
+        except Exception:
+            pass
 
     def fail_goal(self, goal_id: str, reason: str) -> None:
         """Отмечает цель как проваленную."""
@@ -308,6 +353,46 @@ class GoalEngine:
             f"Цель провалена: [{goal_id}] {reason}",
             extra={"event": "goal_failed", "context": {"goal_id": goal_id, "reason": reason}},
         )
+        try:
+            from modules.data_lake import DataLake
+            DataLake().record(agent="goal_engine", task_type="goal_failed", status="failed",
+                              output={"goal_id": goal_id, "title": goal.title}, error=reason)
+        except Exception:
+            pass
+
+    def delete_goal(self, goal_id: str) -> bool:
+        """Удаляет цель из памяти и SQLite."""
+        try:
+            if goal_id in self._goals:
+                if self._active_goal == goal_id:
+                    self._active_goal = None
+                self._goals.pop(goal_id, None)
+            if self._conn:
+                self._conn.execute("DELETE FROM goals WHERE goal_id = ?", (goal_id,))
+                self._conn.commit()
+            logger.info(
+                f"Цель удалена: [{goal_id}]",
+                extra={"event": "goal_deleted", "context": {"goal_id": goal_id}},
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка удаления цели {goal_id}: {e}", extra={"event": "goal_delete_error"}, exc_info=True)
+            return False
+
+    def clear_all_goals(self) -> int:
+        """Удаляет все цели (полная очистка очереди)."""
+        try:
+            count = len(self._goals)
+            self._goals = {}
+            self._active_goal = None
+            if self._conn:
+                self._conn.execute("DELETE FROM goals")
+                self._conn.commit()
+            logger.warning("Все цели удалены", extra={"event": "goals_cleared", "context": {"count": count}})
+            return count
+        except Exception as e:
+            logger.error(f"Ошибка очистки целей: {e}", extra={"event": "goals_clear_error"}, exc_info=True)
+            return 0
 
     def get_next_goal(self) -> Optional[Goal]:
         """Выбирает следующую цель по приоритету (динамическая приоритизация).
@@ -358,3 +443,7 @@ class GoalEngine:
             "success_rate": len(completed) / max(len(completed) + len(failed), 1),
             "total_estimated_cost": sum(g.estimated_cost_usd for g in all_goals),
         }
+
+    def get_waiting_approvals(self) -> list[Goal]:
+        """Список целей, ожидающих одобрения владельца."""
+        return [g for g in self._goals.values() if g.status == GoalStatus.WAITING_APPROVAL]

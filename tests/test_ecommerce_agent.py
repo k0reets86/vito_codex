@@ -32,8 +32,10 @@ class TestECommerceAgent:
         assert "sales_check" in agent.capabilities
 
     @pytest.mark.asyncio
-    async def test_create_listing(self, agent):
-        result = await agent.create_listing("gumroad", {"title": "Test Product", "price": 9.99})
+    async def test_create_listing(self, agent, tmp_path):
+        pdf = tmp_path / "test.pdf"
+        pdf.write_text("dummy", encoding="utf-8")
+        result = await agent.create_listing("gumroad", {"title": "Test Product", "price": 9.99, "pdf_path": str(pdf)})
         assert result.success is True
 
     @pytest.mark.asyncio

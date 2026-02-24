@@ -69,6 +69,20 @@ class AgentRegistry:
         """Находит агентов с указанной capability."""
         return [a for a in self._agents.values() if capability in a.capabilities]
 
+    @staticmethod
+    def _agent_score(agent: BaseAgent) -> float:
+        try:
+            completed = int(getattr(agent, "_tasks_completed", 0))
+        except Exception:
+            completed = 0
+        try:
+            failed = int(getattr(agent, "_tasks_failed", 0))
+        except Exception:
+            failed = 0
+        total = completed + failed
+        success_rate = (completed / total) if total > 0 else 0.5
+        return success_rate
+
     async def _ensure_started(self, agent: BaseAgent) -> None:
         """Lazy start: запускает агента если он ещё не запущен."""
         if agent.name not in self._started:
@@ -96,27 +110,143 @@ class AgentRegistry:
             )
             return None
 
-        agent = agents[0]
+        # Try agents by success rate (best first), fallback to others on failure
+        candidates = sorted(agents, key=self._agent_score, reverse=True)
+        last_error = None
+        for agent in candidates:
+            # Lazy start on first dispatch
+            await self._ensure_started(agent)
+            self._last_used[agent.name] = time.monotonic()
 
-        # Lazy start on first dispatch
-        await self._ensure_started(agent)
-        self._last_used[agent.name] = time.monotonic()
-
-        logger.info(
-            f"Dispatch: {task_type} → {agent.name}",
-            extra={"event": "dispatch", "context": {"task_type": task_type, "agent_name": agent.name}},
-        )
-        try:
-            result = await agent.execute_task(task_type, **kwargs)
-            agent._track_result(result)
-            return result
-        except Exception as e:
-            logger.error(
-                f"Ошибка dispatch {task_type} → {agent.name}: {e}",
-                extra={"event": "dispatch_error"},
-                exc_info=True,
+            logger.info(
+                f"Dispatch: {task_type} → {agent.name}",
+                extra={"event": "dispatch", "context": {"task_type": task_type, "agent_name": agent.name}},
             )
-            return TaskResult(success=False, error=str(e))
+            try:
+                result = await agent.execute_task(task_type, **kwargs)
+                try:
+                    if result is not None:
+                        md = result.metadata or {}
+                        md.setdefault("task_type", task_type)
+                        result.metadata = md
+                except Exception:
+                    pass
+                agent._track_result(result)
+                # Record execution facts for verified actions
+                try:
+                    if result and result.success:
+                        from modules.execution_facts import ExecutionFacts
+                        facts = ExecutionFacts()
+                        evidence = ""
+                        if isinstance(result.output, dict):
+                            for key in ("url", "link", "listing_url", "tweet_url", "post_url"):
+                                if result.output.get(key):
+                                    evidence = str(result.output.get(key))
+                                    break
+                            if not evidence and "path" in result.output:
+                                evidence = str(result.output.get("path"))
+                            if not evidence and "file" in result.output:
+                                evidence = str(result.output.get("file"))
+                            if not evidence and "id" in result.output:
+                                evidence = str(result.output.get("id"))
+                            if not evidence and "listing_id" in result.output:
+                                evidence = str(result.output.get("listing_id"))
+                        evidence_dict = None
+                        if isinstance(result.output, dict):
+                            evidence_dict = {
+                                "url": result.output.get("url") or result.output.get("link"),
+                                "id": result.output.get("id") or result.output.get("listing_id") or result.output.get("post_id"),
+                                "path": result.output.get("path") or result.output.get("file"),
+                                "screenshot": result.output.get("screenshot_path"),
+                                "platform": result.output.get("platform"),
+                            }
+                        facts.record(
+                            action=f"{agent.name}:{task_type}",
+                            status="success",
+                            detail=str(kwargs.get("step", "") or kwargs.get("goal_title", "") or task_type)[:200],
+                            evidence=evidence,
+                            source="agent_registry",
+                            evidence_dict=evidence_dict,
+                        )
+                except Exception:
+                    pass
+                # Structured feedback registry (local, lightweight)
+                try:
+                    from modules.agent_feedback import AgentFeedback
+                    feedback = AgentFeedback()
+                    feedback.record(
+                        agent=agent.name,
+                        task_type=task_type,
+                        success=bool(result and result.success),
+                        output=result.output,
+                        error=getattr(result, "error", None),
+                        metadata=getattr(result, "metadata", None),
+                    )
+                except Exception:
+                    pass
+                # Data lake event log
+                try:
+                    from modules.data_lake import DataLake
+                    lake = DataLake()
+                    lake.record(
+                        agent=agent.name,
+                        task_type=task_type,
+                        status="success" if result and result.success else "failed",
+                        output=getattr(result, "output", None),
+                        error=getattr(result, "error", None) or "",
+                    )
+                except Exception:
+                    pass
+                # Save skill on success (agent-aware, reusable)
+                try:
+                    if result and result.success and agent.memory:
+                        step = kwargs.get("step", "") or kwargs.get("content", "") or ""
+                        goal_title = kwargs.get("goal_title", "")
+                        desc_parts = []
+                        if goal_title:
+                            desc_parts.append(f"Goal: {goal_title[:80]}")
+                        if step:
+                            desc_parts.append(f"Step: {step[:120]}")
+                        description = " | ".join(desc_parts) or f"Task: {task_type}"
+                        skill_name = f"{agent.name}:{task_type}"
+                        agent.memory.save_skill(
+                            name=skill_name,
+                            description=description,
+                            agent=agent.name,
+                            task_type=task_type,
+                            method={"kwargs_keys": list(kwargs.keys())[:10]},
+                        )
+                        try:
+                            agent.memory.update_skill_last_result(skill_name, str(result.output))
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                # Record failures for anti-skill memory
+                try:
+                    if result and not result.success:
+                        from modules.failure_memory import FailureMemory
+                        fm = FailureMemory()
+                        fm.record(
+                            agent=agent.name,
+                            task_type=task_type,
+                            detail=str(kwargs.get("step", "") or kwargs.get("goal_title", "") or task_type)[:200],
+                            error=getattr(result, "error", "") or "unknown_error",
+                        )
+                except Exception:
+                    pass
+                if result and result.success:
+                    return result
+                last_error = getattr(result, "error", None)
+            except Exception as e:
+                last_error = str(e)
+                logger.error(
+                    f"Ошибка dispatch {task_type} → {agent.name}: {e}",
+                    extra={"event": "dispatch_error"},
+                    exc_info=True,
+                )
+
+        return TaskResult(success=False, error=last_error or "All agents failed")
 
     async def start_core(self) -> None:
         """Запускает только Tier 1 (CORE) агентов при старте системы."""

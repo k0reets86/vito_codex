@@ -15,6 +15,8 @@ class Settings:
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     PERPLEXITY_API_KEY: str = os.getenv("PERPLEXITY_API_KEY", "")
     OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
+    OPENROUTER_DEFAULT_MODEL: str = os.getenv("OPENROUTER_DEFAULT_MODEL", "openai/gpt-4o-mini")
+    ANTICAPTCHA_KEY: str = os.getenv("ANTICAPTCHA_KEY", "")
 
     # Telegram
     TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -27,6 +29,9 @@ class Settings:
 
     # Platforms
     GUMROAD_API_KEY: str = os.getenv("GUMROAD_API_KEY", "")
+    GUMROAD_OAUTH_TOKEN: str = os.getenv("GUMROAD_OAUTH_TOKEN", "")
+    GUMROAD_EMAIL: str = os.getenv("GUMROAD_EMAIL", "")
+    GUMROAD_PASSWORD: str = os.getenv("GUMROAD_PASSWORD", "")
     ETSY_API_KEY: str = os.getenv("ETSY_API_KEY", "")
     KOFI_API_KEY: str = os.getenv("KOFI_API_KEY", "")
     WORDPRESS_URL: str = os.getenv("WORDPRESS_URL", "")
@@ -74,6 +79,38 @@ class Settings:
     OPERATION_NOTIFY_USD: float = float(os.getenv("OPERATION_NOTIFY_USD", "1"))
     OPERATION_APPROVE_USD: float = float(os.getenv("OPERATION_APPROVE_USD", "20"))
     OPERATION_MAX_USD: float = float(os.getenv("OPERATION_MAX_USD", "2"))
+
+    # Autonomy toggles
+    PROACTIVE_ENABLED: bool = os.getenv("PROACTIVE_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+    BRAINSTORM_WEEKLY: bool = os.getenv("BRAINSTORM_WEEKLY", "true").lower() in ("1", "true", "yes", "on")
+
+    # LLM cache
+    LLM_CACHE_TTL_HOURS: int = int(os.getenv("LLM_CACHE_TTL_HOURS", "24"))
+    LLM_DISABLED_MODELS: str = os.getenv("LLM_DISABLED_MODELS", "")
+    LLM_ENABLED_MODELS: str = os.getenv("LLM_ENABLED_MODELS", "")
+
+    # Notifications
+    NOTIFY_MODE: str = os.getenv("NOTIFY_MODE", "minimal")  # minimal|all
+
+    # Browser behavior
+    BROWSER_DEFAULT_ON_URL: bool = os.getenv("BROWSER_DEFAULT_ON_URL", "true").lower() in ("1", "true", "yes", "on")
+
+    # Owner inbox (file-based comms)
+    OWNER_INBOX_ENABLED: bool = os.getenv("OWNER_INBOX_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+
+    # Dashboard
+    DASHBOARD_ENABLED: bool = os.getenv("DASHBOARD_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+    DASHBOARD_HOST: str = os.getenv("DASHBOARD_HOST", "0.0.0.0")
+    DASHBOARD_PORT: int = int(os.getenv("DASHBOARD_PORT", "8787"))
+    DASHBOARD_TOKEN: str = os.getenv("DASHBOARD_TOKEN", "")
+
+    # Time sync
+    TIME_SYNC_URL: str = os.getenv("TIME_SYNC_URL", "https://worldtimeapi.org/api/ip")
+    TIME_SYNC_URLS: str = os.getenv("TIME_SYNC_URLS", "")
+    TIME_SYNC_MAX_SKEW_SEC: int = int(os.getenv("TIME_SYNC_MAX_SKEW_SEC", "5"))
+
+    # Calendar update
+    CALENDAR_UPDATE_LLM: bool = os.getenv("CALENDAR_UPDATE_LLM", "false").lower() in ("1", "true", "yes", "on")
 
 
 settings = Settings()

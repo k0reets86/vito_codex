@@ -29,6 +29,7 @@ class MemoryManager:
     def __init__(self):
         self._chroma_client: Optional[chromadb.PersistentClient] = None
         self._chroma_collection = None
+        self._chroma_doc_count = 0
         self._sqlite_conn: Optional[sqlite3.Connection] = None
         self._pg_pool: Optional[asyncpg.Pool] = None
         logger.info("MemoryManager инициализирован", extra={"event": "init"})
@@ -37,11 +38,21 @@ class MemoryManager:
 
     def _get_chroma(self):
         if self._chroma_client is None:
-            self._chroma_client = chromadb.PersistentClient(path=settings.CHROMA_PATH)
+            import os
+            os.makedirs(settings.CHROMA_PATH, exist_ok=True)
+            try:
+                self._chroma_client = chromadb.PersistentClient(path=settings.CHROMA_PATH)
+            except Exception:
+                # Fallback to in-memory client (useful for tests / restricted FS)
+                self._chroma_client = chromadb.Client()
             self._chroma_collection = self._chroma_client.get_or_create_collection(
                 name="vito_knowledge",
                 metadata={"hnsw:space": "cosine"},
             )
+            try:
+                self._chroma_doc_count = int(self._chroma_collection.count())
+            except Exception:
+                self._chroma_doc_count = 0
             logger.info(
                 f"ChromaDB подключён: {settings.CHROMA_PATH}",
                 extra={"event": "chroma_connected"},
@@ -51,10 +62,11 @@ class MemoryManager:
     def store_knowledge(self, doc_id: str, text: str, metadata: dict[str, Any] | None = None) -> None:
         """Сохраняет знание в ChromaDB для семантического поиска."""
         collection = self._get_chroma()
-        meta = metadata or {}
+        meta = self._sanitize_metadata(metadata or {})
         meta["stored_at"] = datetime.now(timezone.utc).isoformat()
         try:
             collection.upsert(ids=[doc_id], documents=[text], metadatas=[meta])
+            self._chroma_doc_count += 1
             logger.info(
                 f"Знание сохранено: {doc_id}",
                 extra={"event": "knowledge_stored", "context": {"doc_id": doc_id}},
@@ -67,8 +79,33 @@ class MemoryManager:
             )
             raise
 
+    @staticmethod
+    def _sanitize_metadata(meta: dict[str, Any]) -> dict[str, Any]:
+        """Ensure ChromaDB metadata contains only supported scalar/list values."""
+        safe: dict[str, Any] = {}
+        for k, v in meta.items():
+            if isinstance(v, (str, int, float, bool)) or v is None:
+                safe[k] = v
+            elif isinstance(v, (list, tuple)):
+                # Allow list of scalars; otherwise JSON-stringify
+                if all(isinstance(i, (str, int, float, bool)) or i is None for i in v):
+                    safe[k] = list(v)
+                else:
+                    try:
+                        safe[k] = json.dumps(v, ensure_ascii=False)[:1000]
+                    except Exception:
+                        safe[k] = str(v)[:1000]
+            else:
+                try:
+                    safe[k] = json.dumps(v, ensure_ascii=False)[:1000]
+                except Exception:
+                    safe[k] = str(v)[:1000]
+        return safe
+
     def search_knowledge(self, query: str, n_results: int = 5) -> list[dict]:
         """Семантический поиск по базе знаний."""
+        if self._chroma_doc_count == 0:
+            return []
         collection = self._get_chroma()
         start = time.monotonic()
         try:
@@ -108,6 +145,34 @@ class MemoryManager:
             )
         return self._sqlite_conn
 
+    def sync_skill_registry(self, limit: int = 500) -> int:
+        """Backfill SkillRegistry from existing skills table."""
+        conn = self._get_sqlite()
+        try:
+            rows = conn.execute(
+                "SELECT name, description, agent, task_type FROM skills ORDER BY last_used DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            if not rows:
+                return 0
+            try:
+                from modules.skill_registry import SkillRegistry
+                reg = SkillRegistry()
+                for r in rows:
+                    reg.register_skill(
+                        name=r["name"],
+                        category=r["task_type"] or "",
+                        source=r["agent"] or "memory",
+                        status="learned",
+                        security_status="unknown",
+                        notes=(r["description"] or "")[:300],
+                    )
+            except Exception:
+                return 0
+            return len(rows)
+        except Exception:
+            return 0
+
     def _init_sqlite_tables(self) -> None:
         conn = self._sqlite_conn
         conn.executescript("""
@@ -121,7 +186,9 @@ class MemoryManager:
                 created_at TEXT DEFAULT (datetime('now')),
                 agent TEXT DEFAULT '',
                 task_type TEXT DEFAULT '',
-                method_json TEXT DEFAULT '{}'
+                method_json TEXT DEFAULT '{}',
+                version INTEGER DEFAULT 1,
+                last_result TEXT DEFAULT ''
             );
             CREATE TABLE IF NOT EXISTS errors (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -151,14 +218,33 @@ class MemoryManager:
             conn.execute("ALTER TABLE skills ADD COLUMN agent TEXT DEFAULT ''")
             conn.execute("ALTER TABLE skills ADD COLUMN task_type TEXT DEFAULT ''")
             conn.execute("ALTER TABLE skills ADD COLUMN method_json TEXT DEFAULT '{}'")
+            conn.execute("ALTER TABLE skills ADD COLUMN version INTEGER DEFAULT 1")
+            conn.execute("ALTER TABLE skills ADD COLUMN last_result TEXT DEFAULT ''")
             conn.commit()
             logger.info("Миграция skills: добавлены agent, task_type, method_json", extra={"event": "skills_migration"})
+        # Ensure new columns exist even if older migrations already ran
+        try:
+            conn.execute("SELECT version FROM skills LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute("ALTER TABLE skills ADD COLUMN version INTEGER DEFAULT 1")
+            conn.commit()
+        try:
+            conn.execute("SELECT last_result FROM skills LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute("ALTER TABLE skills ADD COLUMN last_result TEXT DEFAULT ''")
+            conn.commit()
 
     def save_skill(self, name: str, description: str, agent: str = "",
                    task_type: str = "", method: dict | None = None) -> None:
         conn = self._get_sqlite()
         method_json = json.dumps(method, ensure_ascii=False) if method else "{}"
         try:
+            # Check existing to decide version bump
+            existing = conn.execute("SELECT description, method_json, version FROM skills WHERE name = ?", (name,)).fetchone()
+            bump_version = False
+            if existing:
+                if existing["description"] != description or existing["method_json"] != method_json:
+                    bump_version = True
             conn.execute(
                 """INSERT INTO skills (name, description, last_used, agent, task_type, method_json)
                    VALUES (?, ?, datetime('now'), ?, ?, ?)
@@ -168,8 +254,9 @@ class MemoryManager:
                      last_used = datetime('now'),
                      agent = CASE WHEN excluded.agent != '' THEN excluded.agent ELSE skills.agent END,
                      task_type = CASE WHEN excluded.task_type != '' THEN excluded.task_type ELSE skills.task_type END,
-                     method_json = CASE WHEN excluded.method_json != '{}' THEN excluded.method_json ELSE skills.method_json END""",
-                (name, description, agent, task_type, method_json),
+                     method_json = CASE WHEN excluded.method_json != '{}' THEN excluded.method_json ELSE skills.method_json END,
+                     version = CASE WHEN ? THEN skills.version + 1 ELSE skills.version END""",
+                (name, description, agent, task_type, method_json, 1 if bump_version else 0),
             )
             conn.commit()
             # Дублируем в ChromaDB для семантического поиска
@@ -188,6 +275,31 @@ class MemoryManager:
         except Exception as e:
             logger.error(f"Ошибка сохранения навыка: {e}", extra={"event": "skill_save_failed"}, exc_info=True)
             raise
+        # Register in SkillRegistry for global visibility
+        try:
+            from modules.skill_registry import SkillRegistry
+            reg = SkillRegistry()
+            reg.register_skill(
+                name=name,
+                category=task_type or "",
+                source=agent or "memory",
+                status="learned",
+                security_status="unknown",
+                notes=description[:300],
+            )
+        except Exception:
+            pass
+
+    def update_skill_last_result(self, name: str, result: str) -> None:
+        conn = self._get_sqlite()
+        try:
+            conn.execute(
+                "UPDATE skills SET last_result = ?, last_used = datetime('now') WHERE name = ?",
+                (result[:500], name),
+            )
+            conn.commit()
+        except Exception:
+            pass
 
     def get_skill(self, name: str) -> Optional[dict]:
         conn = self._get_sqlite()

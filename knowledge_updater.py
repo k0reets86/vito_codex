@@ -51,11 +51,150 @@ class KnowledgeUpdater:
             logger.warning(f"Ошибка перерасчёта паттернов: {e}", extra={"event": "patterns_error"})
             results["patterns_updated"] = 0
 
+        # 4. Load static commerce calendar to memory (low cost)
+        try:
+            results["calendar_loaded"] = self.load_static_calendar()
+        except Exception as e:
+            logger.warning(f"Ошибка загрузки календаря: {e}", extra={"event": "calendar_load_error"})
+            results["calendar_loaded"] = False
+
+        # 4.1 Load platform knowledge
+        try:
+            results["platform_knowledge_loaded"] = self.load_platform_knowledge()
+        except Exception as e:
+            logger.warning(f"Ошибка загрузки platform knowledge: {e}", extra={"event": "platform_kb_load_error"})
+            results["platform_knowledge_loaded"] = False
+
+        # 5. Optional: refresh calendar via LLM (disabled by default)
+        try:
+            from config.settings import settings
+            if settings.CALENDAR_UPDATE_LLM:
+                updated = await self.update_calendar_via_llm()
+                results["calendar_updated_llm"] = updated
+        except Exception as e:
+            logger.warning(f"Ошибка обновления календаря через LLM: {e}", extra={"event": "calendar_llm_error"})
+            results["calendar_updated_llm"] = False
+
+        # 6. Load static platform registry knowledge
+        try:
+            results["platform_registry_loaded"] = self.load_platform_registry()
+        except Exception as e:
+            logger.warning(f"Ошибка загрузки платформ: {e}", extra={"event": "platform_registry_load_error"})
+            results["platform_registry_loaded"] = False
+
+        # 7. Load AI models knowledge
+        try:
+            results["ai_models_loaded"] = self.load_ai_models_knowledge()
+        except Exception as e:
+            logger.warning(f"Ошибка загрузки моделей: {e}", extra={"event": "ai_models_load_error"})
+            results["ai_models_loaded"] = False
+
         logger.info(
             f"Еженедельное обновление завершено: {results}",
             extra={"event": "weekly_update_done", "context": results},
         )
         return results
+
+    def load_static_calendar(self) -> bool:
+        """Load commerce calendar from docs into memory (no LLM)."""
+        try:
+            from pathlib import Path
+            calendar_path = Path("/home/vito/vito-agent/docs/commerce_calendar.md")
+            if calendar_path.exists() and self.memory:
+                text = calendar_path.read_text(encoding="utf-8")
+                self.memory.store_knowledge(
+                    doc_id="commerce_calendar",
+                    text=text,
+                    metadata={"type": "calendar", "source": "static", "updated": datetime.now(timezone.utc).isoformat()},
+                )
+                return True
+        except Exception:
+            return False
+        return False
+
+    def load_platform_registry(self) -> bool:
+        """Load platform registry from docs into memory."""
+        try:
+            from pathlib import Path
+            path = Path("/home/vito/vito-agent/docs/platform_registry.md")
+            if path.exists() and self.memory:
+                text = path.read_text(encoding="utf-8")
+                self.memory.store_knowledge(
+                    doc_id="platform_registry",
+                    text=text,
+                    metadata={"type": "platform_registry", "source": "static", "updated": datetime.now(timezone.utc).isoformat()},
+                )
+                return True
+        except Exception:
+            return False
+        return False
+
+    def load_platform_knowledge(self) -> bool:
+        """Load platform knowledge from docs into memory."""
+        try:
+            from pathlib import Path
+            path = Path("/home/vito/vito-agent/docs/platform_knowledge.md")
+            if path.exists() and self.memory:
+                text = path.read_text(encoding="utf-8")
+                self.memory.store_knowledge(
+                    doc_id="platform_knowledge",
+                    text=text,
+                    metadata={"type": "platform_knowledge", "source": "static", "updated": datetime.now(timezone.utc).isoformat()},
+                )
+                return True
+        except Exception:
+            return False
+        return False
+
+    def load_ai_models_knowledge(self) -> bool:
+        """Load AI models knowledge from docs into memory."""
+        try:
+            from pathlib import Path
+            path = Path("/home/vito/vito-agent/docs/ai_models_knowledge.md")
+            if path.exists() and self.memory:
+                text = path.read_text(encoding="utf-8")
+                self.memory.store_knowledge(
+                    doc_id="ai_models_knowledge",
+                    text=text,
+                    metadata={"type": "ai_models", "source": "static", "updated": datetime.now(timezone.utc).isoformat()},
+                )
+                return True
+        except Exception:
+            return False
+        return False
+
+    async def update_calendar_via_llm(self) -> bool:
+        """Update commerce calendar with LLM (requires explicit enable)."""
+        prompt = (
+            "Обнови календарь коммерческих дат для США, ЕС, Канады, Украины и глобальных событий "
+            "на следующий год. Используй формат:\n"
+            "YYYY-MM-DD | REGION | HOLIDAY/EVENT | NOTES\n"
+            "или MM-DD для ежегодных дат.\n\n"
+            "Сохрани важные даты: Black Friday, Cyber Monday, Christmas, New Year, Easter, "
+            "Mother's Day, Father's Day, Independence Day, national holidays.\n"
+            "Верни только список строк без пояснений."
+        )
+        try:
+            response = await self.llm_router.call_llm(
+                task_type=TaskType.RESEARCH,
+                prompt=prompt,
+                estimated_tokens=1200,
+            )
+            if not response:
+                return False
+            from pathlib import Path
+            calendar_path = Path("/home/vito/vito-agent/docs/commerce_calendar.md")
+            header = (
+                "# Commerce & Content Calendar (US/EU/Canada/Ukraine + Global)\\n"
+                "Format: DATE | REGION | HOLIDAY/EVENT | NOTES\\n"
+                "Dates use YYYY-MM-DD for fixed/observed dates, or MM-DD for recurring.\\n\\n"
+            )
+            calendar_path.write_text(header + response.strip() + "\\n", encoding="utf-8")
+            # Reload into memory
+            self.load_static_calendar()
+            return True
+        except Exception:
+            return False
 
     async def update_model_prices(self) -> bool:
         """Запрашивает актуальные цены LLM через Perplexity и обновляет MODEL_REGISTRY в runtime."""

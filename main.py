@@ -36,6 +36,8 @@ def _is_vito_running(pid: int) -> bool:
 
 def _acquire_pidlock():
     """Check PID file. If another VITO is running — exit. Otherwise write our PID."""
+    if os.getenv("VITO_ALLOW_MULTI") == "1":
+        return
     if os.path.exists(PIDFILE):
         try:
             with open(PIDFILE) as f:
@@ -112,6 +114,11 @@ from platforms.image_generator import ImageGenerator
 from code_generator import CodeGenerator
 from self_healer import SelfHealer
 from self_updater import SelfUpdater
+from modules.skill_registry import SkillRegistry
+from modules.time_sync import TimeSync
+from modules.schedule_manager import ScheduleManager
+from modules.platform_registry import PlatformRegistry
+from dashboard_server import DashboardServer
 from knowledge_updater import KnowledgeUpdater
 from conversation_engine import ConversationEngine
 from judge_protocol import JudgeProtocol
@@ -128,9 +135,24 @@ class VITO:
         self.llm_router = LLMRouter()
         self.memory = MemoryManager()
         self.finance = FinancialController()
+        self.comms = CommsAgent()
+        try:
+            self.memory.sync_skill_registry()
+        except Exception:
+            pass
         # Wire finance into LLM router for budget enforcement
         self.llm_router.set_finance(self.finance)
-        self.comms = CommsAgent()
+        # Wire comms into LLM router for approval dialogs
+        self.llm_router.set_comms(self.comms)
+
+        # Skill registry should exist before agents init
+        self.skill_registry = SkillRegistry()
+        self.schedule_manager = ScheduleManager()
+        self.platform_registry = PlatformRegistry()
+        try:
+            self.platform_registry.refresh()
+        except Exception:
+            pass
 
         # Agent Registry + 23 агентов
         self.registry = AgentRegistry()
@@ -146,19 +168,44 @@ class VITO:
         self.code_generator = CodeGenerator(
             llm_router=self.llm_router, self_updater=self.self_updater, comms=self.comms
         )
+        # Wire code_generator/self_updater into VITOCore
+        try:
+            core = self.registry.get("vito_core")
+            if core:
+                core.code_generator = self.code_generator
+                core.self_updater = self.self_updater
+        except Exception:
+            pass
         self.knowledge_updater = KnowledgeUpdater(
             llm_router=self.llm_router, memory=self.memory
         )
+        # Load static commerce calendar into memory on startup
+        try:
+            self.knowledge_updater.load_static_calendar()
+        except Exception:
+            pass
         self.conversation_engine = ConversationEngine(
             llm_router=self.llm_router, memory=self.memory, goal_engine=self.goal_engine,
             finance=self.finance, agent_registry=self.registry,
             self_healer=self.self_healer, self_updater=self.self_updater,
             knowledge_updater=self.knowledge_updater,
-            code_generator=self.code_generator,
+            code_generator=self.code_generator, comms=self.comms,
         )
         self.judge_protocol = JudgeProtocol(
             llm_router=self.llm_router, memory=self.memory, comms=self.comms
         )
+        self.time_sync = TimeSync(comms=self.comms)
+        try:
+            self.dashboard = DashboardServer(
+                goal_engine=self.goal_engine,
+                decision_loop=None,
+                finance=self.finance,
+                registry=self.registry,
+                schedule_manager=self.schedule_manager,
+                platform_registry=self.platform_registry,
+            )
+        except Exception:
+            self.dashboard = None
 
         self.decision_loop = DecisionLoop(
             goal_engine=self.goal_engine,
@@ -172,6 +219,13 @@ class VITO:
         self.decision_loop._platforms = self._platforms_commerce
         self.decision_loop._image_generator = self._image_generator
         self.decision_loop._comms = self.comms
+        self.decision_loop._skill_registry = self.skill_registry
+        try:
+            if self.dashboard:
+                self.dashboard.decision_loop = self.decision_loop
+                self.dashboard.start()
+        except Exception:
+            pass
         self.conversation_engine.decision_loop = self.decision_loop
         self.conversation_engine.judge_protocol = self.judge_protocol
 
@@ -185,6 +239,9 @@ class VITO:
             conversation_engine=self.conversation_engine,
             judge_protocol=self.judge_protocol,
             finance=self.finance,
+            skill_registry=self.skill_registry,
+            weekly_planner=self._weekly_planning,
+            schedule_manager=self.schedule_manager,
         )
 
     def _init_agents(self) -> None:
@@ -222,7 +279,7 @@ class VITO:
 
         # All agents
         agents = [
-            VITOCore(registry=self.registry, **deps),                          # 00
+            VITOCore(registry=self.registry, skill_registry=self.skill_registry, **deps),  # 00
             TrendScout(browser_agent=browser, **deps),                         # 01
             ContentCreator(quality_judge=quality_judge, **deps),               # 02
             SMMAgent(platforms=social_platforms, **deps),                       # 03
@@ -231,7 +288,7 @@ class VITO:
             SEOAgent(**deps),                                                  # 06
             EmailAgent(**deps),                                                # 07
             TranslationAgent(**deps),                                          # 08
-            AnalyticsAgent(**deps),                                            # 09
+            AnalyticsAgent(registry=self.registry, **deps),                    # 09
             EconomicsAgent(**deps),                                            # 16
             LegalAgent(**deps),                                                # 11
             RiskAgent(**deps),                                                 # 12
@@ -249,6 +306,11 @@ class VITO:
 
         for agent in agents:
             self.registry.register(agent)
+
+        # Wire registry into agents that need it
+        for agent in agents:
+            if isinstance(agent, HRAgent):
+                agent.registry = self.registry
 
         # Store platforms for later injection into decision_loop
         self._platforms_commerce = platforms_commerce
@@ -284,6 +346,21 @@ class VITO:
 
         await self.comms.start()
         await self.registry.start_all()
+        # Time sync on startup
+        try:
+            await self.time_sync.check(reason="startup")
+        except Exception:
+            pass
+        # Network check on startup (inside VITO process)
+        try:
+            from modules.network_utils import basic_net_report
+            net = basic_net_report()
+            logger.info(
+                f"Network check: {net}",
+                extra={"event": "network_check", "context": net},
+            )
+        except Exception:
+            pass
 
         self.running = True
         agent_count = len(self.registry.get_all_statuses())
@@ -359,6 +436,22 @@ class VITO:
                 last_run["morning_report"] = today
                 await self._morning_report()
 
+            # Daily time sync at 01:00
+            if hour == 1 and last_run.get("time_sync_daily") != today:
+                last_run["time_sync_daily"] = today
+                try:
+                    await self.time_sync.check(reason="daily")
+                except Exception:
+                    pass
+
+            # Weekly time sync on Monday at 04:00
+            if hour == 4 and now.strftime("%A") == "Monday" and last_run.get("time_sync_weekly") != today:
+                last_run["time_sync_weekly"] = today
+                try:
+                    await self.time_sync.check(reason="weekly")
+                except Exception:
+                    pass
+
             # Balance check at 12:00 — alerts only for low balances
             if hour == 12 and last_run.get("balance_check") != today:
                 last_run["balance_check"] = today
@@ -371,6 +464,16 @@ class VITO:
                     last_run[proactive_key] = today
                     await self._proactive_check()
 
+            # Weekly HR knowledge audit (Monday 05:00)
+            if hour == 5 and now.strftime("%A") == "Monday" and last_run.get("hr_audit") != today:
+                last_run["hr_audit"] = today
+                try:
+                    if self.registry:
+                        await self.registry.dispatch("knowledge_audit")
+                        await self.registry.dispatch("agent_development")
+                except Exception:
+                    pass
+
             # Auto-stop idle agents every minute
             try:
                 stopped = await self.registry.stop_idle_agents()
@@ -379,6 +482,15 @@ class VITO:
                         f"Auto-stopped {stopped} idle agents",
                         extra={"event": "idle_cleanup", "context": {"stopped": stopped}},
                     )
+            except Exception:
+                pass
+
+            # Run due scheduled tasks (calendar / reminders / reports)
+            try:
+                due = self.schedule_manager.due_tasks()
+                for task in due:
+                    await self._run_scheduled_task(task)
+                    self.schedule_manager.mark_run(task)
             except Exception:
                 pass
 
@@ -566,10 +678,31 @@ class VITO:
         now = datetime.now(timezone.utc)
         week_dates = [(now + timedelta(days=i)).strftime("%Y-%m-%d (%A)") for i in range(7)]
 
+        # 2.5. Strategic brainstorm for weekly plan (multi-model)
+        brainstorm_context = ""
+        if settings.BRAINSTORM_WEEKLY and self.judge_protocol:
+            try:
+                result = await self.judge_protocol.brainstorm(
+                    "План на неделю: важные обновления, продажи, анализ ниш, создание продуктов, продвижение."
+                )
+                brainstorm_context = (result.get("final_strategy") or "")[:1200]
+                if self.memory and brainstorm_context:
+                    try:
+                        self.memory.store_knowledge(
+                            doc_id=f"weekly_brainstorm_{now.strftime('%Y-%m-%d')}",
+                            text=brainstorm_context,
+                            metadata={"type": "weekly_brainstorm", "date": now.strftime("%Y-%m-%d")},
+                        )
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.warning(f"Weekly brainstorm error: {e}")
+
         prompt = (
             "Ты VITO — автономный AI-агент для заработка на цифровых продуктах.\n\n"
             "Создай конкретный план на неделю. Каждый день — ОДНА задача.\n"
             "Платформы: Gumroad (продукты), Printful (принты одежды), Twitter (контент), Etsy (листинги).\n\n"
+            f"Стратегический брейншторм:\n{brainstorm_context or '(нет)'}\n\n"
             f"Тренды из разведки:\n{trends_context or '(нет данных)'}\n\n"
             f"Навыки:\n{skills_context or '(нет навыков)'}\n\n"
             "Даты:\n" + "\n".join(week_dates) + "\n\n"
@@ -673,6 +806,65 @@ class VITO:
         stats = self.goal_engine.get_stats()
         finance_block = self.finance.format_morning_finance()
 
+        trends_block = ""
+        try:
+            if self.memory:
+                trends = self.memory.search_knowledge("trend trends ниша", n_results=3)
+                if trends:
+                    lines = ["Горячее сегодня (тренды):"]
+                    for t in trends:
+                        lines.append(f"- {t['text'][:120]}")
+                    trends_block = "\n".join(lines)
+        except Exception:
+            pass
+
+        today_block = ""
+        try:
+            import sqlite3
+            conn = sqlite3.connect(settings.SQLITE_PATH)
+            conn.row_factory = sqlite3.Row
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            row = conn.execute(
+                "SELECT title, description FROM weekly_calendar WHERE date = ? LIMIT 1",
+                (today,),
+            ).fetchone()
+            conn.close()
+            if row:
+                today_block = f"На сегодня:\n- {row['title']} — {row['description'][:200]}"
+        except Exception:
+            pass
+
+        done_block = ""
+        try:
+            from modules.execution_facts import ExecutionFacts
+            facts = ExecutionFacts()
+            yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+            since = f"{yesterday}T00:00:00+00:00"
+            items = facts.facts_since(since, limit=5)
+            if items:
+                lines = ["Сделано вчера:"]
+                for f in items:
+                    detail = f.detail or f.action
+                    lines.append(f"- {f.action} — {detail[:120]}")
+                done_block = "\n".join(lines)
+        except Exception:
+            pass
+
+        approvals_block = ""
+        try:
+            waiting = self.goal_engine.get_waiting_approvals()
+            pending_approvals = len(waiting)
+            if self.comms:
+                pending_approvals += getattr(self.comms, "pending_approvals_count", lambda: 0)()
+            if pending_approvals:
+                lines = ["Нужно одобрение:"]
+                if waiting:
+                    for g in waiting[:3]:
+                        lines.append(f"- {g.title[:120]}")
+                approvals_block = "\n".join(lines)
+        except Exception:
+            pass
+
         report = (
             f"VITO Отчёт | {datetime.now(timezone.utc).strftime('%d.%m.%Y')}\n\n"
             f"{finance_block}\n\n"
@@ -680,6 +872,14 @@ class VITO:
             f"ожидают {stats['pending']}\n"
             f"Успешность: {stats['success_rate']:.0%}"
         )
+        if trends_block:
+            report += f"\n\n{trends_block}"
+        if today_block:
+            report += f"\n\n{today_block}"
+        if done_block:
+            report += f"\n\n{done_block}"
+        if approvals_block:
+            report += f"\n\n{approvals_block}"
 
         # Add balance check to morning report
         try:
@@ -735,8 +935,56 @@ class VITO:
         except Exception as e:
             logger.warning(f"Scheduled balance check error: {e}", extra={"event": "balance_check_error"})
 
+    async def _run_scheduled_task(self, task) -> None:
+        """Execute scheduled task (reports/reminders)."""
+        try:
+            if task.action == "sales_report":
+                msg = "Отчёт по продажам\n"
+                if self.finance:
+                    msg += self.finance.format_morning_finance()
+                await self.comms.send_message(msg)
+            elif task.action == "platform_report":
+                msg = "Отчёт по площадкам\n"
+                try:
+                    from modules.balance_checker import BalanceChecker
+                    checker = BalanceChecker()
+                    balances = await checker.check_all()
+                    msg += checker.format_report(balances, include_internal=None)
+                except Exception:
+                    msg += "Нет данных по площадкам."
+                await self.comms.send_message(msg)
+            elif task.action == "content_report":
+                msg = "Отчёт по контенту\n"
+                try:
+                    # Basic placeholder: no unified content store yet
+                    msg += "Нет агрегированного хранилища контента. Используй /report или уточни формат."
+                except Exception:
+                    pass
+                await self.comms.send_message(msg)
+            elif task.action == "ads_report":
+                msg = "Отчёт по рекламе\n"
+                msg += "Интеграции рекламных кабинетов не настроены."
+                await self.comms.send_message(msg)
+            elif task.action == "report":
+                parts = ["VITO Report (Scheduled)"]
+                if self.finance:
+                    parts.append(self.finance.format_morning_finance())
+                if self.goal_engine:
+                    gs = self.goal_engine.get_stats()
+                    parts.append(
+                        f"Цели: {gs['completed']} выполнено, {gs['executing']} в работе, "
+                        f"{gs['pending']} ожидают\nУспешность: {gs['success_rate']:.0%}"
+                    )
+                await self.comms.send_message("\n\n".join(parts))
+            else:
+                await self.comms.send_message(f"Напоминание: {task.title}")
+        except Exception as e:
+            logger.warning(f"Scheduled task error: {e}", extra={"event": "scheduled_task_error"})
+
     async def _proactive_check(self) -> None:
         """v0.3.0: Проактивная проверка каждые 4 часа — делится достижениями, предлагает шаги."""
+        if not settings.PROACTIVE_ENABLED:
+            return
         logger.info("Проактивная проверка", extra={"event": "proactive_check_start"})
         try:
             stats = self.goal_engine.get_stats()
