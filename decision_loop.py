@@ -1354,6 +1354,14 @@ class DecisionLoop:
         else:
             reason = f"Выполнено {results.get('steps_completed')}/{results.get('steps_total')} шагов"
             self.goal_engine.fail_goal(goal.goal_id, reason)
+            try:
+                self.memory.store_knowledge(
+                    doc_id=f"lesson_fail_{goal.goal_id}",
+                    text=f"Failure: {goal.title}. Reason: {reason}. Plan: {', '.join(goal.plan[:3])}",
+                    metadata={"type": "lesson_fail", "goal_id": goal.goal_id, "title": goal.title},
+                )
+            except Exception:
+                pass
 
             try:
                 await self._notify_goal_failed(goal, results, reason)
