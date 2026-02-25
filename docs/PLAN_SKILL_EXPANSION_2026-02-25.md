@@ -108,3 +108,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added owner preference metrics module + dashboard endpoint.
 - Stored failure lessons into semantic memory.
 - Added owner preference deactivation command and tracking.
+- Added owner preferences report script.
