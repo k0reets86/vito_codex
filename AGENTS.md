@@ -1,6 +1,7 @@
 # Current context (auto-saved)
 - What we were doing:
   - Executing the VITO skill-expansion plan (durable orchestration → memory/skills → operator UI → self-learning → safety/observability → tooling standards).
+  - Общение вести на русском языке, если не появится другая явная инструкция.
   - Recently integrated workflow threads tracking into DecisionLoop and dashboard.
   - Added approvals pause/resume handling, workflow events, prefs controls, skills list, and pending approvals in dashboard.
   - Added optional self-refine for LLM fallback and expanded owner preference auto-detect + metrics.
@@ -22,7 +23,11 @@
   - Added tooling governance report aggregation and key-rotation workflow for signature keys (contract/release) with dashboard controls.
   - Extended step-result contracts across DecisionLoop retry pipeline and AgentRegistry dispatch (including tooling/capability fallbacks).
   - Added durable workflow interrupt registry (pending/resolved/cancelled) and dashboard visibility for approval pauses/resume traces.
+  - Added workflow sessions visibility/resume/cancel/reset (backend `/api/workflow_sessions`, dashboard card, `OrchestrationManager` actions).
   - Upgraded memory policy with retention classes, TTL metadata (`expires_at`), and quality scoring summary in dashboard.
+  - Развернул pipeline памяти: добавлен `MemoryBlocks` для owner-centric блоков и консолидируемый short→long поток в `MemoryManager`.
+  - Добавил `MemorySkillReporter` + скрипт `scripts/generate_weekly_memory_report.py` для owner-facing weekly retention + per-skill quality отчёта.
+  - Запустил durable orchestration: `OrchestrationManager` хранит `workflow_sessions`/`workflow_session_steps`, отслеживает node-статусы, gating interrupts и авто-resume, теперь интегрирован в DecisionLoop.
   - Added model profile workflows (save/apply/delete presets) and secrets status visibility in dashboard for safer provider operations.
   - Added retention drift alerts + expired-memory cleanup (preview/apply) and periodic retention monitor in DecisionLoop.
   - Added provider health report (missing/stale keys + rotation reminders) and safe one-click remediation actions in dashboard.
@@ -47,7 +52,7 @@
 - Next steps:
   - Extend durable orchestration: attach interrupt context to agent-handoff chain and auto-resume policies.
   - Memory/skills pipeline: add owner-facing weekly retention report and per-skill memory quality linkage.
-  - Operator UI: add per-provider connectivity probes and remediation playbooks with approval gates.
   - Self-learning: add adaptive threshold tuning using long-term promotion outcomes and flaky history decay.
   - Security/cost/observability: weekly governance report aggregation + automated remediation suggestions.
   - Tooling standards: add signature key lifecycle hardening (rotation cadence checks + expiry alerts).
+  - Отметка: self-learning, безопасность и tooling-стандарты пока в работе / не завершены.

@@ -21,16 +21,19 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Add graph-based workflow engine (nodes/edges/branches/threads/sessions).
 - Implement durable checkpoints (pause/resume) and interrupts (approvals).
 - Add long-running task persistence and recovery.
+- Added `OrchestrationManager`: workflow sessions, step-state table, waiting-approval pauses/resumes, and thread-aware interrupt gating to solidify durable execution.
 
 ### Phase 2 — Memory + Skills (Owner-Centric)
 - Implement memory blocks: preferences, priorities, constraints, style, long_goals.
 - Short-term vs long-term memory pipeline with scheduled consolidation.
 - Skill library: callable skills with metadata + tests + coverage + risk score.
+- Added weekly owner-facing memory retention report + per-skill memory quality linkage (MemorySkillReporter + persistence script).
 
 ### Phase 3 — Human-in-the-Loop + Operator UI
 - Operator panel: approvals, tool audit trail, resume/rollback.
 - Admin controls: models, providers, budgets, keys, tools.
 - Owner memory controls: remember/forget/override preferences.
+- Added workflow session visibility + resume/cancel/reset controls in dashboard (backend `/api/workflow_sessions`, UI card, `OrchestrationManager` actions).
 
 ### Phase 4 — Self-Learning & Optimization
 - Reflection loop (self-critique -> lessons -> retry).
@@ -148,6 +151,7 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added deactivation count to owner preference metrics.
 - Added durable step-level pause for pending approvals (DecisionLoop waits without failing).
 - Added workflow events endpoint + dashboard panel for durable workflow visibility.
+- Added workflow sessions endpoint (`/api/workflow_sessions`) plus dashboard card for resume/cancel/reset and OrchestrationManager actions.
 - Expanded owner preference auto-detect heuristics and metrics (auto_detect/explicit).
 - Added pending approvals visibility in dashboard (operator UI).
 - Added optional self-refine pass for LLM fallback outputs (gated by settings).
@@ -183,3 +187,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added automated self-learning test runner (executes mapped pytest suites for open jobs), updates job status, and feeds results back into skill `tests_coverage`/`risk_score`.
 - Added flaky-test policy for self-learning (retry-on-fail, flaky tagging, reduced risk credit, promotion cooldown gate) and richer task-family test maps.
 - Moved default family->pytest mapping into versioned config map and added historical flaky-rate suppression per skill before auto-promotion.
+- Added MemoryBlocks-driven owner-centric block tracker and MemoryManager short→long consolidation path for memory/skills pipeline.

@@ -23,6 +23,7 @@ from urllib.parse import urlparse, parse_qs
 from config.settings import settings
 from memory.memory_manager import MemoryManager
 from modules.operator_policy import OperatorPolicy
+from modules.orchestration_manager import OrchestrationManager
 from modules.owner_preference_model import OwnerPreferenceModel
 from modules.owner_pref_metrics import OwnerPreferenceMetrics
 from modules.self_learning import SelfLearningEngine
@@ -251,6 +252,20 @@ class DashboardServer:
                     except Exception:
                         interrupts = []
                     self._json({"interrupts": interrupts})
+                    return
+                if parsed.path == "/api/workflow_sessions":
+                    try:
+                        limit = int(query.get("limit", ["50"])[0] or 50)
+                        state_filter = (query.get("state", [""])[0] or "").strip() or None
+                        manager = OrchestrationManager()
+                        sessions = manager.list_sessions(state_filter=state_filter, limit=limit)
+                        steps = {}
+                        for s in sessions:
+                            steps[s["goal_id"]] = manager.list_steps(s["goal_id"])
+                    except Exception:
+                        sessions = []
+                        steps = {}
+                    self._json({"sessions": sessions, "steps": steps})
                     return
 
                 if parsed.path == "/api/platforms":
@@ -717,6 +732,11 @@ class DashboardServer:
       </div>
       <div class=\"card\"><div class=\"mut\">Workflow Threads</div><div id=\"workflow_threads\"></div></div>
       <div class=\"card\"><div class=\"mut\">Workflow Interrupts</div><div id=\"workflow_interrupts\"></div></div>
+      <div class=\"card\"><div class=\"mut\">Workflow Sessions</div><div id=\"workflow_sessions\"></div>
+        <div style=\"margin-top:8px\">
+          <input id=\"session_reason\" placeholder=\"Reason (optional)\" style=\"width:70%\"/>
+        </div>
+      </div>
       <div class=\"card\"><div class=\"mut\">Secrets</div>
         <div class=\"mut\" style=\"font-size:12px\">Keys are write‑only here.</div>
         <div id=\"secrets_status\" style=\"margin-top:6px\"></div>
@@ -746,13 +766,13 @@ class DashboardServer:
   </div>
 <script>
 async function load(){
-  const endpoints = {
+    const endpoints = {
     status:'/api/status', network:'/api/network', agents:'/api/agents', finance:'/api/finance',
     goals:'/api/goals', schedules:'/api/schedules', config:'/api/config',
-    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', guardrails:'/api/guardrails', llm_evals:'/api/llm_evals', tooling_registry:'/api/tooling_registry', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs', skills:'/api/skills', operator_policy:'/api/operator_policy', self_learning:'/api/self_learning', memory_policy:'/api/memory_policy?limit=80', workflow_threads:'/api/workflow_threads', workflow_interrupts:'/api/workflow_interrupts', secrets_status:'/api/secrets_status', provider_health:'/api/provider_health',
+    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', guardrails:'/api/guardrails', llm_evals:'/api/llm_evals', tooling_registry:'/api/tooling_registry', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs', skills:'/api/skills', operator_policy:'/api/operator_policy', self_learning:'/api/self_learning', memory_policy:'/api/memory_policy?limit=80', workflow_threads:'/api/workflow_threads', workflow_interrupts:'/api/workflow_interrupts', workflow_sessions:'/api/workflow_sessions', secrets_status:'/api/secrets_status', provider_health:'/api/provider_health',
     facts:'/api/execution_facts', approvals:'/api/approvals', events:'/api/events', decisions:'/api/decisions', budget:'/api/budget', workflow_events:'/api/workflow_events'
   };
-  for (const [k,url] of Object.entries(endpoints)){
+    for (const [k,url] of Object.entries(endpoints)){
     const r = await fetch(url); const j = await r.json();
     if (k === 'rss') renderRss(j.sources||[]);
     else if (k === 'agents') renderAgents(j.agents||[]);
@@ -781,6 +801,7 @@ async function load(){
     else if (k === 'memory_policy') renderMemoryPolicy(j.audit||[], j.summary||{}, j.drift||{}, j.cleanup_preview||{});
     else if (k === 'workflow_threads') renderWorkflowThreads(j.threads||[]);
     else if (k === 'workflow_interrupts') renderWorkflowInterrupts(j.interrupts||[]);
+    else if (k === 'workflow_sessions') renderWorkflowSessions(j.sessions||[], j.steps||{});
     else if (k === 'secrets_status') renderSecretsStatus(j.secrets||[]);
     else if (k === 'provider_health') renderProviderHealth(j.health||{});
     else if (k === 'models') renderModels(j);
@@ -789,6 +810,14 @@ async function load(){
     else if (k === 'llm_evals') renderLlmEvals(j);
     else if (k === 'tooling_registry') renderToolingRegistry(j.adapters||[], j.approvals||[], j.stage_approvals||[], j.key_rotations||[], j.history||[], j.governance||{}, j.signature_policy||{});
   }
+}
+function escAttr(value){
+  return (value || '').toString()
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/\"/g,'&quot;')
+    .replace(/'/g,'&#39;');
 }
 function renderPrefs(prefs){
   const el = document.getElementById('prefs');
@@ -939,6 +968,36 @@ function renderWorkflowInterrupts(items){
   if (!items.length){ el.innerHTML = '<div class=\"mut\">No interrupts</div>'; return; }
   const rows = items.slice(0,50).map(i => `<tr><td>${i.goal_id||''}</td><td>${i.step_num||0}</td><td>${i.interrupt_type||''}</td><td>${i.status||''}</td><td>${(i.reason||'').slice(0,80)}</td><td>${i.created_at||''}</td></tr>`).join('');
   el.innerHTML = `<table><thead><tr><th>Goal</th><th>Step</th><th>Type</th><th>Status</th><th>Reason</th><th>Created</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+function renderWorkflowSessions(sessions, stepsByGoal){
+  const el = document.getElementById('workflow_sessions');
+  if (!el) return;
+  const items = sessions || [];
+  if (!items.length){
+    el.innerHTML = '<div class=\"mut\">No active sessions</div>';
+    return;
+  }
+  const rows = items.map(s => {
+    const goal = s.goal_id || '';
+    const stepList = (stepsByGoal && stepsByGoal[goal]) ? stepsByGoal[goal] : [];
+    const summary = stepList.map(st => `${(st.step_index||0) + 1}:${st.status||'?'}`).join(' | ').slice(0, 120);
+    const goalEsc = escAttr(goal);
+    return `<tr>
+      <td>${goal}</td>
+      <td>${s.state || ''}</td>
+      <td>${s.current_step || 0}/${s.plan_length || 0}</td>
+      <td>${s.thread_id || ''}</td>
+      <td>${s.blocking_reason || ''}</td>
+      <td>${summary}</td>
+      <td>
+        <button onclick="sessionAction('${goalEsc}','resume')">Resume</button>
+        <button onclick="sessionAction('${goalEsc}','cancel')">Cancel</button>
+        <button onclick="sessionAction('${goalEsc}','reset')">Reset</button>
+      </td>
+    </tr>`;
+  }).join('');
+  el.innerHTML =
+    `<table><thead><tr><th>Goal</th><th>State</th><th>Progress</th><th>Thread</th><th>Blocking</th><th>Steps</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 function renderRss(sources){
   const el = document.getElementById('rss');
@@ -1196,6 +1255,16 @@ async function generateSelfLearningTestJobs(){
 }
 async function runSelfLearningTestJobs(){
   await fetch('/api/self_learning', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'run_test_jobs'})});
+  await load();
+}
+async function sessionAction(goal_id, action){
+  if (!goal_id || !action) return;
+  const reason = document.getElementById('session_reason').value.trim();
+  await fetch('/api/workflow_sessions', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({goal_id, action, reason}),
+  });
   await load();
 }
 async function completeSelfLearningTestJob(passed){
@@ -1900,6 +1969,41 @@ load();
                         except Exception:
                             pass
                     self._json({"ok": ok, "action": action, "errors": errors, "result": run_result})
+                    return
+                if parsed.path == "/api/workflow_sessions":
+                    length = int(self.headers.get("Content-Length", "0") or "0")
+                    raw = self.rfile.read(length) if length else b"{}"
+                    try:
+                        payload = json.loads(raw.decode("utf-8"))
+                    except Exception:
+                        payload = {}
+                    action = str(payload.get("action", "")).strip().lower()
+                    goal_id = str(payload.get("goal_id", "")).strip()
+                    reason = str(payload.get("reason", "")).strip()
+                    ok = False
+                    if goal_id and action in {"resume", "cancel", "reset"}:
+                        try:
+                            manager = OrchestrationManager()
+                            if action == "resume":
+                                manager.resume_session(goal_id, reason=reason or "dashboard_resume")
+                            elif action == "cancel":
+                                manager.cancel_session(goal_id, reason=reason or "dashboard_cancel")
+                            elif action == "reset":
+                                manager.reset_session(goal_id, reason=reason or "dashboard_reset")
+                            ok = True
+                        except Exception:
+                            ok = False
+                    if ok:
+                        try:
+                            from modules.data_lake import DataLake
+                            DataLake().record_decision(
+                                actor="dashboard",
+                                decision="workflow_session_action",
+                                rationale=f"{action}:{goal_id}",
+                            )
+                        except Exception:
+                            pass
+                    self._json({"ok": ok, "action": action, "goal_id": goal_id})
                     return
                 if parsed.path == "/api/secrets":
                     length = int(self.headers.get("Content-Length", "0") or "0")

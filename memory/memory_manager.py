@@ -21,6 +21,7 @@ import chromadb
 
 from config.logger import get_logger
 from config.settings import settings
+from modules.memory_blocks import MemoryBlocks
 from modules.memory_policy import decide_save, retention_classes
 
 logger = get_logger("memory_manager", agent="memory_manager")
@@ -33,7 +34,12 @@ class MemoryManager:
         self._chroma_doc_count = 0
         self._sqlite_conn: Optional[sqlite3.Connection] = None
         self._pg_pool: Optional[asyncpg.Pool] = None
+        self._memory_blocks = MemoryBlocks()
         logger.info("MemoryManager инициализирован", extra={"event": "init"})
+
+    @property
+    def memory_blocks(self) -> MemoryBlocks:
+        return self._memory_blocks
 
     # ── ChromaDB (семантический поиск) ──
 
@@ -60,7 +66,14 @@ class MemoryManager:
             )
         return self._chroma_collection
 
-    def store_knowledge(self, doc_id: str, text: str, metadata: dict[str, Any] | None = None) -> bool:
+    def store_knowledge(
+        self,
+        doc_id: str,
+        text: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        skip_block_tracking: bool = False,
+    ) -> bool:
         """Сохраняет знание в ChromaDB для семантического поиска."""
         raw_meta = metadata or {}
         decision = decide_save(doc_id=doc_id, text=text, metadata=raw_meta)
@@ -99,6 +112,21 @@ class MemoryManager:
                 f"Знание сохранено: {doc_id}",
                 extra={"event": "knowledge_stored", "context": {"doc_id": doc_id}},
             )
+            if not skip_block_tracking:
+                block_type = str(raw_meta.get("block_type") or raw_meta.get("type") or "knowledge").lower()
+                importance = float(meta.get("importance_score", decision.importance))
+                priority = float(meta.get("priority", 1.0))
+                stage = self._retention_stage(meta.get("retention_class", ""))
+                self._memory_blocks.record_block(
+                    doc_id=doc_id,
+                    block_type=block_type,
+                    summary=text[:2048],
+                    metadata=meta,
+                    retention_class=meta.get("retention_class", ""),
+                    stage=stage,
+                    importance=importance,
+                    priority=priority,
+                )
             return True
         except Exception as e:
             logger.error(
@@ -159,6 +187,53 @@ class MemoryManager:
                     safe[k] = str(v)[:1000]
         return safe
 
+    @staticmethod
+    def _retention_stage(retention_class: str | None) -> str:
+        rc = (retention_class or "").lower()
+        if "owner" in rc:
+            return "long"
+        if "strategic" in rc:
+            return "long"
+        if "project" in rc or "research" in rc:
+            return "mid"
+        return "short"
+
+    @staticmethod
+    def _safe_parse_metadata(payload: str) -> dict[str, Any]:
+        try:
+            return json.loads(payload) if payload else {}
+        except Exception:
+            return {}
+
+    def _record_skill_memory_block(
+        self,
+        name: str,
+        agent: str,
+        task_type: str,
+        description: str,
+        success_rate: float,
+    ) -> None:
+        summary = (description or "").strip()[:1024]
+        doc_id = f"skill_block_{name}"
+        stage = "long" if success_rate >= 0.6 else "mid"
+        metadata = {
+            "skill_name": name,
+            "agent": agent,
+            "task_type": task_type,
+            "success_rate": success_rate,
+            "source": "skill_memory",
+        }
+        self._memory_blocks.record_block(
+            doc_id=doc_id,
+            block_type="skill",
+            summary=summary or f"Навык {name}",
+            metadata=metadata,
+            retention_class="project_mid",
+            stage=stage,
+            importance=max(0.3, success_rate),
+            priority=max(0.1, success_rate),
+        )
+
     def search_knowledge(self, query: str, n_results: int = 5) -> list[dict]:
         """Семантический поиск по базе знаний."""
         if self._chroma_doc_count == 0:
@@ -188,6 +263,36 @@ class MemoryManager:
         except Exception as e:
             logger.error(f"Ошибка поиска: {e}", extra={"event": "knowledge_search_failed"}, exc_info=True)
             return []
+
+    def consolidate_short_term_memory(self, min_age_days: int = 5, limit: int = 25) -> int:
+        """Периодически переводит short-тренировочные блоки в long-term."""
+        candidates = self._memory_blocks.candidates_for_consolidation(min_age_days=min_age_days, stage="short", limit=limit)
+        promoted = 0
+        for block in candidates:
+            doc_id = str(block.get("doc_id") or "").strip()
+            metadata = self._safe_parse_metadata(block.get("metadata_json", "{}"))
+            metadata["retention_class"] = "strategic_long" if block.get("block_type") == "owner_preference" else "project_mid"
+            metadata["importance_score"] = max(0.6, float(metadata.get("importance_score", block.get("importance", 0.5))))
+            text = str(block.get("summary") or "consolidated memory").strip()
+            if not text:
+                text = "consolidated memory"
+            try:
+                self.store_knowledge(doc_id=doc_id, text=text, metadata=metadata, skip_block_tracking=True)
+                stage = "long" if metadata["retention_class"] in {"owner_long", "strategic_long"} else "mid"
+                self._memory_blocks.mark_promoted(doc_id, new_stage=stage)
+                promoted += 1
+            except Exception as exc:
+                logger.warning(
+                    f"Не удалось консолидировать память {doc_id}: {exc}",
+                    extra={"event": "memory_consolidation_failed", "context": {"doc_id": doc_id}},
+                )
+        if promoted:
+            logger.info(
+                f"Консолидация памяти: {promoted} блоков переведено в long-term",
+                extra={"event": "memory_consolidation", "promoted": promoted},
+            )
+        return promoted
+
 
     # ── SQLite (быстрые локальные операции) ──
 
@@ -608,6 +713,15 @@ class MemoryManager:
                 (name, description, agent, task_type, method_json, 1 if bump_version else 0),
             )
             conn.commit()
+            stats = conn.execute("SELECT success_count, fail_count FROM skills WHERE name = ?", (name,)).fetchone()
+            success_count = int(stats["success_count"] or 0)
+            fail_count = int(stats["fail_count"] or 0)
+            total_runs = success_count + fail_count
+            success_rate = float(success_count) / total_runs if total_runs > 0 else 0.0
+            try:
+                self._record_skill_memory_block(name, agent, task_type, description, success_rate)
+            except Exception:
+                pass
             # Дублируем в ChromaDB для семантического поиска
             try:
                 collection = self._get_chroma()

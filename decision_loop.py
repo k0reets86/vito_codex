@@ -30,6 +30,7 @@ from modules.llm_evals import LLMEvals
 from modules.workflow_state_machine import WorkflowStateMachine
 from modules.workflow_threads import WorkflowThreads
 from modules.workflow_interrupts import WorkflowInterrupts
+from modules.orchestration_manager import OrchestrationManager
 from modules.data_lake import DataLake
 from modules.step_contract import validate_step_output, validate_step_result
 
@@ -67,6 +68,8 @@ class DecisionLoop:
         self._last_memory_retention_tick = 0
         self._last_self_learning_opt_tick = 0
         self._last_self_learning_test_tick = 0
+        self._current_interrupt_id: int | None = None
+        self.orchestrator = OrchestrationManager()
         logger.info("DecisionLoop инициализирован", extra={"event": "init"})
 
     def set_self_healer(self, self_healer) -> None:
@@ -164,9 +167,10 @@ class DecisionLoop:
     async def _process_goal(self, goal: Goal) -> None:
         """Проводит цель через полный цикл."""
         trace_id = self.workflow.start_or_attach(goal.goal_id)
+        thread_id = f"goal_{goal.goal_id}"
         try:
-            self.threads.start_thread(thread_id=f"goal_{goal.goal_id}", goal_id=goal.goal_id)
-            self.threads.update_thread(thread_id=f"goal_{goal.goal_id}", status="planning", last_node="planning")
+            self.threads.start_thread(thread_id=thread_id, goal_id=goal.goal_id)
+            self.threads.update_thread(thread_id=thread_id, status="planning", last_node="planning")
         except Exception:
             pass
         logger.info(
@@ -188,7 +192,7 @@ class DecisionLoop:
         if not plan:
             self.workflow.transition(goal.goal_id, "failed", reason="planning_failed", detail="empty_plan")
             try:
-                self.threads.update_thread(thread_id=f"goal_{goal.goal_id}", status="failed", last_node="planning_failed")
+            self.threads.update_thread(thread_id=thread_id, status="failed", last_node="planning_failed")
             except Exception:
                 pass
             self.goal_engine.fail_goal(goal.goal_id, "Не удалось составить план")
@@ -198,14 +202,18 @@ class DecisionLoop:
         # EXECUTE
         self.workflow.transition(goal.goal_id, "executing", reason="plan_ready", detail=f"steps={len(plan)}")
         try:
-            self.threads.update_thread(thread_id=f"goal_{goal.goal_id}", status="executing", last_node="executing")
+            self.threads.update_thread(thread_id=thread_id, status="executing", last_node="executing")
+        except Exception:
+            pass
+        try:
+            self.orchestrator.create_session(goal.goal_id, plan, trace_id, thread_id=thread_id)
         except Exception:
             pass
         if not self.goal_engine.start_execution(goal.goal_id):
             # Цель ушла в WAITING_APPROVAL — ждём одобрения владельца
             self.workflow.transition(goal.goal_id, "waiting_approval", reason="owner_approval_required", detail=goal.title)
             try:
-                self.threads.update_thread(thread_id=f"goal_{goal.goal_id}", status="waiting_approval", last_node="waiting_approval")
+                self.threads.update_thread(thread_id=thread_id, status="waiting_approval", last_node="waiting_approval")
             except Exception:
                 pass
             logger.info(
@@ -216,7 +224,7 @@ class DecisionLoop:
                 self.interrupts.open_interrupt(
                     goal_id=goal.goal_id,
                     step_num=0,
-                    thread_id=f"goal_{goal.goal_id}",
+                    thread_id=thread_id,
                     interrupt_type="owner_approval_required",
                     reason="goal_cost_gate",
                     payload={"goal_title": goal.title},
@@ -229,7 +237,7 @@ class DecisionLoop:
         if results.get("waiting_approval"):
             self.workflow.transition(goal.goal_id, "waiting_approval", reason="step_approval_pending", detail=goal.title)
             try:
-                self.threads.update_thread(thread_id=f"goal_{goal.goal_id}", status="waiting_approval", last_node="waiting_approval")
+                self.threads.update_thread(thread_id=thread_id, status="waiting_approval", last_node="waiting_approval")
             except Exception:
                 pass
             return
@@ -237,20 +245,20 @@ class DecisionLoop:
         # LEARN
         self.workflow.transition(goal.goal_id, "learning", reason="execution_finished", detail=str(results.get("steps_completed", 0)))
         try:
-            self.threads.update_thread(thread_id=f"goal_{goal.goal_id}", status="learning", last_node="learning")
+            self.threads.update_thread(thread_id=thread_id, status="learning", last_node="learning")
         except Exception:
             pass
         await self._learn_from_goal(goal, results)
         if results.get("all_completed"):
             self.workflow.transition(goal.goal_id, "completed", reason="learn_done", detail="ok")
             try:
-                self.threads.update_thread(thread_id=f"goal_{goal.goal_id}", status="completed", last_node="completed")
+                self.threads.update_thread(thread_id=thread_id, status="completed", last_node="completed")
             except Exception:
                 pass
         else:
             self.workflow.transition(goal.goal_id, "failed", reason="partial_or_failed", detail=str(results.get("steps_completed", 0)))
             try:
-                self.threads.update_thread(thread_id=f"goal_{goal.goal_id}", status="failed", last_node="failed")
+                self.threads.update_thread(thread_id=thread_id, status="failed", last_node="failed")
             except Exception:
                 pass
         try:
@@ -454,10 +462,22 @@ class DecisionLoop:
         exec_start = time.monotonic()
         replanned = False
 
-        i = 0
+        session = self.orchestrator.get_session(goal.goal_id)
+        pending_interrupt = self.interrupts.latest_pending(goal.goal_id)
+        if session and session.get("state") == "waiting_approval" and pending_interrupt:
+            return {
+                "waiting_approval": True,
+                "paused_step": int(session.get("current_step", 0)) + 1,
+                "steps_completed": int(session.get("current_step", 0)),
+                "steps_total": len(goal.plan),
+            }
+        if session and session.get("state") == "waiting_approval" and not pending_interrupt:
+            self.orchestrator.resume_session(goal.goal_id, reason="auto_resume")
+            session = self.orchestrator.get_session(goal.goal_id)
+        i = int(session.get("current_step", 0) if session else 0)
         try:
             from config.settings import settings
-            if settings.RESUME_FROM_CHECKPOINT:
+            if settings.RESUME_FROM_CHECKPOINT and i == 0:
                 ck = self.workflow.latest_checkpoint(goal.goal_id)
                 if ck and ck.get("status") == "completed":
                     step_num = ck.get("step_num")
@@ -478,10 +498,12 @@ class DecisionLoop:
         except Exception:
             pass
         while i < len(goal.plan):
+            current_intr = self.interrupts.latest_pending(goal.goal_id)
+            self._current_interrupt_id = int(current_intr["id"]) if current_intr else None
             step = goal.plan[i]
             try:
                 self.threads.update_thread(
-                    thread_id=f"goal_{goal.goal_id}",
+                    thread_id=thread_id,
                     status="executing",
                     last_node=f"step_{i + 1}",
                 )
@@ -494,6 +516,10 @@ class DecisionLoop:
                     "context": {"goal_id": goal.goal_id, "step": i + 1, "action": step},
                 },
             )
+            try:
+                self.orchestrator.mark_step_executing(goal.goal_id, i)
+            except Exception:
+                pass
 
             step_result = await self._execute_step_with_retry(goal, step, i + 1)
             results[f"step_{i + 1}"] = step_result
@@ -506,6 +532,18 @@ class DecisionLoop:
                 )
             except Exception:
                 pass
+            try:
+                detail = str(step_result.get("error") or "")[:400]
+                output = str(step_result.get("output") or step_result.get("result") or "")[:400]
+                self.orchestrator.record_step_result(
+                    goal.goal_id,
+                    i,
+                    step_result.get("status", "unknown"),
+                    detail=detail,
+                    output=output,
+                )
+            except Exception:
+                pass
             if step_result.get("status") == "waiting_approval":
                 results["waiting_approval"] = True
                 results["paused_step"] = i + 1
@@ -513,7 +551,7 @@ class DecisionLoop:
                     self.interrupts.open_interrupt(
                         goal_id=goal.goal_id,
                         step_num=i + 1,
-                        thread_id=f"goal_{goal.goal_id}",
+                        thread_id=thread_id,
                         interrupt_type="step_approval_pending",
                         reason=str(step_result.get("error", "pending approval"))[:500],
                         payload={"step": step[:200], "agent": str(step_result.get("agent", ""))[:80]},
@@ -572,6 +610,7 @@ class DecisionLoop:
             results.get(f"step_{j + 1}", {}).get("status") == "completed"
             for j in range(len(goal.plan))
         )
+        self._current_interrupt_id = None
 
         # Записываем в Data Lake
         try:
@@ -1384,8 +1423,15 @@ class DecisionLoop:
             data["file_path"] = result.metadata["file_path"]
         return data
 
-    @staticmethod
-    def _trace_handoff(from_agent: str, to_agent: str, capability: str, step: str, status: str) -> None:
+    def _trace_handoff(
+        self,
+        from_agent: str,
+        to_agent: str,
+        capability: str,
+        step: str,
+        status: str,
+        interrupt_id: int | None = None,
+    ) -> None:
         try:
             DataLake().record_handoff(
                 from_agent=from_agent,
@@ -1393,6 +1439,7 @@ class DecisionLoop:
                 capability=capability,
                 step=step[:180],
                 status=status,
+                context={"interrupt_id": interrupt_id} if interrupt_id else {},
             )
         except Exception:
             pass

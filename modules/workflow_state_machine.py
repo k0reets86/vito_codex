@@ -18,7 +18,7 @@ class WorkflowStateMachine:
         "planning": {"executing", "waiting_approval", "failed", "cancelled"},
         "waiting_approval": {"executing", "failed", "cancelled"},
         "executing": {"learning", "waiting_approval", "failed", "cancelled"},
-        "learning": {"completed", "failed"},
+        "learning": {"completed", "failed", "cancelled"},
         "completed": set(),
         "failed": set(),
         "cancelled": set(),
