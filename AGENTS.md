@@ -11,6 +11,7 @@
   - Added LLM guardrails (prompt-injection detection + optional block mode) with dashboard observability.
   - Added LLM eval/anomaly monitor with score, fail-rate, blocked-events and cost-anomaly signals.
   - Added tooling standard layer: MCP/OpenAPI registry with schema validation and dashboard controls.
+  - Added runtime owner alerts for LLM risk anomalies/high fail-rate from DecisionLoop.
 - Current blockers:
   - Social network integrations (Threads/YouTube/TikTok/etc.) are paused until accounts are ready.
 - Important commands:
@@ -29,5 +30,5 @@
   - Memory/skills pipeline: retention tuning (TTL classes), memory quality scoring, and policy dashboards.
   - Operator UI: model-profile workflows and safer secret/provider management UX.
   - Self-learning: DSPy-like optimization and safe auto-promotion pipeline from candidates to accepted skills.
-  - Security/cost/observability: route anomaly alerts to owner notifications and weekly governance report.
+  - Security/cost/observability: weekly governance report aggregation + automated remediation suggestions.
   - Tooling standards: wire tooling registry into runtime adapter execution (safe sandboxed runner).

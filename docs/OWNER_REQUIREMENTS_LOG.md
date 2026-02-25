@@ -1005,3 +1005,4 @@ Append all new owner requests here as they arrive.
 - 2026-02-25: Added LLM guardrails with event tracking and optional hard-block for injection signals.
 - 2026-02-25: Added LLM eval scoreboard and cost anomaly monitor for observability.
 - 2026-02-25: Added MCP/OpenAPI tooling registry standard with validation and operator controls.
+- 2026-02-25: Added DecisionLoop LLM risk alerts for anomaly/fail-rate with comms notifications.

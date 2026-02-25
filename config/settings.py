@@ -136,6 +136,7 @@ class Settings:
     # LLM guardrails
     GUARDRAILS_ENABLED: bool = os.getenv("GUARDRAILS_ENABLED", "true").lower() in ("1", "true", "yes", "on")
     GUARDRAILS_BLOCK_ON_INJECTION: bool = os.getenv("GUARDRAILS_BLOCK_ON_INJECTION", "false").lower() in ("1", "true", "yes", "on")
+    LLM_ALERTS_ENABLED: bool = os.getenv("LLM_ALERTS_ENABLED", "true").lower() in ("1", "true", "yes", "on")
 
 
 settings = Settings()

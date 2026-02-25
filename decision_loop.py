@@ -25,6 +25,7 @@ from llm_router import LLMRouter, TaskType
 from memory.memory_manager import MemoryManager
 from modules.operator_policy import OperatorPolicy
 from modules.self_learning import SelfLearningEngine
+from modules.llm_evals import LLMEvals
 from modules.workflow_state_machine import WorkflowStateMachine
 from modules.workflow_threads import WorkflowThreads
 from modules.data_lake import DataLake
@@ -59,6 +60,7 @@ class DecisionLoop:
         self.threads = WorkflowThreads()
         self.operator_policy = OperatorPolicy()
         self.self_learning = None
+        self._last_llm_alert_at_tick = 0
         logger.info("DecisionLoop инициализирован", extra={"event": "init"})
 
     def set_self_healer(self, self_healer) -> None:
@@ -126,6 +128,9 @@ class DecisionLoop:
             self._log_tick_done(tick_start, idle=True)
             return
 
+        # 1.5. LLM risk monitoring (cost anomaly / fail-rate)
+        await self._maybe_send_llm_risk_alert()
+
         # 2. Выбор следующей цели
         try:
             self.goal_engine.reload_goals()
@@ -181,7 +186,6 @@ class DecisionLoop:
             return
 
         self.goal_engine.plan_goal(goal.goal_id, plan)
-
         # EXECUTE
         self.workflow.transition(goal.goal_id, "executing", reason="plan_ready", detail=f"steps={len(plan)}")
         try:
@@ -239,6 +243,34 @@ class DecisionLoop:
                 trace_id=trace_id,
                 source="workflow_state_machine",
             )
+        except Exception:
+            pass
+
+    async def _maybe_send_llm_risk_alert(self) -> None:
+        try:
+            if not settings.LLM_ALERTS_ENABLED:
+                return
+            if self._tick_count - int(self._last_llm_alert_at_tick or 0) < 12:
+                return
+            ev = LLMEvals(sqlite_path=settings.SQLITE_PATH)
+            current = ev.compute()
+            anomaly = bool(current.get("cost_anomaly"))
+            fail_rate = float(current.get("fail_rate", 0.0) or 0.0)
+            if not anomaly and fail_rate < 0.25:
+                return
+            if not hasattr(self, "_comms") or not self._comms:
+                return
+            msg = (
+                "[LLM Risk Alert]\n"
+                f"Score: {current.get('score')}\n"
+                f"Fail rate: {current.get('fail_rate')}\n"
+                f"Blocked(24h): {current.get('blocked_count_24h')}\n"
+                f"Daily cost: ${current.get('daily_cost_usd')}\n"
+                f"Baseline cost: ${current.get('baseline_cost_usd')}\n"
+                f"Anomaly: {1 if anomaly else 0}"
+            )
+            await self._comms.send_message(msg, level="warning")
+            self._last_llm_alert_at_tick = self._tick_count
         except Exception:
             pass
 

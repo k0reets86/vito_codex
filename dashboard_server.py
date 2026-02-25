@@ -417,6 +417,7 @@ class DashboardServer:
                         "SELF_LEARNING_SKILL_SCORE_MIN",
                         "GUARDRAILS_ENABLED",
                         "GUARDRAILS_BLOCK_ON_INJECTION",
+                        "LLM_ALERTS_ENABLED",
                     ]
                     data = {k: getattr(settings, k, None) for k in allowed}
                     self._json({"config": data})
@@ -965,9 +966,10 @@ load();
                         "SELF_LEARNING_SKILL_SCORE_MIN",
                         "GUARDRAILS_ENABLED",
                         "GUARDRAILS_BLOCK_ON_INJECTION",
+                        "LLM_ALERTS_ENABLED",
                     }
                     updated = {}
-                    bool_keys = {"PROACTIVE_ENABLED", "BRAINSTORM_WEEKLY", "OWNER_INBOX_ENABLED", "CALENDAR_UPDATE_LLM", "SELF_LEARNING_ENABLED", "GUARDRAILS_ENABLED", "GUARDRAILS_BLOCK_ON_INJECTION"}
+                    bool_keys = {"PROACTIVE_ENABLED", "BRAINSTORM_WEEKLY", "OWNER_INBOX_ENABLED", "CALENDAR_UPDATE_LLM", "SELF_LEARNING_ENABLED", "GUARDRAILS_ENABLED", "GUARDRAILS_BLOCK_ON_INJECTION", "LLM_ALERTS_ENABLED"}
                     num_keys = {"DAILY_LIMIT_USD", "OPERATION_NOTIFY_USD", "OPERATION_APPROVE_USD", "OPERATION_MAX_USD", "SELF_LEARNING_SKILL_SCORE_MIN"}
                     for k,v in payload.items():
                         if k in allowed:
