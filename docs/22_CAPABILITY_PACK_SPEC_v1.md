@@ -33,3 +33,6 @@ Each capability pack must include:
 
 ## Scaffold Script
 Use `scripts/create_capability_pack.py <name> <category>` to generate a pack skeleton.
+
+## Sync Script
+Use `scripts/sync_capability_packs.py [root]` to register packs into SkillRegistry.

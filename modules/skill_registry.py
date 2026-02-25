@@ -1,5 +1,6 @@
 """SkillRegistry — local registry for VITO skills."""
 
+import json
 import sqlite3
 from datetime import datetime, timezone
 from typing import Optional
@@ -174,6 +175,36 @@ class SkillRegistry:
             conn.commit()
         finally:
             conn.close()
+
+    def register_from_capability_packs(self, root: str = "capability_packs") -> int:
+        """Register skills from capability pack specs."""
+        base = Path(root)
+        if not base.is_absolute():
+            base = Path(__file__).resolve().parent.parent / base
+        if not base.exists():
+            return 0
+        count = 0
+        for spec_path in base.glob("*/spec.json"):
+            try:
+                data = json.loads(spec_path.read_text(encoding="utf-8"))
+                name = str(data.get("name") or spec_path.parent.name).strip()
+                if not name:
+                    continue
+                category = str(data.get("category") or "").strip()
+                notes = str(data.get("description") or "")[:300]
+                acceptance_status = str(data.get("acceptance_status") or "pending")
+                self.register_skill(
+                    name=name,
+                    category=category,
+                    source="capability_pack",
+                    status="learned",
+                    notes=notes,
+                    acceptance_status=acceptance_status,
+                )
+                count += 1
+            except Exception:
+                continue
+        return count
 
     def get_skill(self, name: str) -> Optional[dict]:
         conn = self._get_conn()

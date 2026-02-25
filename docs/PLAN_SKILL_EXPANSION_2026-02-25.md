@@ -91,3 +91,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added DataLake event for explicit owner preference updates.
 - Added capability pack scaffolding script.
 - Added Owner Prefs panel on dashboard UI.
+- Added capability pack sync into SkillRegistry.

@@ -101,3 +101,26 @@ def test_skill_registry_remediation_tasks(tmp_path: Path):
     closed_after = reg.list_remediation_tasks(status="closed", limit=10)
     assert not any(t.get("skill_name") == "secret_skill" for t in open_after)
     assert any(t.get("skill_name") == "secret_skill" for t in closed_after)
+
+
+def test_skill_registry_register_from_capability_packs(tmp_path: Path):
+    db = str(tmp_path / "skills.db")
+    packs = tmp_path / "capability_packs" / "pack_a"
+    packs.mkdir(parents=True, exist_ok=True)
+    (packs / "spec.json").write_text(
+        """{
+  "name": "pack_a",
+  "category": "transport",
+  "description": "transport routing pack",
+  "acceptance_status": "pending"
+}
+""",
+        encoding="utf-8",
+    )
+    reg = SkillRegistry(sqlite_path=db)
+    count = reg.register_from_capability_packs(root=str(tmp_path / "capability_packs"))
+    assert count == 1
+    row = reg.get_skill("pack_a")
+    assert row is not None
+    assert row.get("category") == "transport"
+    assert row.get("acceptance_status") == "pending"
