@@ -209,12 +209,17 @@ class DashboardServer:
                         action = (query.get("action", [""])[0] or "").strip()
                         limit = int(query.get("limit", ["100"])[0] or 100)
                         days = int(query.get("days", ["30"])[0] or 30)
-                        audit = MemoryManager().get_memory_policy_audit(limit=limit, action=action)
-                        summary = MemoryManager().get_memory_policy_summary(days=days)
+                        mm = MemoryManager()
+                        audit = mm.get_memory_policy_audit(limit=limit, action=action)
+                        summary = mm.get_memory_policy_summary(days=days)
+                        drift = mm.retention_drift_alerts(days=days)
+                        cleanup_preview = mm.cleanup_expired_memory(limit=80, dry_run=True)
                     except Exception:
                         audit = []
                         summary = {}
-                    self._json({"audit": audit, "summary": summary})
+                        drift = {}
+                        cleanup_preview = {}
+                    self._json({"audit": audit, "summary": summary, "drift": drift, "cleanup_preview": cleanup_preview})
                     return
                 if parsed.path == "/api/workflow_threads":
                     try:
@@ -672,6 +677,10 @@ class DashboardServer:
           <input id=\"mem_reason\" placeholder=\"reason\" style=\"width:40%\"/>
           <button onclick=\"forgetMemory()\">Forget</button>
         </div>
+        <div style=\"margin-top:6px\">\n
+          <button onclick=\"runMemoryCleanupPreview()\">TTL Cleanup Preview</button>
+          <button onclick=\"runMemoryCleanupApply()\">TTL Cleanup Apply</button>
+        </div>
       </div>
       <div class=\"card\"><div class=\"mut\">Workflow Threads</div><div id=\"workflow_threads\"></div></div>
       <div class=\"card\"><div class=\"mut\">Workflow Interrupts</div><div id=\"workflow_interrupts\"></div></div>
@@ -727,7 +736,7 @@ async function load(){
     else if (k === 'skills') renderSkills(j.skills||[]);
     else if (k === 'operator_policy') renderOperatorPolicy(j);
     else if (k === 'self_learning') renderSelfLearning(j);
-    else if (k === 'memory_policy') renderMemoryPolicy(j.audit||[], j.summary||{});
+    else if (k === 'memory_policy') renderMemoryPolicy(j.audit||[], j.summary||{}, j.drift||{}, j.cleanup_preview||{});
     else if (k === 'workflow_threads') renderWorkflowThreads(j.threads||[]);
     else if (k === 'workflow_interrupts') renderWorkflowInterrupts(j.interrupts||[]);
     else if (k === 'secrets_status') renderSecretsStatus(j.secrets||[]);
@@ -822,9 +831,11 @@ function renderToolingRegistry(items, approvals, stageApprovals, keyRotations, h
     `<div class=\"mut\" style=\"margin-top:8px\">Governance</div><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>${govRows}</tbody></table>` +
     `<div class=\"mut\" style=\"margin-top:8px\">Remediations</div><ul>${rem}</ul>`;
 }
-function renderMemoryPolicy(items, summary){
+function renderMemoryPolicy(items, summary, drift, cleanupPreview){
   const el = document.getElementById('memory_policy');
   const sm = summary || {};
+  const dr = drift || {};
+  const cp = cleanupPreview || {};
   const srows = Object.entries(sm).filter(([k,_]) => k !== 'retention_classes' && k !== 'saved_by_retention' && k !== 'top_forget_reasons').map(([k,v]) => `<tr><td>${k}</td><td>${JSON.stringify(v)}</td></tr>`).join('');
   const rr = Object.entries(sm.retention_classes || {}).map(([k,v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
   const sb = (sm.saved_by_retention || []).map(x => {
@@ -837,11 +848,15 @@ function renderMemoryPolicy(items, summary){
     const val = x[key];
     return `<tr><td>${key}</td><td>${val}</td></tr>`;
   }).join('');
+  const ar = (dr.alerts || []).map(a => `<tr><td>${a.severity||''}</td><td>${a.code||''}</td><td>${a.message||''}</td></tr>`).join('');
+  const crows = (cp.docs || []).slice(0,20).map(d => `<tr><td>${d.doc_id||''}</td><td>${d.retention_class||''}</td><td>${d.expires_at||''}</td></tr>`).join('');
   if (!items.length){
     el.innerHTML =
       `<div class=\"mut\">No audit events</div>` +
       `<div class=\"mut\" style=\"margin-top:8px\">Summary</div><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>${srows}</tbody></table>` +
-      `<div class=\"mut\" style=\"margin-top:8px\">Retention Classes</div><table><thead><tr><th>Class</th><th>TTL days</th></tr></thead><tbody>${rr}</tbody></table>`;
+      `<div class=\"mut\" style=\"margin-top:8px\">Retention Classes</div><table><thead><tr><th>Class</th><th>TTL days</th></tr></thead><tbody>${rr}</tbody></table>` +
+      `<div class=\"mut\" style=\"margin-top:8px\">Drift Alerts</div><table><thead><tr><th>Severity</th><th>Code</th><th>Message</th></tr></thead><tbody>${ar}</tbody></table>` +
+      `<div class=\"mut\" style=\"margin-top:8px\">Cleanup Preview (expired=${cp.expired_found||0})</div><table><thead><tr><th>Doc</th><th>Class</th><th>Expires</th></tr></thead><tbody>${crows}</tbody></table>`;
     return;
   }
   const rows = items.map(a => `<tr><td>${a.created_at||''}</td><td>${a.doc_id||''}</td><td>${a.action||''}</td><td>${a.reason||''}</td><td>${a.memory_type||''}</td></tr>`).join('');
@@ -850,6 +865,8 @@ function renderMemoryPolicy(items, summary){
     `<div class=\"mut\" style=\"margin-top:8px\">Retention Classes</div><table><thead><tr><th>Class</th><th>TTL days</th></tr></thead><tbody>${rr}</tbody></table>` +
     `<div class=\"mut\" style=\"margin-top:8px\">Saved by Retention</div><table><thead><tr><th>Class</th><th>Count</th></tr></thead><tbody>${sb}</tbody></table>` +
     `<div class=\"mut\" style=\"margin-top:8px\">Top Forget Reasons</div><table><thead><tr><th>Reason</th><th>Count</th></tr></thead><tbody>${fr}</tbody></table>` +
+    `<div class=\"mut\" style=\"margin-top:8px\">Drift Alerts</div><table><thead><tr><th>Severity</th><th>Code</th><th>Message</th></tr></thead><tbody>${ar}</tbody></table>` +
+    `<div class=\"mut\" style=\"margin-top:8px\">Cleanup Preview (expired=${cp.expired_found||0})</div><table><thead><tr><th>Doc</th><th>Class</th><th>Expires</th></tr></thead><tbody>${crows}</tbody></table>` +
     `<div class=\"mut\" style=\"margin-top:8px\">Audit Events</div><table><thead><tr><th>Time</th><th>Doc</th><th>Action</th><th>Reason</th><th>Type</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 function renderWorkflowThreads(threads){
@@ -1086,6 +1103,14 @@ async function forgetMemory(){
   const reason = document.getElementById('mem_reason').value.trim() || 'dashboard_forget';
   if (!doc_id) return;
   await fetch('/api/memory_policy', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'forget', doc_id, reason})});
+  await load();
+}
+async function runMemoryCleanupPreview(){
+  await fetch('/api/memory_policy', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'cleanup_preview'})});
+  await load();
+}
+async function runMemoryCleanupApply(){
+  await fetch('/api/memory_policy', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'cleanup_apply'})});
   await load();
 }
 async function setToolPolicy(){
@@ -1504,18 +1529,33 @@ load();
                     doc_id = str(payload.get("doc_id", "")).strip()
                     reason = str(payload.get("reason", "")).strip() or "dashboard_forget"
                     ok = False
+                    result = {}
                     if action == "forget" and doc_id:
                         try:
                             ok = bool(MemoryManager().forget_knowledge(doc_id=doc_id, reason=reason, metadata={"source": "dashboard"}))
                         except Exception:
                             ok = False
+                    elif action in {"cleanup_preview", "cleanup_apply"}:
+                        try:
+                            result = MemoryManager().cleanup_expired_memory(
+                                limit=int(payload.get("limit", 200) or 200),
+                                dry_run=(action == "cleanup_preview"),
+                            )
+                            ok = bool(result.get("ok"))
+                        except Exception:
+                            ok = False
                     if ok:
                         try:
                             from modules.data_lake import DataLake
-                            DataLake().record_decision(actor="dashboard", decision="memory_forget", rationale=f"{doc_id}:{reason}"[:1000])
+                            if action == "forget":
+                                DataLake().record_decision(actor="dashboard", decision="memory_forget", rationale=f"{doc_id}:{reason}"[:1000])
+                            elif action == "cleanup_apply":
+                                DataLake().record_decision(actor="dashboard", decision="memory_cleanup_apply", rationale=str(result.get("deleted", 0)))
+                            elif action == "cleanup_preview":
+                                DataLake().record_decision(actor="dashboard", decision="memory_cleanup_preview", rationale=str(result.get("expired_found", 0)))
                         except Exception:
                             pass
-                    self._json({"ok": ok, "action": action, "doc_id": doc_id, "reason": reason})
+                    self._json({"ok": ok, "action": action, "doc_id": doc_id, "reason": reason, "result": result})
                     return
                 if parsed.path == "/api/tooling_registry":
                     length = int(self.headers.get("Content-Length", "0") or "0")

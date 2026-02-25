@@ -63,6 +63,7 @@ class DecisionLoop:
         self.operator_policy = OperatorPolicy()
         self.self_learning = None
         self._last_llm_alert_at_tick = 0
+        self._last_memory_retention_tick = 0
         logger.info("DecisionLoop инициализирован", extra={"event": "init"})
 
     def set_self_healer(self, self_healer) -> None:
@@ -132,6 +133,7 @@ class DecisionLoop:
 
         # 1.5. LLM risk monitoring (cost anomaly / fail-rate)
         await self._maybe_send_llm_risk_alert()
+        await self._maybe_run_memory_retention()
 
         # 2. Выбор следующей цели
         try:
@@ -284,6 +286,36 @@ class DecisionLoop:
             )
             await self._comms.send_message(msg, level="warning")
             self._last_llm_alert_at_tick = self._tick_count
+        except Exception:
+            pass
+
+    async def _maybe_run_memory_retention(self) -> None:
+        try:
+            # Preview every 4 hours (48 ticks), apply cleanup once per day.
+            if self._tick_count - int(self._last_memory_retention_tick or 0) < 48:
+                return
+            preview = self.memory.cleanup_expired_memory(limit=100, dry_run=True)
+            drift = self.memory.retention_drift_alerts(days=30)
+            expired = int(preview.get("expired_found", 0) or 0)
+            alerts = drift.get("alerts", []) if isinstance(drift, dict) else []
+            if expired > 0:
+                logger.info(
+                    f"Memory retention preview: expired={expired}",
+                    extra={"event": "memory_retention_preview", "context": {"expired_found": expired}},
+                )
+            if alerts:
+                logger.warning(
+                    f"Memory retention drift alerts: {len(alerts)}",
+                    extra={"event": "memory_retention_alerts", "context": {"alerts": alerts[:5]}},
+                )
+            # Apply cleanup every ~24h
+            if self._tick_count % 288 == 0 and expired > 0:
+                applied = self.memory.cleanup_expired_memory(limit=120, dry_run=False)
+                logger.info(
+                    f"Memory retention cleanup applied: deleted={applied.get('deleted', 0)}",
+                    extra={"event": "memory_retention_cleanup", "context": {"result": applied}},
+                )
+            self._last_memory_retention_tick = self._tick_count
         except Exception:
             pass
 

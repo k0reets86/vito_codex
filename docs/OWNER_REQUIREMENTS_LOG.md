@@ -1029,3 +1029,4 @@ Append all new owner requests here as they arrive.
 - 2026-02-25: Added durable workflow interrupts registry and dashboard panel to track approval pauses/resume/cancel outcomes per goal/step.
 - 2026-02-25: Added memory retention classes + TTL expiry metadata and memory quality dashboard summary (quality score/save ratio/reasons).
 - 2026-02-25: Added model profile workflow (save/apply/delete) and secrets-status visibility in dashboard for safer provider/key operations.
+- 2026-02-25: Added retention drift alerts and TTL cleanup workflow (preview/apply) with periodic DecisionLoop retention checks.

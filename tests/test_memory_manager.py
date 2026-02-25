@@ -182,6 +182,37 @@ def test_memory_policy_summary(memory, tmp_path):
     assert isinstance(summary["retention_classes"], dict)
 
 
+def test_memory_cleanup_expired(memory, tmp_path):
+    with patch("memory.memory_manager.settings") as s:
+        s.CHROMA_PATH = str(tmp_path / "chroma")
+        s.SQLITE_PATH = str(tmp_path / "test.db")
+        memory.store_knowledge("exp_1", "important but temporary", {"type": "goal"})
+    conn = memory._get_sqlite()
+    conn.execute(
+        "UPDATE memory_policy_audit SET expires_at = datetime('now', '-1 day') WHERE doc_id = 'exp_1' AND action = 'save'"
+    )
+    conn.commit()
+    preview = memory.cleanup_expired_memory(limit=20, dry_run=True)
+    assert preview["ok"] is True
+    assert preview["expired_found"] >= 1
+    applied = memory.cleanup_expired_memory(limit=20, dry_run=False)
+    assert applied["ok"] is True
+    assert applied["deleted"] >= 1
+    audit = memory.get_memory_policy_audit(limit=10)
+    assert any(r["doc_id"] == "exp_1" and r["action"] == "forget" for r in audit)
+
+
+def test_memory_retention_drift_alerts(memory, tmp_path):
+    with patch("memory.memory_manager.settings") as s:
+        s.CHROMA_PATH = str(tmp_path / "chroma")
+        s.SQLITE_PATH = str(tmp_path / "test.db")
+        for i in range(25):
+            memory.store_knowledge(f"w_{i}", "work item", {"type": "misc"})
+    drift = memory.retention_drift_alerts(days=30)
+    assert "alerts" in drift
+    assert isinstance(drift["alerts"], list)
+
+
 def test_forget_knowledge_records_audit(memory, tmp_path):
     with patch("memory.memory_manager.settings") as s:
         s.CHROMA_PATH = str(tmp_path / "chroma")

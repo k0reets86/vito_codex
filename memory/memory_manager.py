@@ -332,7 +332,7 @@ class MemoryManager:
             expires_at = ""
             if int(ttl_days or 0) > 0 and action == "save":
                 try:
-                    expires_at = (datetime.now(timezone.utc) + timedelta(days=int(ttl_days or 0))).isoformat()
+                    expires_at = (datetime.now(timezone.utc) + timedelta(days=int(ttl_days or 0))).strftime("%Y-%m-%d %H:%M:%S")
                 except Exception:
                     expires_at = ""
             conn.execute(
@@ -476,6 +476,112 @@ class MemoryManager:
             "saved_by_retention": [{str(r["retention_class"] or "unknown"): int(r["n"] or 0)} for r in by_retention_rows],
             "top_forget_reasons": [{str(r["reason"] or ""): int(r["n"] or 0)} for r in by_reason_rows],
         }
+
+    def list_expired_memory_docs(self, limit: int = 200) -> list[dict]:
+        """Return docs where latest memory audit action is save and TTL is expired."""
+        conn = self._get_sqlite()
+        rows = conn.execute(
+            """
+            SELECT m.doc_id, m.memory_type, m.retention_class, m.expires_at, m.importance
+            FROM memory_policy_audit m
+            JOIN (
+                SELECT doc_id, MAX(id) AS max_id
+                FROM memory_policy_audit
+                GROUP BY doc_id
+            ) x ON x.max_id = m.id
+            WHERE m.action = 'save'
+              AND m.expires_at != ''
+              AND m.expires_at <= datetime('now')
+            ORDER BY m.id ASC
+            LIMIT ?
+            """,
+            (int(limit),),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def cleanup_expired_memory(self, limit: int = 200, dry_run: bool = True) -> dict:
+        expired = self.list_expired_memory_docs(limit=limit)
+        if dry_run:
+            return {"ok": True, "dry_run": True, "expired_found": len(expired), "deleted": 0, "docs": expired[:30]}
+        deleted = 0
+        failed = 0
+        for row in expired:
+            ok = self.forget_knowledge(
+                doc_id=str(row.get("doc_id", "")),
+                reason="ttl_expired_cleanup",
+                metadata={
+                    "type": str(row.get("memory_type", "")),
+                    "retention_class": str(row.get("retention_class", "")),
+                    "source": "memory_retention_cleanup",
+                },
+            )
+            if ok:
+                deleted += 1
+            else:
+                failed += 1
+        return {
+            "ok": True,
+            "dry_run": False,
+            "expired_found": len(expired),
+            "deleted": deleted,
+            "failed": failed,
+            "docs": expired[:30],
+        }
+
+    def retention_drift_alerts(self, days: int = 30) -> dict:
+        summary = self.get_memory_policy_summary(days=days)
+        total = int(summary.get("total_events", 0) or 0)
+        saved = int(summary.get("saved", 0) or 0)
+        forgotten = int(summary.get("forgotten", 0) or 0)
+        alerts: list[dict] = []
+
+        counts: dict[str, int] = {}
+        for row in summary.get("saved_by_retention", []) or []:
+            if not isinstance(row, dict) or not row:
+                continue
+            k = next(iter(row.keys()))
+            counts[str(k)] = int(row[k] or 0)
+        if saved >= 20:
+            working_short = counts.get("working_short", 0)
+            noise_short = counts.get("noise_short", 0)
+            if (working_short / max(1, saved)) > 0.75:
+                alerts.append({
+                    "severity": "medium",
+                    "code": "retention_skew_working_short",
+                    "message": "Most saved memories are short-lived; consider more strategic captures.",
+                })
+            if noise_short > 0:
+                alerts.append({
+                    "severity": "low",
+                    "code": "noise_saved_present",
+                    "message": "Noise-class memories are being saved; review save policy routing.",
+                })
+        if total >= 20 and (forgotten / max(1, total)) > 0.7:
+            alerts.append({
+                "severity": "medium",
+                "code": "high_forget_ratio",
+                "message": "Forget ratio is high; memory extraction may be producing low-value artifacts.",
+            })
+        if counts.get("owner_long", 0) == 0:
+            alerts.append({
+                "severity": "low",
+                "code": "owner_profile_gap",
+                "message": "No owner-long memory captures in window; confirm preference sync is active.",
+            })
+        if int(summary.get("expiring_7d", 0) or 0) > 150:
+            alerts.append({
+                "severity": "high",
+                "code": "high_expiring_backlog",
+                "message": "Large memory expiry backlog is approaching; run retention cleanup.",
+            })
+        score = float(summary.get("quality_score", 0.0) or 0.0)
+        if score < 0.45:
+            alerts.append({
+                "severity": "high",
+                "code": "quality_score_low",
+                "message": "Memory quality score is low; tune extraction quality and retention routing.",
+            })
+        return {"window_days": int(days or 30), "summary": summary, "alerts": alerts}
 
     def save_skill(self, name: str, description: str, agent: str = "",
                    task_type: str = "", method: dict | None = None) -> None:
