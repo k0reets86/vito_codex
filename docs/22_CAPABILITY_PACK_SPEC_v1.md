@@ -31,3 +31,5 @@ Each capability pack must include:
 - Tests discovered via `tests/` naming
 - Evidence stored in `execution_facts`
 
+## Scaffold Script
+Use `scripts/create_capability_pack.py <name> <category>` to generate a pack skeleton.
