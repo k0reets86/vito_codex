@@ -43,6 +43,7 @@ from telegram.ext import (
 from config.logger import get_logger
 from config.settings import settings
 from modules.owner_preference_model import OwnerPreferenceModel
+from modules.data_lake import DataLake
 
 logger = get_logger("comms_agent", agent="comms_agent")
 
@@ -2085,6 +2086,16 @@ class CommsAgent:
                 confidence=1.0,
                 notes="explicit owner preference",
             )
+            try:
+                DataLake().record(
+                    agent="comms_agent",
+                    task_type="owner_preference_set",
+                    status="success",
+                    output={"key": key, "value": parsed_value},
+                    source="owner",
+                )
+            except Exception:
+                pass
             return True
         except Exception:
             return False
