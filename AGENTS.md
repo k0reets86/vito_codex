@@ -7,6 +7,7 @@
   - Implemented explicit memory save/forget policy with audit trail and dashboard controls for manual forget.
   - Added operator policy controls for tool allowlist and per-capability budget caps, with DecisionLoop pre-check enforcement.
   - Added gated self-learning reflection loop with lesson scoring and pending skill-candidate generation.
+  - Added dashboard model policy controls (`/api/models`) for default model and allow/deny lists.
 - Current blockers:
   - Social network integrations (Threads/YouTube/TikTok/etc.) are paused until accounts are ready.
 - Important commands:

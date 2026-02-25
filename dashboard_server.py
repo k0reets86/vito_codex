@@ -451,6 +451,18 @@ class DashboardServer:
       <div class=\"card\"><div class=\"mut\">KPI</div><div id=\"kpi\"></div></div>
       <div class=\"card\"><div class=\"mut\">KPI Trend (30d)</div><div id=\"kpi_trend\"></div></div>
       <div class=\"card\"><div class=\"mut\">Models</div><div id=\"models\"></div></div>
+      <div class=\"card\"><div class=\"mut\">Model Controls</div>
+        <div style=\"margin-top:8px\">\n
+          <input id=\"mdl_default\" placeholder=\"OPENROUTER_DEFAULT_MODEL\" style=\"width:62%\"/>
+          <button onclick=\"setModelPolicy()\">Set</button>
+        </div>
+        <div style=\"margin-top:6px\">\n
+          <input id=\"mdl_enabled\" placeholder=\"LLM_ENABLED_MODELS (csv)\" style=\"width:80%\"/>
+        </div>
+        <div style=\"margin-top:6px\">\n
+          <input id=\"mdl_disabled\" placeholder=\"LLM_DISABLED_MODELS (csv)\" style=\"width:80%\"/>
+        </div>
+      </div>
       <div class=\"card\"><div class=\"mut\">Execution Facts</div><div id=\"facts\"></div></div>
       <div class=\"card\"><div class=\"mut\">Pending Approvals</div><div id=\"approvals\"></div></div>
       <div class=\"card\"><div class=\"mut\">Recent Events</div><div id=\"events\"></div></div>
@@ -748,6 +760,17 @@ async function setConfig(){
   await fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({[k]: v})});
   await load();
 }
+async function setModelPolicy(){
+  const OPENROUTER_DEFAULT_MODEL = document.getElementById('mdl_default').value.trim();
+  const LLM_ENABLED_MODELS = document.getElementById('mdl_enabled').value.trim();
+  const LLM_DISABLED_MODELS = document.getElementById('mdl_disabled').value.trim();
+  const payload = {};
+  if (OPENROUTER_DEFAULT_MODEL) payload.OPENROUTER_DEFAULT_MODEL = OPENROUTER_DEFAULT_MODEL;
+  payload.LLM_ENABLED_MODELS = LLM_ENABLED_MODELS;
+  payload.LLM_DISABLED_MODELS = LLM_DISABLED_MODELS;
+  await fetch('/api/models', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+  await load();
+}
 async function addRss(){
   const name = document.getElementById('rss_name').value.trim() || 'source';
   const url = document.getElementById('rss_url').value.trim();
@@ -909,6 +932,48 @@ load();
                                 decision="config_update",
                                 rationale=", ".join(sorted(updated.keys()))[:1000],
                             )
+                    except Exception:
+                        pass
+                    self._json({"updated": updated})
+                    return
+                if parsed.path == "/api/models":
+                    length = int(self.headers.get("Content-Length", "0") or "0")
+                    raw = self.rfile.read(length) if length else b"{}"
+                    try:
+                        payload = json.loads(raw.decode("utf-8"))
+                    except Exception:
+                        payload = {}
+                    allowed = {"OPENROUTER_DEFAULT_MODEL", "LLM_ENABLED_MODELS", "LLM_DISABLED_MODELS"}
+                    updated = {}
+                    for k, v in payload.items():
+                        if k in allowed:
+                            updated[k] = str(v)
+                            try:
+                                import os
+                                os.environ[k] = str(v)
+                                if hasattr(settings, k):
+                                    setattr(settings, k, str(v))
+                            except Exception:
+                                pass
+                    try:
+                        from pathlib import Path
+                        import re
+                        env_path = Path("/home/vito/vito-agent/.env")
+                        text = env_path.read_text() if env_path.exists() else ""
+                        for k, v in updated.items():
+                            if re.search(rf"^{k}=.*$", text, flags=re.M):
+                                text = re.sub(rf"^{k}=.*$", f"{k}={v}", text, flags=re.M)
+                            else:
+                                if text and not text.endswith("\n"):
+                                    text += "\n"
+                                text += f"{k}={v}\n"
+                        env_path.write_text(text)
+                    except Exception:
+                        pass
+                    try:
+                        if updated:
+                            from modules.data_lake import DataLake
+                            DataLake().record_decision(actor="dashboard", decision="models_update", rationale=",".join(sorted(updated.keys())))
                     except Exception:
                         pass
                     self._json({"updated": updated})
