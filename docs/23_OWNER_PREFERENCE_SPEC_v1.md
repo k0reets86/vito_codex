@@ -11,6 +11,9 @@
 - `channels`: preferred platforms and tools
 - `schedule`: time windows, reporting cadence
 
+## Default Seeds (Optional)
+Use `scripts/seed_preference_blocks.py` to seed minimal defaults if missing.
+
 ## Commands
 - Set: `/pref key=value`
 - Deactivate: `/pref_del key` or `forget key` / `забыть key`
