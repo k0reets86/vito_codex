@@ -96,3 +96,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Synced explicit owner preferences into semantic memory.
 - Added starter capability packs for GAP areas (transport, smart_home, health, games, iOS/macOS, voice).
 - Added nightly owner preference snapshot into knowledge base.
+- Added nightly sync of capability packs into SkillRegistry.

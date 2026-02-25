@@ -761,6 +761,13 @@ class VITO:
         except Exception as e:
             logger.debug(f"Ошибка сохранения навыков: {e}", extra={"event": "skill_save_error"})
 
+        # 4.1 Sync capability packs into skill registry
+        try:
+            from modules.skill_registry import SkillRegistry
+            SkillRegistry().register_from_capability_packs()
+        except Exception:
+            pass
+
         # 5. Cleanup resolved errors older than 7 days
         try:
             deleted = self.self_healer.cleanup_old_errors(days=7)
