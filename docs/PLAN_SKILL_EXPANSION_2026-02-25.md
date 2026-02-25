@@ -181,3 +181,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added self-learning optimizer loop: candidate confidence recalibration (lesson/pass-rate weighted), readiness states, and safe auto-promotion to accepted skills via SkillRegistry quality gates.
 - Added explicit self-learning test-jobs (open/passed/failed), dashboard controls, and task-family calibration metrics for confidence scoring.
 - Added automated self-learning test runner (executes mapped pytest suites for open jobs), updates job status, and feeds results back into skill `tests_coverage`/`risk_score`.
+- Added flaky-test policy for self-learning (retry-on-fail, flaky tagging, reduced risk credit, promotion cooldown gate) and richer task-family test maps.

@@ -134,6 +134,10 @@ class Settings:
     SELF_LEARNING_TEST_RUNNER_INTERVAL_TICKS: int = int(os.getenv("SELF_LEARNING_TEST_RUNNER_INTERVAL_TICKS", "96") or 96)
     SELF_LEARNING_TEST_RUNNER_MAX_JOBS: int = int(os.getenv("SELF_LEARNING_TEST_RUNNER_MAX_JOBS", "2") or 2)
     SELF_LEARNING_TEST_RUNNER_TIMEOUT_SEC: int = int(os.getenv("SELF_LEARNING_TEST_RUNNER_TIMEOUT_SEC", "120") or 120)
+    SELF_LEARNING_TEST_RETRY_ON_FAIL: bool = os.getenv("SELF_LEARNING_TEST_RETRY_ON_FAIL", "true").lower() in ("1", "true", "yes", "on")
+    SELF_LEARNING_TEST_MAX_ATTEMPTS: int = int(os.getenv("SELF_LEARNING_TEST_MAX_ATTEMPTS", "2") or 2)
+    SELF_LEARNING_FLAKY_COOLDOWN_HOURS: int = int(os.getenv("SELF_LEARNING_FLAKY_COOLDOWN_HOURS", "72") or 72)
+    SELF_LEARNING_TEST_TARGET_MAP: str = os.getenv("SELF_LEARNING_TEST_TARGET_MAP", "")
 
     # Owner preference auto-detect (off by default)
     OWNER_PREF_AUTO_DETECT: bool = os.getenv("OWNER_PREF_AUTO_DETECT", "false").lower() in ("1", "true", "yes", "on")

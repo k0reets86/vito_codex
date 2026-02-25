@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from config.settings import settings
 from modules.self_learning import SelfLearningEngine
 from modules.skill_registry import SkillRegistry
 
@@ -117,6 +118,7 @@ def test_self_learning_generate_test_jobs_and_complete(tmp_path):
     assert done is True
     jobs2 = sl.list_test_jobs(status="passed", limit=10)
     assert jobs2
+    assert jobs2[0]["attempts"] >= 1
 
 
 def test_self_learning_summary_has_family_calibration(tmp_path):
@@ -127,3 +129,45 @@ def test_self_learning_summary_has_family_calibration(tmp_path):
     summary = sl.summary(days=30)
     assert "family_calibration" in summary
     assert isinstance(summary["family_calibration"], list)
+
+
+def test_self_learning_auto_promote_blocks_recent_flaky(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "SELF_LEARNING_FLAKY_COOLDOWN_HOURS", 72)
+    db = str(tmp_path / "sl.db")
+    sl = SelfLearningEngine(sqlite_path=db)
+    reg = SkillRegistry(sqlite_path=db)
+    skill_name = "selflearn:flaky_skill"
+    reg.register_skill(skill_name, category="self_learning", source="self_learning", acceptance_status="pending")
+    conn = reg._get_conn()
+    try:
+        conn.execute(
+            "UPDATE skill_registry SET tests_coverage = 0.95, risk_score = 0.1, security_status = 'safe' WHERE name = ?",
+            (skill_name,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    sl.register_candidate(skill_name, confidence=0.9, notes="ready", task_family="research")
+    sl.set_candidate_status(skill_name, "ready")
+    for i in range(4):
+        sl.record_lesson(f"g{i}", "research flow", "completed", 0.9, "ok", candidate_skill=skill_name, task_family="research")
+    sl.optimize_candidates(days=30, min_lessons=3, promote_confidence_min=0.78, auto_promote=False)
+    conn = sl._get_conn()
+    try:
+        conn.execute(
+            """
+            INSERT INTO self_learning_test_jobs (skill_name, task_family, reason, status, updated_at)
+            VALUES (?, ?, 'manual_flaky_seed', 'open', datetime('now'))
+            """,
+            (skill_name, "research"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    open_jobs = sl.list_test_jobs(status="open", limit=5)
+    assert open_jobs
+    sl.complete_test_job(int(open_jobs[0]["id"]), passed=True, notes="flaky pass", attempts=2, flaky=True)
+    changed = sl.auto_promote_ready_candidates()
+    assert changed == 0
+    cand = sl.list_candidates(limit=10)[0]
+    assert cand["status"] in {"hold", "ready"}

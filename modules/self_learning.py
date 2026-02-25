@@ -75,6 +75,8 @@ class SelfLearningEngine:
                     task_family TEXT DEFAULT '',
                     reason TEXT DEFAULT '',
                     status TEXT DEFAULT 'open',
+                    attempts INTEGER DEFAULT 0,
+                    flaky INTEGER DEFAULT 0,
                     result_notes TEXT DEFAULT '',
                     created_at TEXT DEFAULT (datetime('now')),
                     updated_at TEXT DEFAULT (datetime('now')),
@@ -96,6 +98,11 @@ class SelfLearningEngine:
                 conn.execute("ALTER TABLE self_learning_candidates ADD COLUMN pass_rate REAL DEFAULT 0")
             if "task_family" not in cand_cols:
                 conn.execute("ALTER TABLE self_learning_candidates ADD COLUMN task_family TEXT DEFAULT ''")
+            job_cols = {r["name"] for r in conn.execute("PRAGMA table_info(self_learning_test_jobs)").fetchall()}
+            if "attempts" not in job_cols:
+                conn.execute("ALTER TABLE self_learning_test_jobs ADD COLUMN attempts INTEGER DEFAULT 0")
+            if "flaky" not in job_cols:
+                conn.execute("ALTER TABLE self_learning_test_jobs ADD COLUMN flaky INTEGER DEFAULT 0")
             conn.commit()
         finally:
             conn.close()
@@ -228,7 +235,7 @@ class SelfLearningEngine:
             if status:
                 rows = conn.execute(
                     """
-                    SELECT id, skill_name, task_family, reason, status, result_notes, created_at, updated_at
+                    SELECT id, skill_name, task_family, reason, status, attempts, flaky, result_notes, created_at, updated_at
                     FROM self_learning_test_jobs
                     WHERE status = ?
                     ORDER BY id DESC
@@ -239,7 +246,7 @@ class SelfLearningEngine:
             else:
                 rows = conn.execute(
                     """
-                    SELECT id, skill_name, task_family, reason, status, result_notes, created_at, updated_at
+                    SELECT id, skill_name, task_family, reason, status, attempts, flaky, result_notes, created_at, updated_at
                     FROM self_learning_test_jobs
                     ORDER BY id DESC
                     LIMIT ?
@@ -250,17 +257,17 @@ class SelfLearningEngine:
         finally:
             conn.close()
 
-    def complete_test_job(self, job_id: int, passed: bool, notes: str = "") -> bool:
+    def complete_test_job(self, job_id: int, passed: bool, notes: str = "", attempts: int = 1, flaky: bool = False) -> bool:
         conn = self._get_conn()
         try:
             status = "passed" if passed else "failed"
             cur = conn.execute(
                 """
                 UPDATE self_learning_test_jobs
-                SET status = ?, result_notes = ?, updated_at = datetime('now')
+                SET status = ?, result_notes = ?, attempts = ?, flaky = ?, updated_at = datetime('now')
                 WHERE id = ? AND status = 'open'
                 """,
-                (status, notes[:500], int(job_id)),
+                (status, notes[:500], max(1, int(attempts or 1)), 1 if flaky else 0, int(job_id)),
             )
             conn.commit()
             return int(cur.rowcount or 0) > 0
@@ -495,6 +502,21 @@ class SelfLearningEngine:
                     and lessons_count >= int(getattr(settings, "SELF_LEARNING_MIN_LESSONS", 3) or 3)
                     and pass_rate >= 0.65
                 )
+                if gate_ok:
+                    flaky_row = conn.execute(
+                        """
+                        SELECT 1
+                        FROM self_learning_test_jobs
+                        WHERE skill_name = ?
+                          AND status = 'passed'
+                          AND flaky = 1
+                          AND updated_at >= datetime('now', ?)
+                        LIMIT 1
+                        """,
+                        (skill_name, f"-{max(1, int(getattr(settings, 'SELF_LEARNING_FLAKY_COOLDOWN_HOURS', 72) or 72))} hour"),
+                    ).fetchone()
+                    if flaky_row:
+                        gate_ok = False
                 if not gate_ok:
                     conn.execute(
                         "UPDATE self_learning_candidates SET status='hold', updated_at=datetime('now') WHERE skill_name=?",
