@@ -41,6 +41,21 @@ class ToolingRegistry:
                     created_at TEXT DEFAULT (datetime('now')),
                     updated_at TEXT DEFAULT (datetime('now'))
                 );
+                CREATE TABLE IF NOT EXISTS tooling_contract_approvals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    adapter_key TEXT NOT NULL,
+                    proposed_version TEXT NOT NULL,
+                    proposed_contract_hash TEXT NOT NULL,
+                    proposed_contract_signature TEXT NOT NULL,
+                    payload_json TEXT DEFAULT '{}',
+                    requested_by TEXT DEFAULT 'system',
+                    status TEXT DEFAULT 'pending',
+                    decision_reason TEXT DEFAULT '',
+                    created_at TEXT DEFAULT (datetime('now')),
+                    decided_at TEXT DEFAULT ''
+                );
+                CREATE INDEX IF NOT EXISTS idx_tooling_contract_approvals_status
+                ON tooling_contract_approvals (status, created_at DESC);
                 """
             )
             cols = {r["name"] for r in conn.execute("PRAGMA table_info(tooling_registry)").fetchall()}
@@ -152,6 +167,172 @@ class ToolingRegistry:
         try:
             conn.execute("DELETE FROM tooling_registry WHERE adapter_key = ?", (adapter_key,))
             conn.commit()
+        finally:
+            conn.close()
+
+    def request_contract_rotation(
+        self,
+        adapter_key: str,
+        protocol: str,
+        endpoint: str,
+        schema: dict | None = None,
+        adapter_version: str = "1.0.0",
+        auth_type: str = "none",
+        enabled: bool = True,
+        notes: str = "",
+        requested_by: str = "system",
+    ) -> dict:
+        errs = self.validate(protocol=protocol, endpoint=endpoint, schema=schema or {})
+        if errs:
+            return {"ok": False, "errors": errs}
+        contract_hash = self.compute_contract_hash(
+            adapter_key=adapter_key,
+            adapter_version=adapter_version,
+            protocol=protocol,
+            endpoint=endpoint,
+            schema=schema or {},
+        )
+        contract_signature = self.sign_contract_hash(contract_hash)
+        payload = {
+            "adapter_key": adapter_key,
+            "adapter_version": adapter_version,
+            "protocol": protocol,
+            "endpoint": endpoint,
+            "auth_type": auth_type,
+            "enabled": bool(enabled),
+            "schema": schema or {},
+            "notes": notes,
+        }
+        conn = self._get_conn()
+        try:
+            cur = conn.execute(
+                """
+                INSERT INTO tooling_contract_approvals
+                (adapter_key, proposed_version, proposed_contract_hash, proposed_contract_signature, payload_json, requested_by, status)
+                VALUES (?, ?, ?, ?, ?, ?, 'pending')
+                """,
+                (
+                    adapter_key[:120],
+                    (adapter_version or "1.0.0")[:32],
+                    contract_hash,
+                    contract_signature,
+                    json.dumps(payload, ensure_ascii=False)[:20000],
+                    requested_by[:120],
+                ),
+            )
+            conn.commit()
+            return {"ok": True, "approval_id": int(cur.lastrowid), "contract_hash": contract_hash}
+        finally:
+            conn.close()
+
+    def list_contract_approvals(self, status: str = "pending", limit: int = 100) -> list[dict]:
+        conn = self._get_conn()
+        try:
+            if status:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM tooling_contract_approvals
+                    WHERE status = ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (status, int(limit)),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM tooling_contract_approvals
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (int(limit),),
+                ).fetchall()
+            out = []
+            for r in rows:
+                d = dict(r)
+                try:
+                    d["payload"] = json.loads(d.get("payload_json") or "{}")
+                except Exception:
+                    d["payload"] = {}
+                out.append(d)
+            return out
+        finally:
+            conn.close()
+
+    def approve_contract_rotation(self, approval_id: int, approver: str = "owner", reason: str = "") -> dict:
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                "SELECT * FROM tooling_contract_approvals WHERE id = ? AND status = 'pending'",
+                (int(approval_id),),
+            ).fetchone()
+            if not row:
+                return {"ok": False, "error": "approval_not_found"}
+            payload = json.loads(row["payload_json"] or "{}")
+            # Apply approved adapter config
+            applied = self.upsert_adapter(
+                adapter_key=str(payload.get("adapter_key", "")).strip(),
+                adapter_version=str(payload.get("adapter_version", "1.0.0")).strip() or "1.0.0",
+                protocol=str(payload.get("protocol", "")).strip().lower(),
+                endpoint=str(payload.get("endpoint", "")).strip(),
+                auth_type=str(payload.get("auth_type", "none")).strip(),
+                enabled=bool(payload.get("enabled", True)),
+                schema=payload.get("schema", {}) if isinstance(payload.get("schema", {}), dict) else {},
+                notes=str(payload.get("notes", "")),
+            )
+            if not applied.get("ok"):
+                return {"ok": False, "error": "apply_failed", "details": applied.get("errors", [])}
+            conn.execute(
+                """
+                UPDATE tooling_contract_approvals
+                SET status = 'approved',
+                    decision_reason = ?,
+                    decided_at = datetime('now')
+                WHERE id = ?
+                """,
+                (f"approved_by:{approver}; {reason}"[:500], int(approval_id)),
+            )
+            conn.commit()
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "error": f"approve_failed:{e}"}
+        finally:
+            conn.close()
+
+    def reject_contract_rotation(self, approval_id: int, approver: str = "owner", reason: str = "") -> dict:
+        conn = self._get_conn()
+        try:
+            cur = conn.execute(
+                """
+                UPDATE tooling_contract_approvals
+                SET status = 'rejected',
+                    decision_reason = ?,
+                    decided_at = datetime('now')
+                WHERE id = ? AND status = 'pending'
+                """,
+                (f"rejected_by:{approver}; {reason}"[:500], int(approval_id)),
+            )
+            conn.commit()
+            if int(cur.rowcount or 0) <= 0:
+                return {"ok": False, "error": "approval_not_found"}
+            return {"ok": True}
+        finally:
+            conn.close()
+
+    def has_pending_rotation(self, adapter_key: str) -> bool:
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM tooling_contract_approvals
+                WHERE adapter_key = ? AND status = 'pending'
+                LIMIT 1
+                """,
+                (adapter_key,),
+            ).fetchone()
+            return row is not None
         finally:
             conn.close()
 

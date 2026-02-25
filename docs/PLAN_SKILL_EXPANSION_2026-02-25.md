@@ -168,3 +168,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Extended ToolingRunner with controlled live-mode (OpenAPI probe), budget checks, and timeout controls while keeping dry-run default.
 - Added MCP sandbox worker + tooling response contract; ToolingRunner now supports controlled MCP live execution via stdio allowlist.
 - Added signed/versioned tooling contracts (contract_hash + HMAC signature) with runtime verification before adapter execution.
+- Added contract rotation approval workflow (request/approve/reject) and runtime live-block while rotation is pending.

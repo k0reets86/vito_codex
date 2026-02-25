@@ -53,3 +53,26 @@ def test_tooling_registry_contract_mismatch(tmp_path):
     ok, reason = reg.verify_contract(row)
     assert ok is False
     assert reason in {"contract_signature_mismatch", "contract_hash_mismatch"}
+
+
+def test_tooling_registry_rotation_approval_flow(tmp_path):
+    db = str(tmp_path / "tools.db")
+    reg = ToolingRegistry(sqlite_path=db)
+    req = reg.request_contract_rotation(
+        adapter_key="rot_demo",
+        adapter_version="2.0.0",
+        protocol="openapi",
+        endpoint="https://example.com/openapi-v2.json",
+        schema={"openapi": "3.0.0", "paths": {}},
+        requested_by="test",
+    )
+    assert req["ok"] is True
+    pending = reg.list_contract_approvals(status="pending", limit=10)
+    assert pending
+    app_id = pending[0]["id"]
+    approved = reg.approve_contract_rotation(app_id, approver="owner", reason="ok")
+    assert approved["ok"] is True
+    rows = reg.list_adapters(limit=10)
+    assert rows
+    assert rows[0]["adapter_key"] == "rot_demo"
+    assert rows[0]["adapter_version"] == "2.0.0"

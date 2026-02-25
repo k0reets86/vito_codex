@@ -84,3 +84,30 @@ def test_tooling_runner_blocks_invalid_contract(tmp_path):
     run = ToolingRunner(sqlite_path=db).run("broken_contract", dry_run=True)
     assert run["status"] == "error"
     assert run["error"] == "adapter_contract_invalid"
+
+
+def test_tooling_runner_blocks_live_when_pending_rotation(tmp_path, monkeypatch):
+    db = str(tmp_path / "tool_run.db")
+    reg = ToolingRegistry(sqlite_path=db)
+    reg.upsert_adapter(
+        adapter_key="pending_demo",
+        protocol="mcp",
+        endpoint="stdio://python3 -c \"import json; print(json.dumps({'ok':True}))\"",
+        schema={"tools": []},
+    )
+    req = reg.request_contract_rotation(
+        adapter_key="pending_demo",
+        adapter_version="1.0.1",
+        protocol="mcp",
+        endpoint="stdio://python3 -c \"import json; print(json.dumps({'ok':True}))\"",
+        schema={"tools": []},
+        requested_by="test",
+    )
+    assert req["ok"] is True
+    from config import settings as settings_mod
+    monkeypatch.setattr(settings_mod.settings, "TOOLING_RUN_LIVE_ENABLED", True)
+    monkeypatch.setattr(settings_mod.settings, "TOOLING_BLOCK_WITH_PENDING_ROTATION", True)
+    monkeypatch.setattr(settings_mod.settings, "TOOLING_MCP_ALLOW_CMDS", "python3")
+    run = ToolingRunner(sqlite_path=db).run("pending_demo", dry_run=False)
+    assert run["status"] == "error"
+    assert run["error"] == "pending_rotation_approval"

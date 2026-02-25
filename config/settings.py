@@ -143,6 +143,7 @@ class Settings:
     TOOLING_MCP_MAX_OUTPUT_BYTES: int = int(os.getenv("TOOLING_MCP_MAX_OUTPUT_BYTES", "32768") or 32768)
     TOOLING_MCP_ALLOW_CMDS: str = os.getenv("TOOLING_MCP_ALLOW_CMDS", "python3,node,npx,uv,mcp-server")
     TOOLING_CONTRACT_SECRET: str = os.getenv("TOOLING_CONTRACT_SECRET", "tooling-contract-local")
+    TOOLING_BLOCK_WITH_PENDING_ROTATION: bool = os.getenv("TOOLING_BLOCK_WITH_PENDING_ROTATION", "true").lower() in ("1", "true", "yes", "on")
 
 
 settings = Settings()

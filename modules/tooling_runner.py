@@ -71,6 +71,18 @@ class ToolingRunner:
             }
             self._record_event(adapter_key, result)
             return result
+        if bool(getattr(settings, "TOOLING_BLOCK_WITH_PENDING_ROTATION", True)):
+            try:
+                if self.registry.has_pending_rotation(adapter_key):
+                    result = {
+                        "status": "error",
+                        "error": "pending_rotation_approval",
+                        "adapter_key": adapter_key,
+                    }
+                    self._record_event(adapter_key, result)
+                    return result
+            except Exception:
+                pass
 
         protocol = str(adapter.get("protocol", "")).strip().lower()
         endpoint = str(adapter.get("endpoint", "")).strip()

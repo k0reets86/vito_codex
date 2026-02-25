@@ -319,10 +319,13 @@ class DashboardServer:
                 if parsed.path == "/api/tooling_registry":
                     try:
                         from modules.tooling_registry import ToolingRegistry
-                        rows = ToolingRegistry().list_adapters(limit=200)
+                        reg = ToolingRegistry()
+                        rows = reg.list_adapters(limit=200)
+                        approvals = reg.list_contract_approvals(status="pending", limit=100)
                     except Exception:
                         rows = []
-                    self._json({"adapters": rows})
+                        approvals = []
+                    self._json({"adapters": rows, "approvals": approvals})
                     return
                 if parsed.path == "/api/events":
                     try:
@@ -422,6 +425,7 @@ class DashboardServer:
                         "TOOLING_HTTP_TIMEOUT_SEC",
                         "TOOLING_MCP_TIMEOUT_SEC",
                         "TOOLING_MCP_MAX_OUTPUT_BYTES",
+                        "TOOLING_BLOCK_WITH_PENDING_ROTATION",
                     ]
                     data = {k: getattr(settings, k, None) for k in allowed}
                     self._json({"config": data})
@@ -560,6 +564,15 @@ class DashboardServer:
           <button onclick=\"setToolingAdapter()\">Upsert</button>
           <button onclick=\"runToolingAdapter()\">Dry Run</button>
         </div>
+        <div style=\"margin-top:6px\">\n
+          <input id=\"tool_ver\" placeholder=\"version\" style=\"width:20%\"/>
+          <button onclick=\"requestToolingRotation()\">Request Rotation</button>
+        </div>
+        <div style=\"margin-top:6px\">\n
+          <input id=\"tool_appr_id\" placeholder=\"approval_id\" style=\"width:22%\"/>
+          <button onclick=\"approveToolingRotation()\">Approve</button>
+          <button onclick=\"rejectToolingRotation()\">Reject</button>
+        </div>
       </div>
       <div class=\"card\"><div class=\"mut\">Memory Policy Audit</div><div id=\"memory_policy\"></div></div>
       <div class=\"card\"><div class=\"mut\">Memory Controls</div>
@@ -627,7 +640,7 @@ async function load(){
     else if (k === 'llm_policy') renderLlmPolicy(j.policy||{});
     else if (k === 'guardrails') renderGuardrails(j);
     else if (k === 'llm_evals') renderLlmEvals(j);
-    else if (k === 'tooling_registry') renderToolingRegistry(j.adapters||[]);
+    else if (k === 'tooling_registry') renderToolingRegistry(j.adapters||[], j.approvals||[]);
   }
 }
 function renderPrefs(prefs){
@@ -673,11 +686,20 @@ function renderSelfLearning(j){
     `<div class=\"mut\">Lessons</div><table><thead><tr><th>Goal</th><th>Status</th><th>Score</th><th>Lesson</th></tr></thead><tbody>${lrows}</tbody></table>` +
     `<div class=\"mut\" style=\"margin-top:8px\">Candidates</div><table><thead><tr><th>Skill</th><th>Confidence</th><th>Status</th></tr></thead><tbody>${crows}</tbody></table>`;
 }
-function renderToolingRegistry(items){
+function renderToolingRegistry(items, approvals){
   const el = document.getElementById('tooling_registry');
-  if (!items.length){ el.innerHTML = '<div class=\"mut\">No adapters</div>'; return; }
+  const app = approvals || [];
+  if (!items.length){
+    const prow0 = app.map(a => `<tr><td>${a.id}</td><td>${a.adapter_key}</td><td>${a.proposed_version}</td><td>${a.requested_by}</td></tr>`).join('');
+    el.innerHTML = `<div class=\"mut\">No adapters</div><table><thead><tr><th>ID</th><th>Adapter</th><th>Version</th><th>By</th></tr></thead><tbody>${prow0}</tbody></table>`;
+    return;
+  }
   const rows = items.map(a => `<tr><td>${a.adapter_key}</td><td>${a.protocol}</td><td>${a.endpoint}</td><td>${a.enabled?1:0}</td></tr>`).join('');
-  el.innerHTML = `<table><thead><tr><th>Key</th><th>Protocol</th><th>Endpoint</th><th>On</th></tr></thead><tbody>${rows}</tbody></table>`;
+  const prows = app.map(a => `<tr><td>${a.id}</td><td>${a.adapter_key}</td><td>${a.proposed_version}</td><td>${a.requested_by}</td></tr>`).join('');
+  el.innerHTML =
+    `<table><thead><tr><th>Key</th><th>Protocol</th><th>Endpoint</th><th>On</th></tr></thead><tbody>${rows}</tbody></table>` +
+    `<div class=\"mut\" style=\"margin-top:8px\">Pending Rotations</div>` +
+    `<table><thead><tr><th>ID</th><th>Adapter</th><th>Version</th><th>By</th></tr></thead><tbody>${prows}</tbody></table>`;
 }
 function renderMemoryPolicy(items){
   const el = document.getElementById('memory_policy');
@@ -907,6 +929,29 @@ async function runToolingAdapter(){
   await fetch('/api/tooling_registry', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'run', adapter_key, dry_run:true})});
   await load();
 }
+async function requestToolingRotation(){
+  const adapter_key = document.getElementById('tool_key').value.trim();
+  const protocol = document.getElementById('tool_proto').value.trim();
+  const endpoint = document.getElementById('tool_ep').value.trim();
+  const auth_type = document.getElementById('tool_auth').value.trim() || 'none';
+  const enabled = (document.getElementById('tool_enabled').value.trim() || '1') !== '0';
+  const adapter_version = document.getElementById('tool_ver').value.trim() || '1.0.0';
+  if (!adapter_key || !protocol || !endpoint) return;
+  await fetch('/api/tooling_registry', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'request_rotation', adapter_key, protocol, endpoint, auth_type, enabled, adapter_version, requested_by:'dashboard'})});
+  await load();
+}
+async function approveToolingRotation(){
+  const approval_id = parseInt((document.getElementById('tool_appr_id').value||'0').trim(), 10);
+  if (!approval_id) return;
+  await fetch('/api/tooling_registry', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'approve_rotation', approval_id, approver:'dashboard'})});
+  await load();
+}
+async function rejectToolingRotation(){
+  const approval_id = parseInt((document.getElementById('tool_appr_id').value||'0').trim(), 10);
+  if (!approval_id) return;
+  await fetch('/api/tooling_registry', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'reject_rotation', approval_id, approver:'dashboard'})});
+  await load();
+}
 async function setSecret(){
   const k = document.getElementById('sec_key').value.trim();
   const v = document.getElementById('sec_val').value.trim();
@@ -982,9 +1027,10 @@ load();
                         "TOOLING_HTTP_TIMEOUT_SEC",
                         "TOOLING_MCP_TIMEOUT_SEC",
                         "TOOLING_MCP_MAX_OUTPUT_BYTES",
+                        "TOOLING_BLOCK_WITH_PENDING_ROTATION",
                     }
                     updated = {}
-                    bool_keys = {"PROACTIVE_ENABLED", "BRAINSTORM_WEEKLY", "OWNER_INBOX_ENABLED", "CALENDAR_UPDATE_LLM", "SELF_LEARNING_ENABLED", "GUARDRAILS_ENABLED", "GUARDRAILS_BLOCK_ON_INJECTION", "LLM_ALERTS_ENABLED", "TOOLING_RUN_LIVE_ENABLED"}
+                    bool_keys = {"PROACTIVE_ENABLED", "BRAINSTORM_WEEKLY", "OWNER_INBOX_ENABLED", "CALENDAR_UPDATE_LLM", "SELF_LEARNING_ENABLED", "GUARDRAILS_ENABLED", "GUARDRAILS_BLOCK_ON_INJECTION", "LLM_ALERTS_ENABLED", "TOOLING_RUN_LIVE_ENABLED", "TOOLING_BLOCK_WITH_PENDING_ROTATION"}
                     num_keys = {"DAILY_LIMIT_USD", "OPERATION_NOTIFY_USD", "OPERATION_APPROVE_USD", "OPERATION_MAX_USD", "SELF_LEARNING_SKILL_SCORE_MIN", "TOOLING_HTTP_TIMEOUT_SEC", "TOOLING_MCP_TIMEOUT_SEC", "TOOLING_MCP_MAX_OUTPUT_BYTES"}
                     for k,v in payload.items():
                         if k in allowed:
@@ -1209,6 +1255,7 @@ load();
                         if action == "upsert":
                             result = reg.upsert_adapter(
                                 adapter_key=str(payload.get("adapter_key", "")).strip(),
+                                adapter_version=str(payload.get("adapter_version", "1.0.0")).strip() or "1.0.0",
                                 protocol=str(payload.get("protocol", "")).strip().lower(),
                                 endpoint=str(payload.get("endpoint", "")).strip(),
                                 auth_type=str(payload.get("auth_type", "none")).strip(),
@@ -1218,11 +1265,48 @@ load();
                             )
                             ok = bool(result.get("ok"))
                             errors = result.get("errors", [])
+                            run_result = result
                         elif action == "delete":
                             key = str(payload.get("adapter_key", "")).strip()
                             if key:
                                 reg.delete_adapter(key)
                                 ok = True
+                        elif action == "request_rotation":
+                            result = reg.request_contract_rotation(
+                                adapter_key=str(payload.get("adapter_key", "")).strip(),
+                                adapter_version=str(payload.get("adapter_version", "1.0.0")).strip() or "1.0.0",
+                                protocol=str(payload.get("protocol", "")).strip().lower(),
+                                endpoint=str(payload.get("endpoint", "")).strip(),
+                                auth_type=str(payload.get("auth_type", "none")).strip(),
+                                enabled=bool(payload.get("enabled", True)),
+                                schema=payload.get("schema", {}) if isinstance(payload.get("schema", {}), dict) else {},
+                                notes=str(payload.get("notes", "")),
+                                requested_by=str(payload.get("requested_by", "dashboard")),
+                            )
+                            ok = bool(result.get("ok"))
+                            if not ok:
+                                errors = result.get("errors", []) or [str(result.get("error", "request_failed"))]
+                            run_result = result
+                        elif action == "approve_rotation":
+                            result = reg.approve_contract_rotation(
+                                approval_id=int(payload.get("approval_id", 0) or 0),
+                                approver=str(payload.get("approver", "dashboard")),
+                                reason=str(payload.get("reason", "")),
+                            )
+                            ok = bool(result.get("ok"))
+                            if not ok:
+                                errors = [str(result.get("error", "approve_failed"))]
+                            run_result = result
+                        elif action == "reject_rotation":
+                            result = reg.reject_contract_rotation(
+                                approval_id=int(payload.get("approval_id", 0) or 0),
+                                approver=str(payload.get("approver", "dashboard")),
+                                reason=str(payload.get("reason", "")),
+                            )
+                            ok = bool(result.get("ok"))
+                            if not ok:
+                                errors = [str(result.get("error", "reject_failed"))]
+                            run_result = result
                         elif action == "run":
                             from modules.tooling_runner import ToolingRunner
                             adapter_key = str(payload.get("adapter_key", "")).strip()
