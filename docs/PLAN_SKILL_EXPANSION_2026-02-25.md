@@ -109,4 +109,5 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Stored failure lessons into semantic memory.
 - Added owner preference deactivation command and tracking.
 - Injected owner preferences into VITOCore planning.
+- Added capability pack runner for safe dynamic execution.
 - Added owner preferences report script.
