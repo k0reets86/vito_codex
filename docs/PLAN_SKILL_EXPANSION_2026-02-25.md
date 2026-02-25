@@ -113,3 +113,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added capability pack run script.
 - Added capability pack validation script.
 - Added owner preferences report script.
+- Injected owner preferences into weekly planning.

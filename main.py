@@ -867,6 +867,13 @@ class VITO:
                 skills_context = "\n".join(f"- {s['name']}: {s['description'][:100]}" for s in skills)
         except Exception:
             pass
+        owner_prefs = ""
+        try:
+            prefs = OwnerPreferenceModel().list_preferences(limit=5)
+            if prefs:
+                owner_prefs = "\n".join(f"- {p.get('pref_key')}: {p.get('value')}" for p in prefs)
+        except Exception:
+            pass
 
         # 3. Generate weekly plan via LLM (1 call for whole week)
         now = datetime.now(timezone.utc)
@@ -899,6 +906,7 @@ class VITO:
             f"Стратегический брейншторм:\n{brainstorm_context or '(нет)'}\n\n"
             f"Тренды из разведки:\n{trends_context or '(нет данных)'}\n\n"
             f"Навыки:\n{skills_context or '(нет навыков)'}\n\n"
+            f"Предпочтения владельца:\n{owner_prefs or '(нет)'}\n\n"
             "Даты:\n" + "\n".join(week_dates) + "\n\n"
             "ВАЖНО:\n"
             "- Понедельник: разведка трендов и планирование\n"
