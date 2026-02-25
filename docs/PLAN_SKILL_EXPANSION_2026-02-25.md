@@ -90,3 +90,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added owner preference event tracking and listing.
 - Added DataLake event for explicit owner preference updates.
 - Added capability pack scaffolding script.
+- Added Owner Prefs panel on dashboard UI.

@@ -359,6 +359,7 @@ class DashboardServer:
           <button onclick=\"setConfig()\">Set</button>
         </div>
       </div>
+      <div class=\"card\"><div class=\"mut\">Owner Prefs</div><div id=\"prefs\"></div></div>
       <div class=\"card\"><div class=\"mut\">Secrets</div>
         <div class=\"mut\" style=\"font-size:12px\">Keys are write‑only here.</div>
         <div style=\"margin-top:8px\">\n
@@ -381,7 +382,7 @@ async function load(){
   const endpoints = {
     status:'/api/status', network:'/api/network', agents:'/api/agents', finance:'/api/finance',
     goals:'/api/goals', schedules:'/api/schedules', config:'/api/config',
-    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy',
+    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', prefs:'/api/prefs',
     facts:'/api/execution_facts', events:'/api/events', decisions:'/api/decisions', budget:'/api/budget'
   };
   for (const [k,url] of Object.entries(endpoints)){
@@ -402,9 +403,16 @@ async function load(){
     else if (k === 'finance') renderFinance(j);
     else if (k === 'schedules') renderSchedules(j.tasks||[]);
     else if (k === 'config') renderConfig(j.config||j);
+    else if (k === 'prefs') renderPrefs(j.preferences||[]);
     else if (k === 'models') renderModels(j);
     else if (k === 'llm_policy') renderLlmPolicy(j.policy||{});
   }
+}
+function renderPrefs(prefs){
+  const el = document.getElementById('prefs');
+  if (!prefs.length){ el.innerHTML = '<div class=\"mut\">No prefs</div>'; return; }
+  const rows = prefs.map(p => `<div style=\"margin:4px 0\"><code>${p.pref_key}</code>: ${JSON.stringify(p.value)} <span class=\"mut\">(conf=${(p.confidence||0).toFixed(2)})</span></div>`);
+  el.innerHTML = rows.join('');
 }
 function renderRss(sources){
   const el = document.getElementById('rss');
