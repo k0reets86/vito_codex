@@ -197,6 +197,17 @@ async def test_cmd_prefs_metrics(comms, mock_update, tmp_path: Path):
         settings.SQLITE_PATH = old_path
 
 
+@pytest.mark.asyncio
+async def test_cmd_packs(comms, mock_update, tmp_path: Path, monkeypatch):
+    root = tmp_path / "capability_packs" / "demo"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "spec.json").write_text('{"name":"demo","category":"x","acceptance_status":"pending"}', encoding="utf-8")
+    monkeypatch.setattr(comms, "_send_packs", lambda reply_to=None: mock_update.message.reply_text("Capability packs:"))
+    await comms._cmd_packs(mock_update, MagicMock())
+    text = mock_update.message.reply_text.call_args[0][0]
+    assert "Capability packs" in text
+
+
 # ── Одобрение ──
 
 @pytest.mark.asyncio

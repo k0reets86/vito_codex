@@ -125,3 +125,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Updated skill acceptance spec to include capability packs.
 - Added DataLake events for capability pack runs.
 - Added /prefs_metrics command for owner preference metrics.
+- Added /packs command to list capability packs.
