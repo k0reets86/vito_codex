@@ -1,0 +1,20 @@
+{
+  "name": "ecommerce_e2e",
+  "category": "ecommerce",
+  "description": "End-to-end commerce pipeline with payments, webhooks, entitlements.",
+  "inputs": [
+    "product",
+    "price",
+    "channel"
+  ],
+  "outputs": [
+    "listing",
+    "payment_intent",
+    "entitlement"
+  ],
+  "version": "0.1.0",
+  "risk_score": 0.2,
+  "tests_coverage": 0.0,
+  "acceptance_status": "pending",
+  "evidence": ""
+}
