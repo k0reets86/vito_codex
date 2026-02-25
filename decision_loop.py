@@ -1722,10 +1722,17 @@ class DecisionLoop:
 
     def get_status(self) -> dict:
         """Статус для мониторинга."""
+        pending = 0
+        try:
+            if hasattr(self, "_comms") and self._comms:
+                pending = int(self._comms.pending_approvals_count())
+        except Exception:
+            pending = 0
         return {
             "running": self.running,
             "tick_count": self._tick_count,
             "consecutive_idle": self._consecutive_idle,
             "daily_spend": self.llm_router.get_daily_spend(),
             "goal_stats": self.goal_engine.get_stats(),
+            "pending_approvals": pending,
         }

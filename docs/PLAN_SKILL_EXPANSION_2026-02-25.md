@@ -98,3 +98,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added nightly owner preference snapshot into knowledge base.
 - Added nightly sync of capability packs into SkillRegistry.
 - Added capability pack report script.
+- Added pending approvals count in DecisionLoop status.
