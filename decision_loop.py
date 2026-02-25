@@ -1310,6 +1310,14 @@ class DecisionLoop:
         if all_completed:
             lesson = f"Цель '{goal.title}' выполнена. План из {len(goal.plan)} шагов сработал."
             self.goal_engine.complete_goal(goal.goal_id, results, lessons=lesson)
+            try:
+                self.memory.store_knowledge(
+                    doc_id=f"lesson_{goal.goal_id}",
+                    text=lesson,
+                    metadata={"type": "lesson", "goal_id": goal.goal_id, "title": goal.title},
+                )
+            except Exception:
+                pass
 
             # Mark calendar task as completed if this goal came from weekly_calendar
             if goal.source == "weekly_calendar":

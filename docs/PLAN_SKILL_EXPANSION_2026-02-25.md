@@ -100,3 +100,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added capability pack report script.
 - Added pending approvals count in DecisionLoop status.
 - Displayed pending approvals in dashboard loop panel.
+- Stored goal lessons into semantic memory.
