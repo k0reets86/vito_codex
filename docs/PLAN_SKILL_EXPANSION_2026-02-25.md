@@ -120,3 +120,5 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added capability pack acceptance script.
 - Fixed sync_capability_packs import path.
 - Added capability pack name fallback in VITOCore classifier.
+- Added capability pack fallback execution in AgentRegistry.
+- Added test for capability pack fallback dispatch.

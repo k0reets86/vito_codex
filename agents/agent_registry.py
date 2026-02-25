@@ -104,11 +104,23 @@ class AgentRegistry:
         """Диспетчеризует задачу к подходящему агенту (с lazy start)."""
         agents = self.find_by_capability(task_type)
         if not agents:
-            logger.debug(
-                f"Нет агента для capability: {task_type}",
-                extra={"event": "dispatch_no_agent", "context": {"task_type": task_type}},
-            )
-            return None
+            # Try capability packs as fallback
+            try:
+                from modules.capability_pack_runner import CapabilityPackRunner
+                runner = CapabilityPackRunner()
+                result = runner.run(task_type, kwargs)
+                return TaskResult(
+                    success=(result.get("status") == "ok"),
+                    output=result.get("output") or result,
+                    error=result.get("error", ""),
+                    metadata={"agent": "capability_pack", "task_type": task_type},
+                )
+            except Exception:
+                logger.debug(
+                    f"Нет агента для capability: {task_type}",
+                    extra={"event": "dispatch_no_agent", "context": {"task_type": task_type}},
+                )
+                return None
 
         # Try agents by success rate (best first), fallback to others on failure
         candidates = sorted(agents, key=self._agent_score, reverse=True)
