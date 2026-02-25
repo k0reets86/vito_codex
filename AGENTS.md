@@ -30,6 +30,7 @@
   - Added self-learning test-job pipeline and task-family calibration (family-aware confidence + explicit open/passed/failed test jobs).
   - Added automated self-learning test-job runner with periodic DecisionLoop execution and feedback into skill coverage/risk.
   - Added flaky-test policy for self-learning jobs (retry, flaky marking, cooldown block before promotion) and expanded family test mappings.
+  - Moved self-learning family test map to versioned config (`config/self_learning_test_map.py`) and added historical flaky-rate suppression gate per skill.
 - Current blockers:
   - Social network integrations (Threads/YouTube/TikTok/etc.) are paused until accounts are ready.
 - Important commands:
@@ -47,6 +48,6 @@
   - Extend durable orchestration: attach interrupt context to agent-handoff chain and auto-resume policies.
   - Memory/skills pipeline: add owner-facing weekly retention report and per-skill memory quality linkage.
   - Operator UI: add per-provider connectivity probes and remediation playbooks with approval gates.
-  - Self-learning: move test maps to versioned config package and add historical flaky-rate suppression by skill.
+  - Self-learning: add adaptive threshold tuning using long-term promotion outcomes and flaky history decay.
   - Security/cost/observability: weekly governance report aggregation + automated remediation suggestions.
   - Tooling standards: add signature key lifecycle hardening (rotation cadence checks + expiry alerts).

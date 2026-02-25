@@ -494,6 +494,7 @@ class SelfLearningEngine:
                 conf = float(row["optimized_confidence"] or 0.0)
                 lessons_count = int(row["lessons_count"] or 0)
                 pass_rate = float(row["pass_rate"] or 0.0)
+                gate_reason = f"cov={tests_cov:.2f},risk={risk:.2f},sec={security},conf={conf:.2f}"
                 gate_ok = (
                     tests_cov >= 0.75
                     and risk <= 0.35
@@ -517,6 +518,28 @@ class SelfLearningEngine:
                     ).fetchone()
                     if flaky_row:
                         gate_ok = False
+                        gate_reason += ",flaky_cooldown=1"
+                if gate_ok:
+                    win_days = max(1, int(getattr(settings, "SELF_LEARNING_FLAKY_WINDOW_DAYS", 30) or 30))
+                    flaky_lim = float(getattr(settings, "SELF_LEARNING_FLAKY_RATE_MAX", 0.3) or 0.3)
+                    fr = conn.execute(
+                        """
+                        SELECT
+                          SUM(CASE WHEN flaky = 1 THEN 1 ELSE 0 END) AS flaky_n,
+                          COUNT(*) AS total_n
+                        FROM self_learning_test_jobs
+                        WHERE skill_name = ?
+                          AND status IN ('passed', 'failed')
+                          AND updated_at >= datetime('now', ?)
+                        """,
+                        (skill_name, f"-{win_days} day"),
+                    ).fetchone()
+                    flaky_n = int((fr["flaky_n"] if fr else 0) or 0)
+                    total_n = int((fr["total_n"] if fr else 0) or 0)
+                    flaky_rate = (flaky_n / max(1, total_n)) if total_n > 0 else 0.0
+                    if total_n >= 3 and flaky_rate > flaky_lim:
+                        gate_ok = False
+                        gate_reason += f",flaky_rate={flaky_rate:.2f}>{flaky_lim:.2f}"
                 if not gate_ok:
                     conn.execute(
                         "UPDATE self_learning_candidates SET status='hold', updated_at=datetime('now') WHERE skill_name=?",
@@ -533,7 +556,7 @@ class SelfLearningEngine:
                         )
                     conn.execute(
                         "INSERT INTO self_learning_promotion_events (skill_name, decision, reason) VALUES (?, 'hold', ?)",
-                        (skill_name, f"gate_failed:cov={tests_cov:.2f},risk={risk:.2f},sec={security},conf={conf:.2f}"),
+                        (skill_name, f"gate_failed:{gate_reason}"),
                     )
                     continue
                 reg.accept_skill(
@@ -599,6 +622,21 @@ class SelfLearningEngine:
                 """,
                 (window,),
             ).fetchall()
+            flaky_rows = conn.execute(
+                """
+                SELECT skill_name,
+                       SUM(CASE WHEN flaky = 1 THEN 1 ELSE 0 END) AS flaky_n,
+                       COUNT(*) AS total_n
+                FROM self_learning_test_jobs
+                WHERE status IN ('passed', 'failed')
+                  AND updated_at >= datetime('now', ?)
+                GROUP BY skill_name
+                HAVING COUNT(*) >= 2
+                ORDER BY (CAST(SUM(CASE WHEN flaky = 1 THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) DESC
+                LIMIT 8
+                """,
+                (window,),
+            ).fetchall()
             return {
                 "window_days": int(days or 30),
                 "lessons": lessons,
@@ -615,6 +653,15 @@ class SelfLearningEngine:
                         "avg_score": round(float(r["avg_score"] or 0.0), 4),
                     }
                     for r in calib_rows
+                ],
+                "flaky_by_skill": [
+                    {
+                        "skill_name": str(r["skill_name"] or ""),
+                        "flaky_rate": round((float(r["flaky_n"] or 0.0) / max(1.0, float(r["total_n"] or 1.0))), 4),
+                        "flaky_runs": int(r["flaky_n"] or 0),
+                        "total_runs": int(r["total_n"] or 0),
+                    }
+                    for r in flaky_rows
                 ],
             }
         finally:

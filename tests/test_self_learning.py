@@ -171,3 +171,46 @@ def test_self_learning_auto_promote_blocks_recent_flaky(tmp_path, monkeypatch):
     assert changed == 0
     cand = sl.list_candidates(limit=10)[0]
     assert cand["status"] in {"hold", "ready"}
+
+
+def test_self_learning_auto_promote_blocks_high_flaky_rate(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "SELF_LEARNING_FLAKY_COOLDOWN_HOURS", 0)
+    monkeypatch.setattr(settings, "SELF_LEARNING_FLAKY_WINDOW_DAYS", 30)
+    monkeypatch.setattr(settings, "SELF_LEARNING_FLAKY_RATE_MAX", 0.3)
+    db = str(tmp_path / "sl.db")
+    sl = SelfLearningEngine(sqlite_path=db)
+    reg = SkillRegistry(sqlite_path=db)
+    skill_name = "selflearn:flaky_rate_skill"
+    reg.register_skill(skill_name, category="self_learning", source="self_learning", acceptance_status="pending")
+    conn = reg._get_conn()
+    try:
+        conn.execute(
+            "UPDATE skill_registry SET tests_coverage = 0.95, risk_score = 0.1, security_status = 'safe' WHERE name = ?",
+            (skill_name,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    sl.register_candidate(skill_name, confidence=0.9, notes="ready", task_family="research")
+    sl.set_candidate_status(skill_name, "ready")
+    for i in range(4):
+        sl.record_lesson(f"g{i}", "research flow", "completed", 0.9, "ok", candidate_skill=skill_name, task_family="research")
+    sl.optimize_candidates(days=30, min_lessons=3, promote_confidence_min=0.78, auto_promote=False)
+    conn = sl._get_conn()
+    try:
+        conn.execute(
+            """
+            INSERT INTO self_learning_test_jobs (skill_name, task_family, reason, status, flaky, attempts, updated_at)
+            VALUES (?, 'research', 'seed1', 'passed', 1, 2, datetime('now')),
+                   (?, 'research', 'seed2', 'failed', 1, 2, datetime('now')),
+                   (?, 'research', 'seed3', 'passed', 0, 1, datetime('now'))
+            """,
+            (skill_name, skill_name, skill_name),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    changed = sl.auto_promote_ready_candidates()
+    assert changed == 0
+    cand = sl.list_candidates(limit=10)[0]
+    assert cand["status"] == "hold"

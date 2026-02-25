@@ -137,6 +137,8 @@ class Settings:
     SELF_LEARNING_TEST_RETRY_ON_FAIL: bool = os.getenv("SELF_LEARNING_TEST_RETRY_ON_FAIL", "true").lower() in ("1", "true", "yes", "on")
     SELF_LEARNING_TEST_MAX_ATTEMPTS: int = int(os.getenv("SELF_LEARNING_TEST_MAX_ATTEMPTS", "2") or 2)
     SELF_LEARNING_FLAKY_COOLDOWN_HOURS: int = int(os.getenv("SELF_LEARNING_FLAKY_COOLDOWN_HOURS", "72") or 72)
+    SELF_LEARNING_FLAKY_RATE_MAX: float = float(os.getenv("SELF_LEARNING_FLAKY_RATE_MAX", "0.3") or 0.3)
+    SELF_LEARNING_FLAKY_WINDOW_DAYS: int = int(os.getenv("SELF_LEARNING_FLAKY_WINDOW_DAYS", "30") or 30)
     SELF_LEARNING_TEST_TARGET_MAP: str = os.getenv("SELF_LEARNING_TEST_TARGET_MAP", "")
 
     # Owner preference auto-detect (off by default)

@@ -831,8 +831,9 @@ function renderSelfLearning(j){
   const optimizations = (j && j.optimizations) ? j.optimizations : [];
   const promotions = (j && j.promotions) ? j.promotions : [];
   const testJobs = (j && j.test_jobs) ? j.test_jobs : [];
-  const srows = Object.entries(summary).filter(([k,_])=>k!=='family_calibration').map(([k,v])=>`<tr><td>${k}</td><td>${JSON.stringify(v)}</td></tr>`).join('');
+  const srows = Object.entries(summary).filter(([k,_])=>k!=='family_calibration' && k!=='flaky_by_skill').map(([k,v])=>`<tr><td>${k}</td><td>${JSON.stringify(v)}</td></tr>`).join('');
   const frows = (summary.family_calibration||[]).slice(0,8).map(r=>`<tr><td>${r.task_family||''}</td><td>${r.lessons||0}</td><td>${r.pass_rate||0}</td><td>${r.avg_score||0}</td></tr>`).join('');
+  const flrows = (summary.flaky_by_skill||[]).slice(0,8).map(r=>`<tr><td>${r.skill_name||''}</td><td>${r.flaky_rate||0}</td><td>${r.flaky_runs||0}</td><td>${r.total_runs||0}</td></tr>`).join('');
   const lrows = lessons.slice(0,8).map(r => `<tr><td>${r.goal_id||''}</td><td>${r.status||''}</td><td>${(r.score||0).toFixed? (r.score||0).toFixed(2):r.score}</td><td>${(r.lesson||'').slice(0,80)}</td></tr>`).join('');
   const crows = candidates.slice(0,8).map(r => `<tr><td>${r.skill_name}</td><td>${r.confidence}</td><td>${r.optimized_confidence||0}</td><td>${r.lessons_count||0}</td><td>${r.pass_rate||0}</td><td>${r.status}</td></tr>`).join('');
   const orows = optimizations.slice(0,8).map(r => `<tr><td>${r.skill_name}</td><td>${r.confidence_before}</td><td>${r.confidence_after}</td><td>${r.lessons_count}</td><td>${r.pass_rate}</td><td>${r.recommendation}</td></tr>`).join('');
@@ -841,6 +842,7 @@ function renderSelfLearning(j){
   el.innerHTML =
     `<div class=\"mut\">Summary</div><table><thead><tr><th>Key</th><th>Value</th></tr></thead><tbody>${srows}</tbody></table>` +
     `<div class=\"mut\" style=\"margin-top:8px\">Family Calibration</div><table><thead><tr><th>Family</th><th>Lessons</th><th>Pass</th><th>Avg</th></tr></thead><tbody>${frows}</tbody></table>` +
+    `<div class=\"mut\" style=\"margin-top:8px\">Flaky By Skill</div><table><thead><tr><th>Skill</th><th>Flaky Rate</th><th>Flaky</th><th>Total</th></tr></thead><tbody>${flrows}</tbody></table>` +
     `<div class=\"mut\">Lessons</div><table><thead><tr><th>Goal</th><th>Status</th><th>Score</th><th>Lesson</th></tr></thead><tbody>${lrows}</tbody></table>` +
     `<div class=\"mut\" style=\"margin-top:8px\">Candidates</div><table><thead><tr><th>Skill</th><th>Conf</th><th>Opt</th><th>Lessons</th><th>Pass</th><th>Status</th></tr></thead><tbody>${crows}</tbody></table>` +
     `<div class=\"mut\" style=\"margin-top:8px\">Optimizations</div><table><thead><tr><th>Skill</th><th>Before</th><th>After</th><th>Lessons</th><th>Pass</th><th>Rec</th></tr></thead><tbody>${orows}</tbody></table>` +
@@ -1386,6 +1388,8 @@ load();
                         "SELF_LEARNING_TEST_RETRY_ON_FAIL",
                         "SELF_LEARNING_TEST_MAX_ATTEMPTS",
                         "SELF_LEARNING_FLAKY_COOLDOWN_HOURS",
+                        "SELF_LEARNING_FLAKY_RATE_MAX",
+                        "SELF_LEARNING_FLAKY_WINDOW_DAYS",
                         "SELF_LEARNING_TEST_TARGET_MAP",
                         "GUARDRAILS_ENABLED",
                         "GUARDRAILS_BLOCK_ON_INJECTION",
@@ -1401,7 +1405,7 @@ load();
                     }
                     updated = {}
                     bool_keys = {"PROACTIVE_ENABLED", "BRAINSTORM_WEEKLY", "OWNER_INBOX_ENABLED", "CALENDAR_UPDATE_LLM", "SELF_LEARNING_ENABLED", "SELF_LEARNING_AUTO_PROMOTE", "SELF_LEARNING_TEST_RUNNER_ENABLED", "SELF_LEARNING_TEST_RETRY_ON_FAIL", "GUARDRAILS_ENABLED", "GUARDRAILS_BLOCK_ON_INJECTION", "LLM_ALERTS_ENABLED", "TOOLING_RUN_LIVE_ENABLED", "TOOLING_BLOCK_WITH_PENDING_ROTATION", "TOOLING_REQUIRE_PRODUCTION_APPROVAL", "TOOLING_REQUIRE_ROLLBACK_APPROVAL"}
-                    num_keys = {"DAILY_LIMIT_USD", "OPERATION_NOTIFY_USD", "OPERATION_APPROVE_USD", "OPERATION_MAX_USD", "SELF_LEARNING_SKILL_SCORE_MIN", "SELF_LEARNING_MIN_LESSONS", "SELF_LEARNING_OPTIMIZE_INTERVAL_TICKS", "SELF_LEARNING_TEST_RUNNER_INTERVAL_TICKS", "SELF_LEARNING_TEST_RUNNER_MAX_JOBS", "SELF_LEARNING_TEST_RUNNER_TIMEOUT_SEC", "SELF_LEARNING_TEST_MAX_ATTEMPTS", "SELF_LEARNING_FLAKY_COOLDOWN_HOURS", "TOOLING_HTTP_TIMEOUT_SEC", "TOOLING_MCP_TIMEOUT_SEC", "TOOLING_MCP_MAX_OUTPUT_BYTES"}
+                    num_keys = {"DAILY_LIMIT_USD", "OPERATION_NOTIFY_USD", "OPERATION_APPROVE_USD", "OPERATION_MAX_USD", "SELF_LEARNING_SKILL_SCORE_MIN", "SELF_LEARNING_MIN_LESSONS", "SELF_LEARNING_OPTIMIZE_INTERVAL_TICKS", "SELF_LEARNING_TEST_RUNNER_INTERVAL_TICKS", "SELF_LEARNING_TEST_RUNNER_MAX_JOBS", "SELF_LEARNING_TEST_RUNNER_TIMEOUT_SEC", "SELF_LEARNING_TEST_MAX_ATTEMPTS", "SELF_LEARNING_FLAKY_COOLDOWN_HOURS", "SELF_LEARNING_FLAKY_RATE_MAX", "SELF_LEARNING_FLAKY_WINDOW_DAYS", "TOOLING_HTTP_TIMEOUT_SEC", "TOOLING_MCP_TIMEOUT_SEC", "TOOLING_MCP_MAX_OUTPUT_BYTES"}
                     for k,v in payload.items():
                         if k in allowed:
                             if k in bool_keys:

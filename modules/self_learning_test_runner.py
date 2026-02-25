@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 from config.settings import settings
+from config.self_learning_test_map import TEST_MAP_VERSION, resolve_family_targets
 from modules.self_learning import SelfLearningEngine
 from modules.skill_registry import SkillRegistry
 
@@ -19,30 +20,10 @@ class SelfLearningTestRunner:
 
     @staticmethod
     def _family_test_targets(task_family: str) -> str:
-        fam = str(task_family or "").strip().lower()
-        raw_map = str(getattr(settings, "SELF_LEARNING_TEST_TARGET_MAP", "") or "").strip()
-        if raw_map:
-            # Format: "research=tests/a.py tests/b.py;code=tests/c.py"
-            for chunk in raw_map.split(";"):
-                part = chunk.strip()
-                if not part or "=" not in part:
-                    continue
-                key, val = part.split("=", 1)
-                if key.strip().lower() == fam and val.strip():
-                    return val.strip()
-        mapping = {
-            "research": "tests/test_research_agent.py tests/test_trend_scout.py",
-            "strategy": "tests/test_vito_core.py tests/test_decision_loop.py",
-            "code": "tests/test_agent_registry.py tests/test_step_contract.py",
-            "content": "tests/test_content_creator.py tests/test_seo_agent.py",
-            "routine": "tests/test_decision_loop.py tests/test_memory_manager.py",
-            "self_learning": "tests/test_self_learning.py tests/test_skill_registry.py",
-            "orchestrate": "tests/test_decision_loop.py tests/test_workflow_state_machine.py tests/test_workflow_threads.py",
-            "tooling": "tests/test_tooling_runner.py tests/test_tooling_registry.py",
-            "security": "tests/test_operator_policy.py tests/test_llm_guardrails.py",
-            "publish": "tests/test_platform_scorecard.py tests/test_publisher_queue.py",
-        }
-        return mapping.get(fam, "tests/test_decision_loop.py tests/test_agent_registry.py")
+        return resolve_family_targets(
+            task_family=task_family,
+            override=str(getattr(settings, "SELF_LEARNING_TEST_TARGET_MAP", "") or ""),
+        )
 
     @staticmethod
     def _coverage_from_return_code(code: int) -> float:
@@ -148,6 +129,7 @@ class SelfLearningTestRunner:
                     "passed": ok,
                     "flaky": flaky,
                     "attempts": attempts,
+                    "map_version": TEST_MAP_VERSION,
                     "notes": notes,
                 }
             )
