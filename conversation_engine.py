@@ -1223,6 +1223,14 @@ class ConversationEngine:
                     parts.append("\n".join(skill_lines))
             except Exception:
                 pass
+        # 8.1 Предпочтения владельца (кратко)
+        try:
+            prefs = OwnerPreferenceModel().list_preferences(limit=5)
+            if prefs:
+                pref_line = "; ".join(f"{p.get('pref_key')}={p.get('value')}" for p in prefs)
+                parts.append(f"Предпочтения владельца: {pref_line}")
+        except Exception:
+            pass
 
         # 9. Обновления (SelfUpdater)
         if self.self_updater:
