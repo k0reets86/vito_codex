@@ -7,7 +7,9 @@ import urllib.request
 from typing import Any
 
 from config.settings import settings
+from modules.mcp_sandbox_worker import MCPSandboxWorker
 from modules.operator_policy import OperatorPolicy
+from modules.tooling_contract import validate_tooling_response
 from modules.tooling_registry import ToolingRegistry
 
 
@@ -64,17 +66,12 @@ class ToolingRunner:
         endpoint = str(adapter.get("endpoint", "")).strip()
         if protocol == "openapi":
             result = self._run_openapi_probe(adapter_key=adapter_key, endpoint=endpoint)
+            result = self._apply_contract(result)
             self._record_event(adapter_key, result)
             return result
         if protocol == "mcp":
-            # Explicitly keep MCP live execution disabled in this runner.
-            result = {
-                "status": "prepared",
-                "adapter_key": adapter_key,
-                "protocol": protocol,
-                "endpoint": endpoint,
-                "notes": "mcp live execution requires dedicated sandbox adapter",
-            }
+            result = self._run_mcp_live(adapter_key=adapter_key, endpoint=endpoint, input_data=input_data)
+            result = self._apply_contract(result)
             self._record_event(adapter_key, result)
             return result
 
@@ -86,6 +83,7 @@ class ToolingRunner:
             "endpoint": endpoint,
             "notes": "protocol handler not implemented",
         }
+        result = self._apply_contract(result)
         self._record_event(adapter_key, result)
         return result
 
@@ -121,6 +119,37 @@ class ToolingRunner:
                 "endpoint": endpoint,
                 "error": f"openapi_probe_failed:{e}",
             }
+
+    @staticmethod
+    def _run_mcp_live(adapter_key: str, endpoint: str, input_data: dict[str, Any]) -> dict[str, Any]:
+        worker = MCPSandboxWorker()
+        out = worker.run(endpoint=endpoint, payload=input_data)
+        if out.get("status") != "ok":
+            return {
+                "status": "failed",
+                "adapter_key": adapter_key,
+                "protocol": "mcp",
+                "endpoint": endpoint,
+                "error": str(out.get("error", "mcp_failed"))[:300],
+            }
+        return {
+            "status": "ok",
+            "adapter_key": adapter_key,
+            "protocol": "mcp",
+            "endpoint": endpoint,
+            "result": out.get("output", {}),
+        }
+
+    @staticmethod
+    def _apply_contract(result: dict[str, Any]) -> dict[str, Any]:
+        chk = validate_tooling_response(result)
+        if chk.ok:
+            return result
+        out = dict(result)
+        out["status"] = "failed"
+        out["error"] = f"tooling_contract_failed:{','.join(chk.errors)}"
+        out["contract_errors"] = chk.errors
+        return out
 
     @staticmethod
     def _record_event(adapter_key: str, result: dict[str, Any]) -> None:

@@ -47,3 +47,20 @@ def test_tooling_runner_live_disabled_returns_dry_reason(tmp_path, monkeypatch):
     run = ToolingRunner(sqlite_path=db).run("openapi_adapter", dry_run=False)
     assert run["status"] == "dry_run"
     assert run["reason"] == "live_disabled"
+
+
+def test_tooling_runner_mcp_live_path(tmp_path, monkeypatch):
+    db = str(tmp_path / "tool_run.db")
+    reg = ToolingRegistry(sqlite_path=db)
+    reg.upsert_adapter(
+        adapter_key="mcp_adapter",
+        protocol="mcp",
+        endpoint="stdio://python3 -c \"import json,sys; data=json.load(sys.stdin); print(json.dumps({'ok':True,'v':data.get('v')}))\"",
+        schema={"tools": []},
+    )
+    from config import settings as settings_mod
+    monkeypatch.setattr(settings_mod.settings, "TOOLING_RUN_LIVE_ENABLED", True)
+    monkeypatch.setattr(settings_mod.settings, "TOOLING_MCP_ALLOW_CMDS", "python3")
+    run = ToolingRunner(sqlite_path=db).run("mcp_adapter", {"v": 3}, dry_run=False)
+    assert run["status"] == "ok"
+    assert run["protocol"] == "mcp"

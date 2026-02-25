@@ -139,6 +139,9 @@ class Settings:
     LLM_ALERTS_ENABLED: bool = os.getenv("LLM_ALERTS_ENABLED", "true").lower() in ("1", "true", "yes", "on")
     TOOLING_RUN_LIVE_ENABLED: bool = os.getenv("TOOLING_RUN_LIVE_ENABLED", "false").lower() in ("1", "true", "yes", "on")
     TOOLING_HTTP_TIMEOUT_SEC: int = int(os.getenv("TOOLING_HTTP_TIMEOUT_SEC", "8") or 8)
+    TOOLING_MCP_TIMEOUT_SEC: int = int(os.getenv("TOOLING_MCP_TIMEOUT_SEC", "12") or 12)
+    TOOLING_MCP_MAX_OUTPUT_BYTES: int = int(os.getenv("TOOLING_MCP_MAX_OUTPUT_BYTES", "32768") or 32768)
+    TOOLING_MCP_ALLOW_CMDS: str = os.getenv("TOOLING_MCP_ALLOW_CMDS", "python3,node,npx,uv,mcp-server")
 
 
 settings = Settings()
