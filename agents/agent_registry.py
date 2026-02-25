@@ -14,6 +14,7 @@ from typing import Optional
 
 from agents.base_agent import BaseAgent, TaskResult
 from config.logger import get_logger
+from modules.step_contract import validate_step_output
 
 logger = get_logger("agent_registry", agent="registry")
 
@@ -113,11 +114,17 @@ class AgentRegistry:
                         input_data=kwargs,
                         dry_run=bool(kwargs.get("dry_run", True)),
                     )
+                    chk = validate_step_output(result, metadata={"task_type": task_type})
                     return TaskResult(
-                        success=result.get("status") in {"dry_run", "prepared", "ok"},
+                        success=(result.get("status") in {"dry_run", "prepared", "ok"} and chk.ok),
                         output=result,
-                        error=result.get("error", ""),
-                        metadata={"agent": "tooling_runner", "task_type": task_type},
+                        error=result.get("error", "") if chk.ok else f"contract_invalid:{','.join(chk.errors)}",
+                        metadata={
+                            "agent": "tooling_runner",
+                            "task_type": task_type,
+                            "contract_ok": chk.ok,
+                            "contract_errors": chk.errors,
+                        },
                     )
                 except Exception:
                     pass
@@ -126,11 +133,17 @@ class AgentRegistry:
                 from modules.capability_pack_runner import CapabilityPackRunner
                 runner = CapabilityPackRunner()
                 result = runner.run(task_type, kwargs)
+                chk = validate_step_output(result.get("output") or result, metadata={"task_type": task_type})
                 return TaskResult(
-                    success=(result.get("status") == "ok"),
+                    success=(result.get("status") == "ok" and chk.ok),
                     output=result.get("output") or result,
-                    error=result.get("error", ""),
-                    metadata={"agent": "capability_pack", "task_type": task_type},
+                    error=result.get("error", "") if chk.ok else f"contract_invalid:{','.join(chk.errors)}",
+                    metadata={
+                        "agent": "capability_pack",
+                        "task_type": task_type,
+                        "contract_ok": chk.ok,
+                        "contract_errors": chk.errors,
+                    },
                 )
             except Exception:
                 logger.debug(
@@ -153,10 +166,25 @@ class AgentRegistry:
             )
             try:
                 result = await agent.execute_task(task_type, **kwargs)
+                contract_ok = True
+                contract_errors: list[str] = []
+                if result and result.success:
+                    chk = validate_step_output(
+                        result.output,
+                        metadata=result.metadata if isinstance(result.metadata, dict) else {},
+                    )
+                    contract_ok = chk.ok
+                    contract_errors = chk.errors
+                    if not contract_ok:
+                        result.success = False
+                        result.error = f"contract_invalid:{','.join(contract_errors)}"
                 try:
                     if result is not None:
                         md = result.metadata or {}
                         md.setdefault("task_type", task_type)
+                        md.setdefault("contract_ok", contract_ok)
+                        if contract_errors:
+                            md["contract_errors"] = contract_errors
                         result.metadata = md
                 except Exception:
                     pass

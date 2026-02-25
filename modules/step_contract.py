@@ -12,6 +12,24 @@ class StepContractResult:
     errors: list[str]
 
 
+ALLOWED_OUTPUT_STATUSES = {
+    "ok",
+    "success",
+    "completed",
+    "published",
+    "created",
+    "failed",
+    "error",
+    "not_configured",
+    "not_authenticated",
+    "needs_oauth",
+    "daily_limit",
+    "dry_run",
+    "prepared",
+    "blocked",
+}
+
+
 def validate_step_output(output: Any, metadata: dict | None = None) -> StepContractResult:
     errors: list[str] = []
     md = metadata or {}
@@ -28,19 +46,7 @@ def validate_step_output(output: Any, metadata: dict | None = None) -> StepContr
     if isinstance(output, dict):
         # Status (if present) must be known-like
         status = str(output.get("status", "")).strip().lower()
-        if status and status not in {
-            "ok",
-            "success",
-            "completed",
-            "published",
-            "created",
-            "failed",
-            "error",
-            "not_configured",
-            "not_authenticated",
-            "needs_oauth",
-            "daily_limit",
-        }:
+        if status and status not in ALLOWED_OUTPUT_STATUSES:
             errors.append("status_unknown")
 
         # For publish-like outputs require at least one evidence field.
@@ -66,3 +72,35 @@ def validate_step_output(output: Any, metadata: dict | None = None) -> StepContr
     # unknown type
     errors.append("output_unsupported_type")
     return StepContractResult(False, errors)
+
+
+def validate_step_result(result: Any) -> StepContractResult:
+    """Validate DecisionLoop step envelope: status + output/error shape."""
+    errors: list[str] = []
+    if not isinstance(result, dict):
+        return StepContractResult(False, ["result_not_dict"])
+
+    status = str(result.get("status", "")).strip().lower()
+    if status not in {"completed", "failed", "waiting_approval"}:
+        errors.append("result_status_invalid")
+        return StepContractResult(False, errors)
+
+    if status == "completed":
+        if "output" not in result:
+            errors.append("result_output_missing")
+        else:
+            metadata = {}
+            if "file_path" in result:
+                metadata["file_path"] = result.get("file_path")
+            out_contract = validate_step_output(result.get("output"), metadata)
+            if not out_contract.ok:
+                errors.extend([f"output:{e}" for e in out_contract.errors])
+
+    if status in {"failed", "waiting_approval"}:
+        if not str(result.get("error", "")).strip():
+            errors.append("result_error_missing")
+
+    if "file_path" in result and not isinstance(result.get("file_path"), str):
+        errors.append("result_file_path_invalid")
+
+    return StepContractResult(len(errors) == 0, errors)

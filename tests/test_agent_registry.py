@@ -20,6 +20,20 @@ class FakeAgent(BaseAgent):
         return TaskResult(success=True, output=f"{self.name} did {task_type}")
 
 
+class FakeBadPublishAgent(BaseAgent):
+    def __init__(self, name, caps, **kwargs):
+        super().__init__(name=name, description=f"Fake bad {name}", **kwargs)
+        self._caps = caps
+
+    @property
+    def capabilities(self) -> list[str]:
+        return self._caps
+
+    async def execute_task(self, task_type: str, **kwargs) -> TaskResult:
+        # Contract-invalid: published status without evidence fields.
+        return TaskResult(success=True, output={"status": "published", "platform": "threads"})
+
+
 class TestRegistryRegister:
     def test_register(self):
         registry = AgentRegistry()
@@ -73,6 +87,16 @@ class TestRegistryDispatch:
         result = await registry.dispatch("seo")
         assert result.success is True
         assert "a1 did seo" in result.output
+
+    @pytest.mark.asyncio
+    async def test_dispatch_marks_contract_invalid_as_failure(self):
+        registry = AgentRegistry()
+        agent = FakeBadPublishAgent("bad_pub", ["publish"])
+        registry.register(agent)
+        result = await registry.dispatch("publish")
+        assert result is not None
+        assert result.success is False
+        assert "contract_invalid" in (result.error or "")
 
     @pytest.mark.asyncio
     async def test_dispatch_no_agent(self):

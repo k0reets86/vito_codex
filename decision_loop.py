@@ -29,7 +29,7 @@ from modules.llm_evals import LLMEvals
 from modules.workflow_state_machine import WorkflowStateMachine
 from modules.workflow_threads import WorkflowThreads
 from modules.data_lake import DataLake
-from modules.step_contract import validate_step_output
+from modules.step_contract import validate_step_output, validate_step_result
 
 TICK_INTERVAL = 300  # 5 минут
 STEP_TIMEOUT = 120   # секунд на один шаг (LLM content needs time)
@@ -587,6 +587,21 @@ class DecisionLoop:
                     f"[{goal.goal_id}] Шаг {step_num} таймаут (попытка {attempt}/{STEP_MAX_RETRIES})",
                     extra={"event": "step_timeout", "context": {"goal_id": goal.goal_id, "step": step_num, "attempt": attempt}},
                 )
+            else:
+                chk = validate_step_result(last_result)
+                if not chk.ok:
+                    logger.warning(
+                        f"[{goal.goal_id}] Step result contract failed: {','.join(chk.errors)}",
+                        extra={
+                            "event": "step_result_contract_failed",
+                            "context": {"goal_id": goal.goal_id, "step": step_num, "errors": chk.errors[:6]},
+                        },
+                    )
+                    last_result = {
+                        "status": "failed",
+                        "error": f"step_result_contract_failed:{','.join(chk.errors)}",
+                        "agent": str(last_result.get("agent", "")),
+                    }
 
             if last_result.get("status") != "failed":
                 return last_result

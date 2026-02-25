@@ -20,6 +20,7 @@
   - Added multi-stage adapter promotion and rollback with release history and live-stage enforcement.
   - Added stage approval policies and signed release bundles for promotion/rollback events.
   - Added tooling governance report aggregation and key-rotation workflow for signature keys (contract/release) with dashboard controls.
+  - Extended step-result contracts across DecisionLoop retry pipeline and AgentRegistry dispatch (including tooling/capability fallbacks).
 - Current blockers:
   - Social network integrations (Threads/YouTube/TikTok/etc.) are paused until accounts are ready.
 - Important commands:
@@ -34,7 +35,7 @@
   - decision_loop.py (orchestration)
   - modules/workflow_state_machine.py, modules/workflow_threads.py
 - Next steps:
-  - Extend durable orchestration: interrupts/approvals + step contracts across more agents/tools.
+  - Extend durable orchestration: add richer interrupt reasons and resumable approvals across cross-agent handoffs.
   - Memory/skills pipeline: retention tuning (TTL classes), memory quality scoring, and policy dashboards.
   - Operator UI: model-profile workflows and safer secret/provider management UX.
   - Self-learning: DSPy-like optimization and safe auto-promotion pipeline from candidates to accepted skills.
