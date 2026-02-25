@@ -1,5 +1,7 @@
-# Capability pack adapter stub
+# Security hardening capability (stub)
 
 def run(input_data: dict) -> dict:
-    """Execute capability pack."""
-    return {"status": "todo", "output": {}}
+    policy = input_data.get("policy")
+    if not policy:
+        return {"status": "error", "error": "policy_required"}
+    return {"status": "ok", "output": {"policy": policy, "report": "pending"}}

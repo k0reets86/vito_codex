@@ -1,5 +1,7 @@
-# Capability pack adapter stub
+# Agent protocols capability (stub)
 
 def run(input_data: dict) -> dict:
-    """Execute capability pack."""
-    return {"status": "todo", "output": {}}
+    handoff = input_data.get("handoff")
+    if not handoff:
+        return {"status": "error", "error": "handoff_required"}
+    return {"status": "ok", "output": {"handoff": handoff, "status": "validated"}}
