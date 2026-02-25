@@ -94,3 +94,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added capability pack sync into SkillRegistry.
 - Added optional resume-from-checkpoint in DecisionLoop (guarded by setting).
 - Synced explicit owner preferences into semantic memory.
+- Added starter capability packs for GAP areas (transport, smart_home, health, games, iOS/macOS, voice).

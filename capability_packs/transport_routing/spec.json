@@ -1,0 +1,20 @@
+{
+  "name": "transport_routing",
+  "category": "transport",
+  "description": "Routing and transit planning (GTFS/OSM compatible).",
+  "inputs": [
+    "origin",
+    "destination",
+    "mode"
+  ],
+  "outputs": [
+    "route",
+    "duration",
+    "cost"
+  ],
+  "version": "0.1.0",
+  "risk_score": 0.2,
+  "tests_coverage": 0.0,
+  "acceptance_status": "pending",
+  "evidence": ""
+}

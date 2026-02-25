@@ -1,0 +1,18 @@
+{
+  "name": "ios_macos_automation",
+  "category": "ios_macos",
+  "description": "iOS/macOS automation and build/release workflows.",
+  "inputs": [
+    "project",
+    "action"
+  ],
+  "outputs": [
+    "artifact",
+    "logs"
+  ],
+  "version": "0.1.0",
+  "risk_score": 0.2,
+  "tests_coverage": 0.0,
+  "acceptance_status": "pending",
+  "evidence": ""
+}

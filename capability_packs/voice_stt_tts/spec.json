@@ -1,0 +1,19 @@
+{
+  "name": "voice_stt_tts",
+  "category": "voice",
+  "description": "Speech-to-text and text-to-speech pipeline.",
+  "inputs": [
+    "audio",
+    "text",
+    "language"
+  ],
+  "outputs": [
+    "transcript",
+    "audio_out"
+  ],
+  "version": "0.1.0",
+  "risk_score": 0.2,
+  "tests_coverage": 0.0,
+  "acceptance_status": "pending",
+  "evidence": ""
+}
