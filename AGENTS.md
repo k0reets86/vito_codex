@@ -22,6 +22,7 @@
   - Added tooling governance report aggregation and key-rotation workflow for signature keys (contract/release) with dashboard controls.
   - Extended step-result contracts across DecisionLoop retry pipeline and AgentRegistry dispatch (including tooling/capability fallbacks).
   - Added durable workflow interrupt registry (pending/resolved/cancelled) and dashboard visibility for approval pauses/resume traces.
+  - Upgraded memory policy with retention classes, TTL metadata (`expires_at`), and quality scoring summary in dashboard.
 - Current blockers:
   - Social network integrations (Threads/YouTube/TikTok/etc.) are paused until accounts are ready.
 - Important commands:
@@ -37,7 +38,7 @@
   - modules/workflow_state_machine.py, modules/workflow_threads.py
 - Next steps:
   - Extend durable orchestration: attach interrupt context to agent-handoff chain and auto-resume policies.
-  - Memory/skills pipeline: retention tuning (TTL classes), memory quality scoring, and policy dashboards.
+  - Memory/skills pipeline: add automatic expiration cleanup and retention drift alerts.
   - Operator UI: model-profile workflows and safer secret/provider management UX.
   - Self-learning: DSPy-like optimization and safe auto-promotion pipeline from candidates to accepted skills.
   - Security/cost/observability: weekly governance report aggregation + automated remediation suggestions.

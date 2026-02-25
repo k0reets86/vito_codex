@@ -1027,3 +1027,4 @@ Append all new owner requests here as they arrive.
 - 2026-02-25: Added tooling governance report + signature key rotation workflow (contract/release key IDs, pending approvals, dashboard controls).
 - 2026-02-25: Enforced step contracts at runtime across DecisionLoop results and AgentRegistry outputs (including tooling/capability fallbacks) to reduce false-success paths.
 - 2026-02-25: Added durable workflow interrupts registry and dashboard panel to track approval pauses/resume/cancel outcomes per goal/step.
+- 2026-02-25: Added memory retention classes + TTL expiry metadata and memory quality dashboard summary (quality score/save ratio/reasons).

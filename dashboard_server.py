@@ -208,10 +208,13 @@ class DashboardServer:
                     try:
                         action = (query.get("action", [""])[0] or "").strip()
                         limit = int(query.get("limit", ["100"])[0] or 100)
+                        days = int(query.get("days", ["30"])[0] or 30)
                         audit = MemoryManager().get_memory_policy_audit(limit=limit, action=action)
+                        summary = MemoryManager().get_memory_policy_summary(days=days)
                     except Exception:
                         audit = []
-                    self._json({"audit": audit})
+                        summary = {}
+                    self._json({"audit": audit, "summary": summary})
                     return
                 if parsed.path == "/api/workflow_threads":
                     try:
@@ -686,7 +689,7 @@ async function load(){
     else if (k === 'skills') renderSkills(j.skills||[]);
     else if (k === 'operator_policy') renderOperatorPolicy(j);
     else if (k === 'self_learning') renderSelfLearning(j);
-    else if (k === 'memory_policy') renderMemoryPolicy(j.audit||[]);
+    else if (k === 'memory_policy') renderMemoryPolicy(j.audit||[], j.summary||{});
     else if (k === 'workflow_threads') renderWorkflowThreads(j.threads||[]);
     else if (k === 'workflow_interrupts') renderWorkflowInterrupts(j.interrupts||[]);
     else if (k === 'models') renderModels(j);
@@ -780,11 +783,35 @@ function renderToolingRegistry(items, approvals, stageApprovals, keyRotations, h
     `<div class=\"mut\" style=\"margin-top:8px\">Governance</div><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>${govRows}</tbody></table>` +
     `<div class=\"mut\" style=\"margin-top:8px\">Remediations</div><ul>${rem}</ul>`;
 }
-function renderMemoryPolicy(items){
+function renderMemoryPolicy(items, summary){
   const el = document.getElementById('memory_policy');
-  if (!items.length){ el.innerHTML = '<div class=\"mut\">No audit events</div>'; return; }
+  const sm = summary || {};
+  const srows = Object.entries(sm).filter(([k,_]) => k !== 'retention_classes' && k !== 'saved_by_retention' && k !== 'top_forget_reasons').map(([k,v]) => `<tr><td>${k}</td><td>${JSON.stringify(v)}</td></tr>`).join('');
+  const rr = Object.entries(sm.retention_classes || {}).map(([k,v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+  const sb = (sm.saved_by_retention || []).map(x => {
+    const key = Object.keys(x)[0] || '';
+    const val = x[key];
+    return `<tr><td>${key}</td><td>${val}</td></tr>`;
+  }).join('');
+  const fr = (sm.top_forget_reasons || []).map(x => {
+    const key = Object.keys(x)[0] || '';
+    const val = x[key];
+    return `<tr><td>${key}</td><td>${val}</td></tr>`;
+  }).join('');
+  if (!items.length){
+    el.innerHTML =
+      `<div class=\"mut\">No audit events</div>` +
+      `<div class=\"mut\" style=\"margin-top:8px\">Summary</div><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>${srows}</tbody></table>` +
+      `<div class=\"mut\" style=\"margin-top:8px\">Retention Classes</div><table><thead><tr><th>Class</th><th>TTL days</th></tr></thead><tbody>${rr}</tbody></table>`;
+    return;
+  }
   const rows = items.map(a => `<tr><td>${a.created_at||''}</td><td>${a.doc_id||''}</td><td>${a.action||''}</td><td>${a.reason||''}</td><td>${a.memory_type||''}</td></tr>`).join('');
-  el.innerHTML = `<table><thead><tr><th>Time</th><th>Doc</th><th>Action</th><th>Reason</th><th>Type</th></tr></thead><tbody>${rows}</tbody></table>`;
+  el.innerHTML =
+    `<div class=\"mut\">Summary</div><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>${srows}</tbody></table>` +
+    `<div class=\"mut\" style=\"margin-top:8px\">Retention Classes</div><table><thead><tr><th>Class</th><th>TTL days</th></tr></thead><tbody>${rr}</tbody></table>` +
+    `<div class=\"mut\" style=\"margin-top:8px\">Saved by Retention</div><table><thead><tr><th>Class</th><th>Count</th></tr></thead><tbody>${sb}</tbody></table>` +
+    `<div class=\"mut\" style=\"margin-top:8px\">Top Forget Reasons</div><table><thead><tr><th>Reason</th><th>Count</th></tr></thead><tbody>${fr}</tbody></table>` +
+    `<div class=\"mut\" style=\"margin-top:8px\">Audit Events</div><table><thead><tr><th>Time</th><th>Doc</th><th>Action</th><th>Reason</th><th>Type</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 function renderWorkflowThreads(threads){
   const el = document.getElementById('workflow_threads');

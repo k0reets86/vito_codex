@@ -13,7 +13,7 @@ import json
 import math
 import sqlite3
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import asyncpg
@@ -21,7 +21,7 @@ import chromadb
 
 from config.logger import get_logger
 from config.settings import settings
-from modules.memory_policy import decide_save
+from modules.memory_policy import decide_save, retention_classes
 
 logger = get_logger("memory_manager", agent="memory_manager")
 
@@ -64,7 +64,16 @@ class MemoryManager:
         """Сохраняет знание в ChromaDB для семантического поиска."""
         raw_meta = metadata or {}
         decision = decide_save(doc_id=doc_id, text=text, metadata=raw_meta)
-        self._audit_memory_policy(doc_id=doc_id, text=text, metadata=raw_meta, action=decision.action, reason=decision.reason, importance=decision.importance, ttl_days=decision.ttl_days)
+        self._audit_memory_policy(
+            doc_id=doc_id,
+            text=text,
+            metadata=raw_meta,
+            action=decision.action,
+            reason=decision.reason,
+            importance=decision.importance,
+            ttl_days=decision.ttl_days,
+            retention_class=decision.retention_class,
+        )
         if decision.action != "save":
             logger.info(
                 f"Знание отклонено policy: {doc_id} ({decision.reason})",
@@ -76,6 +85,12 @@ class MemoryManager:
         meta["stored_at"] = datetime.now(timezone.utc).isoformat()
         meta["importance_score"] = float(meta.get("importance_score", decision.importance))
         meta["ttl_days"] = int(meta.get("ttl_days", decision.ttl_days))
+        meta["retention_class"] = str(meta.get("retention_class", decision.retention_class))
+        try:
+            expires_at = datetime.now(timezone.utc) + timedelta(days=max(0, int(meta["ttl_days"])))
+            meta["expires_at"] = expires_at.isoformat()
+        except Exception:
+            pass
         meta["policy_reason"] = decision.reason
         try:
             collection.upsert(ids=[doc_id], documents=[text], metadatas=[meta])
@@ -104,6 +119,7 @@ class MemoryManager:
             reason=reason or "manual_forget",
             importance=float(meta.get("importance_score", 0.0) or 0.0),
             ttl_days=int(meta.get("ttl_days", 0) or 0),
+            retention_class=str(meta.get("retention_class", "")),
         )
         try:
             collection = self._get_chroma()
@@ -260,6 +276,8 @@ class MemoryManager:
                 text_size INTEGER DEFAULT 0,
                 importance REAL DEFAULT 0.0,
                 ttl_days INTEGER DEFAULT 0,
+                retention_class TEXT DEFAULT '',
+                expires_at TEXT DEFAULT '',
                 created_at TEXT DEFAULT (datetime('now'))
             );
             CREATE INDEX IF NOT EXISTS idx_memory_policy_doc ON memory_policy_audit (doc_id, created_at DESC);
@@ -287,6 +305,16 @@ class MemoryManager:
         except sqlite3.OperationalError:
             conn.execute("ALTER TABLE skills ADD COLUMN last_result TEXT DEFAULT ''")
             conn.commit()
+        try:
+            conn.execute("SELECT retention_class FROM memory_policy_audit LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute("ALTER TABLE memory_policy_audit ADD COLUMN retention_class TEXT DEFAULT ''")
+            conn.commit()
+        try:
+            conn.execute("SELECT expires_at FROM memory_policy_audit LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute("ALTER TABLE memory_policy_audit ADD COLUMN expires_at TEXT DEFAULT ''")
+            conn.commit()
 
     def _audit_memory_policy(
         self,
@@ -297,14 +325,21 @@ class MemoryManager:
         reason: str,
         importance: float,
         ttl_days: int,
+        retention_class: str = "",
     ) -> None:
         try:
             conn = self._get_sqlite()
+            expires_at = ""
+            if int(ttl_days or 0) > 0 and action == "save":
+                try:
+                    expires_at = (datetime.now(timezone.utc) + timedelta(days=int(ttl_days or 0))).isoformat()
+                except Exception:
+                    expires_at = ""
             conn.execute(
                 """
                 INSERT INTO memory_policy_audit
-                (doc_id, action, reason, memory_type, source, text_size, importance, ttl_days)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (doc_id, action, reason, memory_type, source, text_size, importance, ttl_days, retention_class, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     doc_id[:200],
@@ -315,6 +350,8 @@ class MemoryManager:
                     len((text or "").strip()),
                     float(importance or 0.0),
                     int(ttl_days or 0),
+                    str(retention_class or metadata.get("retention_class", ""))[:40],
+                    expires_at[:40],
                 ),
             )
             conn.commit()
@@ -339,6 +376,106 @@ class MemoryManager:
                 (limit,),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def get_memory_policy_summary(self, days: int = 30) -> dict:
+        conn = self._get_sqlite()
+        window_days = max(1, int(days or 30))
+        base_where = "created_at >= datetime('now', ?)"
+        param = (f"-{window_days} day",)
+        total = int(
+            (
+                conn.execute(
+                    f"SELECT COUNT(*) AS n FROM memory_policy_audit WHERE {base_where}",
+                    param,
+                ).fetchone()
+                or {"n": 0}
+            )["n"]
+            or 0
+        )
+        saves = int(
+            (
+                conn.execute(
+                    f"SELECT COUNT(*) AS n FROM memory_policy_audit WHERE {base_where} AND action='save'",
+                    param,
+                ).fetchone()
+                or {"n": 0}
+            )["n"]
+            or 0
+        )
+        forgets = int(
+            (
+                conn.execute(
+                    f"SELECT COUNT(*) AS n FROM memory_policy_audit WHERE {base_where} AND action='forget'",
+                    param,
+                ).fetchone()
+                or {"n": 0}
+            )["n"]
+            or 0
+        )
+        avg_importance = float(
+            (
+                conn.execute(
+                    f"SELECT AVG(importance) AS v FROM memory_policy_audit WHERE {base_where} AND action='save'",
+                    param,
+                ).fetchone()
+                or {"v": 0.0}
+            )["v"]
+            or 0.0
+        )
+        by_retention_rows = conn.execute(
+            f"""
+            SELECT COALESCE(retention_class, '') AS retention_class, COUNT(*) AS n
+            FROM memory_policy_audit
+            WHERE {base_where} AND action='save'
+            GROUP BY retention_class
+            ORDER BY n DESC
+            """,
+            param,
+        ).fetchall()
+        by_reason_rows = conn.execute(
+            f"""
+            SELECT reason, COUNT(*) AS n
+            FROM memory_policy_audit
+            WHERE {base_where} AND action='forget'
+            GROUP BY reason
+            ORDER BY n DESC
+            LIMIT 8
+            """,
+            param,
+        ).fetchall()
+        expiring_soon = int(
+            (
+                conn.execute(
+                    """
+                    SELECT COUNT(*) AS n
+                    FROM memory_policy_audit
+                    WHERE action='save'
+                      AND expires_at != ''
+                      AND expires_at <= datetime('now', '+7 day')
+                      AND expires_at >= datetime('now')
+                    """
+                ).fetchone()
+                or {"n": 0}
+            )["n"]
+            or 0
+        )
+        quality_score = 0.0
+        if total > 0:
+            save_ratio = saves / total
+            quality_score = (0.55 * save_ratio) + (0.35 * min(1.0, avg_importance)) + (0.10 * (1.0 - min(1.0, expiring_soon / max(1, saves))))
+        return {
+            "window_days": window_days,
+            "total_events": total,
+            "saved": saves,
+            "forgotten": forgets,
+            "save_ratio": round((saves / total) if total else 0.0, 4),
+            "avg_saved_importance": round(avg_importance, 4),
+            "expiring_7d": expiring_soon,
+            "quality_score": round(quality_score, 4),
+            "retention_classes": retention_classes(),
+            "saved_by_retention": [{str(r["retention_class"] or "unknown"): int(r["n"] or 0)} for r in by_retention_rows],
+            "top_forget_reasons": [{str(r["reason"] or ""): int(r["n"] or 0)} for r in by_reason_rows],
+        }
 
     def save_skill(self, name: str, description: str, agent: str = "",
                    task_type: str = "", method: dict | None = None) -> None:

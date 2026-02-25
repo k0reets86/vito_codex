@@ -151,6 +151,7 @@ def test_store_knowledge_policy_forget_short_noise(memory, tmp_path):
     assert audit
     assert audit[0]["doc_id"] == "noise_1"
     assert audit[0]["action"] == "forget"
+    assert audit[0]["retention_class"] in {"noise_short", "working_short", ""}
 
 
 def test_store_knowledge_policy_force_save(memory, tmp_path):
@@ -166,6 +167,19 @@ def test_store_knowledge_policy_force_save(memory, tmp_path):
     results = memory.search_knowledge("concise", n_results=1)
     assert results
     assert results[0]["id"] == "owner_pref_tone"
+
+
+def test_memory_policy_summary(memory, tmp_path):
+    with patch("memory.memory_manager.settings") as s:
+        s.CHROMA_PATH = str(tmp_path / "chroma")
+        s.SQLITE_PATH = str(tmp_path / "test.db")
+        memory.store_knowledge("sum_1", "owner prefers concise updates", {"type": "owner_preference"})
+        memory.store_knowledge("sum_2", "debug", {"type": "debug", "source": "heartbeat"})
+    summary = memory.get_memory_policy_summary(days=30)
+    assert summary["total_events"] >= 2
+    assert summary["saved"] >= 1
+    assert "quality_score" in summary
+    assert isinstance(summary["retention_classes"], dict)
 
 
 def test_forget_knowledge_records_audit(memory, tmp_path):
