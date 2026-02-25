@@ -39,3 +39,6 @@ Use `scripts/sync_capability_packs.py [root]` to register packs into SkillRegist
 
 ## Report Script
 Use `scripts/capability_pack_report.py` to generate a pack status report.
+
+## Run Script
+Use `scripts/run_capability_pack.py <name> [json_input]` to execute a pack.
