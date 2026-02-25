@@ -27,6 +27,7 @@ from openai import AsyncOpenAI
 
 from config.logger import get_logger
 from config.settings import settings
+from modules.llm_guardrails import LLMGuardrails
 
 logger = get_logger("llm_router", agent="llm_router")
 
@@ -161,6 +162,7 @@ class LLMRouter:
         self._sqlite_conn: sqlite3.Connection | None = None
         self._finance = finance  # FinancialController — set via set_finance()
         self._comms = comms
+        self._guardrails = LLMGuardrails(sqlite_path=self._sqlite_path)
         self._init_spend_table()
         logger.info("LLMRouter инициализирован", extra={"event": "init"})
 
@@ -375,6 +377,30 @@ class LLMRouter:
         estimated_tokens: int = 2000,
     ) -> Optional[str]:
         """Вызывает LLM с автоматическим выбором модели и fallback."""
+        if getattr(settings, "GUARDRAILS_ENABLED", True):
+            try:
+                guard = self._guardrails.inspect_prompt(task_type=task_type.value, prompt=prompt or "")
+                if guard.get("blocked"):
+                    logger.warning(
+                        f"LLM call blocked by guardrails: {guard.get('reason')}",
+                        extra={"event": "guardrails_block"},
+                    )
+                    try:
+                        from modules.data_lake import DataLake
+                        DataLake().record(
+                            agent="llm_router",
+                            task_type=f"llm:{task_type.value}",
+                            status="blocked",
+                            output={"reason": guard.get("reason", "guardrails")},
+                            severity="warning",
+                            source="llm_guardrails",
+                        )
+                    except Exception:
+                        pass
+                    return None
+            except Exception:
+                pass
+
         route = self.select_model(task_type, estimated_tokens)
         model = route.model
         cached = self._cache_get(task_type, model, prompt, system_prompt)

@@ -296,6 +296,16 @@ class DashboardServer:
                         report = {}
                     self._json({"policy": report})
                     return
+                if parsed.path == "/api/guardrails":
+                    try:
+                        from modules.llm_guardrails import LLMGuardrails
+                        gr = LLMGuardrails()
+                        summary = gr.summary(days=7)
+                        events = gr.recent_events(limit=50)
+                    except Exception:
+                        summary, events = {}, []
+                    self._json({"summary": summary, "events": events})
+                    return
                 if parsed.path == "/api/events":
                     try:
                         from modules.data_lake import DataLake
@@ -387,6 +397,8 @@ class DashboardServer:
                         "LLM_ENABLED_MODELS",
                         "SELF_LEARNING_ENABLED",
                         "SELF_LEARNING_SKILL_SCORE_MIN",
+                        "GUARDRAILS_ENABLED",
+                        "GUARDRAILS_BLOCK_ON_INJECTION",
                     ]
                     data = {k: getattr(settings, k, None) for k in allowed}
                     self._json({"config": data})
@@ -543,7 +555,7 @@ async function load(){
   const endpoints = {
     status:'/api/status', network:'/api/network', agents:'/api/agents', finance:'/api/finance',
     goals:'/api/goals', schedules:'/api/schedules', config:'/api/config',
-    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs', skills:'/api/skills', operator_policy:'/api/operator_policy', self_learning:'/api/self_learning', memory_policy:'/api/memory_policy?limit=80', workflow_threads:'/api/workflow_threads',
+    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', guardrails:'/api/guardrails', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs', skills:'/api/skills', operator_policy:'/api/operator_policy', self_learning:'/api/self_learning', memory_policy:'/api/memory_policy?limit=80', workflow_threads:'/api/workflow_threads',
     facts:'/api/execution_facts', approvals:'/api/approvals', events:'/api/events', decisions:'/api/decisions', budget:'/api/budget', workflow_events:'/api/workflow_events'
   };
   for (const [k,url] of Object.entries(endpoints)){
@@ -576,6 +588,7 @@ async function load(){
     else if (k === 'workflow_threads') renderWorkflowThreads(j.threads||[]);
     else if (k === 'models') renderModels(j);
     else if (k === 'llm_policy') renderLlmPolicy(j.policy||{});
+    else if (k === 'guardrails') renderGuardrails(j);
   }
 }
 function renderPrefs(prefs){
@@ -680,6 +693,16 @@ function renderLlmPolicy(j){
     `<table><thead><tr><th>Provider</th><th>Calls</th><th>Cost</th></tr></thead><tbody>${prov}</tbody></table>` +
     `<div class=\"mut\" style=\"margin-top:8px\">Top spend</div>` +
     `<table><thead><tr><th>Model</th><th>Task</th><th>Calls</th><th>Cost</th></tr></thead><tbody>${top}</tbody></table>`;
+}
+function renderGuardrails(j){
+  const summary = (j && j.summary) ? j.summary : {};
+  const events = (j && j.events) ? j.events : [];
+  const rows = Object.entries(summary).map(([k,v])=>`<tr><td>${k}</td><td>${JSON.stringify(v)}</td></tr>`).join('');
+  const erows = events.slice(0,10).map(e=>`<tr><td>${e.created_at||''}</td><td>${e.task_type||''}</td><td>${e.reason||''}</td><td>${e.blocked?1:0}</td></tr>`).join('');
+  document.getElementById('models').innerHTML +=
+    `<div class=\"mut\" style=\"margin-top:8px\">Guardrails</div>` +
+    `<table><thead><tr><th>Key</th><th>Value</th></tr></thead><tbody>${rows}</tbody></table>` +
+    `<table><thead><tr><th>Time</th><th>Task</th><th>Reason</th><th>Blocked</th></tr></thead><tbody>${erows}</tbody></table>`;
 }
 function renderConfig(j){
   const rows = Object.entries(j||{}).map(([k,v])=>`<tr><td>${k}</td><td>${JSON.stringify(v)}</td></tr>`).join('');
@@ -881,9 +904,11 @@ load();
                         "OPENROUTER_DEFAULT_MODEL",
                         "SELF_LEARNING_ENABLED",
                         "SELF_LEARNING_SKILL_SCORE_MIN",
+                        "GUARDRAILS_ENABLED",
+                        "GUARDRAILS_BLOCK_ON_INJECTION",
                     }
                     updated = {}
-                    bool_keys = {"PROACTIVE_ENABLED", "BRAINSTORM_WEEKLY", "OWNER_INBOX_ENABLED", "CALENDAR_UPDATE_LLM", "SELF_LEARNING_ENABLED"}
+                    bool_keys = {"PROACTIVE_ENABLED", "BRAINSTORM_WEEKLY", "OWNER_INBOX_ENABLED", "CALENDAR_UPDATE_LLM", "SELF_LEARNING_ENABLED", "GUARDRAILS_ENABLED", "GUARDRAILS_BLOCK_ON_INJECTION"}
                     num_keys = {"DAILY_LIMIT_USD", "OPERATION_NOTIFY_USD", "OPERATION_APPROVE_USD", "OPERATION_MAX_USD", "SELF_LEARNING_SKILL_SCORE_MIN"}
                     for k,v in payload.items():
                         if k in allowed:

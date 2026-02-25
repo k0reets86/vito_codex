@@ -160,3 +160,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added operator policy layer (tool allowlist + per-capability budget policy) with dashboard API/UI controls and DecisionLoop pre-check enforcement.
 - Added self-learning reflection pipeline (lessons + reusable skill candidates) with optional DecisionLoop integration and dashboard visibility.
 - Added dashboard model controls API (POST /api/models) for default model and allow/deny lists.
+- Added LLM guardrails module (prompt-injection detection, audit events, optional block mode) and integrated it into LLMRouter call flow.

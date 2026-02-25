@@ -133,5 +133,9 @@ class Settings:
     # Capability pack gating
     CAPABILITY_PACK_ALLOW_PENDING: bool = os.getenv("CAPABILITY_PACK_ALLOW_PENDING", "false").lower() in ("1", "true", "yes", "on")
 
+    # LLM guardrails
+    GUARDRAILS_ENABLED: bool = os.getenv("GUARDRAILS_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+    GUARDRAILS_BLOCK_ON_INJECTION: bool = os.getenv("GUARDRAILS_BLOCK_ON_INJECTION", "false").lower() in ("1", "true", "yes", "on")
+
 
 settings = Settings()

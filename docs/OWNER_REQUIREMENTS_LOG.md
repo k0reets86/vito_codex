@@ -1002,3 +1002,4 @@ Append all new owner requests here as they arrive.
 - 2026-02-25: Added operator policy controls (allow/block capabilities, per-capability budget caps) and DecisionLoop enforcement.
 - 2026-02-25: Added gated self-learning reflection loop; lessons and candidate skills are now tracked and visible in dashboard.
 - 2026-02-25: Added dashboard model-policy controls to manage OpenRouter default and model allow/deny lists.
+- 2026-02-25: Added LLM guardrails with event tracking and optional hard-block for injection signals.

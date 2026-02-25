@@ -8,6 +8,7 @@
   - Added operator policy controls for tool allowlist and per-capability budget caps, with DecisionLoop pre-check enforcement.
   - Added gated self-learning reflection loop with lesson scoring and pending skill-candidate generation.
   - Added dashboard model policy controls (`/api/models`) for default model and allow/deny lists.
+  - Added LLM guardrails (prompt-injection detection + optional block mode) with dashboard observability.
 - Current blockers:
   - Social network integrations (Threads/YouTube/TikTok/etc.) are paused until accounts are ready.
 - Important commands:
@@ -26,5 +27,5 @@
   - Memory/skills pipeline: retention tuning (TTL classes), memory quality scoring, and policy dashboards.
   - Operator UI: model-profile workflows and safer secret/provider management UX.
   - Self-learning: DSPy-like optimization and safe auto-promotion pipeline from candidates to accepted skills.
-  - Security/cost/observability: gateway + guardrails + evals.
+  - Security/cost/observability: finish eval pipelines and cost anomaly alerts.
   - Tooling standards: MCP/OpenAPI integration.
