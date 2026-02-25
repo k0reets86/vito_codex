@@ -116,3 +116,5 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Injected owner preferences into weekly planning.
 - Added owner preference model spec.
 - Added optional owner preference auto-detect (off by default).
+- Next: integrate capability packs into acceptance flow (pending -> accepted with tests).
+- Added capability pack acceptance script.

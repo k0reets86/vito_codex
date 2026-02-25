@@ -45,3 +45,6 @@ Use `scripts/run_capability_pack.py <name> [json_input]` to execute a pack.
 
 ## Validation Script
 Use `scripts/validate_capability_packs.py` to validate required fields.
+
+## Acceptance Script
+Use `scripts/accept_capability_packs.py --tests-passed --evidence <report>` to accept pending packs.
