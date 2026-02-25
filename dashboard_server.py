@@ -419,6 +419,7 @@ class DashboardServer:
                         "GUARDRAILS_BLOCK_ON_INJECTION",
                         "LLM_ALERTS_ENABLED",
                         "TOOLING_RUN_LIVE_ENABLED",
+                        "TOOLING_HTTP_TIMEOUT_SEC",
                     ]
                     data = {k: getattr(settings, k, None) for k in allowed}
                     self._json({"config": data})
@@ -976,10 +977,11 @@ load();
                         "GUARDRAILS_BLOCK_ON_INJECTION",
                         "LLM_ALERTS_ENABLED",
                         "TOOLING_RUN_LIVE_ENABLED",
+                        "TOOLING_HTTP_TIMEOUT_SEC",
                     }
                     updated = {}
                     bool_keys = {"PROACTIVE_ENABLED", "BRAINSTORM_WEEKLY", "OWNER_INBOX_ENABLED", "CALENDAR_UPDATE_LLM", "SELF_LEARNING_ENABLED", "GUARDRAILS_ENABLED", "GUARDRAILS_BLOCK_ON_INJECTION", "LLM_ALERTS_ENABLED", "TOOLING_RUN_LIVE_ENABLED"}
-                    num_keys = {"DAILY_LIMIT_USD", "OPERATION_NOTIFY_USD", "OPERATION_APPROVE_USD", "OPERATION_MAX_USD", "SELF_LEARNING_SKILL_SCORE_MIN"}
+                    num_keys = {"DAILY_LIMIT_USD", "OPERATION_NOTIFY_USD", "OPERATION_APPROVE_USD", "OPERATION_MAX_USD", "SELF_LEARNING_SKILL_SCORE_MIN", "TOOLING_HTTP_TIMEOUT_SEC"}
                     for k,v in payload.items():
                         if k in allowed:
                             if k in bool_keys:

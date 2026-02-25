@@ -31,3 +31,19 @@ def test_tooling_runner_policy_block(tmp_path):
     run = ToolingRunner(sqlite_path=db).run("blocked_adapter", dry_run=True)
     assert run["status"] == "error"
     assert run["error"] == "policy_blocked"
+
+
+def test_tooling_runner_live_disabled_returns_dry_reason(tmp_path, monkeypatch):
+    db = str(tmp_path / "tool_run.db")
+    reg = ToolingRegistry(sqlite_path=db)
+    reg.upsert_adapter(
+        adapter_key="openapi_adapter",
+        protocol="openapi",
+        endpoint="https://example.com/openapi.json",
+        schema={"openapi": "3.0.0", "paths": {}},
+    )
+    from config import settings as settings_mod
+    monkeypatch.setattr(settings_mod.settings, "TOOLING_RUN_LIVE_ENABLED", False)
+    run = ToolingRunner(sqlite_path=db).run("openapi_adapter", dry_run=False)
+    assert run["status"] == "dry_run"
+    assert run["reason"] == "live_disabled"

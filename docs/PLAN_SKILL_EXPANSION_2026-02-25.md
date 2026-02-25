@@ -165,3 +165,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added Tooling Registry for MCP/OpenAPI adapters with schema validation and dashboard controls.
 - Added runtime LLM risk alerts (anomaly/high-fail-rate) in DecisionLoop with owner notification channel.
 - Added ToolingRunner (safe dry-run runtime) and AgentRegistry dispatch fallback for `tooling:<adapter_key>` with operator policy gate.
+- Extended ToolingRunner with controlled live-mode (OpenAPI probe), budget checks, and timeout controls while keeping dry-run default.

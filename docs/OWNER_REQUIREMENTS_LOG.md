@@ -1007,3 +1007,4 @@ Append all new owner requests here as they arrive.
 - 2026-02-25: Added MCP/OpenAPI tooling registry standard with validation and operator controls.
 - 2026-02-25: Added DecisionLoop LLM risk alerts for anomaly/fail-rate with comms notifications.
 - 2026-02-25: Added safe tooling runtime execution path (`tooling:<adapter>`) with dry-run default and policy checks.
+- 2026-02-25: Extended tooling runtime to controlled live OpenAPI probe mode with budget/policy guards.
