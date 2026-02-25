@@ -127,6 +127,9 @@ class Settings:
     SELF_REFINE_MAX_PASSES: int = int(os.getenv("SELF_REFINE_MAX_PASSES", "1") or 1)
     SELF_LEARNING_ENABLED: bool = os.getenv("SELF_LEARNING_ENABLED", "false").lower() in ("1", "true", "yes", "on")
     SELF_LEARNING_SKILL_SCORE_MIN: float = float(os.getenv("SELF_LEARNING_SKILL_SCORE_MIN", "0.78") or 0.78)
+    SELF_LEARNING_AUTO_PROMOTE: bool = os.getenv("SELF_LEARNING_AUTO_PROMOTE", "false").lower() in ("1", "true", "yes", "on")
+    SELF_LEARNING_MIN_LESSONS: int = int(os.getenv("SELF_LEARNING_MIN_LESSONS", "3") or 3)
+    SELF_LEARNING_OPTIMIZE_INTERVAL_TICKS: int = int(os.getenv("SELF_LEARNING_OPTIMIZE_INTERVAL_TICKS", "72") or 72)
 
     # Owner preference auto-detect (off by default)
     OWNER_PREF_AUTO_DETECT: bool = os.getenv("OWNER_PREF_AUTO_DETECT", "false").lower() in ("1", "true", "yes", "on")

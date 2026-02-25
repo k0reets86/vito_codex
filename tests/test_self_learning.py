@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from modules.self_learning import SelfLearningEngine
+from modules.skill_registry import SkillRegistry
 
 
 def test_self_learning_record_and_list(tmp_path):
@@ -34,3 +35,61 @@ async def test_self_learning_reflect_creates_candidate(tmp_path):
     candidates = sl.list_candidates(limit=10)
     assert candidates
     assert candidates[0]["skill_name"] == "selflearn:research_flow"
+
+
+def test_self_learning_optimize_candidates(tmp_path):
+    db = str(tmp_path / "sl.db")
+    sl = SelfLearningEngine(sqlite_path=db)
+    sl.register_candidate("selflearn:seo_flow", confidence=0.6, notes="n")
+    for i in range(5):
+        sl.record_lesson(
+            goal_id=f"g{i}",
+            step_text="seo flow step",
+            status="completed" if i < 4 else "failed",
+            score=0.9 if i < 4 else 0.2,
+            lesson="seo flow lesson",
+            candidate_skill="selflearn:seo_flow",
+        )
+    out = sl.optimize_candidates(days=30, min_lessons=3, promote_confidence_min=0.7, auto_promote=False)
+    assert out["ok"] is True
+    assert out["updated"] >= 1
+    rows = sl.list_candidates(limit=10)
+    assert rows[0]["optimized_confidence"] >= 0.0
+    assert rows[0]["lessons_count"] >= 1
+
+
+def test_self_learning_auto_promote_ready_with_skill_registry_gates(tmp_path):
+    db = str(tmp_path / "sl.db")
+    sl = SelfLearningEngine(sqlite_path=db)
+    reg = SkillRegistry(sqlite_path=db)
+    skill_name = "selflearn:research_flow"
+    reg.register_skill(skill_name, category="self_learning", source="self_learning", acceptance_status="pending")
+    conn = reg._get_conn()
+    try:
+        conn.execute(
+            "UPDATE skill_registry SET tests_coverage = 0.9, risk_score = 0.1, security_status = 'safe' WHERE name = ?",
+            (skill_name,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    sl.register_candidate(skill_name, confidence=0.9, notes="ready")
+    sl.set_candidate_status(skill_name, "ready")
+    # Add lessons used by promotion safety gate
+    for i in range(4):
+        sl.record_lesson(
+            goal_id=f"g{i}",
+            step_text="research flow",
+            status="completed",
+            score=0.9,
+            lesson="works",
+            candidate_skill=skill_name,
+        )
+    sl.optimize_candidates(days=30, min_lessons=3, promote_confidence_min=0.78, auto_promote=False)
+    changed = sl.auto_promote_ready_candidates()
+    assert changed >= 1
+    promoted = sl.list_candidates(limit=10)[0]
+    assert promoted["status"] == "promoted"
+    row = reg.get_skill(skill_name)
+    assert row is not None
+    assert row.get("acceptance_status") == "accepted"

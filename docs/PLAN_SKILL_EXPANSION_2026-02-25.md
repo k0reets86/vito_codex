@@ -178,3 +178,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added operator model profiles (balanced/economy/quality + custom save/apply/delete) and dashboard secrets status panel for provider key visibility.
 - Added retention drift analytics and TTL cleanup workflow (preview/apply) plus periodic DecisionLoop retention checks.
 - Added provider health panel with key-rotation reminders and safe remediation actions (economy profile, strict guardrails, disable tooling live, minimal notify).
+- Added self-learning optimizer loop: candidate confidence recalibration (lesson/pass-rate weighted), readiness states, and safe auto-promotion to accepted skills via SkillRegistry quality gates.

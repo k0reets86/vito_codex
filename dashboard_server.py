@@ -200,9 +200,19 @@ class DashboardServer:
                         sl = SelfLearningEngine()
                         lessons = sl.list_lessons(limit=100)
                         candidates = sl.list_candidates(limit=100)
+                        summary = sl.summary(days=30)
+                        optimizations = sl.optimization_runs(limit=50)
+                        promotions = sl.promotion_events(limit=50)
                     except Exception:
                         lessons, candidates = [], []
-                    self._json({"lessons": lessons, "candidates": candidates})
+                        summary, optimizations, promotions = {}, [], []
+                    self._json({
+                        "lessons": lessons,
+                        "candidates": candidates,
+                        "summary": summary,
+                        "optimizations": optimizations,
+                        "promotions": promotions,
+                    })
                     return
                 if parsed.path == "/api/memory_policy":
                     try:
@@ -635,7 +645,12 @@ class DashboardServer:
           <button onclick=\"setBudgetPolicy()\">Set Budget</button>
         </div>
       </div>
-      <div class=\"card\"><div class=\"mut\">Self Learning</div><div id=\"self_learning\"></div></div>
+      <div class=\"card\"><div class=\"mut\">Self Learning</div><div id=\"self_learning\"></div>
+        <div style=\"margin-top:6px\">
+          <button onclick=\"optimizeSelfLearning()\">Optimize</button>
+          <button onclick=\"autoPromoteSelfLearning()\">Auto Promote Ready</button>
+        </div>
+      </div>
       <div class=\"card\"><div class=\"mut\">Tooling Registry</div><div id=\"tooling_registry\"></div></div>
       <div class=\"card\"><div class=\"mut\">Tooling Controls</div>
         <div style=\"margin-top:8px\">\n
@@ -803,11 +818,20 @@ function renderSelfLearning(j){
   const el = document.getElementById('self_learning');
   const lessons = (j && j.lessons) ? j.lessons : [];
   const candidates = (j && j.candidates) ? j.candidates : [];
+  const summary = (j && j.summary) ? j.summary : {};
+  const optimizations = (j && j.optimizations) ? j.optimizations : [];
+  const promotions = (j && j.promotions) ? j.promotions : [];
+  const srows = Object.entries(summary).map(([k,v])=>`<tr><td>${k}</td><td>${JSON.stringify(v)}</td></tr>`).join('');
   const lrows = lessons.slice(0,8).map(r => `<tr><td>${r.goal_id||''}</td><td>${r.status||''}</td><td>${(r.score||0).toFixed? (r.score||0).toFixed(2):r.score}</td><td>${(r.lesson||'').slice(0,80)}</td></tr>`).join('');
-  const crows = candidates.slice(0,8).map(r => `<tr><td>${r.skill_name}</td><td>${r.confidence}</td><td>${r.status}</td></tr>`).join('');
+  const crows = candidates.slice(0,8).map(r => `<tr><td>${r.skill_name}</td><td>${r.confidence}</td><td>${r.optimized_confidence||0}</td><td>${r.lessons_count||0}</td><td>${r.pass_rate||0}</td><td>${r.status}</td></tr>`).join('');
+  const orows = optimizations.slice(0,8).map(r => `<tr><td>${r.skill_name}</td><td>${r.confidence_before}</td><td>${r.confidence_after}</td><td>${r.lessons_count}</td><td>${r.pass_rate}</td><td>${r.recommendation}</td></tr>`).join('');
+  const prows = promotions.slice(0,8).map(r => `<tr><td>${r.skill_name}</td><td>${r.decision}</td><td>${(r.reason||'').slice(0,80)}</td><td>${r.created_at||''}</td></tr>`).join('');
   el.innerHTML =
+    `<div class=\"mut\">Summary</div><table><thead><tr><th>Key</th><th>Value</th></tr></thead><tbody>${srows}</tbody></table>` +
     `<div class=\"mut\">Lessons</div><table><thead><tr><th>Goal</th><th>Status</th><th>Score</th><th>Lesson</th></tr></thead><tbody>${lrows}</tbody></table>` +
-    `<div class=\"mut\" style=\"margin-top:8px\">Candidates</div><table><thead><tr><th>Skill</th><th>Confidence</th><th>Status</th></tr></thead><tbody>${crows}</tbody></table>`;
+    `<div class=\"mut\" style=\"margin-top:8px\">Candidates</div><table><thead><tr><th>Skill</th><th>Conf</th><th>Opt</th><th>Lessons</th><th>Pass</th><th>Status</th></tr></thead><tbody>${crows}</tbody></table>` +
+    `<div class=\"mut\" style=\"margin-top:8px\">Optimizations</div><table><thead><tr><th>Skill</th><th>Before</th><th>After</th><th>Lessons</th><th>Pass</th><th>Rec</th></tr></thead><tbody>${orows}</tbody></table>` +
+    `<div class=\"mut\" style=\"margin-top:8px\">Promotion Events</div><table><thead><tr><th>Skill</th><th>Decision</th><th>Reason</th><th>Time</th></tr></thead><tbody>${prows}</tbody></table>`;
 }
 function renderToolingRegistry(items, approvals, stageApprovals, keyRotations, history, governance, signaturePolicy){
   const el = document.getElementById('tooling_registry');
@@ -1142,6 +1166,14 @@ async function runMemoryCleanupApply(){
   await fetch('/api/memory_policy', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'cleanup_apply'})});
   await load();
 }
+async function optimizeSelfLearning(){
+  await fetch('/api/self_learning', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'optimize', days:30, min_lessons:3, threshold:0.82, auto_promote:false})});
+  await load();
+}
+async function autoPromoteSelfLearning(){
+  await fetch('/api/self_learning', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'auto_promote'})});
+  await load();
+}
 async function setToolPolicy(){
   const tool_key = document.getElementById('pol_tool_key').value.trim();
   const enabled = (document.getElementById('pol_tool_enabled').value.trim() || '1') !== '0';
@@ -1316,6 +1348,9 @@ load();
                         "OPENROUTER_DEFAULT_MODEL",
                         "SELF_LEARNING_ENABLED",
                         "SELF_LEARNING_SKILL_SCORE_MIN",
+                        "SELF_LEARNING_AUTO_PROMOTE",
+                        "SELF_LEARNING_MIN_LESSONS",
+                        "SELF_LEARNING_OPTIMIZE_INTERVAL_TICKS",
                         "GUARDRAILS_ENABLED",
                         "GUARDRAILS_BLOCK_ON_INJECTION",
                         "LLM_ALERTS_ENABLED",
@@ -1329,8 +1364,8 @@ load();
                         "TOOLING_BLOCK_WITH_PENDING_ROTATION",
                     }
                     updated = {}
-                    bool_keys = {"PROACTIVE_ENABLED", "BRAINSTORM_WEEKLY", "OWNER_INBOX_ENABLED", "CALENDAR_UPDATE_LLM", "SELF_LEARNING_ENABLED", "GUARDRAILS_ENABLED", "GUARDRAILS_BLOCK_ON_INJECTION", "LLM_ALERTS_ENABLED", "TOOLING_RUN_LIVE_ENABLED", "TOOLING_BLOCK_WITH_PENDING_ROTATION", "TOOLING_REQUIRE_PRODUCTION_APPROVAL", "TOOLING_REQUIRE_ROLLBACK_APPROVAL"}
-                    num_keys = {"DAILY_LIMIT_USD", "OPERATION_NOTIFY_USD", "OPERATION_APPROVE_USD", "OPERATION_MAX_USD", "SELF_LEARNING_SKILL_SCORE_MIN", "TOOLING_HTTP_TIMEOUT_SEC", "TOOLING_MCP_TIMEOUT_SEC", "TOOLING_MCP_MAX_OUTPUT_BYTES"}
+                    bool_keys = {"PROACTIVE_ENABLED", "BRAINSTORM_WEEKLY", "OWNER_INBOX_ENABLED", "CALENDAR_UPDATE_LLM", "SELF_LEARNING_ENABLED", "SELF_LEARNING_AUTO_PROMOTE", "GUARDRAILS_ENABLED", "GUARDRAILS_BLOCK_ON_INJECTION", "LLM_ALERTS_ENABLED", "TOOLING_RUN_LIVE_ENABLED", "TOOLING_BLOCK_WITH_PENDING_ROTATION", "TOOLING_REQUIRE_PRODUCTION_APPROVAL", "TOOLING_REQUIRE_ROLLBACK_APPROVAL"}
+                    num_keys = {"DAILY_LIMIT_USD", "OPERATION_NOTIFY_USD", "OPERATION_APPROVE_USD", "OPERATION_MAX_USD", "SELF_LEARNING_SKILL_SCORE_MIN", "SELF_LEARNING_MIN_LESSONS", "SELF_LEARNING_OPTIMIZE_INTERVAL_TICKS", "TOOLING_HTTP_TIMEOUT_SEC", "TOOLING_MCP_TIMEOUT_SEC", "TOOLING_MCP_MAX_OUTPUT_BYTES"}
                     for k,v in payload.items():
                         if k in allowed:
                             if k in bool_keys:
@@ -1552,6 +1587,47 @@ load();
                         except Exception:
                             pass
                     self._json({"ok": ok, "action": action})
+                    return
+                if parsed.path == "/api/self_learning":
+                    length = int(self.headers.get("Content-Length", "0") or "0")
+                    raw = self.rfile.read(length) if length else b"{}"
+                    try:
+                        payload = json.loads(raw.decode("utf-8"))
+                    except Exception:
+                        payload = {}
+                    action = str(payload.get("action", "")).strip().lower()
+                    ok = False
+                    result = {}
+                    try:
+                        sl = SelfLearningEngine()
+                        if action == "optimize":
+                            result = sl.optimize_candidates(
+                                days=int(payload.get("days", 30) or 30),
+                                min_lessons=int(payload.get("min_lessons", 3) or 3),
+                                promote_confidence_min=float(payload.get("threshold", settings.SELF_LEARNING_SKILL_SCORE_MIN) or settings.SELF_LEARNING_SKILL_SCORE_MIN),
+                                auto_promote=bool(payload.get("auto_promote", False)),
+                            )
+                            ok = bool(result.get("ok"))
+                        elif action == "auto_promote":
+                            changed = sl.auto_promote_ready_candidates()
+                            result = {"ok": True, "promoted": changed}
+                            ok = True
+                        elif action == "set_candidate_status":
+                            skill_name = str(payload.get("skill_name", "")).strip()
+                            status = str(payload.get("status", "")).strip()
+                            if skill_name and status:
+                                sl.set_candidate_status(skill_name=skill_name, status=status, notes=str(payload.get("notes", "")))
+                                result = {"ok": True}
+                                ok = True
+                    except Exception:
+                        ok = False
+                    if ok:
+                        try:
+                            from modules.data_lake import DataLake
+                            DataLake().record_decision(actor="dashboard", decision="self_learning_action", rationale=action)
+                        except Exception:
+                            pass
+                    self._json({"ok": ok, "action": action, "result": result})
                     return
                 if parsed.path == "/api/memory_policy":
                     length = int(self.headers.get("Content-Length", "0") or "0")

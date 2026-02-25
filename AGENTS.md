@@ -26,6 +26,7 @@
   - Added model profile workflows (save/apply/delete presets) and secrets status visibility in dashboard for safer provider operations.
   - Added retention drift alerts + expired-memory cleanup (preview/apply) and periodic retention monitor in DecisionLoop.
   - Added provider health report (missing/stale keys + rotation reminders) and safe one-click remediation actions in dashboard.
+  - Added self-learning optimization pipeline (candidate scoring, readiness recommendation, safe auto-promotion gates, promotion events).
 - Current blockers:
   - Social network integrations (Threads/YouTube/TikTok/etc.) are paused until accounts are ready.
 - Important commands:
@@ -43,6 +44,6 @@
   - Extend durable orchestration: attach interrupt context to agent-handoff chain and auto-resume policies.
   - Memory/skills pipeline: add owner-facing weekly retention report and per-skill memory quality linkage.
   - Operator UI: add per-provider connectivity probes and remediation playbooks with approval gates.
-  - Self-learning: DSPy-like optimization and safe auto-promotion pipeline from candidates to accepted skills.
+  - Self-learning: connect optimizer outputs to explicit skill test jobs and confidence calibration by task-family.
   - Security/cost/observability: weekly governance report aggregation + automated remediation suggestions.
   - Tooling standards: add signature key lifecycle hardening (rotation cadence checks + expiry alerts).

@@ -64,6 +64,7 @@ class DecisionLoop:
         self.self_learning = None
         self._last_llm_alert_at_tick = 0
         self._last_memory_retention_tick = 0
+        self._last_self_learning_opt_tick = 0
         logger.info("DecisionLoop инициализирован", extra={"event": "init"})
 
     def set_self_healer(self, self_healer) -> None:
@@ -134,6 +135,7 @@ class DecisionLoop:
         # 1.5. LLM risk monitoring (cost anomaly / fail-rate)
         await self._maybe_send_llm_risk_alert()
         await self._maybe_run_memory_retention()
+        await self._maybe_run_self_learning_optimization()
 
         # 2. Выбор следующей цели
         try:
@@ -316,6 +318,29 @@ class DecisionLoop:
                     extra={"event": "memory_retention_cleanup", "context": {"result": applied}},
                 )
             self._last_memory_retention_tick = self._tick_count
+        except Exception:
+            pass
+
+    async def _maybe_run_self_learning_optimization(self) -> None:
+        try:
+            if not settings.SELF_LEARNING_ENABLED:
+                return
+            interval = max(12, int(getattr(settings, "SELF_LEARNING_OPTIMIZE_INTERVAL_TICKS", 72) or 72))
+            if self._tick_count - int(self._last_self_learning_opt_tick or 0) < interval:
+                return
+            if self.self_learning is None:
+                self.self_learning = SelfLearningEngine(sqlite_path=settings.SQLITE_PATH)
+            result = self.self_learning.optimize_candidates(
+                days=30,
+                min_lessons=int(getattr(settings, "SELF_LEARNING_MIN_LESSONS", 3) or 3),
+                promote_confidence_min=float(settings.SELF_LEARNING_SKILL_SCORE_MIN or 0.78),
+                auto_promote=bool(getattr(settings, "SELF_LEARNING_AUTO_PROMOTE", False)),
+            )
+            logger.info(
+                f"Self-learning optimize: updated={result.get('updated', 0)} promoted={result.get('promoted', 0)}",
+                extra={"event": "self_learning_optimize", "context": {"result": result}},
+            )
+            self._last_self_learning_opt_tick = self._tick_count
         except Exception:
             pass
 
