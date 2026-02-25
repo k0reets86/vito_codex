@@ -43,6 +43,7 @@ from telegram.ext import (
 from config.logger import get_logger
 from config.settings import settings
 from modules.owner_preference_model import OwnerPreferenceModel
+from modules.owner_pref_metrics import OwnerPreferenceMetrics
 from modules.data_lake import DataLake
 
 logger = get_logger("comms_agent", agent="comms_agent")
@@ -274,6 +275,7 @@ class CommsAgent:
         self._app.add_handler(CommandHandler("workflow", self._cmd_workflow))
         self._app.add_handler(CommandHandler("handoffs", self._cmd_handoffs))
         self._app.add_handler(CommandHandler("prefs", self._cmd_prefs))
+        self._app.add_handler(CommandHandler("prefs_metrics", self._cmd_prefs_metrics))
         self._app.add_handler(CommandHandler("pubq", self._cmd_pubq))
         self._app.add_handler(CommandHandler("pubrun", self._cmd_pubrun))
         self._app.add_handler(CommandHandler("webop", self._cmd_webop))
@@ -332,6 +334,7 @@ class CommsAgent:
             BotCommand("workflow", "Статус workflow/state"),
             BotCommand("handoffs", "Трассировка handoff"),
             BotCommand("prefs", "Предпочтения владельца"),
+            BotCommand("prefs_metrics", "Метрики предпочтений"),
             BotCommand("pubq", "Очередь публикаций"),
             BotCommand("pubrun", "Запустить очередь публикаций"),
             BotCommand("webop", "Web-operator сценарии"),
@@ -456,6 +459,12 @@ class CommsAgent:
         if lower.strip() in ("/prefs", "prefs", "предпочтения"):
             try:
                 await self._send_prefs()
+                return
+            except Exception:
+                pass
+        if lower.strip() in ("/prefs_metrics", "prefs_metrics"):
+            try:
+                await self._send_prefs_metrics()
                 return
             except Exception:
                 pass
@@ -1023,6 +1032,12 @@ class CommsAgent:
             return
         await self._send_prefs(reply_to=update)
 
+    async def _cmd_prefs_metrics(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Показать метрики предпочтений владельца."""
+        if await self._reject_stranger(update):
+            return
+        await self._send_prefs_metrics(reply_to=update)
+
     async def _send_prefs(self, reply_to: Update | None = None) -> None:
         try:
             model = OwnerPreferenceModel()
@@ -1047,6 +1062,23 @@ class CommsAgent:
                 await reply_to.message.reply_text("Не удалось загрузить предпочтения.", reply_markup=self._main_keyboard())
             else:
                 await self.send_message("Не удалось загрузить предпочтения.")
+
+    async def _send_prefs_metrics(self, reply_to: Update | None = None) -> None:
+        try:
+            metrics = OwnerPreferenceMetrics().summary()
+            lines = ["Метрики предпочтений:"]
+            for k, v in metrics.items():
+                lines.append(f"- {k}: {v}")
+            msg = "\n".join(lines)
+            if reply_to is not None and getattr(reply_to, "message", None):
+                await reply_to.message.reply_text(msg, reply_markup=self._main_keyboard())
+            else:
+                await self.send_message(msg)
+        except Exception:
+            if reply_to is not None and getattr(reply_to, "message", None):
+                await reply_to.message.reply_text("Не удалось загрузить метрики предпочтений.", reply_markup=self._main_keyboard())
+            else:
+                await self.send_message("Не удалось загрузить метрики предпочтений.")
 
     async def _cmd_pubq(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Показать состояние unified publisher queue."""

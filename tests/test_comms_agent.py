@@ -185,6 +185,18 @@ async def test_pref_deactivate_command(comms, tmp_path: Path):
         settings.SQLITE_PATH = old_path
 
 
+@pytest.mark.asyncio
+async def test_cmd_prefs_metrics(comms, mock_update, tmp_path: Path):
+    old_path = settings.SQLITE_PATH
+    try:
+        settings.SQLITE_PATH = str(tmp_path / "prefs.db")
+        await comms._cmd_prefs_metrics(mock_update, MagicMock())
+        text = mock_update.message.reply_text.call_args[0][0]
+        assert "Метрики предпочтений" in text
+    finally:
+        settings.SQLITE_PATH = old_path
+
+
 # ── Одобрение ──
 
 @pytest.mark.asyncio
