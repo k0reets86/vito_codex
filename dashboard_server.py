@@ -7,6 +7,7 @@ Provides:
 - /api/goals
 - /api/finance
 - /api/schedules
+- /api/prefs
 - /api/platforms
 - /api/config (GET/POST)
 """
@@ -19,6 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 from config.settings import settings
+from modules.owner_preference_model import OwnerPreferenceModel
 
 
 class DashboardServer:
@@ -134,6 +136,13 @@ class DashboardServer:
                         for t in parent.schedule_manager.list_tasks():
                             tasks.append(t.__dict__)
                     self._json({"tasks": tasks})
+                    return
+                if parsed.path == "/api/prefs":
+                    try:
+                        prefs = OwnerPreferenceModel().list_preferences(limit=50)
+                    except Exception:
+                        prefs = []
+                    self._json({"preferences": prefs})
                     return
 
                 if parsed.path == "/api/platforms":
