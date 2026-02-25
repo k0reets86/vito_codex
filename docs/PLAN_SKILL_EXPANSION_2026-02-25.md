@@ -101,3 +101,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added pending approvals count in DecisionLoop status.
 - Displayed pending approvals in dashboard loop panel.
 - Stored goal lessons into semantic memory.
+- Logged owner preference usage in DataLake.

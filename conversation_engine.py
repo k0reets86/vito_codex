@@ -475,11 +475,25 @@ class ConversationEngine:
                 pref_rows = model.list_preferences(limit=5)
                 if pref_rows:
                     lines = []
+                    keys = []
                     for pr in pref_rows:
                         conf = float(pr.get("confidence", 0))
                         val = pr.get("value")
-                        lines.append(f"- {pr.get('pref_key')}: {val} (conf={conf:.2f})")
+                        key = pr.get("pref_key")
+                        keys.append(key)
+                        lines.append(f"- {key}: {val} (conf={conf:.2f})")
                     owner_prefs = owner_prefs + "\n" + "\n".join(lines) if owner_prefs else "\nПредпочтения владельца:\n" + "\n".join(lines)
+                    try:
+                        from modules.data_lake import DataLake
+                        DataLake().record(
+                            agent="conversation_engine",
+                            task_type="owner_prefs_used",
+                            status="success",
+                            output={"keys": keys},
+                            source="system",
+                        )
+                    except Exception:
+                        pass
             except Exception:
                 pass
 
