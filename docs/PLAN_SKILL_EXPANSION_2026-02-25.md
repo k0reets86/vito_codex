@@ -128,6 +128,7 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added nightly owner preference report writeout.
 - Added nightly capability pack report writeout.
 - Added owner preferences summary to system context.
+- Added manual capability pack event logging script.
 - Included owner preferences in question answering context.
 - Added /prefs_metrics command for owner preference metrics.
 - Added /packs command to list capability packs.

@@ -51,3 +51,6 @@ Use `scripts/accept_capability_packs.py --tests-passed --evidence <report>` to a
 
 ## Runtime Gate
 By default, pending packs are blocked at runtime unless `CAPABILITY_PACK_ALLOW_PENDING=true`.
+
+## Manual Event Script
+Use `scripts/register_capability_pack_event.py <name> --status <success|failed>` for manual logging.
