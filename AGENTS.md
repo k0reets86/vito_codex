@@ -25,6 +25,7 @@
   - Upgraded memory policy with retention classes, TTL metadata (`expires_at`), and quality scoring summary in dashboard.
   - Added model profile workflows (save/apply/delete presets) and secrets status visibility in dashboard for safer provider operations.
   - Added retention drift alerts + expired-memory cleanup (preview/apply) and periodic retention monitor in DecisionLoop.
+  - Added provider health report (missing/stale keys + rotation reminders) and safe one-click remediation actions in dashboard.
 - Current blockers:
   - Social network integrations (Threads/YouTube/TikTok/etc.) are paused until accounts are ready.
 - Important commands:
@@ -41,7 +42,7 @@
 - Next steps:
   - Extend durable orchestration: attach interrupt context to agent-handoff chain and auto-resume policies.
   - Memory/skills pipeline: add owner-facing weekly retention report and per-skill memory quality linkage.
-  - Operator UI: secret rotation reminders + provider health checks with safe remediation actions.
+  - Operator UI: add per-provider connectivity probes and remediation playbooks with approval gates.
   - Self-learning: DSPy-like optimization and safe auto-promotion pipeline from candidates to accepted skills.
   - Security/cost/observability: weekly governance report aggregation + automated remediation suggestions.
   - Tooling standards: add signature key lifecycle hardening (rotation cadence checks + expiry alerts).

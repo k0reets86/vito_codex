@@ -177,3 +177,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added memory retention classes (TTL tiers), `expires_at` metadata, and memory quality summary metrics (`quality_score`, save ratio, forget reasons) in dashboard/API.
 - Added operator model profiles (balanced/economy/quality + custom save/apply/delete) and dashboard secrets status panel for provider key visibility.
 - Added retention drift analytics and TTL cleanup workflow (preview/apply) plus periodic DecisionLoop retention checks.
+- Added provider health panel with key-rotation reminders and safe remediation actions (economy profile, strict guardrails, disable tooling live, minimal notify).

@@ -338,6 +338,15 @@ class DashboardServer:
                         })
                     self._json({"secrets": statuses})
                     return
+                if parsed.path == "/api/provider_health":
+                    try:
+                        from modules.provider_health import ProviderHealth
+                        days = int(query.get("rotation_days_max", ["90"])[0] or 90)
+                        report = ProviderHealth().summary(rotation_days_max=days)
+                    except Exception:
+                        report = {}
+                    self._json({"health": report})
+                    return
                 if parsed.path == "/api/llm_policy":
                     try:
                         report = parent.llm_router.get_policy_report(days=1) if parent.llm_router else {}
@@ -693,6 +702,15 @@ class DashboardServer:
           <button onclick=\"setSecret()\">Set</button>
         </div>
       </div>
+      <div class=\"card\"><div class=\"mut\">Provider Health</div>
+        <div id=\"provider_health\"></div>
+        <div style=\"margin-top:6px\">
+          <button onclick=\"providerAction('apply_profile_economy')\">Apply Economy</button>
+          <button onclick=\"providerAction('disable_tooling_live')\">Disable Tooling Live</button>
+          <button onclick=\"providerAction('enable_guardrails_block')\">Guardrails Strict</button>
+          <button onclick=\"providerAction('set_notify_minimal')\">Notify Minimal</button>
+        </div>
+      </div>
       <div class=\"card\"><div class=\"mut\">RSS Sources</div><div id=\"rss\"></div>
         <div style=\"margin-top:8px\">\n
           <input id=\"rss_name\" placeholder=\"Name\" style=\"width:30%\"/>
@@ -707,7 +725,7 @@ async function load(){
   const endpoints = {
     status:'/api/status', network:'/api/network', agents:'/api/agents', finance:'/api/finance',
     goals:'/api/goals', schedules:'/api/schedules', config:'/api/config',
-    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', guardrails:'/api/guardrails', llm_evals:'/api/llm_evals', tooling_registry:'/api/tooling_registry', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs', skills:'/api/skills', operator_policy:'/api/operator_policy', self_learning:'/api/self_learning', memory_policy:'/api/memory_policy?limit=80', workflow_threads:'/api/workflow_threads', workflow_interrupts:'/api/workflow_interrupts', secrets_status:'/api/secrets_status',
+    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', guardrails:'/api/guardrails', llm_evals:'/api/llm_evals', tooling_registry:'/api/tooling_registry', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs', skills:'/api/skills', operator_policy:'/api/operator_policy', self_learning:'/api/self_learning', memory_policy:'/api/memory_policy?limit=80', workflow_threads:'/api/workflow_threads', workflow_interrupts:'/api/workflow_interrupts', secrets_status:'/api/secrets_status', provider_health:'/api/provider_health',
     facts:'/api/execution_facts', approvals:'/api/approvals', events:'/api/events', decisions:'/api/decisions', budget:'/api/budget', workflow_events:'/api/workflow_events'
   };
   for (const [k,url] of Object.entries(endpoints)){
@@ -740,6 +758,7 @@ async function load(){
     else if (k === 'workflow_threads') renderWorkflowThreads(j.threads||[]);
     else if (k === 'workflow_interrupts') renderWorkflowInterrupts(j.interrupts||[]);
     else if (k === 'secrets_status') renderSecretsStatus(j.secrets||[]);
+    else if (k === 'provider_health') renderProviderHealth(j.health||{});
     else if (k === 'models') renderModels(j);
     else if (k === 'llm_policy') renderLlmPolicy(j.policy||{});
     else if (k === 'guardrails') renderGuardrails(j);
@@ -929,6 +948,16 @@ function renderSecretsStatus(items){
   if (!items.length){ el.innerHTML = '<div class=\"mut\">No secrets tracked</div>'; return; }
   const rows = items.map(s => `<tr><td>${s.key}</td><td>${s.present?1:0}</td><td>${s.preview||''}</td></tr>`).join('');
   el.innerHTML = `<table><thead><tr><th>Key</th><th>Set</th><th>Tail</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+function renderProviderHealth(h){
+  const el = document.getElementById('provider_health');
+  if (!el) return;
+  const rows = (h.providers||[]).map(p => `<tr><td>${p.provider}</td><td>${p.status}</td><td>${p.configured}/${p.required}</td><td>${p.rotation_due?1:0}</td><td>${p.max_key_age_days===null?'':p.max_key_age_days}</td></tr>`).join('');
+  const rem = (h.remediations||[]).map(r => `<li>${r}</li>`).join('');
+  el.innerHTML =
+    `<div class=\"mut\">overall=${h.overall_status||''}, missing=${h.missing_provider_count||0}, stale=${h.stale_provider_count||0}</div>` +
+    `<table><thead><tr><th>Provider</th><th>Status</th><th>Configured</th><th>Rotate</th><th>Max age(d)</th></tr></thead><tbody>${rows}</tbody></table>` +
+    `<ul>${rem}</ul>`;
 }
 function renderLlmPolicy(j){
   const rows = Object.entries(j||{}).filter(([k,_]) => k !== 'providers' && k !== 'top').map(([k,v])=>`<tr><td>${k}</td><td>${JSON.stringify(v)}</td></tr>`).join('');
@@ -1220,6 +1249,12 @@ async function setSecret(){
   await fetch('/api/secrets', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({[k]: v})});
   document.getElementById('sec_key').value = '';
   document.getElementById('sec_val').value = '';
+  await load();
+}
+async function providerAction(action){
+  if (!action) return;
+  await fetch('/api/provider_health', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action})});
+  await load();
 }
 async function toggleRss(id, enabled){
   await fetch('/api/rss', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'toggle', id, enabled})});
@@ -1790,6 +1825,63 @@ load();
                     except Exception:
                         pass
                     self._json({"updated": updated})
+                    return
+                if parsed.path == "/api/provider_health":
+                    length = int(self.headers.get("Content-Length", "0") or "0")
+                    raw = self.rfile.read(length) if length else b"{}"
+                    try:
+                        payload = json.loads(raw.decode("utf-8"))
+                    except Exception:
+                        payload = {}
+                    action = str(payload.get("action", "")).strip().lower()
+                    updates = {}
+                    try:
+                        if action == "apply_profile_economy":
+                            from modules.model_profiles import ModelProfiles
+                            updates = ModelProfiles().profile_updates("economy")
+                            if updates:
+                                updates["MODEL_ACTIVE_PROFILE"] = "economy"
+                        elif action == "disable_tooling_live":
+                            updates = {"TOOLING_RUN_LIVE_ENABLED": "false"}
+                        elif action == "enable_guardrails_block":
+                            updates = {"GUARDRAILS_BLOCK_ON_INJECTION": "true"}
+                        elif action == "set_notify_minimal":
+                            updates = {"NOTIFY_MODE": "minimal"}
+                    except Exception:
+                        updates = {}
+                    applied = {}
+                    if updates:
+                        try:
+                            import os
+                            for k, v in updates.items():
+                                os.environ[k] = str(v)
+                                if hasattr(settings, k):
+                                    setattr(settings, k, str(v))
+                                applied[k] = str(v)
+                        except Exception:
+                            pass
+                        try:
+                            from pathlib import Path
+                            import re
+                            env_path = Path("/home/vito/vito-agent/.env")
+                            text = env_path.read_text() if env_path.exists() else ""
+                            for k, v in applied.items():
+                                if re.search(rf"^{k}=.*$", text, flags=re.M):
+                                    text = re.sub(rf"^{k}=.*$", f"{k}={v}", text, flags=re.M)
+                                else:
+                                    if text and not text.endswith("\n"):
+                                        text += "\n"
+                                    text += f"{k}={v}\n"
+                            env_path.write_text(text)
+                        except Exception:
+                            pass
+                    try:
+                        if applied:
+                            from modules.data_lake import DataLake
+                            DataLake().record_decision(actor="dashboard", decision="provider_health_action", rationale=f"{action}:{','.join(sorted(applied.keys()))}"[:1000])
+                    except Exception:
+                        pass
+                    self._json({"ok": bool(applied), "action": action, "updated": applied})
                     return
                 if parsed.path == "/api/rss":
                     length = int(self.headers.get("Content-Length", "0") or "0")
