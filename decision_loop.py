@@ -25,6 +25,7 @@ from llm_router import LLMRouter, TaskType
 from memory.memory_manager import MemoryManager
 from modules.operator_policy import OperatorPolicy
 from modules.self_learning import SelfLearningEngine
+from modules.self_learning_test_runner import SelfLearningTestRunner
 from modules.llm_evals import LLMEvals
 from modules.workflow_state_machine import WorkflowStateMachine
 from modules.workflow_threads import WorkflowThreads
@@ -65,6 +66,7 @@ class DecisionLoop:
         self._last_llm_alert_at_tick = 0
         self._last_memory_retention_tick = 0
         self._last_self_learning_opt_tick = 0
+        self._last_self_learning_test_tick = 0
         logger.info("DecisionLoop инициализирован", extra={"event": "init"})
 
     def set_self_healer(self, self_healer) -> None:
@@ -136,6 +138,7 @@ class DecisionLoop:
         await self._maybe_send_llm_risk_alert()
         await self._maybe_run_memory_retention()
         await self._maybe_run_self_learning_optimization()
+        await self._maybe_run_self_learning_test_jobs()
 
         # 2. Выбор следующей цели
         try:
@@ -341,6 +344,26 @@ class DecisionLoop:
                 extra={"event": "self_learning_optimize", "context": {"result": result}},
             )
             self._last_self_learning_opt_tick = self._tick_count
+        except Exception:
+            pass
+
+    async def _maybe_run_self_learning_test_jobs(self) -> None:
+        try:
+            if not settings.SELF_LEARNING_ENABLED or not settings.SELF_LEARNING_TEST_RUNNER_ENABLED:
+                return
+            interval = max(24, int(getattr(settings, "SELF_LEARNING_TEST_RUNNER_INTERVAL_TICKS", 96) or 96))
+            if self._tick_count - int(self._last_self_learning_test_tick or 0) < interval:
+                return
+            runner = SelfLearningTestRunner(sqlite_path=settings.SQLITE_PATH)
+            out = runner.run_open_jobs(
+                max_jobs=int(getattr(settings, "SELF_LEARNING_TEST_RUNNER_MAX_JOBS", 2) or 2),
+                timeout_sec=int(getattr(settings, "SELF_LEARNING_TEST_RUNNER_TIMEOUT_SEC", 120) or 120),
+            )
+            logger.info(
+                f"Self-learning test runner: processed={out.get('processed', 0)} passed={out.get('passed', 0)} failed={out.get('failed', 0)}",
+                extra={"event": "self_learning_test_runner", "context": {"result": out}},
+            )
+            self._last_self_learning_test_tick = self._tick_count
         except Exception:
             pass
 

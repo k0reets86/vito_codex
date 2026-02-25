@@ -180,3 +180,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added provider health panel with key-rotation reminders and safe remediation actions (economy profile, strict guardrails, disable tooling live, minimal notify).
 - Added self-learning optimizer loop: candidate confidence recalibration (lesson/pass-rate weighted), readiness states, and safe auto-promotion to accepted skills via SkillRegistry quality gates.
 - Added explicit self-learning test-jobs (open/passed/failed), dashboard controls, and task-family calibration metrics for confidence scoring.
+- Added automated self-learning test runner (executes mapped pytest suites for open jobs), updates job status, and feeds results back into skill `tests_coverage`/`risk_score`.

@@ -652,6 +652,7 @@ class DashboardServer:
           <button onclick=\"optimizeSelfLearning()\">Optimize</button>
           <button onclick=\"autoPromoteSelfLearning()\">Auto Promote Ready</button>
           <button onclick=\"generateSelfLearningTestJobs()\">Generate Test Jobs</button>
+          <button onclick=\"runSelfLearningTestJobs()\">Run Open Test Jobs</button>
         </div>
         <div style=\"margin-top:6px\">
           <input id=\"sl_job_id\" placeholder=\"job_id\" style=\"width:20%\"/>
@@ -1191,6 +1192,10 @@ async function generateSelfLearningTestJobs(){
   await fetch('/api/self_learning', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'generate_test_jobs', limit:20})});
   await load();
 }
+async function runSelfLearningTestJobs(){
+  await fetch('/api/self_learning', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'run_test_jobs'})});
+  await load();
+}
 async function completeSelfLearningTestJob(passed){
   const job_id = parseInt((document.getElementById('sl_job_id').value||'0').trim(), 10);
   if (!job_id) return;
@@ -1374,6 +1379,10 @@ load();
                         "SELF_LEARNING_AUTO_PROMOTE",
                         "SELF_LEARNING_MIN_LESSONS",
                         "SELF_LEARNING_OPTIMIZE_INTERVAL_TICKS",
+                        "SELF_LEARNING_TEST_RUNNER_ENABLED",
+                        "SELF_LEARNING_TEST_RUNNER_INTERVAL_TICKS",
+                        "SELF_LEARNING_TEST_RUNNER_MAX_JOBS",
+                        "SELF_LEARNING_TEST_RUNNER_TIMEOUT_SEC",
                         "GUARDRAILS_ENABLED",
                         "GUARDRAILS_BLOCK_ON_INJECTION",
                         "LLM_ALERTS_ENABLED",
@@ -1387,8 +1396,8 @@ load();
                         "TOOLING_BLOCK_WITH_PENDING_ROTATION",
                     }
                     updated = {}
-                    bool_keys = {"PROACTIVE_ENABLED", "BRAINSTORM_WEEKLY", "OWNER_INBOX_ENABLED", "CALENDAR_UPDATE_LLM", "SELF_LEARNING_ENABLED", "SELF_LEARNING_AUTO_PROMOTE", "GUARDRAILS_ENABLED", "GUARDRAILS_BLOCK_ON_INJECTION", "LLM_ALERTS_ENABLED", "TOOLING_RUN_LIVE_ENABLED", "TOOLING_BLOCK_WITH_PENDING_ROTATION", "TOOLING_REQUIRE_PRODUCTION_APPROVAL", "TOOLING_REQUIRE_ROLLBACK_APPROVAL"}
-                    num_keys = {"DAILY_LIMIT_USD", "OPERATION_NOTIFY_USD", "OPERATION_APPROVE_USD", "OPERATION_MAX_USD", "SELF_LEARNING_SKILL_SCORE_MIN", "SELF_LEARNING_MIN_LESSONS", "SELF_LEARNING_OPTIMIZE_INTERVAL_TICKS", "TOOLING_HTTP_TIMEOUT_SEC", "TOOLING_MCP_TIMEOUT_SEC", "TOOLING_MCP_MAX_OUTPUT_BYTES"}
+                    bool_keys = {"PROACTIVE_ENABLED", "BRAINSTORM_WEEKLY", "OWNER_INBOX_ENABLED", "CALENDAR_UPDATE_LLM", "SELF_LEARNING_ENABLED", "SELF_LEARNING_AUTO_PROMOTE", "SELF_LEARNING_TEST_RUNNER_ENABLED", "GUARDRAILS_ENABLED", "GUARDRAILS_BLOCK_ON_INJECTION", "LLM_ALERTS_ENABLED", "TOOLING_RUN_LIVE_ENABLED", "TOOLING_BLOCK_WITH_PENDING_ROTATION", "TOOLING_REQUIRE_PRODUCTION_APPROVAL", "TOOLING_REQUIRE_ROLLBACK_APPROVAL"}
+                    num_keys = {"DAILY_LIMIT_USD", "OPERATION_NOTIFY_USD", "OPERATION_APPROVE_USD", "OPERATION_MAX_USD", "SELF_LEARNING_SKILL_SCORE_MIN", "SELF_LEARNING_MIN_LESSONS", "SELF_LEARNING_OPTIMIZE_INTERVAL_TICKS", "SELF_LEARNING_TEST_RUNNER_INTERVAL_TICKS", "SELF_LEARNING_TEST_RUNNER_MAX_JOBS", "SELF_LEARNING_TEST_RUNNER_TIMEOUT_SEC", "TOOLING_HTTP_TIMEOUT_SEC", "TOOLING_MCP_TIMEOUT_SEC", "TOOLING_MCP_MAX_OUTPUT_BYTES"}
                     for k,v in payload.items():
                         if k in allowed:
                             if k in bool_keys:
@@ -1637,6 +1646,13 @@ load();
                             ok = True
                         elif action == "generate_test_jobs":
                             result = sl.generate_test_jobs(limit=int(payload.get("limit", 20) or 20))
+                            ok = bool(result.get("ok"))
+                        elif action == "run_test_jobs":
+                            from modules.self_learning_test_runner import SelfLearningTestRunner
+                            result = SelfLearningTestRunner(sqlite_path=settings.SQLITE_PATH).run_open_jobs(
+                                max_jobs=int(payload.get("max_jobs", settings.SELF_LEARNING_TEST_RUNNER_MAX_JOBS) or settings.SELF_LEARNING_TEST_RUNNER_MAX_JOBS),
+                                timeout_sec=int(payload.get("timeout_sec", settings.SELF_LEARNING_TEST_RUNNER_TIMEOUT_SEC) or settings.SELF_LEARNING_TEST_RUNNER_TIMEOUT_SEC),
+                            )
                             ok = bool(result.get("ok"))
                         elif action == "complete_test_job":
                             done = sl.complete_test_job(

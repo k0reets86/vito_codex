@@ -28,6 +28,7 @@
   - Added provider health report (missing/stale keys + rotation reminders) and safe one-click remediation actions in dashboard.
   - Added self-learning optimization pipeline (candidate scoring, readiness recommendation, safe auto-promotion gates, promotion events).
   - Added self-learning test-job pipeline and task-family calibration (family-aware confidence + explicit open/passed/failed test jobs).
+  - Added automated self-learning test-job runner with periodic DecisionLoop execution and feedback into skill coverage/risk.
 - Current blockers:
   - Social network integrations (Threads/YouTube/TikTok/etc.) are paused until accounts are ready.
 - Important commands:
@@ -45,6 +46,6 @@
   - Extend durable orchestration: attach interrupt context to agent-handoff chain and auto-resume policies.
   - Memory/skills pipeline: add owner-facing weekly retention report and per-skill memory quality linkage.
   - Operator UI: add per-provider connectivity probes and remediation playbooks with approval gates.
-  - Self-learning: integrate real automated test execution workers for self-learning jobs and feedback loop into confidence model.
+  - Self-learning: tune family-specific test maps and add flaky-test handling policy before auto-promotion.
   - Security/cost/observability: weekly governance report aggregation + automated remediation suggestions.
   - Tooling standards: add signature key lifecycle hardening (rotation cadence checks + expiry alerts).

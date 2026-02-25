@@ -130,6 +130,10 @@ class Settings:
     SELF_LEARNING_AUTO_PROMOTE: bool = os.getenv("SELF_LEARNING_AUTO_PROMOTE", "false").lower() in ("1", "true", "yes", "on")
     SELF_LEARNING_MIN_LESSONS: int = int(os.getenv("SELF_LEARNING_MIN_LESSONS", "3") or 3)
     SELF_LEARNING_OPTIMIZE_INTERVAL_TICKS: int = int(os.getenv("SELF_LEARNING_OPTIMIZE_INTERVAL_TICKS", "72") or 72)
+    SELF_LEARNING_TEST_RUNNER_ENABLED: bool = os.getenv("SELF_LEARNING_TEST_RUNNER_ENABLED", "false").lower() in ("1", "true", "yes", "on")
+    SELF_LEARNING_TEST_RUNNER_INTERVAL_TICKS: int = int(os.getenv("SELF_LEARNING_TEST_RUNNER_INTERVAL_TICKS", "96") or 96)
+    SELF_LEARNING_TEST_RUNNER_MAX_JOBS: int = int(os.getenv("SELF_LEARNING_TEST_RUNNER_MAX_JOBS", "2") or 2)
+    SELF_LEARNING_TEST_RUNNER_TIMEOUT_SEC: int = int(os.getenv("SELF_LEARNING_TEST_RUNNER_TIMEOUT_SEC", "120") or 120)
 
     # Owner preference auto-detect (off by default)
     OWNER_PREF_AUTO_DETECT: bool = os.getenv("OWNER_PREF_AUTO_DETECT", "false").lower() in ("1", "true", "yes", "on")
