@@ -15,12 +15,35 @@ class CapabilityPackRunner:
         pack_dir = self.root / name
         adapter = pack_dir / "adapter.py"
         if not adapter.exists():
-            return {"status": "error", "error": "adapter_not_found"}
+            result = {"status": "error", "error": "adapter_not_found"}
+            _record_pack_event(name, result)
+            return result
         spec = importlib.util.spec_from_file_location(f"cap_pack_{name}", adapter)
         if not spec or not spec.loader:
-            return {"status": "error", "error": "load_failed"}
+            result = {"status": "error", "error": "load_failed"}
+            _record_pack_event(name, result)
+            return result
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         if not hasattr(module, "run"):
-            return {"status": "error", "error": "run_not_defined"}
-        return module.run(input_data or {})
+            result = {"status": "error", "error": "run_not_defined"}
+            _record_pack_event(name, result)
+            return result
+        result = module.run(input_data or {})
+        _record_pack_event(name, result)
+        return result
+
+
+def _record_pack_event(name: str, result: dict[str, Any]) -> None:
+    try:
+        from modules.data_lake import DataLake
+        status = "success" if result.get("status") == "ok" else "failed"
+        DataLake().record(
+            agent="capability_pack",
+            task_type=f"cap_pack:{name}",
+            status=status,
+            output=result,
+            source="capability_pack",
+        )
+    except Exception:
+        pass

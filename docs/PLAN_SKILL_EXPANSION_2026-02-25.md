@@ -123,3 +123,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added capability pack fallback execution in AgentRegistry.
 - Added test for capability pack fallback dispatch.
 - Updated skill acceptance spec to include capability packs.
+- Added DataLake events for capability pack runs.
