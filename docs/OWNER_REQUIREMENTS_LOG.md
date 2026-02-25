@@ -982,3 +982,4 @@ Append all new owner requests here as they arrive.
 - [2026-02-25T10:55:30.595913+00:00] (codex_chat) Continue plan phases: durable orchestration → memory/skills → operator UI → self-learning → safety/observability → tooling standards.
 - [2026-02-25T10:55:30.595913+00:00] (codex_chat) Update OWNER_REQUIREMENTS_LOG with user requests going forward.
 - [2026-02-25T10:57:16.914045+00:00] (codex_chat) Added workflow events visibility in dashboard (durable orchestration transparency).
+- [2026-02-25T10:58:39.884350+00:00] (codex_chat) Expanded owner preference auto-detect heuristics and metrics.

@@ -172,6 +172,42 @@ class CommsAgent:
                 confidence_delta=0.1,
                 notes="auto_detect",
             )
+        if "пиши подробно" in lower or "подробно" == lower:
+            OwnerPreferenceModel().record_signal(
+                key="style.verbosity",
+                value="verbose",
+                signal_type="observation",
+                source="owner",
+                confidence_delta=0.1,
+                notes="auto_detect",
+            )
+        if "на английском" in lower or "по-английски" in lower or "english only" in lower:
+            OwnerPreferenceModel().record_signal(
+                key="content.language",
+                value="en",
+                signal_type="observation",
+                source="owner",
+                confidence_delta=0.08,
+                notes="auto_detect",
+            )
+        if "на русском" in lower or "по-русски" in lower:
+            OwnerPreferenceModel().record_signal(
+                key="content.language",
+                value="ru",
+                signal_type="observation",
+                source="owner",
+                confidence_delta=0.08,
+                notes="auto_detect",
+            )
+        if "сначала тесты" in lower or "после тестов" in lower:
+            OwnerPreferenceModel().record_signal(
+                key="workflow.tests_first",
+                value=True,
+                signal_type="observation",
+                source="owner",
+                confidence_delta=0.08,
+                notes="auto_detect",
+            )
 
     def _main_keyboard(self) -> ReplyKeyboardMarkup:
         """Persistent-клавиатура с основными командами."""

@@ -148,3 +148,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added deactivation count to owner preference metrics.
 - Added durable step-level pause for pending approvals (DecisionLoop waits without failing).
 - Added workflow events endpoint + dashboard panel for durable workflow visibility.
+- Expanded owner preference auto-detect heuristics and metrics (auto_detect/explicit).
