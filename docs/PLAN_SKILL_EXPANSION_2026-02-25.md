@@ -175,3 +175,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Extended strict step contracts to DecisionLoop step-result envelopes and AgentRegistry dispatch outputs (agents + tooling + capability-pack fallbacks).
 - Added workflow interrupt ledger (`workflow_interrupts`) with pending/resolved/cancelled lifecycle and dashboard endpoint for durable approval pauses.
 - Added memory retention classes (TTL tiers), `expires_at` metadata, and memory quality summary metrics (`quality_score`, save ratio, forget reasons) in dashboard/API.
+- Added operator model profiles (balanced/economy/quality + custom save/apply/delete) and dashboard secrets status panel for provider key visibility.

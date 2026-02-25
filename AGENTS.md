@@ -23,6 +23,7 @@
   - Extended step-result contracts across DecisionLoop retry pipeline and AgentRegistry dispatch (including tooling/capability fallbacks).
   - Added durable workflow interrupt registry (pending/resolved/cancelled) and dashboard visibility for approval pauses/resume traces.
   - Upgraded memory policy with retention classes, TTL metadata (`expires_at`), and quality scoring summary in dashboard.
+  - Added model profile workflows (save/apply/delete presets) and secrets status visibility in dashboard for safer provider operations.
 - Current blockers:
   - Social network integrations (Threads/YouTube/TikTok/etc.) are paused until accounts are ready.
 - Important commands:
@@ -39,7 +40,7 @@
 - Next steps:
   - Extend durable orchestration: attach interrupt context to agent-handoff chain and auto-resume policies.
   - Memory/skills pipeline: add automatic expiration cleanup and retention drift alerts.
-  - Operator UI: model-profile workflows and safer secret/provider management UX.
+  - Operator UI: secret rotation reminders + provider health checks with safe remediation actions.
   - Self-learning: DSPy-like optimization and safe auto-promotion pipeline from candidates to accepted skills.
   - Security/cost/observability: weekly governance report aggregation + automated remediation suggestions.
   - Tooling standards: add signature key lifecycle hardening (rotation cadence checks + expiry alerts).

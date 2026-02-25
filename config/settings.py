@@ -96,6 +96,7 @@ class Settings:
     LLM_CACHE_TTL_HOURS: int = int(os.getenv("LLM_CACHE_TTL_HOURS", "24"))
     LLM_DISABLED_MODELS: str = os.getenv("LLM_DISABLED_MODELS", "")
     LLM_ENABLED_MODELS: str = os.getenv("LLM_ENABLED_MODELS", "")
+    MODEL_ACTIVE_PROFILE: str = os.getenv("MODEL_ACTIVE_PROFILE", "balanced")
 
     # Notifications
     NOTIFY_MODE: str = os.getenv("NOTIFY_MODE", "minimal")  # minimal|all

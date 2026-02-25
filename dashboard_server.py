@@ -297,10 +297,41 @@ class DashboardServer:
                 if parsed.path == "/api/models":
                     disabled = getattr(settings, "LLM_DISABLED_MODELS", "")
                     enabled = getattr(settings, "LLM_ENABLED_MODELS", "")
+                    active_profile = getattr(settings, "MODEL_ACTIVE_PROFILE", "balanced")
+                    try:
+                        from modules.model_profiles import ModelProfiles
+                        profiles = ModelProfiles().list_profiles(limit=100)
+                    except Exception:
+                        profiles = []
                     self._json({
                         "disabled": disabled,
                         "enabled": enabled,
+                        "default": getattr(settings, "OPENROUTER_DEFAULT_MODEL", ""),
+                        "active_profile": active_profile,
+                        "profiles": profiles,
                     })
+                    return
+                if parsed.path == "/api/secrets_status":
+                    keys = [
+                        "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY",
+                        "PERPLEXITY_API_KEY", "OPENROUTER_API_KEY",
+                        "TELEGRAM_BOT_TOKEN", "TELEGRAM_OWNER_CHAT_ID",
+                        "GUMROAD_API_KEY", "GUMROAD_OAUTH_TOKEN", "GUMROAD_APP_ID", "GUMROAD_APP_SECRET",
+                        "ETSY_KEYSTRING", "ETSY_SHARED_SECRET", "KOFI_API_KEY", "KOFI_PAGE_ID",
+                        "REPLICATE_API_TOKEN", "ANTICAPTCHA_KEY",
+                        "TWITTER_BEARER_TOKEN", "TWITTER_CONSUMER_KEY", "TWITTER_CONSUMER_SECRET",
+                        "TWITTER_ACCESS_TOKEN", "TWITTER_ACCESS_SECRET",
+                        "THREADS_ACCESS_TOKEN", "THREADS_USER_ID", "TIKTOK_ACCESS_TOKEN",
+                    ]
+                    statuses = []
+                    for key in keys:
+                        raw = str(getattr(settings, key, "") or "")
+                        statuses.append({
+                            "key": key,
+                            "present": bool(raw.strip()),
+                            "preview": (raw[-4:] if raw.strip() else ""),
+                        })
+                    self._json({"secrets": statuses})
                     return
                 if parsed.path == "/api/llm_policy":
                     try:
@@ -535,6 +566,12 @@ class DashboardServer:
         <div style=\"margin-top:6px\">\n
           <input id=\"mdl_disabled\" placeholder=\"LLM_DISABLED_MODELS (csv)\" style=\"width:80%\"/>
         </div>
+        <div style=\"margin-top:6px\">\n
+          <input id=\"mdl_profile\" placeholder=\"profile name\" style=\"width:28%\"/>
+          <button onclick=\"applyModelProfile()\">Apply Profile</button>
+          <button onclick=\"saveModelProfile()\">Save Profile</button>
+          <button onclick=\"deleteModelProfile()\">Delete Profile</button>
+        </div>
       </div>
       <div class=\"card\"><div class=\"mut\">Execution Facts</div><div id=\"facts\"></div></div>
       <div class=\"card\"><div class=\"mut\">Pending Approvals</div><div id=\"approvals\"></div></div>
@@ -640,6 +677,7 @@ class DashboardServer:
       <div class=\"card\"><div class=\"mut\">Workflow Interrupts</div><div id=\"workflow_interrupts\"></div></div>
       <div class=\"card\"><div class=\"mut\">Secrets</div>
         <div class=\"mut\" style=\"font-size:12px\">Keys are write‑only here.</div>
+        <div id=\"secrets_status\" style=\"margin-top:6px\"></div>
         <div style=\"margin-top:8px\">\n
           <input id=\"sec_key\" placeholder=\"KEY\" style=\"width:45%\"/>
           <input id=\"sec_val\" placeholder=\"VALUE\" style=\"width:45%\"/>
@@ -660,7 +698,7 @@ async function load(){
   const endpoints = {
     status:'/api/status', network:'/api/network', agents:'/api/agents', finance:'/api/finance',
     goals:'/api/goals', schedules:'/api/schedules', config:'/api/config',
-    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', guardrails:'/api/guardrails', llm_evals:'/api/llm_evals', tooling_registry:'/api/tooling_registry', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs', skills:'/api/skills', operator_policy:'/api/operator_policy', self_learning:'/api/self_learning', memory_policy:'/api/memory_policy?limit=80', workflow_threads:'/api/workflow_threads', workflow_interrupts:'/api/workflow_interrupts',
+    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', guardrails:'/api/guardrails', llm_evals:'/api/llm_evals', tooling_registry:'/api/tooling_registry', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs', skills:'/api/skills', operator_policy:'/api/operator_policy', self_learning:'/api/self_learning', memory_policy:'/api/memory_policy?limit=80', workflow_threads:'/api/workflow_threads', workflow_interrupts:'/api/workflow_interrupts', secrets_status:'/api/secrets_status',
     facts:'/api/execution_facts', approvals:'/api/approvals', events:'/api/events', decisions:'/api/decisions', budget:'/api/budget', workflow_events:'/api/workflow_events'
   };
   for (const [k,url] of Object.entries(endpoints)){
@@ -692,6 +730,7 @@ async function load(){
     else if (k === 'memory_policy') renderMemoryPolicy(j.audit||[], j.summary||{});
     else if (k === 'workflow_threads') renderWorkflowThreads(j.threads||[]);
     else if (k === 'workflow_interrupts') renderWorkflowInterrupts(j.interrupts||[]);
+    else if (k === 'secrets_status') renderSecretsStatus(j.secrets||[]);
     else if (k === 'models') renderModels(j);
     else if (k === 'llm_policy') renderLlmPolicy(j.policy||{});
     else if (k === 'guardrails') renderGuardrails(j);
@@ -859,8 +898,20 @@ function renderFinance(j){
   document.getElementById('finance').innerHTML = `<table><thead><tr><th>Key</th><th>Value</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 function renderModels(j){
-  const rows = Object.entries(j||{}).map(([k,v])=>`<tr><td>${k}</td><td>${JSON.stringify(v)}</td></tr>`).join('');
-  document.getElementById('models').innerHTML = `<table><thead><tr><th>Key</th><th>Value</th></tr></thead><tbody>${rows}</tbody></table>`;
+  const rows = Object.entries(j||{}).filter(([k,_]) => k !== 'profiles').map(([k,v])=>`<tr><td>${k}</td><td>${JSON.stringify(v)}</td></tr>`).join('');
+  const profiles = (j && j.profiles) ? j.profiles : [];
+  const prows = profiles.map(p => `<tr><td>${p.profile_name}</td><td>${p.default_model||''}</td><td>${p.enabled_models||''}</td><td>${p.disabled_models||''}</td><td>${p.notes||''}</td></tr>`).join('');
+  document.getElementById('models').innerHTML =
+    `<table><thead><tr><th>Key</th><th>Value</th></tr></thead><tbody>${rows}</tbody></table>` +
+    `<div class=\"mut\" style=\"margin-top:8px\">Profiles</div>` +
+    `<table><thead><tr><th>Name</th><th>Default</th><th>Enabled</th><th>Disabled</th><th>Notes</th></tr></thead><tbody>${prows}</tbody></table>`;
+}
+function renderSecretsStatus(items){
+  const el = document.getElementById('secrets_status');
+  if (!el) return;
+  if (!items.length){ el.innerHTML = '<div class=\"mut\">No secrets tracked</div>'; return; }
+  const rows = items.map(s => `<tr><td>${s.key}</td><td>${s.present?1:0}</td><td>${s.preview||''}</td></tr>`).join('');
+  el.innerHTML = `<table><thead><tr><th>Key</th><th>Set</th><th>Tail</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 function renderLlmPolicy(j){
   const rows = Object.entries(j||{}).filter(([k,_]) => k !== 'providers' && k !== 'top').map(([k,v])=>`<tr><td>${k}</td><td>${JSON.stringify(v)}</td></tr>`).join('');
@@ -981,6 +1032,33 @@ async function setModelPolicy(){
   payload.LLM_ENABLED_MODELS = LLM_ENABLED_MODELS;
   payload.LLM_DISABLED_MODELS = LLM_DISABLED_MODELS;
   await fetch('/api/models', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+  await load();
+}
+async function applyModelProfile(){
+  const profile_name = document.getElementById('mdl_profile').value.trim();
+  if (!profile_name) return;
+  await fetch('/api/models', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'apply_profile', profile_name})});
+  await load();
+}
+async function saveModelProfile(){
+  const profile_name = document.getElementById('mdl_profile').value.trim();
+  const OPENROUTER_DEFAULT_MODEL = document.getElementById('mdl_default').value.trim();
+  const LLM_ENABLED_MODELS = document.getElementById('mdl_enabled').value.trim();
+  const LLM_DISABLED_MODELS = document.getElementById('mdl_disabled').value.trim();
+  if (!profile_name) return;
+  await fetch('/api/models', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+    action:'save_profile',
+    profile_name,
+    OPENROUTER_DEFAULT_MODEL,
+    LLM_ENABLED_MODELS,
+    LLM_DISABLED_MODELS,
+  })});
+  await load();
+}
+async function deleteModelProfile(){
+  const profile_name = document.getElementById('mdl_profile').value.trim();
+  if (!profile_name) return;
+  await fetch('/api/models', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'delete_profile', profile_name})});
   await load();
 }
 async function addRss(){
@@ -1251,18 +1329,58 @@ load();
                         payload = json.loads(raw.decode("utf-8"))
                     except Exception:
                         payload = {}
-                    allowed = {"OPENROUTER_DEFAULT_MODEL", "LLM_ENABLED_MODELS", "LLM_DISABLED_MODELS"}
+                    action = str(payload.get("action", "")).strip().lower()
+                    allowed = {"OPENROUTER_DEFAULT_MODEL", "LLM_ENABLED_MODELS", "LLM_DISABLED_MODELS", "MODEL_ACTIVE_PROFILE"}
                     updated = {}
+                    model_chars_ok = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._/:,")
+                    def _clean_csv_models(value: str) -> str:
+                        cleaned = []
+                        for part in str(value or "").split(","):
+                            token = part.strip()
+                            if not token:
+                                continue
+                            if all(c in model_chars_ok for c in token):
+                                cleaned.append(token)
+                        return ",".join(cleaned)
+                    if action in {"apply_profile", "save_profile", "delete_profile"}:
+                        try:
+                            from modules.model_profiles import ModelProfiles
+                            prof = ModelProfiles()
+                            profile_name = str(payload.get("profile_name", "")).strip().lower()
+                            if action == "apply_profile":
+                                updates = prof.profile_updates(profile_name)
+                                if updates:
+                                    updates["MODEL_ACTIVE_PROFILE"] = profile_name
+                                    payload = updates
+                            elif action == "save_profile":
+                                prof.save_profile(
+                                    profile_name=profile_name,
+                                    default_model=str(payload.get("OPENROUTER_DEFAULT_MODEL", "")).strip(),
+                                    enabled_models=_clean_csv_models(payload.get("LLM_ENABLED_MODELS", "")),
+                                    disabled_models=_clean_csv_models(payload.get("LLM_DISABLED_MODELS", "")),
+                                    notes=str(payload.get("notes", "dashboard profile")).strip(),
+                                )
+                            elif action == "delete_profile":
+                                prof.delete_profile(profile_name)
+                        except Exception:
+                            pass
                     for k, v in payload.items():
-                        if k in allowed:
-                            updated[k] = str(v)
-                            try:
-                                import os
-                                os.environ[k] = str(v)
-                                if hasattr(settings, k):
-                                    setattr(settings, k, str(v))
-                            except Exception:
-                                pass
+                        if k not in allowed:
+                            continue
+                        val = str(v or "").strip()
+                        if k == "OPENROUTER_DEFAULT_MODEL":
+                            if not val or not all(c in model_chars_ok for c in val):
+                                continue
+                        if k in {"LLM_ENABLED_MODELS", "LLM_DISABLED_MODELS"}:
+                            val = _clean_csv_models(val)
+                        updated[k] = val
+                        try:
+                            import os
+                            os.environ[k] = val
+                            if hasattr(settings, k):
+                                setattr(settings, k, val)
+                        except Exception:
+                            pass
                     try:
                         from pathlib import Path
                         import re
