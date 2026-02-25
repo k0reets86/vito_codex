@@ -9,6 +9,7 @@
   - Added gated self-learning reflection loop with lesson scoring and pending skill-candidate generation.
   - Added dashboard model policy controls (`/api/models`) for default model and allow/deny lists.
   - Added LLM guardrails (prompt-injection detection + optional block mode) with dashboard observability.
+  - Added LLM eval/anomaly monitor with score, fail-rate, blocked-events and cost-anomaly signals.
 - Current blockers:
   - Social network integrations (Threads/YouTube/TikTok/etc.) are paused until accounts are ready.
 - Important commands:
@@ -27,5 +28,5 @@
   - Memory/skills pipeline: retention tuning (TTL classes), memory quality scoring, and policy dashboards.
   - Operator UI: model-profile workflows and safer secret/provider management UX.
   - Self-learning: DSPy-like optimization and safe auto-promotion pipeline from candidates to accepted skills.
-  - Security/cost/observability: finish eval pipelines and cost anomaly alerts.
+  - Security/cost/observability: route anomaly alerts to owner notifications and weekly governance report.
   - Tooling standards: MCP/OpenAPI integration.

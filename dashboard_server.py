@@ -306,6 +306,16 @@ class DashboardServer:
                         summary, events = {}, []
                     self._json({"summary": summary, "events": events})
                     return
+                if parsed.path == "/api/llm_evals":
+                    try:
+                        from modules.llm_evals import LLMEvals
+                        ev = LLMEvals()
+                        current = ev.compute()
+                        runs = ev.recent_runs(limit=20)
+                    except Exception:
+                        current, runs = {}, []
+                    self._json({"current": current, "runs": runs})
+                    return
                 if parsed.path == "/api/events":
                     try:
                         from modules.data_lake import DataLake
@@ -555,7 +565,7 @@ async function load(){
   const endpoints = {
     status:'/api/status', network:'/api/network', agents:'/api/agents', finance:'/api/finance',
     goals:'/api/goals', schedules:'/api/schedules', config:'/api/config',
-    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', guardrails:'/api/guardrails', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs', skills:'/api/skills', operator_policy:'/api/operator_policy', self_learning:'/api/self_learning', memory_policy:'/api/memory_policy?limit=80', workflow_threads:'/api/workflow_threads',
+    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', guardrails:'/api/guardrails', llm_evals:'/api/llm_evals', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs', skills:'/api/skills', operator_policy:'/api/operator_policy', self_learning:'/api/self_learning', memory_policy:'/api/memory_policy?limit=80', workflow_threads:'/api/workflow_threads',
     facts:'/api/execution_facts', approvals:'/api/approvals', events:'/api/events', decisions:'/api/decisions', budget:'/api/budget', workflow_events:'/api/workflow_events'
   };
   for (const [k,url] of Object.entries(endpoints)){
@@ -589,6 +599,7 @@ async function load(){
     else if (k === 'models') renderModels(j);
     else if (k === 'llm_policy') renderLlmPolicy(j.policy||{});
     else if (k === 'guardrails') renderGuardrails(j);
+    else if (k === 'llm_evals') renderLlmEvals(j);
   }
 }
 function renderPrefs(prefs){
@@ -703,6 +714,16 @@ function renderGuardrails(j){
     `<div class=\"mut\" style=\"margin-top:8px\">Guardrails</div>` +
     `<table><thead><tr><th>Key</th><th>Value</th></tr></thead><tbody>${rows}</tbody></table>` +
     `<table><thead><tr><th>Time</th><th>Task</th><th>Reason</th><th>Blocked</th></tr></thead><tbody>${erows}</tbody></table>`;
+}
+function renderLlmEvals(j){
+  const current = (j && j.current) ? j.current : {};
+  const runs = (j && j.runs) ? j.runs : [];
+  const rows = Object.entries(current).map(([k,v])=>`<tr><td>${k}</td><td>${JSON.stringify(v)}</td></tr>`).join('');
+  const hrows = runs.slice(0,8).map(r=>`<tr><td>${r.created_at||''}</td><td>${r.score}</td><td>${r.fail_rate}</td><td>${r.daily_cost}</td><td>${r.anomaly?1:0}</td></tr>`).join('');
+  document.getElementById('models').innerHTML +=
+    `<div class=\"mut\" style=\"margin-top:8px\">LLM Evals</div>` +
+    `<table><thead><tr><th>Key</th><th>Value</th></tr></thead><tbody>${rows}</tbody></table>` +
+    `<table><thead><tr><th>Time</th><th>Score</th><th>Fail</th><th>Cost</th><th>Anomaly</th></tr></thead><tbody>${hrows}</tbody></table>`;
 }
 function renderConfig(j){
   const rows = Object.entries(j||{}).map(([k,v])=>`<tr><td>${k}</td><td>${JSON.stringify(v)}</td></tr>`).join('');

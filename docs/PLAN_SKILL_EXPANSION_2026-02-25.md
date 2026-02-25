@@ -161,3 +161,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added self-learning reflection pipeline (lessons + reusable skill candidates) with optional DecisionLoop integration and dashboard visibility.
 - Added dashboard model controls API (POST /api/models) for default model and allow/deny lists.
 - Added LLM guardrails module (prompt-injection detection, audit events, optional block mode) and integrated it into LLMRouter call flow.
+- Added LLM eval/anomaly module with score, fail-rate, guardrail blocks, and cost anomaly detection; exposed via dashboard /api/llm_evals.
