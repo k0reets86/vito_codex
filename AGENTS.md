@@ -12,6 +12,7 @@
   - Added LLM eval/anomaly monitor with score, fail-rate, blocked-events and cost-anomaly signals.
   - Added tooling standard layer: MCP/OpenAPI registry with schema validation and dashboard controls.
   - Added runtime owner alerts for LLM risk anomalies/high fail-rate from DecisionLoop.
+  - Added safe tooling runtime path (`tooling:<adapter_key>`) with dry-run default and operator policy gates.
 - Current blockers:
   - Social network integrations (Threads/YouTube/TikTok/etc.) are paused until accounts are ready.
 - Important commands:
@@ -31,4 +32,4 @@
   - Operator UI: model-profile workflows and safer secret/provider management UX.
   - Self-learning: DSPy-like optimization and safe auto-promotion pipeline from candidates to accepted skills.
   - Security/cost/observability: weekly governance report aggregation + automated remediation suggestions.
-  - Tooling standards: wire tooling registry into runtime adapter execution (safe sandboxed runner).
+  - Tooling standards: extend tooling runtime from dry-run/prepared to controlled live execution with adapter-specific handlers.

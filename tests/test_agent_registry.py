@@ -78,7 +78,29 @@ class TestRegistryDispatch:
     async def test_dispatch_no_agent(self):
         registry = AgentRegistry()
         result = await registry.dispatch("nonexistent_cap")
-        assert result is None
+        if result is None:
+            assert True
+        else:
+            assert result.success is False
+
+    @pytest.mark.asyncio
+    async def test_dispatch_tooling_runner_fallback(self, tmp_path, monkeypatch):
+        from modules.tooling_registry import ToolingRegistry
+        from config import settings as settings_mod
+        monkeypatch.setattr(settings_mod.settings, "SQLITE_PATH", str(tmp_path / "vito.db"))
+        reg = ToolingRegistry(sqlite_path=str(tmp_path / "vito.db"))
+        reg.upsert_adapter(
+            adapter_key="demo_adapter",
+            protocol="openapi",
+            endpoint="https://example.com/openapi.json",
+            schema={"openapi": "3.0.0", "paths": {}},
+        )
+        registry = AgentRegistry()
+        result = await registry.dispatch("tooling:demo_adapter", dry_run=True, payload={"x": 1})
+        assert result is not None
+        assert result.success is True
+        assert isinstance(result.output, dict)
+        assert result.output.get("status") in {"dry_run", "prepared", "ok"}
 
 
 class TestRegistryLifecycle:

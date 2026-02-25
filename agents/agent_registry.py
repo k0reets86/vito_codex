@@ -104,6 +104,23 @@ class AgentRegistry:
         """Диспетчеризует задачу к подходящему агенту (с lazy start)."""
         agents = self.find_by_capability(task_type)
         if not agents:
+            if task_type.startswith("tooling:"):
+                try:
+                    from modules.tooling_runner import ToolingRunner
+                    adapter_key = task_type.split(":", 1)[1].strip()
+                    result = ToolingRunner().run(
+                        adapter_key=adapter_key,
+                        input_data=kwargs,
+                        dry_run=bool(kwargs.get("dry_run", True)),
+                    )
+                    return TaskResult(
+                        success=result.get("status") in {"dry_run", "prepared", "ok"},
+                        output=result,
+                        error=result.get("error", ""),
+                        metadata={"agent": "tooling_runner", "task_type": task_type},
+                    )
+                except Exception:
+                    pass
             # Try capability packs as fallback
             try:
                 from modules.capability_pack_runner import CapabilityPackRunner

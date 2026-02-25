@@ -418,6 +418,7 @@ class DashboardServer:
                         "GUARDRAILS_ENABLED",
                         "GUARDRAILS_BLOCK_ON_INJECTION",
                         "LLM_ALERTS_ENABLED",
+                        "TOOLING_RUN_LIVE_ENABLED",
                     ]
                     data = {k: getattr(settings, k, None) for k in allowed}
                     self._json({"config": data})
@@ -554,6 +555,7 @@ class DashboardServer:
           <input id=\"tool_auth\" placeholder=\"auth_type\" style=\"width:22%\"/>
           <input id=\"tool_enabled\" placeholder=\"enabled 1/0\" style=\"width:18%\"/>
           <button onclick=\"setToolingAdapter()\">Upsert</button>
+          <button onclick=\"runToolingAdapter()\">Dry Run</button>
         </div>
       </div>
       <div class=\"card\"><div class=\"mut\">Memory Policy Audit</div><div id=\"memory_policy\"></div></div>
@@ -896,6 +898,12 @@ async function setToolingAdapter(){
   await fetch('/api/tooling_registry', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'upsert', adapter_key, protocol, endpoint, auth_type, enabled})});
   await load();
 }
+async function runToolingAdapter(){
+  const adapter_key = document.getElementById('tool_key').value.trim();
+  if (!adapter_key) return;
+  await fetch('/api/tooling_registry', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'run', adapter_key, dry_run:true})});
+  await load();
+}
 async function setSecret(){
   const k = document.getElementById('sec_key').value.trim();
   const v = document.getElementById('sec_val').value.trim();
@@ -967,9 +975,10 @@ load();
                         "GUARDRAILS_ENABLED",
                         "GUARDRAILS_BLOCK_ON_INJECTION",
                         "LLM_ALERTS_ENABLED",
+                        "TOOLING_RUN_LIVE_ENABLED",
                     }
                     updated = {}
-                    bool_keys = {"PROACTIVE_ENABLED", "BRAINSTORM_WEEKLY", "OWNER_INBOX_ENABLED", "CALENDAR_UPDATE_LLM", "SELF_LEARNING_ENABLED", "GUARDRAILS_ENABLED", "GUARDRAILS_BLOCK_ON_INJECTION", "LLM_ALERTS_ENABLED"}
+                    bool_keys = {"PROACTIVE_ENABLED", "BRAINSTORM_WEEKLY", "OWNER_INBOX_ENABLED", "CALENDAR_UPDATE_LLM", "SELF_LEARNING_ENABLED", "GUARDRAILS_ENABLED", "GUARDRAILS_BLOCK_ON_INJECTION", "LLM_ALERTS_ENABLED", "TOOLING_RUN_LIVE_ENABLED"}
                     num_keys = {"DAILY_LIMIT_USD", "OPERATION_NOTIFY_USD", "OPERATION_APPROVE_USD", "OPERATION_MAX_USD", "SELF_LEARNING_SKILL_SCORE_MIN"}
                     for k,v in payload.items():
                         if k in allowed:
@@ -1187,6 +1196,7 @@ load();
                     action = str(payload.get("action", "")).strip().lower()
                     ok = False
                     errors = []
+                    run_result = {}
                     try:
                         from modules.tooling_registry import ToolingRegistry
                         reg = ToolingRegistry()
@@ -1207,6 +1217,17 @@ load();
                             if key:
                                 reg.delete_adapter(key)
                                 ok = True
+                        elif action == "run":
+                            from modules.tooling_runner import ToolingRunner
+                            adapter_key = str(payload.get("adapter_key", "")).strip()
+                            run_result = ToolingRunner().run(
+                                adapter_key=adapter_key,
+                                input_data=payload.get("input", {}) if isinstance(payload.get("input", {}), dict) else {},
+                                dry_run=bool(payload.get("dry_run", True)),
+                            )
+                            ok = run_result.get("status") in {"dry_run", "prepared", "ok"}
+                            if not ok:
+                                errors = [str(run_result.get("error", "run_failed"))]
                     except Exception:
                         ok = False
                     if ok:
@@ -1215,7 +1236,7 @@ load();
                             DataLake().record_decision(actor="dashboard", decision="tooling_registry_update", rationale=action)
                         except Exception:
                             pass
-                    self._json({"ok": ok, "action": action, "errors": errors})
+                    self._json({"ok": ok, "action": action, "errors": errors, "result": run_result})
                     return
                 if parsed.path == "/api/secrets":
                     length = int(self.headers.get("Content-Length", "0") or "0")
