@@ -174,6 +174,14 @@ class DashboardServer:
                         items = []
                     self._json({"packs": items})
                     return
+                if parsed.path == "/api/skills":
+                    try:
+                        from modules.skill_registry import SkillRegistry
+                        skills = SkillRegistry().list_skills(limit=200)
+                    except Exception:
+                        skills = []
+                    self._json({"skills": skills})
+                    return
 
                 if parsed.path == "/api/platforms":
                     rows = []
@@ -434,6 +442,7 @@ class DashboardServer:
       </div>
       <div class=\"card\"><div class=\"mut\">Pref Metrics</div><div id=\"prefs_metrics\"></div></div>
       <div class=\"card\"><div class=\"mut\">Capability Packs</div><div id=\"capability_packs\"></div></div>
+      <div class=\"card\"><div class=\"mut\">Skills</div><div id=\"skills\"></div></div>
       <div class=\"card\"><div class=\"mut\">Secrets</div>
         <div class=\"mut\" style=\"font-size:12px\">Keys are write‑only here.</div>
         <div style=\"margin-top:8px\">\n
@@ -456,7 +465,7 @@ async function load(){
   const endpoints = {
     status:'/api/status', network:'/api/network', agents:'/api/agents', finance:'/api/finance',
     goals:'/api/goals', schedules:'/api/schedules', config:'/api/config',
-    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs',
+    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs', skills:'/api/skills',
     facts:'/api/execution_facts', approvals:'/api/approvals', events:'/api/events', decisions:'/api/decisions', budget:'/api/budget', workflow_events:'/api/workflow_events'
   };
   for (const [k,url] of Object.entries(endpoints)){
@@ -482,6 +491,7 @@ async function load(){
     else if (k === 'prefs') renderPrefs(j.preferences||[]);
     else if (k === 'prefs_metrics') renderPrefsMetrics(j.metrics||{});
     else if (k === 'capability_packs') renderCapabilityPacks(j.packs||[]);
+    else if (k === 'skills') renderSkills(j.skills||[]);
     else if (k === 'models') renderModels(j);
     else if (k === 'llm_policy') renderLlmPolicy(j.policy||{});
   }
@@ -501,6 +511,12 @@ function renderCapabilityPacks(packs){
   const el = document.getElementById('capability_packs');
   if (!packs.length){ el.innerHTML = '<div class=\"mut\">No packs</div>'; return; }
   const rows = packs.map(p => `<div style=\"margin:4px 0\"><code>${p.name}</code> ${p.category} <span class=\"mut\">(${p.status})</span></div>`);
+  el.innerHTML = rows.join('');
+}
+function renderSkills(skills){
+  const el = document.getElementById('skills');
+  if (!skills.length){ el.innerHTML = '<div class=\"mut\">No skills</div>'; return; }
+  const rows = skills.map(s => `<div style=\"margin:4px 0\"><code>${s.name}</code> ${s.category} <span class=\"mut\">(${s.acceptance_status})</span></div>`);
   el.innerHTML = rows.join('');
 }
 function renderRss(sources){
