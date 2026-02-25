@@ -10,6 +10,7 @@
   - Added dashboard model policy controls (`/api/models`) for default model and allow/deny lists.
   - Added LLM guardrails (prompt-injection detection + optional block mode) with dashboard observability.
   - Added LLM eval/anomaly monitor with score, fail-rate, blocked-events and cost-anomaly signals.
+  - Added tooling standard layer: MCP/OpenAPI registry with schema validation and dashboard controls.
 - Current blockers:
   - Social network integrations (Threads/YouTube/TikTok/etc.) are paused until accounts are ready.
 - Important commands:
@@ -29,4 +30,4 @@
   - Operator UI: model-profile workflows and safer secret/provider management UX.
   - Self-learning: DSPy-like optimization and safe auto-promotion pipeline from candidates to accepted skills.
   - Security/cost/observability: route anomaly alerts to owner notifications and weekly governance report.
-  - Tooling standards: MCP/OpenAPI integration.
+  - Tooling standards: wire tooling registry into runtime adapter execution (safe sandboxed runner).

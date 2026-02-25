@@ -316,6 +316,14 @@ class DashboardServer:
                         current, runs = {}, []
                     self._json({"current": current, "runs": runs})
                     return
+                if parsed.path == "/api/tooling_registry":
+                    try:
+                        from modules.tooling_registry import ToolingRegistry
+                        rows = ToolingRegistry().list_adapters(limit=200)
+                    except Exception:
+                        rows = []
+                    self._json({"adapters": rows})
+                    return
                 if parsed.path == "/api/events":
                     try:
                         from modules.data_lake import DataLake
@@ -534,6 +542,19 @@ class DashboardServer:
         </div>
       </div>
       <div class=\"card\"><div class=\"mut\">Self Learning</div><div id=\"self_learning\"></div></div>
+      <div class=\"card\"><div class=\"mut\">Tooling Registry</div><div id=\"tooling_registry\"></div></div>
+      <div class=\"card\"><div class=\"mut\">Tooling Controls</div>
+        <div style=\"margin-top:8px\">\n
+          <input id=\"tool_key\" placeholder=\"adapter_key\" style=\"width:32%\"/>
+          <input id=\"tool_proto\" placeholder=\"mcp/openapi\" style=\"width:18%\"/>
+          <input id=\"tool_ep\" placeholder=\"endpoint\" style=\"width:40%\"/>
+        </div>
+        <div style=\"margin-top:6px\">\n
+          <input id=\"tool_auth\" placeholder=\"auth_type\" style=\"width:22%\"/>
+          <input id=\"tool_enabled\" placeholder=\"enabled 1/0\" style=\"width:18%\"/>
+          <button onclick=\"setToolingAdapter()\">Upsert</button>
+        </div>
+      </div>
       <div class=\"card\"><div class=\"mut\">Memory Policy Audit</div><div id=\"memory_policy\"></div></div>
       <div class=\"card\"><div class=\"mut\">Memory Controls</div>
         <div style=\"margin-top:8px\">\n
@@ -565,7 +586,7 @@ async function load(){
   const endpoints = {
     status:'/api/status', network:'/api/network', agents:'/api/agents', finance:'/api/finance',
     goals:'/api/goals', schedules:'/api/schedules', config:'/api/config',
-    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', guardrails:'/api/guardrails', llm_evals:'/api/llm_evals', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs', skills:'/api/skills', operator_policy:'/api/operator_policy', self_learning:'/api/self_learning', memory_policy:'/api/memory_policy?limit=80', workflow_threads:'/api/workflow_threads',
+    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', guardrails:'/api/guardrails', llm_evals:'/api/llm_evals', tooling_registry:'/api/tooling_registry', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs', skills:'/api/skills', operator_policy:'/api/operator_policy', self_learning:'/api/self_learning', memory_policy:'/api/memory_policy?limit=80', workflow_threads:'/api/workflow_threads',
     facts:'/api/execution_facts', approvals:'/api/approvals', events:'/api/events', decisions:'/api/decisions', budget:'/api/budget', workflow_events:'/api/workflow_events'
   };
   for (const [k,url] of Object.entries(endpoints)){
@@ -600,6 +621,7 @@ async function load(){
     else if (k === 'llm_policy') renderLlmPolicy(j.policy||{});
     else if (k === 'guardrails') renderGuardrails(j);
     else if (k === 'llm_evals') renderLlmEvals(j);
+    else if (k === 'tooling_registry') renderToolingRegistry(j.adapters||[]);
   }
 }
 function renderPrefs(prefs){
@@ -644,6 +666,12 @@ function renderSelfLearning(j){
   el.innerHTML =
     `<div class=\"mut\">Lessons</div><table><thead><tr><th>Goal</th><th>Status</th><th>Score</th><th>Lesson</th></tr></thead><tbody>${lrows}</tbody></table>` +
     `<div class=\"mut\" style=\"margin-top:8px\">Candidates</div><table><thead><tr><th>Skill</th><th>Confidence</th><th>Status</th></tr></thead><tbody>${crows}</tbody></table>`;
+}
+function renderToolingRegistry(items){
+  const el = document.getElementById('tooling_registry');
+  if (!items.length){ el.innerHTML = '<div class=\"mut\">No adapters</div>'; return; }
+  const rows = items.map(a => `<tr><td>${a.adapter_key}</td><td>${a.protocol}</td><td>${a.endpoint}</td><td>${a.enabled?1:0}</td></tr>`).join('');
+  el.innerHTML = `<table><thead><tr><th>Key</th><th>Protocol</th><th>Endpoint</th><th>On</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 function renderMemoryPolicy(items){
   const el = document.getElementById('memory_policy');
@@ -855,6 +883,16 @@ async function setBudgetPolicy(){
   const hard_block = (document.getElementById('pol_budget_hard').value.trim() || '0') === '1';
   if (!actor_key) return;
   await fetch('/api/operator_policy', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'set_budget', actor_key, daily_limit_usd, hard_block})});
+  await load();
+}
+async function setToolingAdapter(){
+  const adapter_key = document.getElementById('tool_key').value.trim();
+  const protocol = document.getElementById('tool_proto').value.trim();
+  const endpoint = document.getElementById('tool_ep').value.trim();
+  const auth_type = document.getElementById('tool_auth').value.trim() || 'none';
+  const enabled = (document.getElementById('tool_enabled').value.trim() || '1') !== '0';
+  if (!adapter_key || !protocol || !endpoint) return;
+  await fetch('/api/tooling_registry', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'upsert', adapter_key, protocol, endpoint, auth_type, enabled})});
   await load();
 }
 async function setSecret(){
@@ -1136,6 +1174,46 @@ load();
                         except Exception:
                             pass
                     self._json({"ok": ok, "action": action, "doc_id": doc_id, "reason": reason})
+                    return
+                if parsed.path == "/api/tooling_registry":
+                    length = int(self.headers.get("Content-Length", "0") or "0")
+                    raw = self.rfile.read(length) if length else b"{}"
+                    try:
+                        payload = json.loads(raw.decode("utf-8"))
+                    except Exception:
+                        payload = {}
+                    action = str(payload.get("action", "")).strip().lower()
+                    ok = False
+                    errors = []
+                    try:
+                        from modules.tooling_registry import ToolingRegistry
+                        reg = ToolingRegistry()
+                        if action == "upsert":
+                            result = reg.upsert_adapter(
+                                adapter_key=str(payload.get("adapter_key", "")).strip(),
+                                protocol=str(payload.get("protocol", "")).strip().lower(),
+                                endpoint=str(payload.get("endpoint", "")).strip(),
+                                auth_type=str(payload.get("auth_type", "none")).strip(),
+                                enabled=bool(payload.get("enabled", True)),
+                                schema=payload.get("schema", {}) if isinstance(payload.get("schema", {}), dict) else {},
+                                notes=str(payload.get("notes", "")),
+                            )
+                            ok = bool(result.get("ok"))
+                            errors = result.get("errors", [])
+                        elif action == "delete":
+                            key = str(payload.get("adapter_key", "")).strip()
+                            if key:
+                                reg.delete_adapter(key)
+                                ok = True
+                    except Exception:
+                        ok = False
+                    if ok:
+                        try:
+                            from modules.data_lake import DataLake
+                            DataLake().record_decision(actor="dashboard", decision="tooling_registry_update", rationale=action)
+                        except Exception:
+                            pass
+                    self._json({"ok": ok, "action": action, "errors": errors})
                     return
                 if parsed.path == "/api/secrets":
                     length = int(self.headers.get("Content-Length", "0") or "0")
