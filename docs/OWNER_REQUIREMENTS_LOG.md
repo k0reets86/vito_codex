@@ -1012,3 +1012,15 @@ Append all new owner requests here as they arrive.
 - 2026-02-25: Added adapter contract integrity checks (versioned hash/signature) and runtime blocking on mismatch.
 - 2026-02-25: Added adapter contract rotation approvals and pending-rotation runtime gate for live tooling runs.
 - 2026-02-25: Added tooling release stages, rollback workflow, and live-stage gating for runtime safety.
+- [2026-02-25T12:26:39.495308+00:00] (text) Отклонить
+- [2026-02-25T12:26:39.639912+00:00] (text) Отклонить
+- [2026-02-25T12:26:39.852936+00:00] (text) Отклонить
+- [2026-02-25T12:26:39.974712+00:00] (text) Отклонить
+- [2026-02-25T12:26:40.113292+00:00] (text) Отклонить
+- [2026-02-25T12:26:40.274212+00:00] (text) Отклонить
+- [2026-02-25T12:26:40.385302+00:00] (text) Отклонить
+- [2026-02-25T12:26:40.535615+00:00] (text) Отклонить
+- [2026-02-25T12:26:40.760200+00:00] (text) Отклонить
+- [2026-02-25T12:26:40.893011+00:00] (text) Отклонить
+- [2026-02-25T12:26:41.114188+00:00] (text) Отклонить
+- 2026-02-25: Added stage change approvals and signed release bundle verification for adapter promotions/rollbacks.

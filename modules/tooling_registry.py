@@ -50,9 +50,25 @@ class ToolingRegistry:
                     to_stage TEXT DEFAULT '',
                     actor TEXT DEFAULT 'system',
                     reason TEXT DEFAULT '',
+                    bundle_hash TEXT DEFAULT '',
+                    bundle_signature TEXT DEFAULT '',
                     snapshot_json TEXT DEFAULT '{}',
                     created_at TEXT DEFAULT (datetime('now'))
                 );
+                CREATE TABLE IF NOT EXISTS tooling_stage_approvals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    adapter_key TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    target_stage TEXT DEFAULT '',
+                    requested_by TEXT DEFAULT 'system',
+                    reason TEXT DEFAULT '',
+                    status TEXT DEFAULT 'pending',
+                    decision_reason TEXT DEFAULT '',
+                    created_at TEXT DEFAULT (datetime('now')),
+                    decided_at TEXT DEFAULT ''
+                );
+                CREATE INDEX IF NOT EXISTS idx_tooling_stage_approvals_status
+                ON tooling_stage_approvals (status, created_at DESC);
                 CREATE TABLE IF NOT EXISTS tooling_contract_approvals (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     adapter_key TEXT NOT NULL,
@@ -79,6 +95,11 @@ class ToolingRegistry:
                 conn.execute("ALTER TABLE tooling_registry ADD COLUMN contract_hash TEXT DEFAULT ''")
             if "contract_signature" not in cols:
                 conn.execute("ALTER TABLE tooling_registry ADD COLUMN contract_signature TEXT DEFAULT ''")
+            rel_cols = {r["name"] for r in conn.execute("PRAGMA table_info(tooling_release_history)").fetchall()}
+            if "bundle_hash" not in rel_cols:
+                conn.execute("ALTER TABLE tooling_release_history ADD COLUMN bundle_hash TEXT DEFAULT ''")
+            if "bundle_signature" not in rel_cols:
+                conn.execute("ALTER TABLE tooling_release_history ADD COLUMN bundle_signature TEXT DEFAULT ''")
             conn.commit()
         finally:
             conn.close()
@@ -376,9 +397,22 @@ class ToolingRegistry:
             conn.close()
 
     def promote_adapter(self, adapter_key: str, to_stage: str, actor: str = "owner", reason: str = "") -> dict:
+        return self._promote_adapter(adapter_key=adapter_key, to_stage=to_stage, actor=actor, reason=reason, require_policy=True)
+
+    def _promote_adapter(
+        self,
+        adapter_key: str,
+        to_stage: str,
+        actor: str = "owner",
+        reason: str = "",
+        require_policy: bool = True,
+    ) -> dict:
         stage = self._normalize_stage(to_stage)
         if not stage:
             return {"ok": False, "error": "stage_invalid"}
+        if require_policy and stage == "production" and bool(getattr(settings, "TOOLING_REQUIRE_PRODUCTION_APPROVAL", True)):
+            if not self._has_approved_stage_request(adapter_key, action="promote", target_stage=stage):
+                return {"ok": False, "error": "production_approval_required"}
         conn = self._get_conn()
         conn.row_factory = sqlite3.Row
         try:
@@ -391,6 +425,9 @@ class ToolingRegistry:
             if not self._valid_transition(cur_stage, stage):
                 return {"ok": False, "error": f"invalid_transition:{cur_stage}->{stage}"}
             snap = dict(row)
+            bundle = self._build_release_bundle(snapshot=snap, from_stage=cur_stage, to_stage=stage, actor=actor, reason=reason)
+            bundle_hash = self._hash_release_bundle(bundle)
+            bundle_sig = self._sign_release_bundle(bundle_hash)
             conn.execute(
                 "UPDATE tooling_registry SET adapter_stage = ?, updated_at = datetime('now') WHERE adapter_key = ?",
                 (stage, adapter_key),
@@ -398,8 +435,8 @@ class ToolingRegistry:
             conn.execute(
                 """
                 INSERT INTO tooling_release_history
-                (adapter_key, adapter_version, from_stage, to_stage, actor, reason, snapshot_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (adapter_key, adapter_version, from_stage, to_stage, actor, reason, bundle_hash, bundle_signature, snapshot_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     adapter_key[:120],
@@ -408,15 +445,22 @@ class ToolingRegistry:
                     stage[:32],
                     actor[:120],
                     reason[:500],
+                    bundle_hash,
+                    bundle_sig,
                     json.dumps(snap, ensure_ascii=False)[:20000],
                 ),
             )
+            if require_policy and stage == "production":
+                self._consume_approved_stage_request(conn, adapter_key, action="promote", target_stage="production")
             conn.commit()
             return {"ok": True}
         finally:
             conn.close()
 
     def rollback_adapter(self, adapter_key: str, actor: str = "owner", reason: str = "") -> dict:
+        if bool(getattr(settings, "TOOLING_REQUIRE_ROLLBACK_APPROVAL", True)):
+            if not self._has_approved_stage_request(adapter_key, action="rollback", target_stage=""):
+                return {"ok": False, "error": "rollback_approval_required"}
         conn = self._get_conn()
         conn.row_factory = sqlite3.Row
         try:
@@ -435,7 +479,13 @@ class ToolingRegistry:
             target_stage = str(row["from_stage"] or "").strip()
             if not target_stage:
                 return {"ok": False, "error": "rollback_target_missing"}
-            return self.promote_adapter(adapter_key=adapter_key, to_stage=target_stage, actor=actor, reason=f"rollback:{reason}"[:500])
+            return self._promote_adapter(
+                adapter_key=adapter_key,
+                to_stage=target_stage,
+                actor=actor,
+                reason=f"rollback:{reason}"[:500],
+                require_policy=False,
+            )
         finally:
             conn.close()
 
@@ -472,6 +522,232 @@ class ToolingRegistry:
             return out
         finally:
             conn.close()
+
+    def verify_release_bundle(self, row: dict) -> tuple[bool, str]:
+        try:
+            required = {"adapter_key", "adapter_version", "from_stage", "to_stage", "actor", "reason"}
+            payload = {k: row.get(k, "") for k in required}
+            bundle_hash = self._hash_release_bundle(payload)
+            stored_hash = str(row.get("bundle_hash", "") or "")
+            if not stored_hash or stored_hash != bundle_hash:
+                return False, "bundle_hash_mismatch"
+            expected_sig = self._sign_release_bundle(stored_hash)
+            stored_sig = str(row.get("bundle_signature", "") or "")
+            if not stored_sig or not hmac.compare_digest(stored_sig, expected_sig):
+                return False, "bundle_signature_mismatch"
+            return True, "bundle_ok"
+        except Exception:
+            return False, "bundle_verify_error"
+
+    def request_stage_change(
+        self,
+        adapter_key: str,
+        action: str,
+        target_stage: str = "",
+        requested_by: str = "system",
+        reason: str = "",
+    ) -> dict:
+        act = str(action or "").strip().lower()
+        if act not in {"promote", "rollback"}:
+            return {"ok": False, "error": "action_invalid"}
+        tgt = self._normalize_stage(target_stage) if target_stage else ""
+        if act == "promote" and not tgt:
+            return {"ok": False, "error": "target_stage_invalid"}
+        conn = self._get_conn()
+        try:
+            cur = conn.execute(
+                """
+                INSERT INTO tooling_stage_approvals
+                (adapter_key, action, target_stage, requested_by, reason, status)
+                VALUES (?, ?, ?, ?, ?, 'pending')
+                """,
+                (adapter_key[:120], act, tgt[:32], requested_by[:120], reason[:500]),
+            )
+            conn.commit()
+            return {"ok": True, "approval_id": int(cur.lastrowid)}
+        finally:
+            conn.close()
+
+    def list_stage_approvals(self, status: str = "pending", limit: int = 100) -> list[dict]:
+        conn = self._get_conn()
+        try:
+            if status:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM tooling_stage_approvals
+                    WHERE status = ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (status, int(limit)),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM tooling_stage_approvals
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (int(limit),),
+                ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def approve_stage_change(self, approval_id: int, approver: str = "owner", reason: str = "") -> dict:
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                "SELECT * FROM tooling_stage_approvals WHERE id = ? AND status = 'pending'",
+                (int(approval_id),),
+            ).fetchone()
+            if not row:
+                return {"ok": False, "error": "approval_not_found"}
+            action = str(row["action"] or "")
+            adapter_key = str(row["adapter_key"] or "")
+            target_stage = str(row["target_stage"] or "")
+            if action == "promote":
+                out = self._promote_adapter(
+                    adapter_key=adapter_key,
+                    to_stage=target_stage,
+                    actor=approver,
+                    reason=f"approved:{reason}"[:500],
+                    require_policy=False,
+                )
+            else:
+                out = self._promote_adapter(
+                    adapter_key=adapter_key,
+                    to_stage=self._rollback_target(adapter_key),
+                    actor=approver,
+                    reason=f"approved_rollback:{reason}"[:500],
+                    require_policy=False,
+                )
+            if not out.get("ok"):
+                return out
+            conn.execute(
+                """
+                UPDATE tooling_stage_approvals
+                SET status = 'approved', decision_reason = ?, decided_at = datetime('now')
+                WHERE id = ?
+                """,
+                (f"approved_by:{approver}; {reason}"[:500], int(approval_id)),
+            )
+            conn.commit()
+            return {"ok": True}
+        finally:
+            conn.close()
+
+    def reject_stage_change(self, approval_id: int, approver: str = "owner", reason: str = "") -> dict:
+        conn = self._get_conn()
+        try:
+            cur = conn.execute(
+                """
+                UPDATE tooling_stage_approvals
+                SET status = 'rejected', decision_reason = ?, decided_at = datetime('now')
+                WHERE id = ? AND status = 'pending'
+                """,
+                (f"rejected_by:{approver}; {reason}"[:500], int(approval_id)),
+            )
+            conn.commit()
+            if int(cur.rowcount or 0) <= 0:
+                return {"ok": False, "error": "approval_not_found"}
+            return {"ok": True}
+        finally:
+            conn.close()
+
+    def _rollback_target(self, adapter_key: str) -> str:
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                """
+                SELECT from_stage
+                FROM tooling_release_history
+                WHERE adapter_key = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (adapter_key,),
+            ).fetchone()
+            return str((row["from_stage"] if row else "") or "")
+        finally:
+            conn.close()
+
+    def _has_approved_stage_request(self, adapter_key: str, action: str, target_stage: str = "") -> bool:
+        conn = self._get_conn()
+        try:
+            if target_stage:
+                row = conn.execute(
+                    """
+                    SELECT 1 FROM tooling_stage_approvals
+                    WHERE adapter_key = ? AND action = ? AND target_stage = ? AND status = 'approved'
+                    LIMIT 1
+                    """,
+                    (adapter_key, action, target_stage),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT 1 FROM tooling_stage_approvals
+                    WHERE adapter_key = ? AND action = ? AND status = 'approved'
+                    LIMIT 1
+                    """,
+                    (adapter_key, action),
+                ).fetchone()
+            return row is not None
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _consume_approved_stage_request(conn: sqlite3.Connection, adapter_key: str, action: str, target_stage: str = "") -> None:
+        if target_stage:
+            conn.execute(
+                """
+                UPDATE tooling_stage_approvals
+                SET status = 'applied', decided_at = CASE WHEN decided_at='' THEN datetime('now') ELSE decided_at END
+                WHERE id = (
+                  SELECT id FROM tooling_stage_approvals
+                  WHERE adapter_key = ? AND action = ? AND target_stage = ? AND status = 'approved'
+                  ORDER BY id DESC LIMIT 1
+                )
+                """,
+                (adapter_key, action, target_stage),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE tooling_stage_approvals
+                SET status = 'applied', decided_at = CASE WHEN decided_at='' THEN datetime('now') ELSE decided_at END
+                WHERE id = (
+                  SELECT id FROM tooling_stage_approvals
+                  WHERE adapter_key = ? AND action = ? AND status = 'approved'
+                  ORDER BY id DESC LIMIT 1
+                )
+                """,
+                (adapter_key, action),
+            )
+
+    @staticmethod
+    def _build_release_bundle(snapshot: dict, from_stage: str, to_stage: str, actor: str, reason: str) -> dict:
+        return {
+            "adapter_key": snapshot.get("adapter_key", ""),
+            "adapter_version": snapshot.get("adapter_version", "1.0.0"),
+            "from_stage": from_stage,
+            "to_stage": to_stage,
+            "actor": actor,
+            "reason": reason,
+        }
+
+    @staticmethod
+    def _hash_release_bundle(bundle: dict) -> str:
+        canonical = json.dumps(bundle, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _sign_release_bundle(bundle_hash: str) -> str:
+        key = (settings.TOOLING_RELEASE_SECRET or "tooling-release-local").encode("utf-8")
+        return hmac.new(key, (bundle_hash or "").encode("utf-8"), hashlib.sha256).hexdigest()
 
     @staticmethod
     def _normalize_stage(stage: str) -> str:

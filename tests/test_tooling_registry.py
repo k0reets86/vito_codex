@@ -79,6 +79,21 @@ def test_tooling_registry_rotation_approval_flow(tmp_path):
     assert rows[0]["adapter_stage"] == "staging"
 
 
+def test_tooling_registry_production_requires_stage_approval(tmp_path):
+    db = str(tmp_path / "tools.db")
+    reg = ToolingRegistry(sqlite_path=db)
+    reg.upsert_adapter(
+        adapter_key="need_appr",
+        protocol="openapi",
+        endpoint="https://example.com/openapi.json",
+        schema={"openapi": "3.0.0", "paths": {}},
+        adapter_stage="accepted",
+    )
+    out = reg.promote_adapter("need_appr", "production", actor="owner", reason="release")
+    assert out["ok"] is False
+    assert out["error"] == "production_approval_required"
+
+
 def test_tooling_registry_promote_and_rollback(tmp_path):
     db = str(tmp_path / "tools.db")
     reg = ToolingRegistry(sqlite_path=db)
@@ -89,13 +104,34 @@ def test_tooling_registry_promote_and_rollback(tmp_path):
         schema={"openapi": "3.0.0", "paths": {}},
         adapter_stage="staging",
     )
+    # Promote to accepted (no mandatory approval by default policy)
     p1 = reg.promote_adapter("prom_demo", "accepted", actor="owner", reason="qa ok")
     assert p1["ok"] is True
-    p2 = reg.promote_adapter("prom_demo", "production", actor="owner", reason="release")
-    assert p2["ok"] is True
+    # Production requires stage approval: request and approve
+    req = reg.request_stage_change(
+        adapter_key="prom_demo",
+        action="promote",
+        target_stage="production",
+        requested_by="owner",
+    )
+    assert req["ok"] is True
+    app = reg.approve_stage_change(req["approval_id"], approver="owner", reason="release")
+    assert app["ok"] is True
     row = reg.list_adapters(limit=1)[0]
     assert row["adapter_stage"] == "production"
-    rb = reg.rollback_adapter("prom_demo", actor="owner", reason="issue")
+    # Rollback requires stage approval
+    req_rb = reg.request_stage_change(
+        adapter_key="prom_demo",
+        action="rollback",
+        requested_by="owner",
+    )
+    assert req_rb["ok"] is True
+    rb = reg.approve_stage_change(req_rb["approval_id"], approver="owner", reason="issue")
     assert rb["ok"] is True
     row2 = reg.list_adapters(limit=1)[0]
     assert row2["adapter_stage"] in {"accepted", "staging"}
+    hist = reg.list_release_history(adapter_key="prom_demo", limit=10)
+    assert hist
+    ok_bundle, reason = reg.verify_release_bundle(hist[0])
+    assert ok_bundle is True
+    assert reason == "bundle_ok"

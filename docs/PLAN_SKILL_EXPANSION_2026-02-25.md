@@ -170,3 +170,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added signed/versioned tooling contracts (contract_hash + HMAC signature) with runtime verification before adapter execution.
 - Added contract rotation approval workflow (request/approve/reject) and runtime live-block while rotation is pending.
 - Added multi-stage adapter promotion (staging->accepted->production) with rollback and release history; live runtime now enforces required stage.
+- Added stage-approval policies for production/rollback and signed release bundles in release history (bundle_hash + signature).

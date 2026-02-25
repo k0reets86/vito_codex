@@ -145,6 +145,9 @@ class Settings:
     TOOLING_CONTRACT_SECRET: str = os.getenv("TOOLING_CONTRACT_SECRET", "tooling-contract-local")
     TOOLING_BLOCK_WITH_PENDING_ROTATION: bool = os.getenv("TOOLING_BLOCK_WITH_PENDING_ROTATION", "true").lower() in ("1", "true", "yes", "on")
     TOOLING_LIVE_REQUIRED_STAGE: str = os.getenv("TOOLING_LIVE_REQUIRED_STAGE", "production")
+    TOOLING_REQUIRE_PRODUCTION_APPROVAL: bool = os.getenv("TOOLING_REQUIRE_PRODUCTION_APPROVAL", "true").lower() in ("1", "true", "yes", "on")
+    TOOLING_REQUIRE_ROLLBACK_APPROVAL: bool = os.getenv("TOOLING_REQUIRE_ROLLBACK_APPROVAL", "true").lower() in ("1", "true", "yes", "on")
+    TOOLING_RELEASE_SECRET: str = os.getenv("TOOLING_RELEASE_SECRET", "tooling-release-local")
 
 
 settings = Settings()

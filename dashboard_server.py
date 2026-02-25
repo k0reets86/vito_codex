@@ -322,12 +322,14 @@ class DashboardServer:
                         reg = ToolingRegistry()
                         rows = reg.list_adapters(limit=200)
                         approvals = reg.list_contract_approvals(status="pending", limit=100)
+                        stage_approvals = reg.list_stage_approvals(status="pending", limit=100)
                         history = reg.list_release_history(limit=100)
                     except Exception:
                         rows = []
                         approvals = []
+                        stage_approvals = []
                         history = []
-                    self._json({"adapters": rows, "approvals": approvals, "history": history})
+                    self._json({"adapters": rows, "approvals": approvals, "stage_approvals": stage_approvals, "history": history})
                     return
                 if parsed.path == "/api/events":
                     try:
@@ -425,6 +427,8 @@ class DashboardServer:
                         "LLM_ALERTS_ENABLED",
                         "TOOLING_RUN_LIVE_ENABLED",
                         "TOOLING_LIVE_REQUIRED_STAGE",
+                        "TOOLING_REQUIRE_PRODUCTION_APPROVAL",
+                        "TOOLING_REQUIRE_ROLLBACK_APPROVAL",
                         "TOOLING_HTTP_TIMEOUT_SEC",
                         "TOOLING_MCP_TIMEOUT_SEC",
                         "TOOLING_MCP_MAX_OUTPUT_BYTES",
@@ -578,8 +582,13 @@ class DashboardServer:
         </div>
         <div style=\"margin-top:6px\">\n
           <input id=\"tool_stage\" placeholder=\"stage\" style=\"width:20%\"/>
-          <button onclick=\"promoteToolingStage()\">Promote</button>
-          <button onclick=\"rollbackToolingStage()\">Rollback</button>
+          <button onclick=\"requestPromoteToolingStage()\">Request Promote</button>
+          <button onclick=\"requestRollbackToolingStage()\">Request Rollback</button>
+        </div>
+        <div style=\"margin-top:6px\">\n
+          <input id=\"tool_stage_appr_id\" placeholder=\"stage_approval_id\" style=\"width:24%\"/>
+          <button onclick=\"approveStageToolingChange()\">Approve Stage</button>
+          <button onclick=\"rejectStageToolingChange()\">Reject Stage</button>
         </div>
       </div>
       <div class=\"card\"><div class=\"mut\">Memory Policy Audit</div><div id=\"memory_policy\"></div></div>
@@ -648,7 +657,7 @@ async function load(){
     else if (k === 'llm_policy') renderLlmPolicy(j.policy||{});
     else if (k === 'guardrails') renderGuardrails(j);
     else if (k === 'llm_evals') renderLlmEvals(j);
-    else if (k === 'tooling_registry') renderToolingRegistry(j.adapters||[], j.approvals||[], j.history||[]);
+    else if (k === 'tooling_registry') renderToolingRegistry(j.adapters||[], j.approvals||[], j.stage_approvals||[], j.history||[]);
   }
 }
 function renderPrefs(prefs){
@@ -694,24 +703,30 @@ function renderSelfLearning(j){
     `<div class=\"mut\">Lessons</div><table><thead><tr><th>Goal</th><th>Status</th><th>Score</th><th>Lesson</th></tr></thead><tbody>${lrows}</tbody></table>` +
     `<div class=\"mut\" style=\"margin-top:8px\">Candidates</div><table><thead><tr><th>Skill</th><th>Confidence</th><th>Status</th></tr></thead><tbody>${crows}</tbody></table>`;
 }
-function renderToolingRegistry(items, approvals, history){
+function renderToolingRegistry(items, approvals, stageApprovals, history){
   const el = document.getElementById('tooling_registry');
   const app = approvals || [];
+  const sapp = stageApprovals || [];
   const hist = history || [];
   if (!items.length){
     const prow0 = app.map(a => `<tr><td>${a.id}</td><td>${a.adapter_key}</td><td>${a.proposed_version}</td><td>${a.requested_by}</td></tr>`).join('');
+    const s0 = sapp.map(a => `<tr><td>${a.id}</td><td>${a.adapter_key}</td><td>${a.action}</td><td>${a.target_stage||''}</td><td>${a.requested_by}</td></tr>`).join('');
     const h0 = hist.slice(0,6).map(h => `<tr><td>${h.adapter_key}</td><td>${h.from_stage}</td><td>${h.to_stage}</td><td>${h.created_at||''}</td></tr>`).join('');
     el.innerHTML = `<div class=\"mut\">No adapters</div><table><thead><tr><th>ID</th><th>Adapter</th><th>Version</th><th>By</th></tr></thead><tbody>${prow0}</tbody></table>` +
+      `<div class=\"mut\" style=\"margin-top:8px\">Pending Stage Changes</div><table><thead><tr><th>ID</th><th>Adapter</th><th>Action</th><th>Target</th><th>By</th></tr></thead><tbody>${s0}</tbody></table>` +
       `<div class=\"mut\" style=\"margin-top:8px\">Release History</div><table><thead><tr><th>Adapter</th><th>From</th><th>To</th><th>Time</th></tr></thead><tbody>${h0}</tbody></table>`;
     return;
   }
   const rows = items.map(a => `<tr><td>${a.adapter_key}</td><td>${a.adapter_version||''}</td><td>${a.adapter_stage||''}</td><td>${a.protocol}</td><td>${a.endpoint}</td><td>${a.enabled?1:0}</td></tr>`).join('');
   const prows = app.map(a => `<tr><td>${a.id}</td><td>${a.adapter_key}</td><td>${a.proposed_version}</td><td>${a.requested_by}</td></tr>`).join('');
+  const srows = sapp.map(a => `<tr><td>${a.id}</td><td>${a.adapter_key}</td><td>${a.action}</td><td>${a.target_stage||''}</td><td>${a.requested_by}</td></tr>`).join('');
   const hrows = hist.slice(0,8).map(h => `<tr><td>${h.adapter_key}</td><td>${h.from_stage}</td><td>${h.to_stage}</td><td>${h.actor}</td><td>${h.created_at||''}</td></tr>`).join('');
   el.innerHTML =
     `<table><thead><tr><th>Key</th><th>Version</th><th>Stage</th><th>Protocol</th><th>Endpoint</th><th>On</th></tr></thead><tbody>${rows}</tbody></table>` +
     `<div class=\"mut\" style=\"margin-top:8px\">Pending Rotations</div>` +
     `<table><thead><tr><th>ID</th><th>Adapter</th><th>Version</th><th>By</th></tr></thead><tbody>${prows}</tbody></table>` +
+    `<div class=\"mut\" style=\"margin-top:8px\">Pending Stage Changes</div>` +
+    `<table><thead><tr><th>ID</th><th>Adapter</th><th>Action</th><th>Target</th><th>By</th></tr></thead><tbody>${srows}</tbody></table>` +
     `<div class=\"mut\" style=\"margin-top:8px\">Release History</div>` +
     `<table><thead><tr><th>Adapter</th><th>From</th><th>To</th><th>Actor</th><th>Time</th></tr></thead><tbody>${hrows}</tbody></table>`;
 }
@@ -968,17 +983,29 @@ async function rejectToolingRotation(){
   await fetch('/api/tooling_registry', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'reject_rotation', approval_id, approver:'dashboard'})});
   await load();
 }
-async function promoteToolingStage(){
+async function requestPromoteToolingStage(){
   const adapter_key = document.getElementById('tool_key').value.trim();
   const to_stage = document.getElementById('tool_stage').value.trim();
   if (!adapter_key || !to_stage) return;
-  await fetch('/api/tooling_registry', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'promote_stage', adapter_key, to_stage, actor:'dashboard'})});
+  await fetch('/api/tooling_registry', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'request_stage_change', adapter_key, change_action:'promote', target_stage:to_stage, requested_by:'dashboard'})});
   await load();
 }
-async function rollbackToolingStage(){
+async function requestRollbackToolingStage(){
   const adapter_key = document.getElementById('tool_key').value.trim();
   if (!adapter_key) return;
-  await fetch('/api/tooling_registry', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'rollback_stage', adapter_key, actor:'dashboard'})});
+  await fetch('/api/tooling_registry', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'request_stage_change', adapter_key, change_action:'rollback', requested_by:'dashboard'})});
+  await load();
+}
+async function approveStageToolingChange(){
+  const approval_id = parseInt((document.getElementById('tool_stage_appr_id').value||'0').trim(), 10);
+  if (!approval_id) return;
+  await fetch('/api/tooling_registry', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'approve_stage_change', approval_id, approver:'dashboard'})});
+  await load();
+}
+async function rejectStageToolingChange(){
+  const approval_id = parseInt((document.getElementById('tool_stage_appr_id').value||'0').trim(), 10);
+  if (!approval_id) return;
+  await fetch('/api/tooling_registry', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'reject_stage_change', approval_id, approver:'dashboard'})});
   await load();
 }
 async function setSecret(){
@@ -1054,13 +1081,15 @@ load();
                         "LLM_ALERTS_ENABLED",
                         "TOOLING_RUN_LIVE_ENABLED",
                         "TOOLING_LIVE_REQUIRED_STAGE",
+                        "TOOLING_REQUIRE_PRODUCTION_APPROVAL",
+                        "TOOLING_REQUIRE_ROLLBACK_APPROVAL",
                         "TOOLING_HTTP_TIMEOUT_SEC",
                         "TOOLING_MCP_TIMEOUT_SEC",
                         "TOOLING_MCP_MAX_OUTPUT_BYTES",
                         "TOOLING_BLOCK_WITH_PENDING_ROTATION",
                     }
                     updated = {}
-                    bool_keys = {"PROACTIVE_ENABLED", "BRAINSTORM_WEEKLY", "OWNER_INBOX_ENABLED", "CALENDAR_UPDATE_LLM", "SELF_LEARNING_ENABLED", "GUARDRAILS_ENABLED", "GUARDRAILS_BLOCK_ON_INJECTION", "LLM_ALERTS_ENABLED", "TOOLING_RUN_LIVE_ENABLED", "TOOLING_BLOCK_WITH_PENDING_ROTATION"}
+                    bool_keys = {"PROACTIVE_ENABLED", "BRAINSTORM_WEEKLY", "OWNER_INBOX_ENABLED", "CALENDAR_UPDATE_LLM", "SELF_LEARNING_ENABLED", "GUARDRAILS_ENABLED", "GUARDRAILS_BLOCK_ON_INJECTION", "LLM_ALERTS_ENABLED", "TOOLING_RUN_LIVE_ENABLED", "TOOLING_BLOCK_WITH_PENDING_ROTATION", "TOOLING_REQUIRE_PRODUCTION_APPROVAL", "TOOLING_REQUIRE_ROLLBACK_APPROVAL"}
                     num_keys = {"DAILY_LIMIT_USD", "OPERATION_NOTIFY_USD", "OPERATION_APPROVE_USD", "OPERATION_MAX_USD", "SELF_LEARNING_SKILL_SCORE_MIN", "TOOLING_HTTP_TIMEOUT_SEC", "TOOLING_MCP_TIMEOUT_SEC", "TOOLING_MCP_MAX_OUTPUT_BYTES"}
                     for k,v in payload.items():
                         if k in allowed:
@@ -1358,6 +1387,38 @@ load();
                             ok = bool(result.get("ok"))
                             if not ok:
                                 errors = [str(result.get("error", "rollback_failed"))]
+                            run_result = result
+                        elif action == "request_stage_change":
+                            result = reg.request_stage_change(
+                                adapter_key=str(payload.get("adapter_key", "")).strip(),
+                                action=str(payload.get("change_action", "")).strip().lower(),
+                                target_stage=str(payload.get("target_stage", "")).strip(),
+                                requested_by=str(payload.get("requested_by", "dashboard")),
+                                reason=str(payload.get("reason", "")),
+                            )
+                            ok = bool(result.get("ok"))
+                            if not ok:
+                                errors = [str(result.get("error", "request_stage_failed"))]
+                            run_result = result
+                        elif action == "approve_stage_change":
+                            result = reg.approve_stage_change(
+                                approval_id=int(payload.get("approval_id", 0) or 0),
+                                approver=str(payload.get("approver", "dashboard")),
+                                reason=str(payload.get("reason", "")),
+                            )
+                            ok = bool(result.get("ok"))
+                            if not ok:
+                                errors = [str(result.get("error", "approve_stage_failed"))]
+                            run_result = result
+                        elif action == "reject_stage_change":
+                            result = reg.reject_stage_change(
+                                approval_id=int(payload.get("approval_id", 0) or 0),
+                                approver=str(payload.get("approver", "dashboard")),
+                                reason=str(payload.get("reason", "")),
+                            )
+                            ok = bool(result.get("ok"))
+                            if not ok:
+                                errors = [str(result.get("error", "reject_stage_failed"))]
                             run_result = result
                         elif action == "run":
                             from modules.tooling_runner import ToolingRunner

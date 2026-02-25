@@ -18,6 +18,7 @@
   - Added signed/versioned tooling contracts with runtime integrity verification.
   - Added approval workflow for contract rotation (request/approve/reject) with pending-rotation live gate.
   - Added multi-stage adapter promotion and rollback with release history and live-stage enforcement.
+  - Added stage approval policies and signed release bundles for promotion/rollback events.
 - Current blockers:
   - Social network integrations (Threads/YouTube/TikTok/etc.) are paused until accounts are ready.
 - Important commands:
@@ -37,4 +38,4 @@
   - Operator UI: model-profile workflows and safer secret/provider management UX.
   - Self-learning: DSPy-like optimization and safe auto-promotion pipeline from candidates to accepted skills.
   - Security/cost/observability: weekly governance report aggregation + automated remediation suggestions.
-  - Tooling standards: add rollback approval policies and signed release bundles for adapter promotion events.
+  - Tooling standards: add auto-generated governance report and cryptographic key rotation flow for tooling signatures.
