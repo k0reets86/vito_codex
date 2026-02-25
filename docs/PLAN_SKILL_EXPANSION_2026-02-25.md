@@ -83,3 +83,5 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added Owner Preference Model storage and tests.
 - Added explicit preference command parsing in CommsAgent.
 - Added structured preference hints in goal planning prompt.
+- Added /prefs command to review owner preferences.
+- Added Capability Pack Spec v1.

@@ -1,11 +1,14 @@
 """Тесты comms_agent.py."""
 
 import asyncio
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from comms_agent import CommsAgent
+from config.settings import settings
+from modules.owner_preference_model import OwnerPreferenceModel
 
 
 @pytest.fixture
@@ -152,6 +155,20 @@ async def test_cmd_goal_empty(comms, mock_update):
     await comms._cmd_goal(mock_update, MagicMock())
     text = mock_update.message.reply_text.call_args[0][0]
     assert "Использование" in text
+
+
+@pytest.mark.asyncio
+async def test_cmd_prefs(comms, mock_update, tmp_path: Path):
+    old_path = settings.SQLITE_PATH
+    try:
+        settings.SQLITE_PATH = str(tmp_path / "prefs.db")
+        OwnerPreferenceModel().set_preference("tone.style", {"tone": "concise"}, confidence=0.9)
+        await comms._cmd_prefs(mock_update, MagicMock())
+        text = mock_update.message.reply_text.call_args[0][0]
+        assert "Предпочтения владельца" in text
+        assert "tone.style" in text
+    finally:
+        settings.SQLITE_PATH = old_path
 
 
 # ── Одобрение ──

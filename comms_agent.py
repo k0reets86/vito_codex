@@ -252,6 +252,7 @@ class CommsAgent:
         self._app.add_handler(CommandHandler("playbooks", self._cmd_playbooks))
         self._app.add_handler(CommandHandler("workflow", self._cmd_workflow))
         self._app.add_handler(CommandHandler("handoffs", self._cmd_handoffs))
+        self._app.add_handler(CommandHandler("prefs", self._cmd_prefs))
         self._app.add_handler(CommandHandler("pubq", self._cmd_pubq))
         self._app.add_handler(CommandHandler("pubrun", self._cmd_pubrun))
         self._app.add_handler(CommandHandler("webop", self._cmd_webop))
@@ -309,6 +310,7 @@ class CommsAgent:
             BotCommand("playbooks", "Топ playbooks"),
             BotCommand("workflow", "Статус workflow/state"),
             BotCommand("handoffs", "Трассировка handoff"),
+            BotCommand("prefs", "Предпочтения владельца"),
             BotCommand("pubq", "Очередь публикаций"),
             BotCommand("pubrun", "Запустить очередь публикаций"),
             BotCommand("webop", "Web-operator сценарии"),
@@ -427,28 +429,12 @@ class CommsAgent:
                 return
             except Exception:
                 pass
-
-
-def _parse_pref_value(raw: str):
-    raw = raw.strip()
-    if not raw:
-        return ""
-    if (raw.startswith("{") and raw.endswith("}")) or (raw.startswith("[") and raw.endswith("]")):
-        try:
-            return json.loads(raw)
-        except Exception:
-            return raw
-    low = raw.lower()
-    if low in ("true", "yes", "да", "on"):
-        return True
-    if low in ("false", "no", "нет", "off"):
-        return False
-    try:
-        if "." in raw:
-            return float(raw)
-        return int(raw)
-    except Exception:
-        return raw
+        if lower.strip() in ("/prefs", "prefs", "предпочтения"):
+            try:
+                await self._send_prefs()
+                return
+            except Exception:
+                pass
         if lower.strip() in ("/pubq", "pubq"):
             try:
                 if not self._publisher_queue:
@@ -634,7 +620,8 @@ def _parse_pref_value(raw: str):
             "/spend — расходы за сегодня\n"
             "/approve — одобрить запрос\n"
             "/reject — отклонить запрос\n"
-            "/goal <текст> — создать цель",
+            "/goal <текст> — создать цель\n"
+            "/prefs — предпочтения владельца",
             reply_markup=self._main_keyboard(),
         )
 
@@ -1005,6 +992,37 @@ def _parse_pref_value(raw: str):
             await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
         except Exception as e:
             await update.message.reply_text(f"Handoffs error: {e}", reply_markup=self._main_keyboard())
+
+    async def _cmd_prefs(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Показать предпочтения владельца."""
+        if await self._reject_stranger(update):
+            return
+        await self._send_prefs(reply_to=update)
+
+    async def _send_prefs(self, reply_to: Update | None = None) -> None:
+        try:
+            model = OwnerPreferenceModel()
+            prefs = model.list_preferences(limit=20)
+            if not prefs:
+                msg = "Предпочтения владельца: пока нет записей. Используй /pref ключ=значение."
+            else:
+                lines = ["Предпочтения владельца:"]
+                for p in prefs:
+                    conf = float(p.get("confidence", 0.0))
+                    key = p.get("pref_key", "")
+                    val = p.get("value")
+                    lines.append(f"- {key}: {val} (conf={conf:.2f})")
+                lines.append("Чтобы добавить: /pref ключ=значение")
+                msg = "\n".join(lines)
+            if reply_to is not None and getattr(reply_to, "message", None):
+                await reply_to.message.reply_text(msg, reply_markup=self._main_keyboard())
+            else:
+                await self.send_message(msg)
+        except Exception:
+            if reply_to is not None and getattr(reply_to, "message", None):
+                await reply_to.message.reply_text("Не удалось загрузить предпочтения.", reply_markup=self._main_keyboard())
+            else:
+                await self.send_message("Не удалось загрузить предпочтения.")
 
     async def _cmd_pubq(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Показать состояние unified publisher queue."""
@@ -2258,3 +2276,25 @@ def _parse_pref_value(raw: str):
             f"VITO Error | {module}\n{error}",
             level="critical",
         )
+
+
+def _parse_pref_value(raw: str):
+    raw = raw.strip()
+    if not raw:
+        return ""
+    if (raw.startswith("{") and raw.endswith("}")) or (raw.startswith("[") and raw.endswith("]")):
+        try:
+            return json.loads(raw)
+        except Exception:
+            return raw
+    low = raw.lower()
+    if low in ("true", "yes", "да", "on"):
+        return True
+    if low in ("false", "no", "нет", "off"):
+        return False
+    try:
+        if "." in raw:
+            return float(raw)
+        return int(raw)
+    except Exception:
+        return raw
