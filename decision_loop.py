@@ -23,6 +23,7 @@ from config.settings import settings
 from goal_engine import Goal, GoalEngine, GoalPriority, GoalStatus
 from llm_router import LLMRouter, TaskType
 from memory.memory_manager import MemoryManager
+from modules.operator_policy import OperatorPolicy
 from modules.workflow_state_machine import WorkflowStateMachine
 from modules.workflow_threads import WorkflowThreads
 from modules.data_lake import DataLake
@@ -55,6 +56,7 @@ class DecisionLoop:
         self._progress_sent: dict[str, set[int]] = {}
         self.workflow = WorkflowStateMachine()
         self.threads = WorkflowThreads()
+        self.operator_policy = OperatorPolicy()
         logger.info("DecisionLoop инициализирован", extra={"event": "init"})
 
     def set_self_healer(self, self_healer) -> None:
@@ -534,6 +536,10 @@ class DecisionLoop:
         Chain: Smart Route → Agent Registry → LLM fallback → Research-Learn.
         """
         try:
+            precheck = self._policy_precheck(step)
+            if precheck:
+                return precheck
+
             # Fast mode for boevoy/test steps to avoid long LLM calls
             import os
             fast_trigger = "boevoy" in goal.title.lower() or "test" in step.lower() or "минимальн" in step.lower()
@@ -687,6 +693,42 @@ class DecisionLoop:
                 except Exception:
                     pass
             return {"status": "failed", "error": str(e)}
+
+    def _policy_precheck(self, step: str) -> dict[str, Any] | None:
+        capability = self._step_to_capability(step)
+        if not capability:
+            return None
+        tool_key = f"capability:{capability}"
+        try:
+            allowed, reason = self.operator_policy.is_tool_allowed(tool_key)
+        except Exception:
+            allowed, reason = True, "policy_unavailable"
+        if not allowed:
+            self._record_policy_decision("blocked_tool", f"{tool_key}:{reason}")
+            return {"status": "failed", "error": f"Policy blocked {tool_key}: {reason}", "agent": "operator_policy"}
+
+        try:
+            budget = self.operator_policy.check_actor_budget(tool_key)
+        except Exception:
+            budget = {"allowed": True, "reason": "budget_policy_unavailable"}
+        if not budget.get("allowed", True):
+            self._record_policy_decision(
+                "blocked_budget",
+                f"{tool_key} spent={budget.get('spent_usd', 0):.4f} limit={budget.get('limit_usd', 0):.4f}",
+            )
+            return {
+                "status": "failed",
+                "error": f"Policy budget block {tool_key}: {budget.get('reason', '')}",
+                "agent": "operator_policy",
+            }
+        return None
+
+    @staticmethod
+    def _record_policy_decision(decision: str, rationale: str) -> None:
+        try:
+            DataLake().record_decision(actor="operator_policy", decision=decision, rationale=rationale[:1000])
+        except Exception:
+            pass
 
     async def _maybe_install_skill(self, step: str) -> bool:
         """Attempt to self-improve (install skill) if likely missing."""

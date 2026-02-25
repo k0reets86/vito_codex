@@ -22,6 +22,7 @@ from urllib.parse import urlparse, parse_qs
 
 from config.settings import settings
 from memory.memory_manager import MemoryManager
+from modules.operator_policy import OperatorPolicy
 from modules.owner_preference_model import OwnerPreferenceModel
 from modules.owner_pref_metrics import OwnerPreferenceMetrics
 
@@ -183,6 +184,15 @@ class DashboardServer:
                     except Exception:
                         skills = []
                     self._json({"skills": skills})
+                    return
+                if parsed.path == "/api/operator_policy":
+                    try:
+                        op = OperatorPolicy()
+                        tools = op.list_tool_policies(limit=200)
+                        budgets = op.list_budget_policies(limit=200)
+                    except Exception:
+                        tools, budgets = [], []
+                    self._json({"tools": tools, "budgets": budgets})
                     return
                 if parsed.path == "/api/memory_policy":
                     try:
@@ -463,6 +473,20 @@ class DashboardServer:
       <div class=\"card\"><div class=\"mut\">Pref Metrics</div><div id=\"prefs_metrics\"></div></div>
       <div class=\"card\"><div class=\"mut\">Capability Packs</div><div id=\"capability_packs\"></div></div>
       <div class=\"card\"><div class=\"mut\">Skills</div><div id=\"skills\"></div></div>
+      <div class=\"card\"><div class=\"mut\">Operator Policy</div><div id=\"operator_policy\"></div></div>
+      <div class=\"card\"><div class=\"mut\">Policy Controls</div>
+        <div style=\"margin-top:8px\">\n
+          <input id=\"pol_tool_key\" placeholder=\"capability:research\" style=\"width:52%\"/>
+          <input id=\"pol_tool_enabled\" placeholder=\"1/0\" style=\"width:15%\"/>
+          <button onclick=\"setToolPolicy()\">Set Tool</button>
+        </div>
+        <div style=\"margin-top:6px\">\n
+          <input id=\"pol_budget_actor\" placeholder=\"capability:research\" style=\"width:40%\"/>
+          <input id=\"pol_budget_limit\" placeholder=\"daily usd\" style=\"width:20%\"/>
+          <input id=\"pol_budget_hard\" placeholder=\"hard 1/0\" style=\"width:18%\"/>
+          <button onclick=\"setBudgetPolicy()\">Set Budget</button>
+        </div>
+      </div>
       <div class=\"card\"><div class=\"mut\">Memory Policy Audit</div><div id=\"memory_policy\"></div></div>
       <div class=\"card\"><div class=\"mut\">Memory Controls</div>
         <div style=\"margin-top:8px\">\n
@@ -494,7 +518,7 @@ async function load(){
   const endpoints = {
     status:'/api/status', network:'/api/network', agents:'/api/agents', finance:'/api/finance',
     goals:'/api/goals', schedules:'/api/schedules', config:'/api/config',
-    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs', skills:'/api/skills', memory_policy:'/api/memory_policy?limit=80', workflow_threads:'/api/workflow_threads',
+    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs', skills:'/api/skills', operator_policy:'/api/operator_policy', memory_policy:'/api/memory_policy?limit=80', workflow_threads:'/api/workflow_threads',
     facts:'/api/execution_facts', approvals:'/api/approvals', events:'/api/events', decisions:'/api/decisions', budget:'/api/budget', workflow_events:'/api/workflow_events'
   };
   for (const [k,url] of Object.entries(endpoints)){
@@ -521,6 +545,7 @@ async function load(){
     else if (k === 'prefs_metrics') renderPrefsMetrics(j.metrics||{});
     else if (k === 'capability_packs') renderCapabilityPacks(j.packs||[]);
     else if (k === 'skills') renderSkills(j.skills||[]);
+    else if (k === 'operator_policy') renderOperatorPolicy(j);
     else if (k === 'memory_policy') renderMemoryPolicy(j.audit||[]);
     else if (k === 'workflow_threads') renderWorkflowThreads(j.threads||[]);
     else if (k === 'models') renderModels(j);
@@ -549,6 +574,16 @@ function renderSkills(skills){
   if (!skills.length){ el.innerHTML = '<div class=\"mut\">No skills</div>'; return; }
   const rows = skills.map(s => `<div style=\"margin:4px 0\"><code>${s.name}</code> ${s.category} <span class=\"mut\">(${s.acceptance_status})</span></div>`);
   el.innerHTML = rows.join('');
+}
+function renderOperatorPolicy(j){
+  const el = document.getElementById('operator_policy');
+  const tools = j.tools || [];
+  const budgets = j.budgets || [];
+  const trows = tools.map(t => `<tr><td>${t.tool_key}</td><td>${t.enabled?1:0}</td><td>${t.notes||''}</td></tr>`).join('');
+  const brows = budgets.map(b => `<tr><td>${b.actor_key}</td><td>${b.daily_limit_usd}</td><td>${b.hard_block?1:0}</td><td>${b.notes||''}</td></tr>`).join('');
+  el.innerHTML =
+    `<div class=\"mut\">Tools</div><table><thead><tr><th>Key</th><th>On</th><th>Notes</th></tr></thead><tbody>${trows}</tbody></table>` +
+    `<div class=\"mut\" style=\"margin-top:8px\">Budgets</div><table><thead><tr><th>Actor</th><th>Daily</th><th>Hard</th><th>Notes</th></tr></thead><tbody>${brows}</tbody></table>`;
 }
 function renderMemoryPolicy(items){
   const el = document.getElementById('memory_policy');
@@ -716,6 +751,21 @@ async function forgetMemory(){
   await fetch('/api/memory_policy', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'forget', doc_id, reason})});
   await load();
 }
+async function setToolPolicy(){
+  const tool_key = document.getElementById('pol_tool_key').value.trim();
+  const enabled = (document.getElementById('pol_tool_enabled').value.trim() || '1') !== '0';
+  if (!tool_key) return;
+  await fetch('/api/operator_policy', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'set_tool', tool_key, enabled})});
+  await load();
+}
+async function setBudgetPolicy(){
+  const actor_key = document.getElementById('pol_budget_actor').value.trim();
+  const daily_limit_usd = parseFloat(document.getElementById('pol_budget_limit').value.trim() || '0');
+  const hard_block = (document.getElementById('pol_budget_hard').value.trim() || '0') === '1';
+  if (!actor_key) return;
+  await fetch('/api/operator_policy', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'set_budget', actor_key, daily_limit_usd, hard_block})});
+  await load();
+}
 async function setSecret(){
   const k = document.getElementById('sec_key').value.trim();
   const v = document.getElementById('sec_val').value.trim();
@@ -879,6 +929,52 @@ load();
                         except Exception:
                             pass
                     self._json({"updated": updated, "action": action, "key": key})
+                    return
+                if parsed.path == "/api/operator_policy":
+                    length = int(self.headers.get("Content-Length", "0") or "0")
+                    raw = self.rfile.read(length) if length else b"{}"
+                    try:
+                        payload = json.loads(raw.decode("utf-8"))
+                    except Exception:
+                        payload = {}
+                    action = str(payload.get("action", "")).strip().lower()
+                    ok = False
+                    try:
+                        op = OperatorPolicy()
+                        if action == "set_tool":
+                            tool_key = str(payload.get("tool_key", "")).strip()
+                            if tool_key:
+                                op.set_tool_policy(tool_key=tool_key, enabled=bool(payload.get("enabled", True)), notes=str(payload.get("notes", "")))
+                                ok = True
+                        elif action == "delete_tool":
+                            tool_key = str(payload.get("tool_key", "")).strip()
+                            if tool_key:
+                                op.delete_tool_policy(tool_key)
+                                ok = True
+                        elif action == "set_budget":
+                            actor_key = str(payload.get("actor_key", "")).strip()
+                            if actor_key:
+                                op.set_budget_policy(
+                                    actor_key=actor_key,
+                                    daily_limit_usd=float(payload.get("daily_limit_usd", 0) or 0),
+                                    hard_block=bool(payload.get("hard_block", False)),
+                                    notes=str(payload.get("notes", "")),
+                                )
+                                ok = True
+                        elif action == "delete_budget":
+                            actor_key = str(payload.get("actor_key", "")).strip()
+                            if actor_key:
+                                op.delete_budget_policy(actor_key)
+                                ok = True
+                    except Exception:
+                        ok = False
+                    if ok:
+                        try:
+                            from modules.data_lake import DataLake
+                            DataLake().record_decision(actor="dashboard", decision="operator_policy_update", rationale=action)
+                        except Exception:
+                            pass
+                    self._json({"ok": ok, "action": action})
                     return
                 if parsed.path == "/api/memory_policy":
                     length = int(self.headers.get("Content-Length", "0") or "0")

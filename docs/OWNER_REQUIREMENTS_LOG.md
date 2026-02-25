@@ -999,3 +999,4 @@ Append all new owner requests here as they arrive.
 - [2026-02-25T11:03:27.576878+00:00] (text) Отклонить
 - [2026-02-25T11:03:27.756512+00:00] (text) Отклонить
 - 2026-02-25: Implemented memory policy layer (save/forget + audit) and dashboard controls for manual memory forget.
+- 2026-02-25: Added operator policy controls (allow/block capabilities, per-capability budget caps) and DecisionLoop enforcement.

@@ -187,6 +187,17 @@ async def test_execute_step_failure(dl):
 
 
 @pytest.mark.asyncio
+async def test_execute_step_policy_blocked(dl):
+    dl.operator_policy = MagicMock()
+    dl.operator_policy.is_tool_allowed.return_value = (False, "owner_block")
+    dl.operator_policy.check_actor_budget.return_value = {"allowed": True}
+    goal = dl.goal_engine.create_goal("Exec", "desc")
+    result = await dl._execute_step(goal, "Research market")
+    assert result["status"] == "failed"
+    assert "Policy blocked" in result["error"]
+
+
+@pytest.mark.asyncio
 async def test_execute_step_exception(dl):
     dl.llm_router.call_llm = AsyncMock(side_effect=RuntimeError("LLM error"))
     goal = dl.goal_engine.create_goal("Exec", "desc")

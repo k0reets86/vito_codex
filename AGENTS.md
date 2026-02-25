@@ -5,6 +5,7 @@
   - Added approvals pause/resume handling, workflow events, prefs controls, skills list, and pending approvals in dashboard.
   - Added optional self-refine for LLM fallback and expanded owner preference auto-detect + metrics.
   - Implemented explicit memory save/forget policy with audit trail and dashboard controls for manual forget.
+  - Added operator policy controls for tool allowlist and per-capability budget caps, with DecisionLoop pre-check enforcement.
 - Current blockers:
   - Social network integrations (Threads/YouTube/TikTok/etc.) are paused until accounts are ready.
 - Important commands:
@@ -21,7 +22,7 @@
 - Next steps:
   - Extend durable orchestration: interrupts/approvals + step contracts across more agents/tools.
   - Memory/skills pipeline: retention tuning (TTL classes), memory quality scoring, and policy dashboards.
-  - Operator UI: budgets/models/tools management.
+  - Operator UI: model-profile workflows and safer secret/provider management UX.
   - Self-learning: reflection loop + DSPy-like optimization + skill generation pipeline.
   - Security/cost/observability: gateway + guardrails + evals.
   - Tooling standards: MCP/OpenAPI integration.
