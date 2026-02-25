@@ -27,6 +27,7 @@ from typing import Any, Optional
 
 from config.logger import get_logger
 from config.settings import settings
+from modules.owner_preference_model import OwnerPreferenceModel
 from llm_router import LLMRouter, TaskType, MODEL_REGISTRY
 from modules.prompt_guard import wrap_untrusted_text
 
@@ -466,6 +467,19 @@ class ConversationEngine:
                     owner_prefs = "\nПредпочтения владельца:\n" + "\n".join(
                         f"- {p['text'][:150]}" for p in prefs
                     )
+            except Exception:
+                pass
+            # Explicit owner preferences (structured model)
+            try:
+                model = OwnerPreferenceModel()
+                pref_rows = model.list_preferences(limit=5)
+                if pref_rows:
+                    lines = []
+                    for pr in pref_rows:
+                        conf = float(pr.get("confidence", 0))
+                        val = pr.get("value")
+                        lines.append(f"- {pr.get('pref_key')}: {val} (conf={conf:.2f})")
+                    owner_prefs = owner_prefs + "\n" + "\n".join(lines) if owner_prefs else "\nПредпочтения владельца:\n" + "\n".join(lines)
             except Exception:
                 pass
 

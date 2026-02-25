@@ -42,6 +42,7 @@ from telegram.ext import (
 
 from config.logger import get_logger
 from config.settings import settings
+from modules.owner_preference_model import OwnerPreferenceModel
 
 logger = get_logger("comms_agent", agent="comms_agent")
 
@@ -361,6 +362,14 @@ class CommsAgent:
         if self._try_set_env_from_text(text):
             await self.send_message("Ключ принят и сохранён. Если нужен перезапуск сервиса — скажи 'перезапусти'.")
             return
+        # Explicit preference update (opt-in)
+        if self._try_set_preference_from_text(text):
+            await self.send_message("Предпочтение сохранено. Могу учитывать в будущих задачах.")
+            return
+        # Explicit owner preference update (opt-in command)
+        if self._try_set_preference_from_text(text):
+            await self.send_message("Предпочтение сохранено. Могу учитывать в будущих задачах.")
+            return
 
         lower = text.lower()
         # Approvals
@@ -418,6 +427,28 @@ class CommsAgent:
                 return
             except Exception:
                 pass
+
+
+def _parse_pref_value(raw: str):
+    raw = raw.strip()
+    if not raw:
+        return ""
+    if (raw.startswith("{") and raw.endswith("}")) or (raw.startswith("[") and raw.endswith("]")):
+        try:
+            return json.loads(raw)
+        except Exception:
+            return raw
+    low = raw.lower()
+    if low in ("true", "yes", "да", "on"):
+        return True
+    if low in ("false", "no", "нет", "off"):
+        return False
+    try:
+        if "." in raw:
+            return float(raw)
+        return int(raw)
+    except Exception:
+        return raw
         if lower.strip() in ("/pubq", "pubq"):
             try:
                 if not self._publisher_queue:
@@ -1987,6 +2018,58 @@ class CommsAgent:
         if any(kw in text.lower() for kw in ["отчёт", "report", "готово", "готов", "результат"]):
             return True
         return False
+
+    def _try_set_preference_from_text(self, text: str) -> bool:
+        """Parse explicit preference commands and store in OwnerPreferenceModel.
+
+        Supported:
+        - /pref key=value
+        - pref key = value
+        - preference: key=value
+        - предпочтение: key=value
+        - remember: key=value
+        """
+        raw = (text or "").strip()
+        if not raw:
+            return False
+        lower = raw.lower()
+        if not (
+            lower.startswith("/pref")
+            or lower.startswith("pref ")
+            or lower.startswith("pref:")
+            or lower.startswith("preference:")
+            or lower.startswith("предпочтение:")
+            or lower.startswith("remember:")
+        ):
+            return False
+
+        payload = raw
+        for prefix in ("/pref", "pref:", "pref ", "preference:", "предпочтение:", "remember:"):
+            if lower.startswith(prefix):
+                payload = raw[len(prefix):].strip()
+                break
+        if "=" not in payload:
+            return False
+        key, value = payload.split("=", 1)
+        key = key.strip()
+        if not key:
+            return False
+        value = value.strip()
+        if not value:
+            return False
+
+        parsed_value = _parse_pref_value(value)
+        try:
+            OwnerPreferenceModel().set_preference(
+                key=key,
+                value=parsed_value,
+                source="owner",
+                confidence=1.0,
+                notes="explicit owner preference",
+            )
+            return True
+        except Exception:
+            return False
 
     def _guard_outgoing(self, text: str) -> str:
         """Prevent unverified completion claims in outbound messages."""

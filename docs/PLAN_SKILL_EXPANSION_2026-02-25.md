@@ -77,3 +77,9 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 ## Notes
 - This plan must be updated only with evidence links and tests.
 - If the plan changes, add a dated amendment section at the end.
+
+## Amendments
+### 2026-02-25
+- Added Owner Preference Model storage and tests.
+- Added explicit preference command parsing in CommsAgent.
+- Added structured preference hints in goal planning prompt.
