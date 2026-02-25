@@ -274,6 +274,20 @@ class DashboardServer:
                         health = {}
                     self._json({"workflow": health})
                     return
+                if parsed.path == "/api/workflow_events":
+                    try:
+                        from modules.workflow_state_machine import WorkflowStateMachine
+                        wf = WorkflowStateMachine()
+                        goal_id = (query.get("goal_id", [""])[0] or "").strip()
+                        limit = int(query.get("limit", ["50"])[0] or 50)
+                        if goal_id:
+                            events = wf.recent_events(goal_id, limit=limit)
+                        else:
+                            events = wf.recent_events_all(limit=limit)
+                    except Exception:
+                        events = []
+                    self._json({"events": events})
+                    return
                 if parsed.path == "/api/execution_facts":
                     try:
                         from modules.execution_facts import ExecutionFacts
@@ -379,6 +393,13 @@ class DashboardServer:
       <div class=\"card\"><div class=\"mut\">Models</div><div id=\"models\"></div></div>
       <div class=\"card\"><div class=\"mut\">Execution Facts</div><div id=\"facts\"></div></div>
       <div class=\"card\"><div class=\"mut\">Recent Events</div><div id=\"events\"></div></div>
+      <div class=\"card\"><div class=\"mut\">Workflow Events</div>
+        <div style=\"margin-top:6px\">
+          <input id=\"wf_goal\" placeholder=\"goal_id (optional)\" style=\"width:70%\"/>
+          <button onclick=\"loadWorkflowEvents()\">Load</button>
+        </div>
+        <div id=\"workflow_events\" style=\"margin-top:8px\"></div>
+      </div>
       <div class=\"card\"><div class=\"mut\">Decisions</div><div id=\"decisions\"></div></div>
       <div class=\"card\"><div class=\"mut\">Budget (30d)</div><div id=\"budget\"></div></div>
       <div class=\"card\"><div class=\"mut\">Config</div><div id=\"config\"></div>
@@ -414,7 +435,7 @@ async function load(){
     status:'/api/status', network:'/api/network', agents:'/api/agents', finance:'/api/finance',
     goals:'/api/goals', schedules:'/api/schedules', config:'/api/config',
     platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs',
-    facts:'/api/execution_facts', events:'/api/events', decisions:'/api/decisions', budget:'/api/budget'
+    facts:'/api/execution_facts', events:'/api/events', decisions:'/api/decisions', budget:'/api/budget', workflow_events:'/api/workflow_events'
   };
   for (const [k,url] of Object.entries(endpoints)){
     const r = await fetch(url); const j = await r.json();
@@ -427,6 +448,7 @@ async function load(){
     else if (k === 'kpi_trend') renderKpiTrend(j.trend||[]);
     else if (k === 'facts') renderFacts(j.facts||[]);
     else if (k === 'events') renderEvents(j.events||[]);
+    else if (k === 'workflow_events') renderWorkflowEvents(j.events||[]);
     else if (k === 'decisions') renderDecisions(j.decisions||[]);
     else if (k === 'budget') renderBudget(j.budget||[]);
     else if (k === 'status') renderStatus(j);
@@ -545,6 +567,11 @@ function renderEvents(items){
   const rows = items.map(e=>`<tr><td>${e.agent}</td><td>${e.task_type}</td><td>${e.status}</td><td>${e.created_at}</td></tr>`).join('');
   document.getElementById('events').innerHTML = `<table><thead><tr><th>Agent</th><th>Task</th><th>Status</th><th>Time</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
+function renderWorkflowEvents(items){
+  const rows = items.map(e=>`<tr><td>${e.created_at||''}</td><td>${e.goal_id||''}</td><td>${e.from_state||''} → ${e.to_state||''}</td><td>${e.reason||''}</td><td>${(e.detail||'').toString().slice(0,120)}</td></tr>`).join('');
+  document.getElementById('workflow_events').innerHTML =
+    `<table><thead><tr><th>Time</th><th>Goal</th><th>Transition</th><th>Reason</th><th>Detail</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
 function renderDecisions(items){
   const rows = items.map(d=>`<tr><td>${d.actor}</td><td>${d.decision}</td><td>${d.created_at}</td></tr>`).join('');
   document.getElementById('decisions').innerHTML = `<table><thead><tr><th>Actor</th><th>Decision</th><th>Time</th></tr></thead><tbody>${rows}</tbody></table>`;
@@ -557,6 +584,12 @@ function renderSchedules(items){
   const rows = items.map(s=>`<tr><td>${s.id}</td><td>${s.title}</td><td>${s.schedule_type}</td><td>${s.next_run||''}</td><td>${s.status}</td></tr>`).join('');
   document.getElementById('schedules').innerHTML = `<table><thead><tr><th>ID</th><th>Title</th><th>Type</th><th>Next</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>`;
   document.getElementById('schedule_ctrl').innerHTML = `<div class="mut">Rows: ${items.length}</div>`;
+}
+async function loadWorkflowEvents(){
+  const goal = document.getElementById('wf_goal').value || '';
+  const url = goal ? `/api/workflow_events?goal_id=${encodeURIComponent(goal)}` : '/api/workflow_events';
+  const r = await fetch(url); const j = await r.json();
+  renderWorkflowEvents(j.events||[]);
 }
 async function setConfig(){
   const k = document.getElementById('cfg_key').value.trim();

@@ -24,6 +24,8 @@ def test_workflow_transitions_and_checkpoint(tmp_path):
     assert ck is not None
     assert ck["step_num"] == 1
     assert ck["status"] == "completed"
+    all_events = wf.recent_events_all(limit=10)
+    assert len(all_events) >= 5
 
 
 def test_invalid_transition_rejected(tmp_path):

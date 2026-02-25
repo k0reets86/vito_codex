@@ -188,6 +188,20 @@ class WorkflowStateMachine:
         conn.close()
         return [dict(r) for r in rows]
 
+    def recent_events_all(self, limit: int = 50) -> list[dict]:
+        conn = self._conn()
+        rows = conn.execute(
+            """
+            SELECT goal_id, trace_id, from_state, to_state, reason, detail, created_at
+            FROM goal_workflow_events
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (int(limit),),
+        ).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
     def latest_checkpoint(self, goal_id: str) -> Optional[dict]:
         """Return last step checkpoint for goal (step_num, status, detail, created_at)."""
         conn = self._conn()
