@@ -15,6 +15,7 @@
   - Added safe tooling runtime path (`tooling:<adapter_key>`) with dry-run default and operator policy gates.
   - Extended tooling runtime with controlled live OpenAPI probe mode (still guarded and off by default).
   - Added MCP sandbox worker and response contracts for controlled stdio live execution.
+  - Added signed/versioned tooling contracts with runtime integrity verification.
 - Current blockers:
   - Social network integrations (Threads/YouTube/TikTok/etc.) are paused until accounts are ready.
 - Important commands:
@@ -34,4 +35,4 @@
   - Operator UI: model-profile workflows and safer secret/provider management UX.
   - Self-learning: DSPy-like optimization and safe auto-promotion pipeline from candidates to accepted skills.
   - Security/cost/observability: weekly governance report aggregation + automated remediation suggestions.
-  - Tooling standards: enrich adapter-specific handlers and signed capability contracts per adapter version.
+  - Tooling standards: add approval workflow for contract rotation and adapter version promotion.

@@ -167,3 +167,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added ToolingRunner (safe dry-run runtime) and AgentRegistry dispatch fallback for `tooling:<adapter_key>` with operator policy gate.
 - Extended ToolingRunner with controlled live-mode (OpenAPI probe), budget checks, and timeout controls while keeping dry-run default.
 - Added MCP sandbox worker + tooling response contract; ToolingRunner now supports controlled MCP live execution via stdio allowlist.
+- Added signed/versioned tooling contracts (contract_hash + HMAC signature) with runtime verification before adapter execution.

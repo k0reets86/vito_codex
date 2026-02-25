@@ -30,6 +30,16 @@ class ToolingRunner:
             result = {"status": "error", "error": "adapter_disabled", "adapter_key": adapter_key}
             self._record_event(adapter_key, result)
             return result
+        contract_ok, contract_reason = self.registry.verify_contract(adapter)
+        if not contract_ok:
+            result = {
+                "status": "error",
+                "error": "adapter_contract_invalid",
+                "reason": contract_reason,
+                "adapter_key": adapter_key,
+            }
+            self._record_event(adapter_key, result)
+            return result
 
         policy_key = f"tooling:{adapter_key}"
         allowed, reason = self.policy.is_tool_allowed(policy_key)

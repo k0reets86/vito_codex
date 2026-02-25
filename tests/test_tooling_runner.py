@@ -64,3 +64,23 @@ def test_tooling_runner_mcp_live_path(tmp_path, monkeypatch):
     run = ToolingRunner(sqlite_path=db).run("mcp_adapter", {"v": 3}, dry_run=False)
     assert run["status"] == "ok"
     assert run["protocol"] == "mcp"
+
+
+def test_tooling_runner_blocks_invalid_contract(tmp_path):
+    db = str(tmp_path / "tool_run.db")
+    reg = ToolingRegistry(sqlite_path=db)
+    reg.upsert_adapter(
+        adapter_key="broken_contract",
+        protocol="openapi",
+        endpoint="https://example.com/openapi.json",
+        schema={"openapi": "3.0.0", "paths": {}},
+    )
+    conn = reg._get_conn()
+    try:
+        conn.execute("UPDATE tooling_registry SET contract_signature='invalid' WHERE adapter_key='broken_contract'")
+        conn.commit()
+    finally:
+        conn.close()
+    run = ToolingRunner(sqlite_path=db).run("broken_contract", dry_run=True)
+    assert run["status"] == "error"
+    assert run["error"] == "adapter_contract_invalid"

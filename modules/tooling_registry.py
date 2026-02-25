@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import sqlite3
 from typing import Optional
@@ -27,17 +29,27 @@ class ToolingRegistry:
                 CREATE TABLE IF NOT EXISTS tooling_registry (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     adapter_key TEXT UNIQUE NOT NULL,
+                    adapter_version TEXT DEFAULT '1.0.0',
                     protocol TEXT NOT NULL,
                     endpoint TEXT NOT NULL,
                     auth_type TEXT DEFAULT 'none',
                     enabled INTEGER DEFAULT 1,
                     schema_json TEXT DEFAULT '{}',
+                    contract_hash TEXT DEFAULT '',
+                    contract_signature TEXT DEFAULT '',
                     notes TEXT DEFAULT '',
                     created_at TEXT DEFAULT (datetime('now')),
                     updated_at TEXT DEFAULT (datetime('now'))
                 );
                 """
             )
+            cols = {r["name"] for r in conn.execute("PRAGMA table_info(tooling_registry)").fetchall()}
+            if "adapter_version" not in cols:
+                conn.execute("ALTER TABLE tooling_registry ADD COLUMN adapter_version TEXT DEFAULT '1.0.0'")
+            if "contract_hash" not in cols:
+                conn.execute("ALTER TABLE tooling_registry ADD COLUMN contract_hash TEXT DEFAULT ''")
+            if "contract_signature" not in cols:
+                conn.execute("ALTER TABLE tooling_registry ADD COLUMN contract_signature TEXT DEFAULT ''")
             conn.commit()
         finally:
             conn.close()
@@ -50,39 +62,54 @@ class ToolingRegistry:
         auth_type: str = "none",
         enabled: bool = True,
         schema: dict | None = None,
+        adapter_version: str = "1.0.0",
         notes: str = "",
     ) -> dict:
         errs = self.validate(protocol=protocol, endpoint=endpoint, schema=schema or {})
         if errs:
             return {"ok": False, "errors": errs}
+        contract_hash = self.compute_contract_hash(
+            adapter_key=adapter_key,
+            adapter_version=adapter_version,
+            protocol=protocol,
+            endpoint=endpoint,
+            schema=schema or {},
+        )
+        contract_signature = self.sign_contract_hash(contract_hash)
         conn = self._get_conn()
         try:
             conn.execute(
                 """
                 INSERT INTO tooling_registry
-                (adapter_key, protocol, endpoint, auth_type, enabled, schema_json, notes, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                (adapter_key, adapter_version, protocol, endpoint, auth_type, enabled, schema_json, contract_hash, contract_signature, notes, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                 ON CONFLICT(adapter_key) DO UPDATE SET
+                  adapter_version = excluded.adapter_version,
                   protocol = excluded.protocol,
                   endpoint = excluded.endpoint,
                   auth_type = excluded.auth_type,
                   enabled = excluded.enabled,
                   schema_json = excluded.schema_json,
+                  contract_hash = excluded.contract_hash,
+                  contract_signature = excluded.contract_signature,
                   notes = excluded.notes,
                   updated_at = datetime('now')
                 """,
                 (
                     adapter_key[:120],
+                    (adapter_version or "1.0.0")[:32],
                     protocol[:20],
                     endpoint[:500],
                     auth_type[:30],
                     1 if enabled else 0,
                     json.dumps(schema or {}, ensure_ascii=False)[:5000],
+                    contract_hash,
+                    contract_signature,
                     notes[:1000],
                 ),
             )
             conn.commit()
-            return {"ok": True}
+            return {"ok": True, "contract_hash": contract_hash, "contract_signature": contract_signature}
         finally:
             conn.close()
 
@@ -127,6 +154,54 @@ class ToolingRegistry:
             conn.commit()
         finally:
             conn.close()
+
+    def verify_contract(self, adapter_row: dict) -> tuple[bool, str]:
+        try:
+            expected_hash = self.compute_contract_hash(
+                adapter_key=str(adapter_row.get("adapter_key", "")),
+                adapter_version=str(adapter_row.get("adapter_version", "1.0.0")),
+                protocol=str(adapter_row.get("protocol", "")),
+                endpoint=str(adapter_row.get("endpoint", "")),
+                schema=adapter_row.get("schema", {}) if isinstance(adapter_row.get("schema"), dict) else {},
+            )
+            stored_hash = str(adapter_row.get("contract_hash", ""))
+            if not stored_hash or stored_hash != expected_hash:
+                return False, "contract_hash_mismatch"
+            stored_sig = str(adapter_row.get("contract_signature", ""))
+            expected_sig = self.sign_contract_hash(stored_hash)
+            if not stored_sig or not hmac.compare_digest(stored_sig, expected_sig):
+                return False, "contract_signature_mismatch"
+            return True, "contract_ok"
+        except Exception:
+            return False, "contract_verify_error"
+
+    @staticmethod
+    def compute_contract_hash(
+        adapter_key: str,
+        adapter_version: str,
+        protocol: str,
+        endpoint: str,
+        schema: dict,
+    ) -> str:
+        canonical = json.dumps(
+            {
+                "adapter_key": adapter_key,
+                "adapter_version": adapter_version,
+                "protocol": protocol,
+                "endpoint": endpoint,
+                "schema": schema,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def sign_contract_hash(contract_hash: str) -> str:
+        key = (settings.TOOLING_CONTRACT_SECRET or "tooling-contract-local").encode("utf-8")
+        msg = (contract_hash or "").encode("utf-8")
+        return hmac.new(key, msg, hashlib.sha256).hexdigest()
 
     @staticmethod
     def validate(protocol: str, endpoint: str, schema: dict) -> list[str]:

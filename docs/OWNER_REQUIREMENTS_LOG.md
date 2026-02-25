@@ -1009,3 +1009,4 @@ Append all new owner requests here as they arrive.
 - 2026-02-25: Added safe tooling runtime execution path (`tooling:<adapter>`) with dry-run default and policy checks.
 - 2026-02-25: Extended tooling runtime to controlled live OpenAPI probe mode with budget/policy guards.
 - 2026-02-25: Added MCP sandbox runtime path with strict command allowlist, timeout, and response contract validation.
+- 2026-02-25: Added adapter contract integrity checks (versioned hash/signature) and runtime blocking on mismatch.

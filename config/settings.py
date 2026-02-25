@@ -142,6 +142,7 @@ class Settings:
     TOOLING_MCP_TIMEOUT_SEC: int = int(os.getenv("TOOLING_MCP_TIMEOUT_SEC", "12") or 12)
     TOOLING_MCP_MAX_OUTPUT_BYTES: int = int(os.getenv("TOOLING_MCP_MAX_OUTPUT_BYTES", "32768") or 32768)
     TOOLING_MCP_ALLOW_CMDS: str = os.getenv("TOOLING_MCP_ALLOW_CMDS", "python3,node,npx,uv,mcp-server")
+    TOOLING_CONTRACT_SECRET: str = os.getenv("TOOLING_CONTRACT_SECRET", "tooling-contract-local")
 
 
 settings = Settings()
