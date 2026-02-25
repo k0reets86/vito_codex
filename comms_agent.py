@@ -2454,6 +2454,13 @@ class CommsAgent:
         """Return count of pending approvals in comms layer."""
         return len(self._pending_approvals or {})
 
+    def pending_approvals_list(self) -> list[str]:
+        """Return pending approval request ids."""
+        try:
+            return list(self._pending_approvals.keys())
+        except Exception:
+            return []
+
     async def notify_error(self, module: str, error: str) -> bool:
         """Уведомляет владельца о критической ошибке."""
         return await self.send_message(

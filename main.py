@@ -227,6 +227,7 @@ class VITO:
                 schedule_manager=self.schedule_manager,
                 platform_registry=self.platform_registry,
                 llm_router=self.llm_router,
+                comms=self.comms,
             )
         except Exception:
             self.dashboard = None

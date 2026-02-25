@@ -26,7 +26,7 @@ from modules.owner_pref_metrics import OwnerPreferenceMetrics
 
 
 class DashboardServer:
-    def __init__(self, goal_engine=None, decision_loop=None, finance=None, registry=None, schedule_manager=None, platform_registry=None, llm_router=None, publisher_queue=None):
+    def __init__(self, goal_engine=None, decision_loop=None, finance=None, registry=None, schedule_manager=None, platform_registry=None, llm_router=None, publisher_queue=None, comms=None):
         self.goal_engine = goal_engine
         self.decision_loop = decision_loop
         self.finance = finance
@@ -35,6 +35,7 @@ class DashboardServer:
         self.platform_registry = platform_registry
         self.llm_router = llm_router
         self.publisher_queue = publisher_queue
+        self.comms = comms
         self._server = None
         self._thread = None
 
@@ -297,6 +298,15 @@ class DashboardServer:
                         facts_out = []
                     self._json({"facts": facts_out})
                     return
+                if parsed.path == "/api/approvals":
+                    pending = []
+                    try:
+                        if parent.comms:
+                            pending = parent.comms.pending_approvals_list()
+                    except Exception:
+                        pending = []
+                    self._json({"pending": pending, "count": len(pending)})
+                    return
                 if parsed.path == "/api/decisions":
                     try:
                         from modules.data_lake import DataLake
@@ -392,6 +402,7 @@ class DashboardServer:
       <div class=\"card\"><div class=\"mut\">KPI Trend (30d)</div><div id=\"kpi_trend\"></div></div>
       <div class=\"card\"><div class=\"mut\">Models</div><div id=\"models\"></div></div>
       <div class=\"card\"><div class=\"mut\">Execution Facts</div><div id=\"facts\"></div></div>
+      <div class=\"card\"><div class=\"mut\">Pending Approvals</div><div id=\"approvals\"></div></div>
       <div class=\"card\"><div class=\"mut\">Recent Events</div><div id=\"events\"></div></div>
       <div class=\"card\"><div class=\"mut\">Workflow Events</div>
         <div style=\"margin-top:6px\">
@@ -435,7 +446,7 @@ async function load(){
     status:'/api/status', network:'/api/network', agents:'/api/agents', finance:'/api/finance',
     goals:'/api/goals', schedules:'/api/schedules', config:'/api/config',
     platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs',
-    facts:'/api/execution_facts', events:'/api/events', decisions:'/api/decisions', budget:'/api/budget', workflow_events:'/api/workflow_events'
+    facts:'/api/execution_facts', approvals:'/api/approvals', events:'/api/events', decisions:'/api/decisions', budget:'/api/budget', workflow_events:'/api/workflow_events'
   };
   for (const [k,url] of Object.entries(endpoints)){
     const r = await fetch(url); const j = await r.json();
@@ -447,6 +458,7 @@ async function load(){
     else if (k === 'kpi') renderKpi(j.agent_kpi||[]);
     else if (k === 'kpi_trend') renderKpiTrend(j.trend||[]);
     else if (k === 'facts') renderFacts(j.facts||[]);
+    else if (k === 'approvals') renderApprovals(j);
     else if (k === 'events') renderEvents(j.events||[]);
     else if (k === 'workflow_events') renderWorkflowEvents(j.events||[]);
     else if (k === 'decisions') renderDecisions(j.decisions||[]);
@@ -562,6 +574,15 @@ function renderKpiTrend(items){
 function renderFacts(items){
   const rows = items.map(f=>`<tr><td>${f.action}</td><td>${f.status}</td><td>${f.evidence||''}</td><td>${f.created_at}</td></tr>`).join('');
   document.getElementById('facts').innerHTML = `<table><thead><tr><th>Action</th><th>Status</th><th>Evidence</th><th>Time</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+function renderApprovals(j){
+  const pending = (j && j.pending) ? j.pending : [];
+  if (!pending.length){
+    document.getElementById('approvals').innerHTML = '<div class=\"mut\">None</div>';
+    return;
+  }
+  const rows = pending.map(p=>`<tr><td>${p}</td></tr>`).join('');
+  document.getElementById('approvals').innerHTML = `<table><thead><tr><th>Request ID</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 function renderEvents(items){
   const rows = items.map(e=>`<tr><td>${e.agent}</td><td>${e.task_type}</td><td>${e.status}</td><td>${e.created_at}</td></tr>`).join('');
