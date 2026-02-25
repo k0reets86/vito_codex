@@ -23,6 +23,9 @@ Use `scripts/seed_preference_blocks.py` to seed minimal defaults if missing.
 - Disabled by default via `OWNER_PREF_AUTO_DETECT=false`.
 - If enabled, can log weak signals like “пиши кратко” → `style.verbosity=concise`.
 
+## Eval Script
+Use `scripts/owner_pref_eval.py` to print current prefs summary.
+
 ## Storage
 - SQLite `owner_preferences`
 - Events table `owner_preference_events`
