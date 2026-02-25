@@ -671,7 +671,22 @@ class DecisionLoop:
                     step=f"Install/implement skill to accomplish: {step}",
                     goal_title="skill_install",
                 )
-                return bool(res and res.success)
+                if res and res.success:
+                    try:
+                        if hasattr(self, "_skill_registry") and self._skill_registry:
+                            name = f"self_improve:{hash(step) % 100000}"
+                            self._skill_registry.register_skill(
+                                name=name,
+                                category="self_improve",
+                                source="self_improve",
+                                status="learned",
+                                acceptance_status="pending",
+                                notes=f"auto_install:{step[:200]}",
+                            )
+                    except Exception:
+                        pass
+                    return True
+                return False
         except Exception:
             return False
         return False

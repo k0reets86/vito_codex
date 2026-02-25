@@ -987,3 +987,12 @@ Append all new owner requests here as they arrive.
 - [2026-02-25T11:00:41.598127+00:00] (codex_chat) Added optional self-refine pass for LLM fallback outputs (disabled by default).
 - [2026-02-25T11:01:28.802505+00:00] (codex_chat) Added preference correction events + metrics for explicit overrides.
 - [2026-02-25T11:02:55.396554+00:00] (codex_chat) Added dashboard preference controls (set/deactivate) for operator memory management.
+- [2026-02-25T11:03:47.527040+00:00] (codex_chat) Auto-installed self_improve skills now register as pending in SkillRegistry.
+- [2026-02-25T11:03:24.690697+00:00] (text) Расходы
+- [2026-02-25T11:03:26.671891+00:00] (text) Отклонить
+- [2026-02-25T11:03:26.814688+00:00] (text) Отклонить
+- [2026-02-25T11:03:27.105963+00:00] (text) Отклонить
+- [2026-02-25T11:03:27.221452+00:00] (text) Отклонить
+- [2026-02-25T11:03:27.418699+00:00] (text) Отклонить
+- [2026-02-25T11:03:27.576878+00:00] (text) Отклонить
+- [2026-02-25T11:03:27.756512+00:00] (text) Отклонить
