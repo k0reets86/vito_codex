@@ -103,3 +103,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Stored goal lessons into semantic memory.
 - Logged owner preference usage in DataLake.
 - Added additional capability packs (ecommerce_e2e, security_hardening, agent_protocols, voice_streaming).
+- Added dashboard capability pack listing + API.

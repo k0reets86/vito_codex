@@ -23,6 +23,7 @@ from config.settings import settings
 from modules.owner_preference_model import OwnerPreferenceModel
 
 
+
 class DashboardServer:
     def __init__(self, goal_engine=None, decision_loop=None, finance=None, registry=None, schedule_manager=None, platform_registry=None, llm_router=None, publisher_queue=None):
         self.goal_engine = goal_engine
@@ -143,6 +144,26 @@ class DashboardServer:
                     except Exception:
                         prefs = []
                     self._json({"preferences": prefs})
+                    return
+                if parsed.path == "/api/capability_packs":
+                    try:
+                        from pathlib import Path
+                        root = Path(__file__).resolve().parent / "capability_packs"
+                        items = []
+                        for spec in root.glob("*/spec.json"):
+                            try:
+                                data = json.loads(spec.read_text(encoding="utf-8"))
+                            except Exception:
+                                continue
+                            items.append({
+                                "name": data.get("name") or spec.parent.name,
+                                "category": data.get("category", ""),
+                                "status": data.get("acceptance_status", "pending"),
+                                "risk": data.get("risk_score", 0),
+                            })
+                    except Exception:
+                        items = []
+                    self._json({"packs": items})
                     return
 
                 if parsed.path == "/api/platforms":
@@ -360,6 +381,7 @@ class DashboardServer:
         </div>
       </div>
       <div class=\"card\"><div class=\"mut\">Owner Prefs</div><div id=\"prefs\"></div></div>
+      <div class=\"card\"><div class=\"mut\">Capability Packs</div><div id=\"capability_packs\"></div></div>
       <div class=\"card\"><div class=\"mut\">Secrets</div>
         <div class=\"mut\" style=\"font-size:12px\">Keys are write‑only here.</div>
         <div style=\"margin-top:8px\">\n
@@ -382,7 +404,7 @@ async function load(){
   const endpoints = {
     status:'/api/status', network:'/api/network', agents:'/api/agents', finance:'/api/finance',
     goals:'/api/goals', schedules:'/api/schedules', config:'/api/config',
-    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', prefs:'/api/prefs',
+    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', prefs:'/api/prefs', capability_packs:'/api/capability_packs',
     facts:'/api/execution_facts', events:'/api/events', decisions:'/api/decisions', budget:'/api/budget'
   };
   for (const [k,url] of Object.entries(endpoints)){
@@ -404,6 +426,7 @@ async function load(){
     else if (k === 'schedules') renderSchedules(j.tasks||[]);
     else if (k === 'config') renderConfig(j.config||j);
     else if (k === 'prefs') renderPrefs(j.preferences||[]);
+    else if (k === 'capability_packs') renderCapabilityPacks(j.packs||[]);
     else if (k === 'models') renderModels(j);
     else if (k === 'llm_policy') renderLlmPolicy(j.policy||{});
   }
@@ -412,6 +435,12 @@ function renderPrefs(prefs){
   const el = document.getElementById('prefs');
   if (!prefs.length){ el.innerHTML = '<div class=\"mut\">No prefs</div>'; return; }
   const rows = prefs.map(p => `<div style=\"margin:4px 0\"><code>${p.pref_key}</code>: ${JSON.stringify(p.value)} <span class=\"mut\">(conf=${(p.confidence||0).toFixed(2)})</span></div>`);
+  el.innerHTML = rows.join('');
+}
+function renderCapabilityPacks(packs){
+  const el = document.getElementById('capability_packs');
+  if (!packs.length){ el.innerHTML = '<div class=\"mut\">No packs</div>'; return; }
+  const rows = packs.map(p => `<div style=\"margin:4px 0\"><code>${p.name}</code> ${p.category} <span class=\"mut\">(${p.status})</span></div>`);
   el.innerHTML = rows.join('');
 }
 function renderRss(sources){
