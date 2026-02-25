@@ -118,3 +118,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added optional owner preference auto-detect (off by default).
 - Next: integrate capability packs into acceptance flow (pending -> accepted with tests).
 - Added capability pack acceptance script.
+- Fixed sync_capability_packs import path.
