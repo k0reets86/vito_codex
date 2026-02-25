@@ -159,6 +159,10 @@ class VITO:
             self.skill_registry.audit_coverage()
         except Exception:
             pass
+        try:
+            self.skill_registry.register_from_capability_packs()
+        except Exception:
+            pass
         self.schedule_manager = ScheduleManager()
         self.platform_registry = PlatformRegistry()
         try:
