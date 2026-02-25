@@ -141,6 +141,44 @@ def test_chroma_search_empty(memory, tmp_path):
     assert results == []
 
 
+def test_store_knowledge_policy_forget_short_noise(memory, tmp_path):
+    with patch("memory.memory_manager.settings") as s:
+        s.CHROMA_PATH = str(tmp_path / "chroma")
+        s.SQLITE_PATH = str(tmp_path / "test.db")
+        stored = memory.store_knowledge("noise_1", "ok", {"type": "debug", "source": "heartbeat"})
+    assert stored is False
+    audit = memory.get_memory_policy_audit(limit=1)
+    assert audit
+    assert audit[0]["doc_id"] == "noise_1"
+    assert audit[0]["action"] == "forget"
+
+
+def test_store_knowledge_policy_force_save(memory, tmp_path):
+    with patch("memory.memory_manager.settings") as s:
+        s.CHROMA_PATH = str(tmp_path / "chroma")
+        s.SQLITE_PATH = str(tmp_path / "test.db")
+        stored = memory.store_knowledge(
+            "owner_pref_tone",
+            "owner preference: concise",
+            {"type": "owner_preference", "force_save": True},
+        )
+    assert stored is True
+    results = memory.search_knowledge("concise", n_results=1)
+    assert results
+    assert results[0]["id"] == "owner_pref_tone"
+
+
+def test_forget_knowledge_records_audit(memory, tmp_path):
+    with patch("memory.memory_manager.settings") as s:
+        s.CHROMA_PATH = str(tmp_path / "chroma")
+        s.SQLITE_PATH = str(tmp_path / "test.db")
+        memory.store_knowledge("doc_forget", "This is important content for test", {"type": "lesson"})
+        deleted = memory.forget_knowledge("doc_forget", reason="test_cleanup")
+    assert deleted is True
+    audit = memory.get_memory_policy_audit(limit=5)
+    assert any(r["doc_id"] == "doc_forget" and r["action"] == "forget" for r in audit)
+
+
 # ── Формула релевантности ──
 
 def test_relevance_recent_important():

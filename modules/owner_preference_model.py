@@ -102,7 +102,13 @@ class OwnerPreferenceModel:
             mm.store_knowledge(
                 doc_id=f"owner_pref_{key}",
                 text=f"owner preference: {key} = {value}",
-                metadata={"type": "owner_preference", "key": key, "source": source},
+                metadata={
+                    "type": "owner_preference",
+                    "key": key,
+                    "source": source,
+                    "force_save": True,
+                    "policy_reason": "owner_explicit",
+                },
             )
         except Exception:
             pass

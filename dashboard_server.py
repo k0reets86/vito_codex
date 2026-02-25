@@ -8,6 +8,7 @@ Provides:
 - /api/finance
 - /api/schedules
 - /api/prefs
+- /api/memory_policy
 - /api/platforms
 - /api/config (GET/POST)
 """
@@ -20,6 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 from config.settings import settings
+from memory.memory_manager import MemoryManager
 from modules.owner_preference_model import OwnerPreferenceModel
 from modules.owner_pref_metrics import OwnerPreferenceMetrics
 
@@ -181,6 +183,15 @@ class DashboardServer:
                     except Exception:
                         skills = []
                     self._json({"skills": skills})
+                    return
+                if parsed.path == "/api/memory_policy":
+                    try:
+                        action = (query.get("action", [""])[0] or "").strip()
+                        limit = int(query.get("limit", ["100"])[0] or 100)
+                        audit = MemoryManager().get_memory_policy_audit(limit=limit, action=action)
+                    except Exception:
+                        audit = []
+                    self._json({"audit": audit})
                     return
                 if parsed.path == "/api/workflow_threads":
                     try:
@@ -452,6 +463,14 @@ class DashboardServer:
       <div class=\"card\"><div class=\"mut\">Pref Metrics</div><div id=\"prefs_metrics\"></div></div>
       <div class=\"card\"><div class=\"mut\">Capability Packs</div><div id=\"capability_packs\"></div></div>
       <div class=\"card\"><div class=\"mut\">Skills</div><div id=\"skills\"></div></div>
+      <div class=\"card\"><div class=\"mut\">Memory Policy Audit</div><div id=\"memory_policy\"></div></div>
+      <div class=\"card\"><div class=\"mut\">Memory Controls</div>
+        <div style=\"margin-top:8px\">\n
+          <input id=\"mem_doc_id\" placeholder=\"doc_id\" style=\"width:45%\"/>
+          <input id=\"mem_reason\" placeholder=\"reason\" style=\"width:40%\"/>
+          <button onclick=\"forgetMemory()\">Forget</button>
+        </div>
+      </div>
       <div class=\"card\"><div class=\"mut\">Workflow Threads</div><div id=\"workflow_threads\"></div></div>
       <div class=\"card\"><div class=\"mut\">Secrets</div>
         <div class=\"mut\" style=\"font-size:12px\">Keys are write‑only here.</div>
@@ -475,7 +494,7 @@ async function load(){
   const endpoints = {
     status:'/api/status', network:'/api/network', agents:'/api/agents', finance:'/api/finance',
     goals:'/api/goals', schedules:'/api/schedules', config:'/api/config',
-    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs', skills:'/api/skills', workflow_threads:'/api/workflow_threads',
+    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs', skills:'/api/skills', memory_policy:'/api/memory_policy?limit=80', workflow_threads:'/api/workflow_threads',
     facts:'/api/execution_facts', approvals:'/api/approvals', events:'/api/events', decisions:'/api/decisions', budget:'/api/budget', workflow_events:'/api/workflow_events'
   };
   for (const [k,url] of Object.entries(endpoints)){
@@ -502,6 +521,7 @@ async function load(){
     else if (k === 'prefs_metrics') renderPrefsMetrics(j.metrics||{});
     else if (k === 'capability_packs') renderCapabilityPacks(j.packs||[]);
     else if (k === 'skills') renderSkills(j.skills||[]);
+    else if (k === 'memory_policy') renderMemoryPolicy(j.audit||[]);
     else if (k === 'workflow_threads') renderWorkflowThreads(j.threads||[]);
     else if (k === 'models') renderModels(j);
     else if (k === 'llm_policy') renderLlmPolicy(j.policy||{});
@@ -529,6 +549,12 @@ function renderSkills(skills){
   if (!skills.length){ el.innerHTML = '<div class=\"mut\">No skills</div>'; return; }
   const rows = skills.map(s => `<div style=\"margin:4px 0\"><code>${s.name}</code> ${s.category} <span class=\"mut\">(${s.acceptance_status})</span></div>`);
   el.innerHTML = rows.join('');
+}
+function renderMemoryPolicy(items){
+  const el = document.getElementById('memory_policy');
+  if (!items.length){ el.innerHTML = '<div class=\"mut\">No audit events</div>'; return; }
+  const rows = items.map(a => `<tr><td>${a.created_at||''}</td><td>${a.doc_id||''}</td><td>${a.action||''}</td><td>${a.reason||''}</td><td>${a.memory_type||''}</td></tr>`).join('');
+  el.innerHTML = `<table><thead><tr><th>Time</th><th>Doc</th><th>Action</th><th>Reason</th><th>Type</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 function renderWorkflowThreads(threads){
   const el = document.getElementById('workflow_threads');
@@ -681,6 +707,13 @@ async function delPref(){
   const key = document.getElementById('pref_del_key').value.trim();
   if (!key) return;
   await fetch('/api/prefs', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'deactivate', key})});
+  await load();
+}
+async function forgetMemory(){
+  const doc_id = document.getElementById('mem_doc_id').value.trim();
+  const reason = document.getElementById('mem_reason').value.trim() || 'dashboard_forget';
+  if (!doc_id) return;
+  await fetch('/api/memory_policy', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'forget', doc_id, reason})});
   await load();
 }
 async function setSecret(){
@@ -846,6 +879,30 @@ load();
                         except Exception:
                             pass
                     self._json({"updated": updated, "action": action, "key": key})
+                    return
+                if parsed.path == "/api/memory_policy":
+                    length = int(self.headers.get("Content-Length", "0") or "0")
+                    raw = self.rfile.read(length) if length else b"{}"
+                    try:
+                        payload = json.loads(raw.decode("utf-8"))
+                    except Exception:
+                        payload = {}
+                    action = str(payload.get("action", "")).strip().lower()
+                    doc_id = str(payload.get("doc_id", "")).strip()
+                    reason = str(payload.get("reason", "")).strip() or "dashboard_forget"
+                    ok = False
+                    if action == "forget" and doc_id:
+                        try:
+                            ok = bool(MemoryManager().forget_knowledge(doc_id=doc_id, reason=reason, metadata={"source": "dashboard"}))
+                        except Exception:
+                            ok = False
+                    if ok:
+                        try:
+                            from modules.data_lake import DataLake
+                            DataLake().record_decision(actor="dashboard", decision="memory_forget", rationale=f"{doc_id}:{reason}"[:1000])
+                        except Exception:
+                            pass
+                    self._json({"ok": ok, "action": action, "doc_id": doc_id, "reason": reason})
                     return
                 if parsed.path == "/api/secrets":
                     length = int(self.headers.get("Content-Length", "0") or "0")

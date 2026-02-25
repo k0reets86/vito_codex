@@ -1,0 +1,27 @@
+# Current context (auto-saved)
+- What we were doing:
+  - Executing the VITO skill-expansion plan (durable orchestration → memory/skills → operator UI → self-learning → safety/observability → tooling standards).
+  - Recently integrated workflow threads tracking into DecisionLoop and dashboard.
+  - Added approvals pause/resume handling, workflow events, prefs controls, skills list, and pending approvals in dashboard.
+  - Added optional self-refine for LLM fallback and expanded owner preference auto-detect + metrics.
+  - Implemented explicit memory save/forget policy with audit trail and dashboard controls for manual forget.
+- Current blockers:
+  - Social network integrations (Threads/YouTube/TikTok/etc.) are paused until accounts are ready.
+- Important commands:
+  - pytest -q -c /dev/null tests/test_decision_loop.py
+  - pytest -q -c /dev/null tests/test_workflow_state_machine.py
+  - pytest -q -c /dev/null tests/test_workflow_threads.py
+  - git status -sb
+- Paths / URLs:
+  - docs/PLAN_SKILL_EXPANSION_2026-02-25.md (master plan + amendments)
+  - docs/OWNER_REQUIREMENTS_LOG.md (owner requests log)
+  - dashboard_server.py (dashboard UI/API)
+  - decision_loop.py (orchestration)
+  - modules/workflow_state_machine.py, modules/workflow_threads.py
+- Next steps:
+  - Extend durable orchestration: interrupts/approvals + step contracts across more agents/tools.
+  - Memory/skills pipeline: retention tuning (TTL classes), memory quality scoring, and policy dashboards.
+  - Operator UI: budgets/models/tools management.
+  - Self-learning: reflection loop + DSPy-like optimization + skill generation pipeline.
+  - Security/cost/observability: gateway + guardrails + evals.
+  - Tooling standards: MCP/OpenAPI integration.

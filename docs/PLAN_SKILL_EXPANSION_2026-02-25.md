@@ -156,3 +156,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Registered auto-installed self_improve skills as pending in SkillRegistry.
 - Added skills listing endpoint + dashboard panel.
 - Integrated workflow threads tracking + dashboard visibility.
+- Added explicit memory save/forget policy with SQLite audit trail and manual forget API in dashboard.

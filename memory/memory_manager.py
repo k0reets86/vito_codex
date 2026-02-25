@@ -21,6 +21,7 @@ import chromadb
 
 from config.logger import get_logger
 from config.settings import settings
+from modules.memory_policy import decide_save
 
 logger = get_logger("memory_manager", agent="memory_manager")
 
@@ -59,11 +60,23 @@ class MemoryManager:
             )
         return self._chroma_collection
 
-    def store_knowledge(self, doc_id: str, text: str, metadata: dict[str, Any] | None = None) -> None:
+    def store_knowledge(self, doc_id: str, text: str, metadata: dict[str, Any] | None = None) -> bool:
         """Сохраняет знание в ChromaDB для семантического поиска."""
+        raw_meta = metadata or {}
+        decision = decide_save(doc_id=doc_id, text=text, metadata=raw_meta)
+        self._audit_memory_policy(doc_id=doc_id, text=text, metadata=raw_meta, action=decision.action, reason=decision.reason, importance=decision.importance, ttl_days=decision.ttl_days)
+        if decision.action != "save":
+            logger.info(
+                f"Знание отклонено policy: {doc_id} ({decision.reason})",
+                extra={"event": "knowledge_forget_policy", "context": {"doc_id": doc_id, "reason": decision.reason}},
+            )
+            return False
         collection = self._get_chroma()
-        meta = self._sanitize_metadata(metadata or {})
+        meta = self._sanitize_metadata(raw_meta)
         meta["stored_at"] = datetime.now(timezone.utc).isoformat()
+        meta["importance_score"] = float(meta.get("importance_score", decision.importance))
+        meta["ttl_days"] = int(meta.get("ttl_days", decision.ttl_days))
+        meta["policy_reason"] = decision.reason
         try:
             collection.upsert(ids=[doc_id], documents=[text], metadatas=[meta])
             self._chroma_doc_count += 1
@@ -71,6 +84,7 @@ class MemoryManager:
                 f"Знание сохранено: {doc_id}",
                 extra={"event": "knowledge_stored", "context": {"doc_id": doc_id}},
             )
+            return True
         except Exception as e:
             logger.error(
                 f"Ошибка сохранения знания: {e}",
@@ -78,6 +92,33 @@ class MemoryManager:
                 exc_info=True,
             )
             raise
+
+    def forget_knowledge(self, doc_id: str, reason: str = "manual_forget", metadata: dict[str, Any] | None = None) -> bool:
+        """Удаляет знание из ChromaDB и пишет аудит forget-события."""
+        meta = metadata or {}
+        self._audit_memory_policy(
+            doc_id=doc_id,
+            text="",
+            metadata=meta,
+            action="forget",
+            reason=reason or "manual_forget",
+            importance=float(meta.get("importance_score", 0.0) or 0.0),
+            ttl_days=int(meta.get("ttl_days", 0) or 0),
+        )
+        try:
+            collection = self._get_chroma()
+            collection.delete(ids=[doc_id])
+            logger.info(
+                f"Знание удалено: {doc_id}",
+                extra={"event": "knowledge_deleted", "context": {"doc_id": doc_id, "reason": reason}},
+            )
+            return True
+        except Exception as e:
+            logger.warning(
+                f"Не удалось удалить знание: {e}",
+                extra={"event": "knowledge_delete_failed", "context": {"doc_id": doc_id}},
+            )
+            return False
 
     @staticmethod
     def _sanitize_metadata(meta: dict[str, Any]) -> dict[str, Any]:
@@ -209,6 +250,19 @@ class MemoryManager:
                 created_at TEXT DEFAULT (datetime('now')),
                 UNIQUE(category, pattern_key)
             );
+            CREATE TABLE IF NOT EXISTS memory_policy_audit (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                doc_id TEXT NOT NULL,
+                action TEXT NOT NULL,
+                reason TEXT DEFAULT '',
+                memory_type TEXT DEFAULT '',
+                source TEXT DEFAULT '',
+                text_size INTEGER DEFAULT 0,
+                importance REAL DEFAULT 0.0,
+                ttl_days INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_memory_policy_doc ON memory_policy_audit (doc_id, created_at DESC);
         """)
         conn.commit()
         # Миграция: добавить колонки если их нет (для существующих БД)
@@ -233,6 +287,58 @@ class MemoryManager:
         except sqlite3.OperationalError:
             conn.execute("ALTER TABLE skills ADD COLUMN last_result TEXT DEFAULT ''")
             conn.commit()
+
+    def _audit_memory_policy(
+        self,
+        doc_id: str,
+        text: str,
+        metadata: dict[str, Any],
+        action: str,
+        reason: str,
+        importance: float,
+        ttl_days: int,
+    ) -> None:
+        try:
+            conn = self._get_sqlite()
+            conn.execute(
+                """
+                INSERT INTO memory_policy_audit
+                (doc_id, action, reason, memory_type, source, text_size, importance, ttl_days)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    doc_id[:200],
+                    (action or "")[:30],
+                    (reason or "")[:200],
+                    str(metadata.get("type", ""))[:80],
+                    str(metadata.get("source", ""))[:80],
+                    len((text or "").strip()),
+                    float(importance or 0.0),
+                    int(ttl_days or 0),
+                ),
+            )
+            conn.commit()
+        except Exception:
+            pass
+
+    def get_memory_policy_audit(self, limit: int = 100, action: str = "") -> list[dict]:
+        conn = self._get_sqlite()
+        if action:
+            rows = conn.execute(
+                """SELECT * FROM memory_policy_audit
+                   WHERE action = ?
+                   ORDER BY id DESC
+                   LIMIT ?""",
+                (action, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT * FROM memory_policy_audit
+                   ORDER BY id DESC
+                   LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def save_skill(self, name: str, description: str, agent: str = "",
                    task_type: str = "", method: dict | None = None) -> None:
