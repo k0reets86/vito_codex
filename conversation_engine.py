@@ -28,6 +28,7 @@ from typing import Any, Optional
 from config.logger import get_logger
 from config.settings import settings
 from llm_router import LLMRouter, TaskType, MODEL_REGISTRY
+from modules.prompt_guard import wrap_untrusted_text
 
 logger = get_logger("conversation_engine", agent="conversation_engine")
 
@@ -288,14 +289,21 @@ class ConversationEngine:
         if intent == Intent.APPROVAL:
             return {"intent": intent.value, "response": None, "pass_through": True}
         if intent == Intent.QUESTION:
-            return await self._handle_question(text)
-        if intent == Intent.GOAL_REQUEST:
-            return await self._handle_goal_request(text)
-        if intent == Intent.SYSTEM_ACTION:
-            return await self._handle_system_action(text)
-        if intent == Intent.FEEDBACK:
-            return await self._handle_feedback(text)
-        return await self._handle_conversation(text)
+            result = await self._handle_question(text)
+        elif intent == Intent.GOAL_REQUEST:
+            result = await self._handle_goal_request(text)
+        elif intent == Intent.SYSTEM_ACTION:
+            result = await self._handle_system_action(text)
+        elif intent == Intent.FEEDBACK:
+            result = await self._handle_feedback(text)
+        else:
+            result = await self._handle_conversation(text)
+        try:
+            if isinstance(result, dict) and isinstance(result.get("response"), str):
+                result["response"] = self._guard_response(result["response"])
+        except Exception:
+            pass
+        return result
 
     # ── Обработчики ──
 
@@ -347,7 +355,7 @@ class ConversationEngine:
             f"=== КОНЕЦ СОСТОЯНИЯ ===\n\n"
             f"История разговора:\n{self._format_context()}\n\n"
             f"{context_from_memory}\n\n"
-            f"Вопрос владельца: {text}\n\n"
+            f"Вопрос владельца: {wrap_untrusted_text(text)}\n\n"
             f"ВАЖНО: отвечай с КОНКРЕТНЫМИ цифрами и данными из системы выше. "
             f"Не говори что данных нет — они есть в состоянии системы."
         )
@@ -394,7 +402,7 @@ class ConversationEngine:
             f"{VITO_PERSONALITY}\n\n"
             f"=== СОСТОЯНИЕ СИСТЕМЫ ===\n{system_context}\n=== КОНЕЦ ===\n\n"
             f"Доступные действия:\n{available_actions}\n\n"
-            f"Владелец просит: \"{text}\"\n\n"
+            f"Владелец просит: \"{wrap_untrusted_text(text)}\"\n\n"
             f"Определи какие действия нужно выполнить и дай подтверждение.\n"
             f"Ответь в JSON:\n"
             f'{{"response": "текст ответа владельцу", '
@@ -465,7 +473,7 @@ class ConversationEngine:
             f"{VITO_PERSONALITY}\n\n"
             f"=== СОСТОЯНИЕ СИСТЕМЫ ===\n{system_context}\n=== КОНЕЦ ===\n\n"
             f"{skills_context}{owner_prefs}\n\n"
-            f"Владелец просит: \"{text}\"\n\n"
+            f"Владелец просит: \"{wrap_untrusted_text(text)}\"\n\n"
             f"ПРАВИЛА:\n"
             f"1. Все продукты/контент — на АНГЛИЙСКОМ (US/CA/EU market)\n"
             f"2. НЕ начинай сразу. Сформируй план и предложи на одобрение\n"

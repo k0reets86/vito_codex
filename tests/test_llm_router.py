@@ -127,6 +127,17 @@ def test_spend_persists_in_sqlite(router):
     assert abs(router.get_daily_spend() - 0.15) < 1e-9
 
 
+def test_policy_report_contains_totals(router):
+    router._record_spend("gemini-2.5-flash-lite", "routine", 100, 50, 0.0)
+    router._record_spend("gpt-5", "strategy", 300, 200, 0.2)
+    report = router.get_policy_report(days=1)
+    assert "daily_spend_usd" in report
+    assert "free_calls" in report
+    assert "paid_calls" in report
+    assert report["paid_calls"] >= 1
+    assert report["window_days"] == 1
+
+
 @pytest.mark.asyncio
 async def test_call_llm_returns_none_on_approval_needed(router):
     # Очень дорогой запрос — needs_approval

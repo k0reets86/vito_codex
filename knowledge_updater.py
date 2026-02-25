@@ -95,6 +95,31 @@ class KnowledgeUpdater:
         )
         return results
 
+    def run_daily_refresh(self) -> dict[str, Any]:
+        """Cheap daily refresh without mandatory LLM calls."""
+        results: dict[str, Any] = {}
+        try:
+            results["calendar_loaded"] = self.load_static_calendar()
+        except Exception:
+            results["calendar_loaded"] = False
+        try:
+            results["platform_knowledge_loaded"] = self.load_platform_knowledge()
+        except Exception:
+            results["platform_knowledge_loaded"] = False
+        try:
+            results["platform_registry_loaded"] = self.load_platform_registry()
+        except Exception:
+            results["platform_registry_loaded"] = False
+        try:
+            results["ai_models_loaded"] = self.load_ai_models_knowledge()
+        except Exception:
+            results["ai_models_loaded"] = False
+        logger.info(
+            f"Daily knowledge refresh done: {results}",
+            extra={"event": "daily_knowledge_refresh", "context": results},
+        )
+        return results
+
     def load_static_calendar(self) -> bool:
         """Load commerce calendar from docs into memory (no LLM)."""
         try:

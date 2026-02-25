@@ -207,3 +207,12 @@ class TestRunWeeklyUpdate:
         assert "model_prices" in results
         assert "memories_compacted" in results
         assert "patterns_updated" in results
+
+
+class TestRunDailyRefresh:
+    def test_run_daily_refresh(self, ku):
+        results = ku.run_daily_refresh()
+        assert "calendar_loaded" in results
+        assert "platform_knowledge_loaded" in results
+        assert "platform_registry_loaded" in results
+        assert "ai_models_loaded" in results

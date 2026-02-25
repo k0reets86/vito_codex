@@ -63,6 +63,32 @@ class ExecutionFacts:
         )
         conn.commit()
         conn.close()
+        # Mirror verified actions into DataLake for unified observability/KPI
+        try:
+            from modules.data_lake import DataLake
+            DataLake().record(
+                agent=source or "execution_facts",
+                task_type=f"fact:{action}",
+                status=status,
+                output={"detail": detail[:300], "evidence": evidence[:500], "evidence_json": evidence_dict or {}},
+                error="" if status == "success" else detail[:300],
+            )
+        except Exception:
+            pass
+        # Auto-learn playbook entries (works/fails memory loop)
+        try:
+            from modules.playbook_registry import PlaybookRegistry
+            agent = (source or action.split(":", 1)[0] or "system").split(".", 1)[0]
+            task_type = action.split(":", 1)[-1] if ":" in action else action
+            PlaybookRegistry().learn(
+                agent=agent,
+                task_type=task_type,
+                action=action,
+                status=status,
+                strategy={"detail": detail[:200], "evidence": evidence[:300]},
+            )
+        except Exception:
+            pass
 
     def recent_exists(self, actions: list[str], hours: int = 24) -> bool:
         if not actions:
@@ -75,6 +101,20 @@ class ExecutionFacts:
             WHERE created_at >= ? AND action IN ({",".join("?" for _ in actions)})
             """,
             (since, *actions),
+        )
+        count = cur.fetchone()[0]
+        conn.close()
+        return count > 0
+
+    def recent_status_exists(self, action: str, status: str, hours: int = 24) -> bool:
+        since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        conn = sqlite3.connect(self.sqlite_path)
+        cur = conn.execute(
+            """
+            SELECT COUNT(*) FROM execution_facts
+            WHERE created_at >= ? AND action = ? AND status = ?
+            """,
+            (since, action, status),
         )
         count = cur.fetchone()[0]
         conn.close()
@@ -96,6 +136,21 @@ class ExecutionFacts:
         count = cur.fetchone()[0]
         conn.close()
         return count > 0
+
+    def has_publish_evidence_recent(self, hours: int = 24) -> bool:
+        return self.recent_verified_exists(
+            actions=[
+                "platform:publish",
+                "publisher_agent:publish",
+                "gumroad:publish",
+                "etsy:publish",
+                "kofi:publish",
+                "wordpress:publish",
+                "smm_agent:publish",
+                "browser_agent:form_fill",
+            ],
+            hours=hours,
+        )
 
     def recent_facts(self, limit: int = 10) -> list[ExecutionFact]:
         conn = sqlite3.connect(self.sqlite_path)

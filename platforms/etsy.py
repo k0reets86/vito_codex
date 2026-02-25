@@ -12,6 +12,7 @@ import aiohttp
 from config.logger import get_logger
 from config.settings import settings
 from platforms.base_platform import BasePlatform
+from modules.execution_facts import ExecutionFacts
 
 logger = get_logger("etsy", agent="etsy")
 API_BASE = "https://openapi.etsy.com/v3"
@@ -170,6 +171,26 @@ class EtsyPlatform(BasePlatform):
 
         content: {title, description, price, quantity, taxonomy_id, tags[], who_made, when_made, is_supply}
         """
+        if content.get("dry_run"):
+            title = content.get("title", "")
+            try:
+                ExecutionFacts().record(
+                    action="platform:publish",
+                    status="prepared",
+                    detail=f"etsy dry_run title={str(title)[:80]}",
+                    evidence="dryrun:etsy",
+                    source="etsy.publish",
+                    evidence_dict={"platform": "etsy", "dry_run": True, "title": title},
+                )
+            except Exception:
+                pass
+            return {
+                "platform": "etsy",
+                "status": "prepared",
+                "dry_run": True,
+                "title": title,
+            }
+
         if not self._oauth_token:
             logger.warning(
                 "Etsy publish requires OAuth2 token (not yet configured)",
@@ -210,14 +231,27 @@ class EtsyPlatform(BasePlatform):
                 data = await resp.json()
                 if resp.status in (200, 201):
                     listing_id = data.get("listing_id", "")
+                    listing_url = f"https://www.etsy.com/listing/{listing_id}" if listing_id else ""
                     logger.info(
                         f"Etsy listing created: {listing_id}",
                         extra={"event": "etsy_publish_ok", "context": {"listing_id": listing_id}},
                     )
+                    try:
+                        ExecutionFacts().record(
+                            action="platform:publish",
+                            status="created",
+                            detail=f"etsy listing_id={listing_id}",
+                            evidence=listing_url,
+                            source="etsy.publish",
+                            evidence_dict={"platform": "etsy", "listing_id": listing_id, "url": listing_url},
+                        )
+                    except Exception:
+                        pass
                     return {
                         "platform": "etsy",
                         "status": "created",
                         "listing_id": listing_id,
+                        "url": listing_url,
                         "state": "draft",
                         "data": data,
                     }

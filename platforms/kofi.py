@@ -12,6 +12,7 @@ import aiohttp
 from config.logger import get_logger
 from config.settings import settings
 from platforms.base_platform import BasePlatform
+from modules.execution_facts import ExecutionFacts
 
 logger = get_logger("kofi", agent="kofi")
 API_BASE = "https://ko-fi.com/api"
@@ -70,6 +71,26 @@ class KofiPlatform(BasePlatform):
 
         content: {title, description, price, type (digital/physical), file_url}
         """
+        if content.get("dry_run"):
+            title = content.get("title", "")
+            try:
+                ExecutionFacts().record(
+                    action="platform:publish",
+                    status="prepared",
+                    detail=f"kofi dry_run title={str(title)[:80]}",
+                    evidence="dryrun:kofi",
+                    source="kofi.publish",
+                    evidence_dict={"platform": "kofi", "dry_run": True, "title": title},
+                )
+            except Exception:
+                pass
+            return {
+                "platform": "kofi",
+                "status": "prepared",
+                "dry_run": True,
+                "title": title,
+            }
+
         if not self._authenticated:
             auth_ok = await self.authenticate()
             if not auth_ok:
@@ -98,6 +119,17 @@ class KofiPlatform(BasePlatform):
                         f"Ko-fi product created via browser: {title}",
                         extra={"event": "kofi_publish_ok"},
                     )
+                    try:
+                        ExecutionFacts().record(
+                            action="platform:publish",
+                            status="created",
+                            detail=f"kofi title={title[:80]}",
+                            evidence=f"https://ko-fi.com/{self._page_id}",
+                            source="kofi.publish",
+                            evidence_dict={"platform": "kofi", "title": title, "method": "browser_automation"},
+                        )
+                    except Exception:
+                        pass
                     return {
                         "platform": "kofi",
                         "status": "created",
@@ -114,6 +146,17 @@ class KofiPlatform(BasePlatform):
             f"Ko-fi product prepared (manual upload needed): {title}",
             extra={"event": "kofi_publish_prepared"},
         )
+        try:
+            ExecutionFacts().record(
+                action="platform:publish",
+                status="prepared",
+                detail=f"kofi title={title[:80]}",
+                evidence=product_url,
+                source="kofi.publish",
+                evidence_dict={"platform": "kofi", "title": title, "method": "prepared"},
+            )
+        except Exception:
+            pass
         return {
             "platform": "kofi",
             "status": "prepared",

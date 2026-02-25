@@ -144,6 +144,57 @@ class GumroadPlatform(BasePlatform):
 
         Gumroad API does NOT support product creation (404). Uses Playwright + session cookie.
         """
+        # Dry-run path: validate payload and return deterministic evidence without touching live account.
+        if bool(content.get("dry_run")):
+            name = str(content.get("name") or "VITO Gumroad DryRun").strip()
+            price = content.get("price", 0)
+            pdf_path = str(content.get("pdf_path") or "")
+            cover_path = str(content.get("cover_path") or "")
+            thumb_path = str(content.get("thumb_path") or "")
+            missing = []
+            for pth in (pdf_path, cover_path, thumb_path):
+                if pth and not Path(pth).exists():
+                    missing.append(pth)
+            if missing:
+                result = {
+                    "platform": "gumroad",
+                    "status": "error",
+                    "error": f"missing_file:{missing[0]}",
+                }
+            else:
+                result = {
+                    "platform": "gumroad",
+                    "status": "prepared",
+                    "url": f"dryrun://gumroad/{name[:60].replace(' ', '_')}",
+                    "evidence": {
+                        "name": name,
+                        "price": price,
+                        "pdf_path": pdf_path,
+                        "cover_path": cover_path,
+                        "thumb_path": thumb_path,
+                    },
+                }
+            try:
+                ExecutionFacts().record(
+                    action="platform:publish",
+                    status=result.get("status", "unknown"),
+                    detail=f"gumroad dry_run name={name[:80]}",
+                    evidence=str(result.get("url", "")),
+                    source="gumroad.publish",
+                    evidence_dict={"platform": "gumroad", "dry_run": True, "result": result},
+                )
+            except Exception:
+                pass
+            return result
+
+        # Safety policy: editing existing live products must be explicitly confirmed.
+        if content.get("allow_existing_update") and not content.get("owner_edit_confirmed"):
+            return {
+                "platform": "gumroad",
+                "status": "blocked",
+                "error": "existing_update_requires_owner_confirmation",
+            }
+
         # Validate required assets
         pdf_path = content.get("pdf_path", "")
         cover_path = content.get("cover_path", "")
@@ -178,10 +229,12 @@ class GumroadPlatform(BasePlatform):
             try:
                 facts = ExecutionFacts()
                 evidence = result.get("url") or result.get("screenshot_path", "")
+                sig = str(content.get("signature", "")).strip()
+                detail = f"gumroad sig={sig}" if sig else "gumroad"
                 facts.record(
                     action="platform:publish",
                     status=result.get("status", "unknown"),
-                    detail="gumroad",
+                    detail=detail,
                     evidence=evidence,
                     source="gumroad.publish",
                     evidence_dict={
@@ -274,6 +327,8 @@ class GumroadPlatform(BasePlatform):
                 "error": "No session cookie. Ask owner for _gumroad_app_session from browser.",
             }
 
+        allow_existing_update = bool(content.get("allow_existing_update")) and bool(content.get("owner_edit_confirmed"))
+
         name = content.get("name", "VITO Product")
         price = str(content.get("price", 9))
         description = content.get("description", "")
@@ -303,20 +358,21 @@ class GumroadPlatform(BasePlatform):
                 page = await ctx.new_page()
                 page.set_default_timeout(20000)
 
-                # Prefer editing existing product with same name to avoid daily limit
+                # Prefer editing existing product with same name only when explicitly allowed.
                 slug_from_api = ""
-                try:
-                    existing = await self.get_products()
-                    for prod in existing:
-                        if prod.get("name") == name:
-                            short = prod.get("short_url", "") or prod.get("url", "")
-                            if "/l/" in short:
-                                slug_from_api = short.split("/l/")[-1].split("?")[0]
-                            elif "gum.co/" in short:
-                                slug_from_api = short.rsplit("/", 1)[-1]
-                            break
-                except Exception:
-                    slug_from_api = ""
+                if allow_existing_update:
+                    try:
+                        existing = await self.get_products()
+                        for prod in existing:
+                            if prod.get("name") == name:
+                                short = prod.get("short_url", "") or prod.get("url", "")
+                                if "/l/" in short:
+                                    slug_from_api = short.split("/l/")[-1].split("?")[0]
+                                elif "gum.co/" in short:
+                                    slug_from_api = short.rsplit("/", 1)[-1]
+                                break
+                    except Exception:
+                        slug_from_api = ""
 
                 async def _open_existing_product(preferred_name: str = "", allow_update: bool = False) -> str:
                     if not allow_update:
@@ -379,7 +435,7 @@ class GumroadPlatform(BasePlatform):
                         content_html = await page.content()
                         if "only create 10 products per day" in content_html:
                             logger.warning("Gumroad: daily limit reached", extra={"event": "gumroad_daily_limit"})
-                            slug_from_api = await _open_existing_product(name, allow_update=bool(content.get("allow_existing_update")))
+                            slug_from_api = await _open_existing_product(name, allow_update=allow_existing_update)
                             if not slug_from_api:
                                 await br.close()
                                 return {"platform": "gumroad", "status": "daily_limit", "error": "Daily limit reached; update_existing_not_allowed"}
@@ -388,7 +444,7 @@ class GumroadPlatform(BasePlatform):
                     # If we got redirected to the products list, open an existing product
                     try:
                         if page.url.rstrip("/").endswith("/products"):
-                            slug_from_api = await _open_existing_product(name, allow_update=bool(content.get("allow_existing_update")))
+                            slug_from_api = await _open_existing_product(name, allow_update=allow_existing_update)
                             if not slug_from_api:
                                 return {"platform": "gumroad", "status": "daily_limit", "error": "redirected_to_products_list_update_not_allowed", "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else ""}
                     except Exception:
@@ -1174,7 +1230,13 @@ class GumroadPlatform(BasePlatform):
             # Publish via API — MUST confirm product exists and publish succeeds
             products = await self.get_products()
             for prod in products:
-                if prod.get("name") == name or (slug and slug in prod.get("short_url", "")):
+                short_url = prod.get("short_url", "") or ""
+                # For strict non-update mode, never match by name (prevents reporting old products).
+                if allow_existing_update:
+                    matched = (prod.get("name") == name) or (slug and slug in short_url)
+                else:
+                    matched = bool(slug and slug in short_url)
+                if matched:
                     pid = prod.get("id")
                     if draft_only:
                         return {

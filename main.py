@@ -109,6 +109,10 @@ from platforms.youtube import YouTubePlatform
 from platforms.substack import SubstackPlatform
 from platforms.creative_fabrica import CreativeFabricaPlatform
 from platforms.twitter import TwitterPlatform
+from platforms.threads import ThreadsPlatform
+from platforms.youtube import YouTubePlatform
+from platforms.reddit import RedditPlatform
+from platforms.tiktok import TikTokPlatform
 from platforms.image_generator import ImageGenerator
 
 from code_generator import CodeGenerator
@@ -118,6 +122,9 @@ from modules.skill_registry import SkillRegistry
 from modules.time_sync import TimeSync
 from modules.schedule_manager import ScheduleManager
 from modules.platform_registry import PlatformRegistry
+from modules.platform_smoke import PlatformSmoke
+from modules.playbook_registry import PlaybookRegistry
+from modules.publisher_queue import PublisherQueue
 from dashboard_server import DashboardServer
 from knowledge_updater import KnowledgeUpdater
 from conversation_engine import ConversationEngine
@@ -147,10 +154,20 @@ class VITO:
 
         # Skill registry should exist before agents init
         self.skill_registry = SkillRegistry()
+        try:
+            self.skill_registry.audit_coverage()
+        except Exception:
+            pass
         self.schedule_manager = ScheduleManager()
         self.platform_registry = PlatformRegistry()
         try:
             self.platform_registry.refresh()
+        except Exception:
+            pass
+        self.platform_smoke = None
+        try:
+            # Bootstrap playbooks from historical facts once (if table is empty).
+            PlaybookRegistry().ensure_bootstrap(limit=2000)
         except Exception:
             pass
 
@@ -159,11 +176,11 @@ class VITO:
         self._init_agents()
 
         # v0.3.0: Новые модули
-        self.self_healer = SelfHealer(
-            llm_router=self.llm_router, memory=self.memory, comms=self.comms
-        )
         self.self_updater = SelfUpdater(
             memory=self.memory, comms=self.comms
+        )
+        self.self_healer = SelfHealer(
+            llm_router=self.llm_router, memory=self.memory, comms=self.comms, self_updater=self.self_updater
         )
         self.code_generator = CodeGenerator(
             llm_router=self.llm_router, self_updater=self.self_updater, comms=self.comms
@@ -203,6 +220,7 @@ class VITO:
                 registry=self.registry,
                 schedule_manager=self.schedule_manager,
                 platform_registry=self.platform_registry,
+                llm_router=self.llm_router,
             )
         except Exception:
             self.dashboard = None
@@ -228,6 +246,15 @@ class VITO:
             pass
         self.conversation_engine.decision_loop = self.decision_loop
         self.conversation_engine.judge_protocol = self.judge_protocol
+        try:
+            self.publisher_queue = PublisherQueue(getattr(self, "_platforms_queue", self._platforms_commerce))
+        except Exception:
+            self.publisher_queue = None
+        try:
+            if self.dashboard:
+                self.dashboard.publisher_queue = self.publisher_queue
+        except Exception:
+            pass
 
         self.comms.set_modules(
             goal_engine=self.goal_engine,
@@ -242,6 +269,7 @@ class VITO:
             skill_registry=self.skill_registry,
             weekly_planner=self._weekly_planning,
             schedule_manager=self.schedule_manager,
+            publisher_queue=self.publisher_queue,
         )
 
     def _init_agents(self) -> None:
@@ -314,6 +342,20 @@ class VITO:
 
         # Store platforms for later injection into decision_loop
         self._platforms_commerce = platforms_commerce
+        self._platforms_social = {
+            "twitter": TwitterPlatform(),
+            "threads": ThreadsPlatform(),
+            "youtube": YouTubePlatform(),
+            "reddit": RedditPlatform(),
+            "tiktok": TikTokPlatform(),
+            "wordpress": platforms_publish.get("wordpress"),
+            "medium": platforms_publish.get("medium"),
+        }
+        self._platforms_queue = {**self._platforms_commerce, **self._platforms_social}
+        try:
+            self.platform_smoke = PlatformSmoke(self._platforms_commerce)
+        except Exception:
+            self.platform_smoke = None
 
     async def startup(self) -> None:
         """Инициализация всех подсистем."""
@@ -457,6 +499,22 @@ class VITO:
                 last_run["balance_check"] = today
                 await self._scheduled_balance_check()
 
+            # Daily platform smoke check at 13:00 (safe read-only checks)
+            if hour == 13 and last_run.get("platform_smoke_daily") != today:
+                last_run["platform_smoke_daily"] = today
+                try:
+                    await self._platform_smoke_check()
+                except Exception:
+                    pass
+
+            # Daily commerce readiness loop at 14:00 (dry-run publish queue, evidence refresh)
+            if hour == 14 and last_run.get("commerce_readiness_daily") != today:
+                last_run["commerce_readiness_daily"] = today
+                try:
+                    await self._commerce_readiness_loop()
+                except Exception:
+                    pass
+
             # v0.3.0: Проактивные проверки каждые 4 часа (10, 14, 18, 22)
             if hour in (10, 14, 18, 22):
                 proactive_key = f"proactive_{hour}"
@@ -471,6 +529,53 @@ class VITO:
                     if self.registry:
                         await self.registry.dispatch("knowledge_audit")
                         await self.registry.dispatch("agent_development")
+                except Exception:
+                    pass
+
+            # Daily skill registry audit (quality/risk/tests_coverage)
+            if hour == 2 and last_run.get("skill_audit_daily") != today:
+                last_run["skill_audit_daily"] = today
+                try:
+                    audited = self.skill_registry.audit_coverage()
+                    rem = self.skill_registry.remediate_high_risk(limit=50)
+                    logger.info(
+                        "Daily skill audit completed",
+                        extra={
+                            "event": "skill_audit_daily_done",
+                            "context": {
+                                "audited": audited,
+                                "remediation_created": rem.get("created", 0),
+                                "remediation_open": rem.get("open_total", 0),
+                            },
+                        },
+                    )
+                except Exception:
+                    pass
+
+            # Daily static knowledge refresh (platform/model docs to memory)
+            if hour == 7 and last_run.get("knowledge_refresh_daily") != today:
+                last_run["knowledge_refresh_daily"] = today
+                try:
+                    self.knowledge_updater.run_daily_refresh()
+                except Exception:
+                    pass
+
+            # Platform registry refresh every 6 hours
+            if hour in (0, 6, 12, 18):
+                pkey = f"platform_refresh_{hour}"
+                if last_run.get(pkey) != today:
+                    last_run[pkey] = today
+                    try:
+                        self.platform_registry.refresh()
+                    except Exception:
+                        pass
+
+            # Network watchdog for Telegram DNS every hour (quiet unless broken)
+            nkey = f"net_watchdog_{hour}"
+            if last_run.get(nkey) != today:
+                last_run[nkey] = today
+                try:
+                    await self._network_watchdog()
                 except Exception:
                     pass
 
@@ -495,6 +600,74 @@ class VITO:
                 pass
 
             await asyncio.sleep(60)
+
+    async def _network_watchdog(self) -> None:
+        """Check Telegram DNS reachability and notify via fallback channel if broken."""
+        from modules.network_utils import basic_net_report
+        report = basic_net_report(["api.telegram.org", "gumroad.com", "google.com"])
+        if report.get("ok"):
+            return
+        msg = (
+            "⚠️ Network watchdog: DNS issue detected.\n"
+            f"seccomp={report.get('seccomp')}\n"
+            f"dns={report.get('dns')}"
+        )
+        try:
+            await self.comms.send_message(msg, level="critical")
+        except Exception:
+            pass
+
+    async def _platform_smoke_check(self) -> None:
+        """Daily safe platform smoke checks and summary."""
+        if not self.platform_smoke:
+            return
+        results = await self.platform_smoke.run(names=["gumroad", "etsy", "kofi", "printful"])
+        ok = sum(1 for r in results if r.get("status") == "success")
+        fail = len(results) - ok
+        logger.info(
+            f"Platform smoke: ok={ok} fail={fail}",
+            extra={"event": "platform_smoke_done", "context": {"results": results}},
+        )
+        try:
+            await self.comms.send_message(
+                f"Platform smoke done: ok={ok}, fail={fail}",
+                level="info",
+            )
+        except Exception:
+            pass
+
+    async def _commerce_readiness_loop(self) -> None:
+        """Queue dry-run jobs on key platforms and process them for evidence/KPI freshness."""
+        if not self.publisher_queue:
+            return
+        payloads = {
+            "gumroad": {"dry_run": True, "name": "VITO daily readiness check", "price": 5},
+            "etsy": {"dry_run": True, "title": "VITO readiness Etsy", "price": 5},
+            "kofi": {"dry_run": True, "title": "VITO readiness Ko-fi", "price": 5},
+            "printful": {"dry_run": True, "sync_product": {"name": "VITO readiness Printful"}},
+            "twitter": {"dry_run": True, "text": "VITO readiness check"},
+            "wordpress": {"dry_run": True, "title": "VITO readiness WP", "content": "<p>ok</p>", "status": "draft"},
+            "threads": {"dry_run": True, "text": "VITO readiness check"},
+            "reddit": {"dry_run": True, "title": "VITO readiness", "subreddit": "test", "text": "dry run"},
+            "youtube": {"dry_run": True, "title": "VITO readiness", "description": "dry run"},
+            "tiktok": {"dry_run": True, "title": "VITO readiness", "description": "dry run"},
+        }
+        enqueued = 0
+        for platform, payload in payloads.items():
+            if platform not in getattr(self, "_platforms_queue", {}):
+                continue
+            self.publisher_queue.enqueue(platform, payload, max_attempts=1, trace_id="daily_readiness")
+            enqueued += 1
+        results = await self.publisher_queue.process_all(limit=30)
+        done = sum(1 for r in results if r.get("status") == "done")
+        fail = sum(1 for r in results if r.get("status") == "failed")
+        logger.info(
+            "Commerce readiness loop done",
+            extra={
+                "event": "commerce_readiness_done",
+                "context": {"enqueued": enqueued, "processed": len(results), "done": done, "failed": fail},
+            },
+        )
 
     async def _night_consolidation(self) -> None:
         """03:00 — анализ дня, сохранение навыков, обновление базы знаний.

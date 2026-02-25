@@ -10,6 +10,7 @@ import aiohttp
 from config.logger import get_logger
 from config.settings import settings
 from platforms.base_platform import BasePlatform
+from modules.execution_facts import ExecutionFacts
 
 logger = get_logger("youtube", agent="youtube")
 API_BASE = "https://www.googleapis.com/youtube/v3"
@@ -43,8 +44,26 @@ class YouTubePlatform(BasePlatform):
             return False
 
     async def publish(self, content: dict) -> dict:
-        """YouTube не поддерживает публикацию через Data API v3 (readonly)."""
-        return {"platform": "youtube", "status": "not_supported", "reason": "Read-only API"}
+        """Safe-first publish adapter.
+
+        Full resumable upload flow requires OAuth client setup.
+        In this phase we support evidence-producing dry_run and prepared mode.
+        """
+        if content.get("dry_run"):
+            title = str(content.get("title", ""))[:120]
+            try:
+                ExecutionFacts().record(
+                    action="platform:publish",
+                    status="prepared",
+                    detail=f"youtube dry_run title={title}",
+                    evidence="dryrun:youtube",
+                    source="youtube.publish",
+                    evidence_dict={"platform": "youtube", "dry_run": True, "title": title},
+                )
+            except Exception:
+                pass
+            return {"platform": "youtube", "status": "prepared", "dry_run": True}
+        return {"platform": "youtube", "status": "not_supported", "reason": "upload flow requires OAuth upload scope"}
 
     async def get_analytics(self) -> dict:
         """Получение трендовых видео."""

@@ -278,7 +278,12 @@ class MemoryManager:
         # Register in SkillRegistry for global visibility
         try:
             from modules.skill_registry import SkillRegistry
-            reg = SkillRegistry()
+            reg = SkillRegistry(sqlite_path=settings.SQLITE_PATH)
+            method_dict = method if isinstance(method, dict) else {}
+            tests_passed = bool(method_dict.get("tests_passed", False))
+            acceptance_status = "accepted"
+            if not tests_passed and (task_type in {"self_improve", "shell", "codegen", "fix"} or name.startswith("self_improve:")):
+                acceptance_status = "pending"
             reg.register_skill(
                 name=name,
                 category=task_type or "",
@@ -286,7 +291,16 @@ class MemoryManager:
                 status="learned",
                 security_status="unknown",
                 notes=description[:300],
+                acceptance_status=acceptance_status,
             )
+            if tests_passed:
+                reg.accept_skill(
+                    name=name,
+                    tests_passed=True,
+                    evidence=str(method_dict.get("test_report", "") or method_dict.get("evidence", ""))[:500],
+                    validator="memory.save_skill",
+                    notes="auto-accepted by tests_passed",
+                )
         except Exception:
             pass
 

@@ -317,6 +317,8 @@ class BrowserAgent(BaseAgent):
         prefer_link: bool = False,
         timeout_sec: int = 180,
         screenshot_path: str = "",
+        verify_selectors: list[str] | None = None,
+        require_verify: bool = False,
     ) -> TaskResult:
         """Generic registration flow: fill form, submit, fetch email code/link, submit."""
         page = await self._new_page()
@@ -369,13 +371,37 @@ class BrowserAgent(BaseAgent):
                     shot = screenshot_path
                 except Exception:
                     pass
+            ver = {"verified": False, "matched_selectors": []}
+            if verify_selectors:
+                for sel in verify_selectors:
+                    try:
+                        n = await page.locator(sel).count()
+                        if n > 0:
+                            ver["matched_selectors"].append(sel)
+                    except Exception:
+                        continue
+                ver["verified"] = bool(ver["matched_selectors"])
+            success = bool(filled) and (ver["verified"] if (require_verify and verify_selectors) else True)
+            try:
+                from modules.execution_facts import ExecutionFacts
+                ExecutionFacts().record(
+                    action="browser:register_with_email",
+                    status="success" if success else "failed",
+                    detail=f"url={url[:120]} filled={filled} verified={ver['verified']}",
+                    evidence=shot or "",
+                    source="browser_agent.register_with_email",
+                    evidence_dict={"url": page.url, "verify": ver, "code_used": bool(code_val)},
+                )
+            except Exception:
+                pass
             return TaskResult(
-                success=bool(filled),
+                success=success,
                 output={
                     "fields_filled": filled,
                     "code_used": bool(code_val),
                     "screenshot_path": shot,
                     "url": page.url,
+                    **ver,
                 },
             )
         except Exception as e:
@@ -430,6 +456,8 @@ class BrowserAgent(BaseAgent):
                     prefer_link=bool(kwargs.get("prefer_link", False)),
                     timeout_sec=int(kwargs.get("timeout_sec", 180)),
                     screenshot_path=kwargs.get("screenshot_path", ""),
+                    verify_selectors=kwargs.get("verify_selectors", []) or [],
+                    require_verify=bool(kwargs.get("require_verify", False)),
                 )
             elif task_type == "solve_captcha":
                 page = kwargs.get("page")

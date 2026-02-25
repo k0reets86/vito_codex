@@ -15,6 +15,7 @@ import aiohttp
 from config.logger import get_logger
 from config.settings import settings
 from platforms.base_platform import BasePlatform
+from modules.execution_facts import ExecutionFacts
 
 logger = get_logger("twitter", agent="twitter")
 
@@ -116,6 +117,26 @@ class TwitterPlatform(BasePlatform):
 
         content: {text: str, reply_to: str (optional), media_ids: list (optional)}
         """
+        if content.get("dry_run"):
+            preview = (content.get("text", "") or "")[:280]
+            try:
+                ExecutionFacts().record(
+                    action="platform:publish",
+                    status="prepared",
+                    detail=f"twitter dry_run preview_len={len(preview)}",
+                    evidence="dryrun:twitter",
+                    source="twitter.publish",
+                    evidence_dict={"platform": "twitter", "dry_run": True, "text_preview": preview},
+                )
+            except Exception:
+                pass
+            return {
+                "platform": "twitter",
+                "status": "prepared",
+                "dry_run": True,
+                "text_preview": preview,
+            }
+
         if not self._authenticated:
             auth_ok = await self.authenticate()
             if not auth_ok:
@@ -149,15 +170,27 @@ class TwitterPlatform(BasePlatform):
                 if resp.status in (200, 201):
                     tweet = data.get("data", {})
                     tweet_id = tweet.get("id", "")
+                    tweet_url = f"https://x.com/i/status/{tweet_id}" if tweet_id else ""
                     logger.info(
                         f"Tweet posted: {tweet_id}",
                         extra={"event": "twitter_publish_ok", "context": {"tweet_id": tweet_id}},
                     )
+                    try:
+                        ExecutionFacts().record(
+                            action="platform:publish",
+                            status="published",
+                            detail=f"twitter tweet_id={tweet_id}",
+                            evidence=tweet_url,
+                            source="twitter.publish",
+                            evidence_dict={"platform": "twitter", "tweet_id": tweet_id, "url": tweet_url},
+                        )
+                    except Exception:
+                        pass
                     return {
                         "platform": "twitter",
                         "status": "published",
                         "tweet_id": tweet_id,
-                        "url": f"https://x.com/i/status/{tweet_id}",
+                        "url": tweet_url,
                         "text": text,
                     }
                 else:
@@ -174,6 +207,37 @@ class TwitterPlatform(BasePlatform):
             logger.error(f"Twitter publish error: {e}", exc_info=True)
             return {"platform": "twitter", "status": "error", "error": str(e)}
 
+    async def delete_tweet(self, tweet_id: str) -> dict:
+        """DELETE /2/tweets/{id} — cleanup helper for live probes/tests."""
+        if not tweet_id:
+            return {"platform": "twitter", "status": "error", "error": "tweet_id required"}
+        if not self._authenticated:
+            auth_ok = await self.authenticate()
+            if not auth_ok:
+                return {"platform": "twitter", "status": "not_authenticated"}
+        try:
+            session = await self._get_session()
+            url = f"{API_V2}/tweets/{tweet_id}"
+            headers = {"Authorization": self._oauth1_header("DELETE", url)}
+            async with session.delete(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                data = await resp.json()
+                if resp.status in (200, 202):
+                    try:
+                        ExecutionFacts().record(
+                            action="platform:cleanup",
+                            status="success",
+                            detail=f"twitter delete tweet_id={tweet_id}",
+                            evidence=f"https://x.com/i/status/{tweet_id}",
+                            source="twitter.delete",
+                            evidence_dict={"platform": "twitter", "tweet_id": tweet_id},
+                        )
+                    except Exception:
+                        pass
+                    return {"platform": "twitter", "status": "deleted", "tweet_id": tweet_id, "data": data}
+                return {"platform": "twitter", "status": "error", "error": str(data)[:300]}
+        except Exception as e:
+            return {"platform": "twitter", "status": "error", "error": str(e)}
+
     async def _save_draft_tweet(self, text: str, error: str) -> dict:
         """Save tweet to file when write permissions are not available."""
         from pathlib import Path
@@ -187,6 +251,17 @@ class TwitterPlatform(BasePlatform):
             f"Tweet saved to file (no write perms): {fp}",
             extra={"event": "twitter_draft_saved", "context": {"path": str(fp)}},
         )
+        try:
+            ExecutionFacts().record(
+                action="platform:publish",
+                status="prepared",
+                detail="twitter draft saved",
+                evidence=str(fp),
+                source="twitter.publish",
+                evidence_dict={"platform": "twitter", "draft_path": str(fp)},
+            )
+        except Exception:
+            pass
         return {
             "platform": "twitter",
             "status": "draft_saved",

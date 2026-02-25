@@ -46,3 +46,24 @@ def write_outbox(text: str) -> Path:
     out = OUTBOX_DIR / f"response_{ts}.txt"
     out.write_text(text, encoding="utf-8")
     return out
+
+
+def write_inbox(text: str, prefix: str = "message") -> Path:
+    ensure_dirs()
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    msg = INBOX_DIR / f"{prefix}_{ts}.txt"
+    msg.write_text(text, encoding="utf-8")
+    return msg
+
+
+def read_outbox(limit: int = 20) -> list[tuple[Path, str]]:
+    ensure_dirs()
+    files = sorted(OUTBOX_DIR.glob("*.txt"))
+    result: list[tuple[Path, str]] = []
+    for fp in files[-limit:]:
+        try:
+            text = fp.read_text(encoding="utf-8").strip()
+        except Exception:
+            text = ""
+        result.append((fp, text))
+    return result

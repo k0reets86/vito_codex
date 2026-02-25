@@ -44,6 +44,9 @@ class Settings:
     SENDGRID_API_KEY: str = os.getenv("SENDGRID_API_KEY", "")
     REDDIT_CLIENT_ID: str = os.getenv("REDDIT_CLIENT_ID", "")
     REDDIT_CLIENT_SECRET: str = os.getenv("REDDIT_CLIENT_SECRET", "")
+    REDDIT_USERNAME: str = os.getenv("REDDIT_USERNAME", "")
+    REDDIT_PASSWORD: str = os.getenv("REDDIT_PASSWORD", "")
+    REDDIT_USER_AGENT: str = os.getenv("REDDIT_USER_AGENT", "vito-bot/0.3")
 
     # X.com (Twitter)
     TWITTER_BEARER_TOKEN: str = os.getenv("TWITTER_BEARER_TOKEN", "")
@@ -72,6 +75,11 @@ class Settings:
     REPLICATE_API_TOKEN: str = os.getenv("REPLICATE_API_TOKEN", "")
     BFL_API_KEY: str = os.getenv("BFL_API_KEY", "")
     WAVESPEED_API_KEY: str = os.getenv("WAVESPEED_API_KEY", "")
+
+    # Social official APIs
+    THREADS_ACCESS_TOKEN: str = os.getenv("THREADS_ACCESS_TOKEN", "")
+    THREADS_USER_ID: str = os.getenv("THREADS_USER_ID", "")
+    TIKTOK_ACCESS_TOKEN: str = os.getenv("TIKTOK_ACCESS_TOKEN", "")
 
     # Financial limits (USD)
     # Hierarchy: OPERATION_MAX < OPERATION_NOTIFY < DAILY_LIMIT < OPERATION_APPROVE

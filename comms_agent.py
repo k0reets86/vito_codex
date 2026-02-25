@@ -30,6 +30,7 @@ from telegram import (
     ReplyKeyboardMarkup,
     Update,
 )
+from telegram.error import Conflict as TgConflict
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -56,6 +57,7 @@ class CommsAgent:
         self._pending_approvals: dict[str, asyncio.Future] = {}
         # Ожидаем уточнение по расписанию
         self._pending_schedule_update: dict | None = None
+        self._telegram_conflict_mode: bool = False
 
         # Обратные ссылки на модули — устанавливаются через set_modules()
         self._goal_engine = None
@@ -70,6 +72,7 @@ class CommsAgent:
         self._skill_registry = None
         self._weekly_planner = None
         self._schedule_manager = None
+        self._publisher_queue = None
 
         # Маппинг текста кнопок → имена команд
         self._button_map: dict[str, str] = {
@@ -105,6 +108,9 @@ class CommsAgent:
             "REPLICATE_API_TOKEN", "ANTICAPTCHA_KEY",
             "TWITTER_BEARER_TOKEN", "TWITTER_CONSUMER_KEY", "TWITTER_CONSUMER_SECRET",
             "TWITTER_ACCESS_TOKEN", "TWITTER_ACCESS_SECRET",
+            "THREADS_ACCESS_TOKEN", "THREADS_USER_ID",
+            "REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET", "REDDIT_USERNAME", "REDDIT_PASSWORD", "REDDIT_USER_AGENT",
+            "TIKTOK_ACCESS_TOKEN",
         }
         if key not in allowed:
             return False
@@ -170,6 +176,7 @@ class CommsAgent:
         skill_registry=None,
         weekly_planner=None,
         schedule_manager=None,
+        publisher_queue=None,
     ) -> None:
         """Привязывает модули после инициализации (избегаем циклических импортов)."""
         self._goal_engine = goal_engine
@@ -192,6 +199,8 @@ class CommsAgent:
             self._weekly_planner = weekly_planner
         if schedule_manager is not None:
             self._schedule_manager = schedule_manager
+        if publisher_queue is not None:
+            self._publisher_queue = publisher_queue
 
     # ── Запуск / Остановка ──
 
@@ -236,8 +245,18 @@ class CommsAgent:
         self._app.add_handler(CommandHandler("goals_all", self._cmd_goals_all))
         self._app.add_handler(CommandHandler("fix", self._cmd_fix))
         self._app.add_handler(CommandHandler("skills", self._cmd_skills))
+        self._app.add_handler(CommandHandler("skills_pending", self._cmd_skills_pending))
+        self._app.add_handler(CommandHandler("skills_audit", self._cmd_skills_audit))
+        self._app.add_handler(CommandHandler("skills_fix", self._cmd_skills_fix))
+        self._app.add_handler(CommandHandler("playbooks", self._cmd_playbooks))
+        self._app.add_handler(CommandHandler("workflow", self._cmd_workflow))
+        self._app.add_handler(CommandHandler("handoffs", self._cmd_handoffs))
+        self._app.add_handler(CommandHandler("pubq", self._cmd_pubq))
+        self._app.add_handler(CommandHandler("pubrun", self._cmd_pubrun))
+        self._app.add_handler(CommandHandler("webop", self._cmd_webop))
         self._app.add_handler(CommandHandler("clear_goals", self._cmd_clear_goals))
         self._app.add_handler(CommandHandler("nettest", self._cmd_nettest))
+        self._app.add_handler(CommandHandler("smoke", self._cmd_smoke))
         self._app.add_handler(
             MessageHandler(
                 filters.Document.ALL | filters.PHOTO | filters.VIDEO,
@@ -248,8 +267,14 @@ class CommsAgent:
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_message)
         )
         self._app.add_handler(CallbackQueryHandler(self._handle_callback))
+        self._app.add_error_handler(self._on_app_error)
 
         await self._app.initialize()
+        # Ensure webhook state does not interfere with polling mode.
+        try:
+            await self._bot.delete_webhook(drop_pending_updates=True)
+        except Exception:
+            pass
 
         await self._bot.set_my_commands([
             BotCommand("status", "Статус системы"),
@@ -277,8 +302,18 @@ class CommsAgent:
             BotCommand("goals_all", "Все цели (история)"),
             BotCommand("fix", "Самоисправление/интеграции"),
             BotCommand("skills", "Реестр навыков"),
+            BotCommand("skills_pending", "Навыки ждут принятия"),
+            BotCommand("skills_audit", "Аудит навыков (риск/покрытие)"),
+            BotCommand("skills_fix", "Создать remediation-задачи навыков"),
+            BotCommand("playbooks", "Топ playbooks"),
+            BotCommand("workflow", "Статус workflow/state"),
+            BotCommand("handoffs", "Трассировка handoff"),
+            BotCommand("pubq", "Очередь публикаций"),
+            BotCommand("pubrun", "Запустить очередь публикаций"),
+            BotCommand("webop", "Web-operator сценарии"),
             BotCommand("clear_goals", "Очистить все цели"),
             BotCommand("nettest", "Проверка сети/интернета"),
+            BotCommand("smoke", "Платформенный smoke-check"),
         ])
 
         await self._app.start()
@@ -289,6 +324,31 @@ class CommsAgent:
         # Start file-based inbox poller (offline testing)
         if settings.OWNER_INBOX_ENABLED:
             asyncio.create_task(self._poll_owner_inbox())
+
+    async def _on_app_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle Telegram runtime errors without crashing VITO."""
+        err = getattr(context, "error", None)
+        if isinstance(err, TgConflict):
+            if self._telegram_conflict_mode:
+                return
+            self._telegram_conflict_mode = True
+            logger.error(
+                "Telegram polling conflict detected; switching to degraded mode (owner_inbox fallback).",
+                extra={"event": "telegram_conflict_mode"},
+            )
+            try:
+                if self._app and self._app.updater:
+                    await self._app.updater.stop()
+            except Exception:
+                pass
+            try:
+                from modules.owner_inbox import write_outbox
+                write_outbox(
+                    "⚠️ Telegram Conflict: другой инстанс использует getUpdates. "
+                    "VITO переключен в fallback owner_inbox до устранения конфликта."
+                )
+            except Exception:
+                pass
 
     async def _handle_owner_text(self, text: str, source: str = "owner_inbox") -> None:
         """Process owner text without Telegram Update (offline inbox)."""
@@ -332,6 +392,76 @@ class CommsAgent:
                     f"Цели: {gs['total']} всего, {gs['completed']} выполнено, {gs['executing']} в работе, {gs['pending']} ожидают"
                 )
                 return
+        if lower.strip() in ("/workflow", "workflow"):
+            try:
+                from modules.workflow_state_machine import WorkflowStateMachine
+                h = WorkflowStateMachine().health()
+                await self.send_message(
+                    f"Workflow\nВсего: {h.get('workflows_total',0)}\nОбновлён: {h.get('last_update','-')}"
+                )
+                return
+            except Exception:
+                pass
+        if lower.strip() in ("/handoffs", "handoffs"):
+            try:
+                from modules.data_lake import DataLake
+                rows = DataLake().handoff_summary(days=7)[:5]
+                if not rows:
+                    await self.send_message("Handoffs: нет событий за 7 дней")
+                    return
+                lines = ["Handoffs (7d):"]
+                for r in rows:
+                    lines.append(
+                        f"- {r.get('from','?')} -> {r.get('to','?')}: ok={r.get('ok',0)} fail={r.get('fail',0)} total={r.get('total',0)}"
+                    )
+                await self.send_message("\n".join(lines))
+                return
+            except Exception:
+                pass
+        if lower.strip() in ("/pubq", "pubq"):
+            try:
+                if not self._publisher_queue:
+                    await self.send_message("PublisherQueue не подключён.")
+                    return
+                st = self._publisher_queue.stats()
+                await self.send_message(
+                    f"Publish Queue\nqueued={st.get('queued',0)} running={st.get('running',0)} done={st.get('done',0)} failed={st.get('failed',0)} total={st.get('total',0)}"
+                )
+                return
+            except Exception:
+                pass
+        if lower.strip().startswith("/pubrun") or lower.strip() == "pubrun":
+            try:
+                if not self._publisher_queue:
+                    await self.send_message("PublisherQueue не подключён.")
+                    return
+                lim = 5
+                parts = lower.split()
+                if len(parts) >= 2 and parts[1].isdigit():
+                    lim = max(1, min(20, int(parts[1])))
+                rows = await self._publisher_queue.process_all(limit=lim)
+                await self.send_message(f"Publish run: processed={len(rows)}")
+                return
+            except Exception:
+                pass
+        if lower.strip().startswith("/webop") or lower.strip().startswith("webop"):
+            try:
+                if not self._agent_registry:
+                    await self.send_message("AgentRegistry не подключён.")
+                    return
+                from modules.web_operator_pack import WebOperatorPack
+                pack = WebOperatorPack(self._agent_registry)
+                parts = lower.split()
+                if len(parts) == 1 or parts[1] in {"list", "ls"}:
+                    items = pack.list_scenarios()
+                    await self.send_message("WebOp scenarios:\n" + ("\n".join(f"- {x}" for x in items) if items else "- empty"))
+                    return
+                if len(parts) >= 3 and parts[1] == "run":
+                    res = await pack.run(parts[2], overrides={})
+                    await self.send_message(f"WebOp run: {parts[2]}\nstatus={res.get('status')}\nerror={res.get('error','')}")
+                    return
+            except Exception:
+                pass
 
         # Conversation engine
         if self._conversation_engine:
@@ -689,8 +819,246 @@ class CommsAgent:
             return
         lines = ["Навыки (последние 20):"]
         for s in skills:
-            lines.append(f"- {s['name']} | {s['status']} | sec:{s['security']} | v{s['version']}")
+            lines.append(
+                f"- {s['name']} | {s['status']} | accept:{s.get('acceptance_status','?')} | sec:{s['security']} | v{s['version']}"
+            )
         await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
+
+    async def _cmd_skills_pending(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Показать навыки, ожидающие acceptance."""
+        if await self._reject_stranger(update):
+            return
+        if not self._skill_registry:
+            await update.message.reply_text("SkillRegistry не подключён.", reply_markup=self._main_keyboard())
+            return
+        rows = self._skill_registry.pending_skills(limit=30)
+        if not rows:
+            await update.message.reply_text("Нет pending навыков.", reply_markup=self._main_keyboard())
+            return
+        lines = ["Pending skills (до acceptance):"]
+        for r in rows:
+            lines.append(f"- {r.get('name')} | {r.get('category','')} | updated:{r.get('updated_at','')}")
+        await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
+
+    async def _cmd_skills_audit(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Запустить аудит навыков и показать агрегированный риск-профиль."""
+        if await self._reject_stranger(update):
+            return
+        if not self._skill_registry:
+            await update.message.reply_text("SkillRegistry не подключён.", reply_markup=self._main_keyboard())
+            return
+        try:
+            audited = self._skill_registry.audit_coverage()
+            summary = self._skill_registry.audit_summary(limit=8)
+            lines = [
+                "Skill Audit",
+                f"Проверено: {audited}",
+                f"Всего: {summary.get('total', 0)}",
+                f"Stable: {summary.get('stable', 0)}",
+                f"Pending: {summary.get('pending', 0)}",
+                f"Rejected: {summary.get('rejected', 0)}",
+                f"High risk: {summary.get('high_risk', 0)}",
+            ]
+            risky = summary.get("top_risky", []) or []
+            if risky:
+                lines.append("Top risk:")
+                for row in risky[:5]:
+                    lines.append(
+                        f"- {row.get('name')} | risk:{float(row.get('risk_score', 0.0)):.2f} | "
+                        f"{row.get('compatibility')} | {row.get('acceptance_status')}"
+                    )
+            await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
+        except Exception as e:
+            await update.message.reply_text(f"Skill audit error: {e}", reply_markup=self._main_keyboard())
+
+    async def _cmd_skills_fix(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Создать remediation-задачи для высокорисковых навыков."""
+        if await self._reject_stranger(update):
+            return
+        if not self._skill_registry:
+            await update.message.reply_text("SkillRegistry не подключён.", reply_markup=self._main_keyboard())
+            return
+        try:
+            result = self._skill_registry.remediate_high_risk(limit=50)
+            lines = [
+                "Skill Remediation",
+                f"Создано задач: {result.get('created', 0)}",
+                f"Открыто задач: {result.get('open_total', 0)}",
+            ]
+            for item in (result.get("items", []) or [])[:5]:
+                lines.append(
+                    f"- {item.get('skill_name')} | {item.get('reason')} | action: {item.get('action')}"
+                )
+            await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
+        except Exception as e:
+            await update.message.reply_text(f"Skill remediation error: {e}", reply_markup=self._main_keyboard())
+
+    async def _cmd_playbooks(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Показать лучшие playbooks из verified run-ов."""
+        if await self._reject_stranger(update):
+            return
+        try:
+            from modules.playbook_registry import PlaybookRegistry
+            rows = PlaybookRegistry().top(limit=20)
+        except Exception:
+            rows = []
+        if not rows:
+            await update.message.reply_text("Реестр playbooks пуст.", reply_markup=self._main_keyboard())
+            return
+        lines = ["Playbooks (top 20):"]
+        for r in rows:
+            lines.append(
+                f"- {r.get('agent')}::{r.get('action')} "
+                f"(ok:{r.get('success_count',0)} fail:{r.get('fail_count',0)})"
+            )
+        await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
+
+    async def _cmd_workflow(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Показать здоровье workflow и последние события по цели."""
+        if await self._reject_stranger(update):
+            return
+        try:
+            from modules.workflow_state_machine import WorkflowStateMachine
+            wf = WorkflowStateMachine()
+            health = wf.health()
+            goal_id = " ".join(context.args).strip() if getattr(context, "args", None) else ""
+            if not goal_id and self._goal_engine:
+                goals = self._goal_engine.get_all_goals()
+                if goals:
+                    goal_id = goals[-1].goal_id
+            lines = [
+                "Workflow",
+                f"Всего: {health.get('workflows_total', 0)}",
+                f"Обновлён: {health.get('last_update', '-')}",
+            ]
+            if goal_id:
+                lines.append(f"Goal: {goal_id}")
+                events = wf.recent_events(goal_id, limit=8)
+                if events:
+                    for e in events:
+                        lines.append(
+                            f"- {e.get('created_at','')} | {e.get('from_state','')} -> {e.get('to_state','')} | {e.get('reason','')}"
+                        )
+                else:
+                    lines.append("- Нет событий по этой цели")
+            await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
+        except Exception as e:
+            await update.message.reply_text(f"Workflow error: {e}", reply_markup=self._main_keyboard())
+
+    async def _cmd_handoffs(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Показать сводку передач между агентами (handoff)."""
+        if await self._reject_stranger(update):
+            return
+        try:
+            from modules.data_lake import DataLake
+            dl = DataLake()
+            summary = dl.handoff_summary(days=7)[:10]
+            recent = dl.recent_handoffs(limit=8)
+            lines = ["Handoffs (7d)"]
+            if summary:
+                for r in summary:
+                    lines.append(
+                        f"- {r.get('from','?')} -> {r.get('to','?')}: ok={r.get('ok',0)} fail={r.get('fail',0)} total={r.get('total',0)}"
+                    )
+            else:
+                lines.append("- Нет handoff событий")
+            lines.append("")
+            lines.append("Recent:")
+            if recent:
+                for r in recent[:5]:
+                    lines.append(
+                        f"- {r.get('created_at','')} | {r.get('from','?')} -> {r.get('to','?')} | {r.get('status','?')} | {r.get('capability','')}"
+                    )
+            else:
+                lines.append("- Нет recent событий")
+            await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
+        except Exception as e:
+            await update.message.reply_text(f"Handoffs error: {e}", reply_markup=self._main_keyboard())
+
+    async def _cmd_pubq(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Показать состояние unified publisher queue."""
+        if await self._reject_stranger(update):
+            return
+        if not self._publisher_queue:
+            await update.message.reply_text("PublisherQueue не подключён.", reply_markup=self._main_keyboard())
+            return
+        try:
+            st = self._publisher_queue.stats()
+            rows = self._publisher_queue.list_jobs(limit=10)
+            lines = [
+                "Publish Queue",
+                f"queued={st.get('queued',0)} running={st.get('running',0)} done={st.get('done',0)} failed={st.get('failed',0)} total={st.get('total',0)}",
+            ]
+            for r in rows[:8]:
+                lines.append(
+                    f"- #{r.get('id')} {r.get('platform')} [{r.get('status')}] a={r.get('attempts',0)}/{r.get('max_attempts',0)}"
+                )
+            await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
+        except Exception as e:
+            await update.message.reply_text(f"PubQ error: {e}", reply_markup=self._main_keyboard())
+
+    async def _cmd_pubrun(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Ручной запуск обработки очереди публикаций."""
+        if await self._reject_stranger(update):
+            return
+        if not self._publisher_queue:
+            await update.message.reply_text("PublisherQueue не подключён.", reply_markup=self._main_keyboard())
+            return
+        limit = 5
+        try:
+            if context.args:
+                limit = max(1, min(20, int(context.args[0])))
+        except Exception:
+            limit = 5
+        try:
+            rows = await self._publisher_queue.process_all(limit=limit)
+            if not rows:
+                await update.message.reply_text("Очередь пустая.", reply_markup=self._main_keyboard())
+                return
+            ok = sum(1 for x in rows if x.get("status") == "done")
+            fail = len(rows) - ok
+            await update.message.reply_text(
+                f"Publish run: processed={len(rows)} done={ok} fail/retry={fail}",
+                reply_markup=self._main_keyboard(),
+            )
+        except Exception as e:
+            await update.message.reply_text(f"PubRun error: {e}", reply_markup=self._main_keyboard())
+
+    async def _cmd_webop(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Web operator pack: list/run scenarios.
+
+        Usage:
+          /webop list
+          /webop run <scenario_name>
+        """
+        if await self._reject_stranger(update):
+            return
+        if not self._agent_registry:
+            await update.message.reply_text("AgentRegistry не подключён.", reply_markup=self._main_keyboard())
+            return
+        try:
+            from modules.web_operator_pack import WebOperatorPack
+            pack = WebOperatorPack(self._agent_registry)
+            args = context.args or []
+            if not args or args[0] in {"list", "ls"}:
+                items = pack.list_scenarios()
+                text = "WebOp scenarios:\n" + ("\n".join(f"- {x}" for x in items) if items else "- empty")
+                await update.message.reply_text(text, reply_markup=self._main_keyboard())
+                return
+            if args[0] == "run":
+                if len(args) < 2:
+                    await update.message.reply_text("Usage: /webop run <scenario_name>", reply_markup=self._main_keyboard())
+                    return
+                scenario = args[1]
+                res = await pack.run(scenario, overrides={})
+                await update.message.reply_text(
+                    f"WebOp run: {scenario}\nstatus={res.get('status')}\nerror={res.get('error','')}",
+                    reply_markup=self._main_keyboard(),
+                )
+                return
+            await update.message.reply_text("Usage: /webop list | /webop run <scenario>", reply_markup=self._main_keyboard())
+        except Exception as e:
+            await update.message.reply_text(f"WebOp error: {e}", reply_markup=self._main_keyboard())
 
     async def _cmd_clear_goals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Удалить все цели из очереди."""
@@ -721,6 +1089,25 @@ class CommsAgent:
             await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
         except Exception as e:
             await update.message.reply_text(f"NetTest error: {e}", reply_markup=self._main_keyboard())
+
+    async def _cmd_smoke(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Manual safe smoke-check for platforms."""
+        if await self._reject_stranger(update):
+            return
+        try:
+            from modules.platform_smoke import PlatformSmoke
+            # use decision loop injected platforms if available
+            platforms = getattr(self._decision_loop, "_platforms", {}) if self._decision_loop else {}
+            sm = PlatformSmoke(platforms)
+            rows = await sm.run(names=["gumroad", "etsy", "kofi", "printful"])
+            ok = sum(1 for r in rows if r.get("status") == "success")
+            fail = len(rows) - ok
+            lines = [f"Smoke: ok={ok}, fail={fail}"]
+            for r in rows:
+                lines.append(f"- {r.get('platform')}: {r.get('status')} ({r.get('detail','')})")
+            await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
+        except Exception as e:
+            await update.message.reply_text(f"Smoke error: {e}", reply_markup=self._main_keyboard())
 
     async def _on_attachment(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Приём файлов/фото/видео от владельца и запуск document_agent."""
@@ -1603,33 +1990,11 @@ class CommsAgent:
 
     def _guard_outgoing(self, text: str) -> str:
         """Prevent unverified completion claims in outbound messages."""
-        lower = text.lower()
-        risky = [
-            "готов и загружен", "готов и опубликован", "опубликован", "опубликовав",
-            "загружен", "загрузил", "загрузили", "опубликовал", "опубликовали",
-            "создан и загружен", "создан и опубликован", "я загрузил", "я опубликовал",
-            "already uploaded", "already published", "is live", "published on", "uploaded to",
-        ]
-        if not any(p in lower for p in risky):
-            return text
         try:
-            from modules.execution_facts import ExecutionFacts
-            facts = ExecutionFacts()
-            ok = facts.recent_verified_exists(
-                actions=[
-                    "publisher_agent:publish",
-                    "browser_agent:form_fill",
-                    "ecommerce_agent:listing_create",
-                    "platform:publish",
-                    "gumroad:publish",
-                    "etsy:publish",
-                    "kofi:publish",
-                    "smm_agent:publish",
-                ],
-                hours=24,
-            )
-            if not ok:
-                return "Это было предложение/план, а не подтверждённый факт выполнения. Нужна команда на запуск?"
+            from modules.fact_gate import gate_outgoing_claim
+            decision = gate_outgoing_claim(text, evidence_hours=24)
+            if not decision.allowed:
+                return decision.text
         except Exception:
             return "Это было предложение/план, а не подтверждённый факт выполнения. Нужна команда на запуск?"
         return text
@@ -1696,9 +2061,10 @@ class CommsAgent:
             logger.error(f"Файл не найден: {file_path}", extra={"event": "file_not_found"})
             return False
         try:
+            safe_caption = self._guard_outgoing(caption) if caption else ""
             with open(path, "rb") as f:
                 await self._bot.send_document(
-                    chat_id=self._owner_id, document=f, caption=caption[:1024]
+                    chat_id=self._owner_id, document=f, caption=safe_caption[:1024]
                 )
             logger.info(
                 f"Файл отправлен: {path.name}",
@@ -1712,7 +2078,8 @@ class CommsAgent:
                 from modules.telegram_fallback import send_document as fb_doc
                 token = getattr(self._bot, "token", "") if self._bot else ""
                 if token and self._owner_id:
-                    ok = fb_doc(token, str(self._owner_id), str(path), caption=caption[:1024])
+                    safe_caption = self._guard_outgoing(caption) if caption else ""
+                    ok = fb_doc(token, str(self._owner_id), str(path), caption=safe_caption[:1024])
                     if ok:
                         logger.info("Fallback Telegram file ok", extra={"event": "file_send_fallback_ok"})
                         return True

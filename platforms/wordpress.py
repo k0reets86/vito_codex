@@ -13,6 +13,7 @@ import aiohttp
 from config.logger import get_logger
 from config.settings import settings
 from platforms.base_platform import BasePlatform
+from modules.execution_facts import ExecutionFacts
 
 logger = get_logger("wordpress", agent="wordpress")
 
@@ -87,6 +88,26 @@ class WordPressPlatform(BasePlatform):
                   categories (list of IDs), tags (list of IDs),
                   featured_media (media ID)}
         """
+        if content.get("dry_run"):
+            title = content.get("title", "Untitled")
+            try:
+                ExecutionFacts().record(
+                    action="platform:publish",
+                    status="prepared",
+                    detail=f"wordpress dry_run title={str(title)[:80]}",
+                    evidence="dryrun:wordpress",
+                    source="wordpress.publish",
+                    evidence_dict={"platform": "wordpress", "dry_run": True, "title": title},
+                )
+            except Exception:
+                pass
+            return {
+                "platform": "wordpress",
+                "status": "prepared",
+                "dry_run": True,
+                "title": title,
+            }
+
         if not self._url or not self._password:
             return {
                 "platform": "wordpress",
@@ -128,6 +149,17 @@ class WordPressPlatform(BasePlatform):
                         f"WordPress post created: {post_id} ({post_data['status']})",
                         extra={"event": "wp_publish_ok", "context": {"post_id": post_id}},
                     )
+                    try:
+                        ExecutionFacts().record(
+                            action="platform:publish",
+                            status="published" if post_data["status"] == "publish" else "draft",
+                            detail=f"wordpress post_id={post_id}",
+                            evidence=post_url,
+                            source="wordpress.publish",
+                            evidence_dict={"platform": "wordpress", "post_id": str(post_id), "url": post_url},
+                        )
+                    except Exception:
+                        pass
                     return {
                         "platform": "wordpress",
                         "status": "published" if post_data["status"] == "publish" else "draft",

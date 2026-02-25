@@ -383,6 +383,97 @@ async def test_button_reject(comms, mock_update):
     assert future.result() is False
 
 
+@pytest.mark.asyncio
+async def test_cmd_workflow(comms, mock_update):
+    ctx = MagicMock()
+    ctx.args = []
+    await comms._cmd_workflow(mock_update, ctx)
+    text = mock_update.message.reply_text.call_args[0][0]
+    assert "Workflow" in text
+
+
+@pytest.mark.asyncio
+async def test_cmd_handoffs(comms, mock_update):
+    await comms._cmd_handoffs(mock_update, MagicMock())
+    text = mock_update.message.reply_text.call_args[0][0]
+    assert "Handoffs" in text
+
+
+@pytest.mark.asyncio
+async def test_cmd_pubq(comms, mock_update):
+    q = MagicMock()
+    q.stats.return_value = {"queued": 1, "running": 0, "done": 2, "failed": 0, "total": 3}
+    q.list_jobs.return_value = [{"id": 1, "platform": "twitter", "status": "queued", "attempts": 0, "max_attempts": 3}]
+    comms.set_modules(publisher_queue=q)
+    await comms._cmd_pubq(mock_update, MagicMock())
+    text = mock_update.message.reply_text.call_args[0][0]
+    assert "Publish Queue" in text
+
+
+@pytest.mark.asyncio
+async def test_cmd_pubrun(comms, mock_update):
+    q = MagicMock()
+    q.process_all = AsyncMock(return_value=[{"status": "done"}, {"status": "failed"}])
+    comms.set_modules(publisher_queue=q)
+    ctx = MagicMock()
+    ctx.args = ["2"]
+    await comms._cmd_pubrun(mock_update, ctx)
+    text = mock_update.message.reply_text.call_args[0][0]
+    assert "processed=2" in text
+
+
+@pytest.mark.asyncio
+async def test_cmd_webop_list(comms, mock_update):
+    comms.set_modules(agent_registry=MagicMock())
+    ctx = MagicMock()
+    ctx.args = ["list"]
+    await comms._cmd_webop(mock_update, ctx)
+    text = mock_update.message.reply_text.call_args[0][0]
+    assert "WebOp scenarios" in text
+
+
+@pytest.mark.asyncio
+async def test_cmd_skills_pending(comms, mock_update):
+    reg = MagicMock()
+    reg.pending_skills.return_value = [{"name": "self_improve:x", "category": "self_improve", "updated_at": "now"}]
+    comms.set_modules(skill_registry=reg)
+    await comms._cmd_skills_pending(mock_update, MagicMock())
+    text = mock_update.message.reply_text.call_args[0][0]
+    assert "Pending skills" in text
+
+
+@pytest.mark.asyncio
+async def test_cmd_skills_audit(comms, mock_update):
+    reg = MagicMock()
+    reg.audit_coverage.return_value = 3
+    reg.audit_summary.return_value = {
+        "total": 10,
+        "pending": 1,
+        "rejected": 0,
+        "high_risk": 2,
+        "stable": 4,
+        "top_risky": [{"name": "s1", "risk_score": 0.9, "compatibility": "review", "acceptance_status": "pending"}],
+    }
+    comms.set_modules(skill_registry=reg)
+    await comms._cmd_skills_audit(mock_update, MagicMock())
+    text = mock_update.message.reply_text.call_args[0][0]
+    assert "Skill Audit" in text
+
+
+@pytest.mark.asyncio
+async def test_cmd_skills_fix(comms, mock_update):
+    reg = MagicMock()
+    reg.remediate_high_risk.return_value = {
+        "created": 2,
+        "open_total": 5,
+        "items": [{"skill_name": "s1", "reason": "pending_acceptance", "action": "run_tests"}],
+    }
+    comms.set_modules(skill_registry=reg)
+    await comms._cmd_skills_fix(mock_update, MagicMock())
+    text = mock_update.message.reply_text.call_args[0][0]
+    assert "Skill Remediation" in text
+
+
 # ── Inline callback ──
 
 @pytest.fixture

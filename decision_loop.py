@@ -23,6 +23,9 @@ from config.settings import settings
 from goal_engine import Goal, GoalEngine, GoalPriority, GoalStatus
 from llm_router import LLMRouter, TaskType
 from memory.memory_manager import MemoryManager
+from modules.workflow_state_machine import WorkflowStateMachine
+from modules.data_lake import DataLake
+from modules.step_contract import validate_step_output
 
 TICK_INTERVAL = 300  # 5 минут
 STEP_TIMEOUT = 120   # секунд на один шаг (LLM content needs time)
@@ -49,6 +52,7 @@ class DecisionLoop:
         self._tick_count = 0
         self._consecutive_idle = 0
         self._progress_sent: dict[str, set[int]] = {}
+        self.workflow = WorkflowStateMachine()
         logger.info("DecisionLoop инициализирован", extra={"event": "init"})
 
     def set_self_healer(self, self_healer) -> None:
@@ -139,6 +143,7 @@ class DecisionLoop:
 
     async def _process_goal(self, goal: Goal) -> None:
         """Проводит цель через полный цикл."""
+        trace_id = self.workflow.start_or_attach(goal.goal_id)
         logger.info(
             f"Обработка цели: [{goal.goal_id}] {goal.title}",
             extra={
@@ -153,16 +158,20 @@ class DecisionLoop:
         )
 
         # PLAN
+        self.workflow.transition(goal.goal_id, "planning", reason="goal_selected", detail=goal.title)
         plan = await self._plan_goal(goal)
         if not plan:
+            self.workflow.transition(goal.goal_id, "failed", reason="planning_failed", detail="empty_plan")
             self.goal_engine.fail_goal(goal.goal_id, "Не удалось составить план")
             return
 
         self.goal_engine.plan_goal(goal.goal_id, plan)
 
         # EXECUTE
+        self.workflow.transition(goal.goal_id, "executing", reason="plan_ready", detail=f"steps={len(plan)}")
         if not self.goal_engine.start_execution(goal.goal_id):
             # Цель ушла в WAITING_APPROVAL — ждём одобрения владельца
+            self.workflow.transition(goal.goal_id, "waiting_approval", reason="owner_approval_required", detail=goal.title)
             logger.info(
                 f"[{goal.goal_id}] ожидает одобрения владельца",
                 extra={"event": "goal_awaiting_approval"},
@@ -172,7 +181,24 @@ class DecisionLoop:
         results = await self._execute_goal(goal)
 
         # LEARN
+        self.workflow.transition(goal.goal_id, "learning", reason="execution_finished", detail=str(results.get("steps_completed", 0)))
         await self._learn_from_goal(goal, results)
+        if results.get("all_completed"):
+            self.workflow.transition(goal.goal_id, "completed", reason="learn_done", detail="ok")
+        else:
+            self.workflow.transition(goal.goal_id, "failed", reason="partial_or_failed", detail=str(results.get("steps_completed", 0)))
+        try:
+            DataLake().record(
+                agent="decision_loop",
+                task_type="workflow_trace",
+                status="success",
+                output={"goal_id": goal.goal_id, "trace_id": trace_id, "state": self.workflow.get_state(goal.goal_id)},
+                goal_id=goal.goal_id,
+                trace_id=trace_id,
+                source="workflow_state_machine",
+            )
+        except Exception:
+            pass
 
     async def _plan_goal(self, goal: Goal) -> list[str]:
         """Фаза PLAN: генерирует план выполнения через LLM."""
@@ -274,6 +300,15 @@ class DecisionLoop:
 
             step_result = await self._execute_step_with_retry(goal, step, i + 1)
             results[f"step_{i + 1}"] = step_result
+            try:
+                self.workflow.checkpoint_step(
+                    goal.goal_id,
+                    i + 1,
+                    step_result.get("status", "unknown"),
+                    detail=(step_result.get("error") or str(step_result.get("output", "")))[:300],
+                )
+            except Exception:
+                pass
             if step_result.get("status") == "completed":
                 results["steps_completed"] += 1
             await self._maybe_send_progress(goal, results)
@@ -451,8 +486,16 @@ class DecisionLoop:
                 capability = self._step_to_capability(step)
                 if capability:
                     try:
+                        self._trace_handoff("decision_loop", "agent_registry", capability, step, "start")
                         result = await self.agent_registry.dispatch(
                             capability, step=step, goal_title=goal.title, content=step,
+                        )
+                        self._trace_handoff(
+                            "agent_registry",
+                            "decision_loop",
+                            capability,
+                            step,
+                            "success" if (result and result.success) else "failed",
                         )
                         if result and result.success and self._validate_result(result, step):
                             output = result.output
@@ -469,8 +512,16 @@ class DecisionLoop:
             # 2.5. Orchestrator fallback — let VITOCore classify and dispatch
             if self.agent_registry:
                 try:
+                    self._trace_handoff("decision_loop", "vito_core", "orchestrate", step, "start")
                     result = await self.agent_registry.dispatch(
                         "orchestrate", step=step, goal_title=goal.title, content=step,
+                    )
+                    self._trace_handoff(
+                        "vito_core",
+                        "decision_loop",
+                        "orchestrate",
+                        step,
+                        "success" if (result and result.success) else "failed",
                     )
                     if result and result.success and self._validate_result(result, step):
                         output = result.output
@@ -752,9 +803,16 @@ class DecisionLoop:
                             return {"status": "failed", "error": "Owner approval rejected or timed out", "agent": "comms"}
                     # Cooldown for repetitive test goals
                     try:
+                        from modules.execution_facts import ExecutionFacts
+                        facts = ExecutionFacts()
+                        # Global cooldown when Gumroad daily limit was reached recently.
+                        if facts.recent_status_exists(action="platform:publish", status="daily_limit", hours=18):
+                            return {
+                                "status": "failed",
+                                "error": "Gumroad daily limit cooldown active (18h after last daily_limit)",
+                                "agent": "gumroad",
+                            }
                         if "gumroad publish test" in goal.title.lower():
-                            from modules.execution_facts import ExecutionFacts
-                            facts = ExecutionFacts()
                             if facts.recent_exists(actions=["gumroad:publish_attempt"], hours=6):
                                 return {"status": "failed", "error": "Gumroad publish test cooldown (6h)", "agent": "gumroad"}
                             facts.record(action="gumroad:publish_attempt", status="started", detail=goal.title[:200], source="decision_loop")
@@ -825,16 +883,60 @@ class DecisionLoop:
                     except Exception:
                         pass
 
-                    pub_result = await gumroad.publish({
+                    from modules.publish_contract import (
+                        build_publish_signature,
+                        recent_duplicate_publish,
+                        validate_publish_payload,
+                    )
+
+                    publish_payload = {
                         "name": goal.title[:100],
-                        "description": goal.description[:500],
+                        "description": (goal.description or goal.title)[:2000],
                         "price": 5,
                         "pdf_path": pdf_path,
                         "cover_path": cover_path,
                         "thumb_path": thumb_path,
+                        "category": "Programming",
+                        "tags": ["automation", "ai", "productivity", "workflow"],
                         "draft_only": any(w in s for w in ("черновик", "превью", "preview", "draft")),
                         "allow_existing_update": False,
-                    })
+                        "owner_edit_confirmed": False,
+                    }
+                    ok_payload, payload_errors, _norm = validate_publish_payload("gumroad", publish_payload)
+                    if not ok_payload:
+                        return {
+                            "status": "failed",
+                            "error": f"Publish payload invalid: {', '.join(payload_errors)}",
+                            "agent": "gumroad",
+                        }
+                    sig = build_publish_signature("gumroad", publish_payload)
+                    if recent_duplicate_publish(sig, hours=24):
+                        return {
+                            "status": "failed",
+                            "error": f"Duplicate publish blocked (24h) sig={sig}",
+                            "agent": "gumroad",
+                        }
+                    try:
+                        from modules.execution_facts import ExecutionFacts
+                        ExecutionFacts().record(
+                            action="platform:publish_attempt",
+                            status="started",
+                            detail=f"gumroad sig={sig}",
+                            source="decision_loop",
+                        )
+                    except Exception:
+                        pass
+
+                    # Support explicit dry-run / verify intent
+                    if any(w in s for w in ("dry-run", "dry run", "verify-run", "verify only", "только провер")):
+                        return {
+                            "status": "completed",
+                            "agent": "gumroad",
+                            "output": {"dry_run": True, "signature": sig, "payload_ok": True},
+                        }
+
+                    publish_payload["signature"] = sig
+                    pub_result = await gumroad.publish(publish_payload)
                     if pub_result.get("status") == "published" and pub_result.get("url"):
                         try:
                             if self.memory:
@@ -933,6 +1035,19 @@ class DecisionLoop:
             data["file_path"] = result.metadata["file_path"]
         return data
 
+    @staticmethod
+    def _trace_handoff(from_agent: str, to_agent: str, capability: str, step: str, status: str) -> None:
+        try:
+            DataLake().record_handoff(
+                from_agent=from_agent,
+                to_agent=to_agent,
+                capability=capability,
+                step=step[:180],
+                status=status,
+            )
+        except Exception:
+            pass
+
     async def _save_step_output(self, goal: Goal, step: str, content: str) -> str:
         """Save LLM-generated content to file if applicable. Returns file path or empty string."""
         from pathlib import Path
@@ -969,6 +1084,13 @@ class DecisionLoop:
 
         output = result.output
         metadata = result.metadata or {}
+        contract = validate_step_output(output, metadata)
+        if not contract.ok:
+            logger.warning(
+                f"Validation(contract) failed: {','.join(contract.errors)}",
+                extra={"event": "step_contract_failed", "context": {"step": step[:120], "errors": contract.errors[:4]}},
+            )
+            return False
 
         # Check for file creation tasks — file must exist
         if metadata.get("file_path"):

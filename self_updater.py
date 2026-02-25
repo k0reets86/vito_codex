@@ -221,12 +221,24 @@ class SelfUpdater:
                     if m:
                         failed = int(m.group(1))
 
-            return {
+            result = {
                 "success": proc.returncode == 0,
                 "passed": passed,
                 "failed": failed,
                 "output": output[-2000:],  # Последние 2000 символов
             }
+            # Skill acceptance gate: finalize pending skills based on this test run.
+            try:
+                from modules.skill_registry import SkillRegistry
+                SkillRegistry().auto_accept_pending(
+                    tests_passed=bool(result["success"]),
+                    evidence=f"pytest:{test_path}",
+                    validator="self_updater.run_tests",
+                    notes=f"passed={passed} failed={failed}",
+                )
+            except Exception:
+                pass
+            return result
         except subprocess.TimeoutExpired:
             return {"success": False, "passed": 0, "failed": 0, "output": "Test timeout (300s)"}
         except Exception as e:

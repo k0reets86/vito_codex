@@ -7,6 +7,7 @@ import aiohttp
 from config.logger import get_logger
 from config.settings import settings
 from platforms.base_platform import BasePlatform
+from modules.execution_facts import ExecutionFacts
 
 logger = get_logger("printful", agent="printful")
 API_BASE = "https://api.printful.com"
@@ -48,6 +49,26 @@ class PrintfulPlatform(BasePlatform):
 
     async def publish(self, content: dict) -> dict:
         """POST /store/products — создание продукта."""
+        if content.get("dry_run"):
+            name = (content.get("sync_product", {}) or {}).get("name", "printful_dryrun")
+            try:
+                ExecutionFacts().record(
+                    action="platform:publish",
+                    status="prepared",
+                    detail=f"printful dry_run name={str(name)[:80]}",
+                    evidence="dryrun:printful",
+                    source="printful.publish",
+                    evidence_dict={"platform": "printful", "dry_run": True, "name": name},
+                )
+            except Exception:
+                pass
+            return {
+                "platform": "printful",
+                "status": "prepared",
+                "dry_run": True,
+                "name": name,
+            }
+
         if not self._authenticated:
             return {"platform": "printful", "status": "not_authenticated"}
         try:
@@ -58,6 +79,20 @@ class PrintfulPlatform(BasePlatform):
                     f"Printful продукт создан: {content.get('sync_product', {}).get('name', 'unknown')}",
                     extra={"event": "printful_publish"},
                 )
+                try:
+                    product = (data or {}).get("result", {}) if isinstance(data, dict) else {}
+                    pid = product.get("id", "")
+                    evidence = f"https://www.printful.com/dashboard/store/products/{pid}" if pid else ""
+                    ExecutionFacts().record(
+                        action="platform:publish",
+                        status="created",
+                        detail=f"printful product_id={pid}",
+                        evidence=evidence,
+                        source="printful.publish",
+                        evidence_dict={"platform": "printful", "product_id": pid, "url": evidence},
+                    )
+                except Exception:
+                    pass
                 return {"platform": "printful", "status": "created", "data": data}
         except Exception as e:
             logger.error(f"Printful publish error: {e}", extra={"event": "printful_publish_error"})

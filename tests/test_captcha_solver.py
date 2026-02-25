@@ -1,8 +1,11 @@
 """Tests for captcha_solver module."""
 
+import os
 import sqlite3
 import sys
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -11,6 +14,9 @@ from modules.captcha_solver import CaptchaSolver, DB_PATH
 
 def test_balance():
     """Check anti-captcha account balance."""
+    if not os.getenv("ANTICAPTCHA_KEY"):
+        pytest.skip("ANTICAPTCHA_KEY not configured")
+    pytest.importorskip("anticaptchaofficial")
     solver = CaptchaSolver.get_instance()
     balance = solver.get_balance()
     print(f"Anti-Captcha balance: ${balance:.4f}")

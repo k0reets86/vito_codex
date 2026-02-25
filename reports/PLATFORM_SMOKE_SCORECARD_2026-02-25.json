@@ -1,0 +1,60 @@
+{
+  "generated_at": "2026-02-25T06:27:58.578105+00:00",
+  "window_days": 30,
+  "platforms": [
+    {
+      "platform": "twitter",
+      "configured": true,
+      "evidence_count_30d": 8,
+      "success_count_30d": 11,
+      "fail_count_30d": 0,
+      "readiness_score": 100,
+      "note": "ready"
+    },
+    {
+      "platform": "etsy",
+      "configured": true,
+      "evidence_count_30d": 6,
+      "success_count_30d": 7,
+      "fail_count_30d": 0,
+      "readiness_score": 95,
+      "note": "ready"
+    },
+    {
+      "platform": "kofi",
+      "configured": true,
+      "evidence_count_30d": 6,
+      "success_count_30d": 7,
+      "fail_count_30d": 0,
+      "readiness_score": 95,
+      "note": "ready"
+    },
+    {
+      "platform": "printful",
+      "configured": true,
+      "evidence_count_30d": 6,
+      "success_count_30d": 7,
+      "fail_count_30d": 0,
+      "readiness_score": 95,
+      "note": "ready"
+    },
+    {
+      "platform": "gumroad",
+      "configured": true,
+      "evidence_count_30d": 34,
+      "success_count_30d": 17,
+      "fail_count_30d": 43,
+      "readiness_score": 65,
+      "note": "partial"
+    },
+    {
+      "platform": "wordpress",
+      "configured": false,
+      "evidence_count_30d": 6,
+      "success_count_30d": 7,
+      "fail_count_30d": 0,
+      "readiness_score": 65,
+      "note": "partial"
+    }
+  ]
+}

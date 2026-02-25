@@ -93,6 +93,34 @@ class TestBrowserAgent:
         result = await agent.execute_task("unknown_task")
         assert result.success is False
 
+    @pytest.mark.asyncio
+    async def test_register_with_email_verify_mode(self, agent):
+        mock_page = AsyncMock()
+        mock_page.goto = AsyncMock()
+        mock_page.fill = AsyncMock()
+        mock_page.click = AsyncMock()
+        mock_page.url = "https://example.com/register"
+        mock_page.close = AsyncMock()
+        mock_page.screenshot = AsyncMock()
+        loc = MagicMock()
+        loc.count = AsyncMock(return_value=1)
+        mock_page.locator = MagicMock(return_value=loc)
+
+        mock_context = AsyncMock()
+        mock_context.new_page = AsyncMock(return_value=mock_page)
+        agent._context = mock_context
+
+        with patch.object(agent, "_ensure_browser", new_callable=AsyncMock):
+            res = await agent.register_with_email(
+                url="https://example.com/register",
+                form={"#email": "a@b.com"},
+                submit_selector="#submit",
+                verify_selectors=["#dashboard"],
+                require_verify=True,
+            )
+            assert res.success is True
+            assert res.output.get("verified") is True
+
 
 class TestOOMProtection:
     """Tests for OOM protection mechanisms."""

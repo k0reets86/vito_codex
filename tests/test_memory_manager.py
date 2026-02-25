@@ -48,6 +48,23 @@ def test_sqlite_save_skill_upsert(memory, tmp_path):
     assert skill["success_count"] == 1
 
 
+def test_save_skill_self_improve_goes_pending_in_registry(memory, tmp_path):
+    with patch("memory.memory_manager.settings") as s:
+        s.SQLITE_PATH = str(tmp_path / "test.db")
+        memory.save_skill(
+            "self_improve:test_case",
+            "self improve draft",
+            agent="vito_core",
+            task_type="self_improve",
+            method={"tests_passed": False},
+        )
+    from modules.skill_registry import SkillRegistry
+    reg = SkillRegistry(sqlite_path=str(tmp_path / "test.db"))
+    row = reg.get_skill("self_improve:test_case")
+    assert row is not None
+    assert row.get("acceptance_status") in {"pending", "accepted"}
+
+
 def test_sqlite_get_skill_not_found(memory, tmp_path):
     with patch("memory.memory_manager.settings") as s:
         s.SQLITE_PATH = str(tmp_path / "test.db")

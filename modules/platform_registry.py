@@ -114,3 +114,29 @@ class PlatformRegistry:
             ]
         finally:
             conn.close()
+
+    def stale_platforms(self, max_age_hours: int = 24) -> list[dict]:
+        """Platforms whose registry record is older than max_age_hours."""
+        conn = self._get_conn()
+        try:
+            rows = conn.execute(
+                """
+                SELECT name, type, capabilities, configured, updated_at
+                FROM platform_registry
+                WHERE updated_at < datetime('now', ?)
+                ORDER BY updated_at ASC
+                """,
+                (f"-{int(max_age_hours)} hour",),
+            ).fetchall()
+            return [
+                {
+                    "name": r[0],
+                    "type": r[1],
+                    "capabilities": r[2],
+                    "configured": bool(r[3]),
+                    "updated_at": r[4],
+                }
+                for r in rows
+            ]
+        finally:
+            conn.close()

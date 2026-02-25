@@ -1,0 +1,574 @@
+=== FILE COUNTS BY KEY TREES ===
+vito-agent files: 23729
+vito-dashboard-src files: 9914
+dot-cache files: 639
+
+=== EMPTY FILES (vito-agent) ===
+/home/vito/vito-agent/<MagicMock name='settings.CHROMA_PATH' id='277394036357936'>/94d23a62-b415-47f6-8835-2a2e9a35dee4/link_lists.bin
+/home/vito/vito-agent/memory/vito_memory.db
+/home/vito/vito-agent/memory/__init__.py
+/home/vito/vito-agent/memory/chroma_db/3d9270d4-3045-4c3b-9dcd-5595c5f91424/link_lists.bin
+/home/vito/vito-agent/<MagicMock name='settings.CHROMA_PATH' id='267298571537776'>/b12f9334-5704-471d-a588-bac1e97065e7/link_lists.bin
+/home/vito/vito-agent/<MagicMock name='settings.CHROMA_PATH' id='277394086070560'>/0ac6472d-37c6-433c-9121-38ffacb8730e/link_lists.bin
+/home/vito/vito-agent/<MagicMock name='settings.CHROMA_PATH' id='267298450256480'>/21b82277-b4ea-424a-9136-211ce8b9dfa4/link_lists.bin
+/home/vito/vito-agent/output/boevoy/boevoy_run_2.log
+/home/vito/vito-agent/<MagicMock name='settings.CHROMA_PATH' id='251266302230112'>/71ba38b5-79c4-427b-ac41-402db89b1f8c/link_lists.bin
+/home/vito/vito-agent/tests/__init__.py
+/home/vito/vito-agent/config/__init__.py
+/home/vito/vito-agent/backups/manual_20260223_021726/<MagicMock name='settings.CHROMA_PATH' id='277394036357936'>/94d23a62-b415-47f6-8835-2a2e9a35dee4/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260223_021726/<MagicMock name='settings.CHROMA_PATH' id='267298571537776'>/b12f9334-5704-471d-a588-bac1e97065e7/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260223_021726/<MagicMock name='settings.CHROMA_PATH' id='277394086070560'>/0ac6472d-37c6-433c-9121-38ffacb8730e/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260223_021726/<MagicMock name='settings.CHROMA_PATH' id='267298450256480'>/21b82277-b4ea-424a-9136-211ce8b9dfa4/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260223_021726/<MagicMock name='settings.CHROMA_PATH' id='251266302230112'>/71ba38b5-79c4-427b-ac41-402db89b1f8c/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260223_021726/tests/__init__.py
+/home/vito/vito-agent/backups/manual_20260223_021726/config/__init__.py
+/home/vito/vito-agent/backups/manual_20260223_021726/<MagicMock name='settings.CHROMA_PATH' id='277394086457472'>/46475b14-4ec6-4c02-9d85-91b7822e0f91/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260223_021726/<MagicMock name='settings.CHROMA_PATH' id='267298492702192'>/5fec5735-1748-4a2c-a200-433a8251addb/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260223_021726/<MagicMock name='settings.CHROMA_PATH' id='251266280746608'>/d57322b0-9b2c-43c2-82d6-f312def2ccf0/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260223_021726/<MagicMock name='settings.CHROMA_PATH' id='251266281013952'>/3fad6be2-a59d-4917-8850-7a06a8e80e9c/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260223_021726/platforms/__init__.py
+/home/vito/vito-agent/backups/manual_post_20260223_061157/<MagicMock name='settings.CHROMA_PATH' id='277394036357936'>/94d23a62-b415-47f6-8835-2a2e9a35dee4/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_20260223_061157/<MagicMock name='settings.CHROMA_PATH' id='267298571537776'>/b12f9334-5704-471d-a588-bac1e97065e7/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_20260223_061157/<MagicMock name='settings.CHROMA_PATH' id='277394086070560'>/0ac6472d-37c6-433c-9121-38ffacb8730e/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_20260223_061157/<MagicMock name='settings.CHROMA_PATH' id='267298450256480'>/21b82277-b4ea-424a-9136-211ce8b9dfa4/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_20260223_061157/<MagicMock name='settings.CHROMA_PATH' id='251266302230112'>/71ba38b5-79c4-427b-ac41-402db89b1f8c/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_20260223_061157/tests/__init__.py
+/home/vito/vito-agent/backups/manual_post_20260223_061157/config/__init__.py
+/home/vito/vito-agent/backups/manual_post_20260223_061157/<MagicMock name='settings.CHROMA_PATH' id='277394086457472'>/46475b14-4ec6-4c02-9d85-91b7822e0f91/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_20260223_061157/<MagicMock name='settings.CHROMA_PATH' id='267298492702192'>/5fec5735-1748-4a2c-a200-433a8251addb/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_20260223_061157/<MagicMock name='settings.CHROMA_PATH' id='251266280746608'>/d57322b0-9b2c-43c2-82d6-f312def2ccf0/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_20260223_061157/<MagicMock name='settings.CHROMA_PATH' id='251266281013952'>/3fad6be2-a59d-4917-8850-7a06a8e80e9c/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_20260223_061157/platforms/__init__.py
+/home/vito/vito-agent/backups/manual_post_audit_20260223_111904/<MagicMock name='settings.CHROMA_PATH' id='277394036357936'>/94d23a62-b415-47f6-8835-2a2e9a35dee4/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_111904/memory/__init__.py
+/home/vito/vito-agent/backups/manual_post_audit_20260223_111904/memory/chroma_db/3d9270d4-3045-4c3b-9dcd-5595c5f91424/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_111904/<MagicMock name='settings.CHROMA_PATH' id='267298571537776'>/b12f9334-5704-471d-a588-bac1e97065e7/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_111904/<MagicMock name='settings.CHROMA_PATH' id='277394086070560'>/0ac6472d-37c6-433c-9121-38ffacb8730e/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_111904/<MagicMock name='settings.CHROMA_PATH' id='267298450256480'>/21b82277-b4ea-424a-9136-211ce8b9dfa4/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_111904/<MagicMock name='settings.CHROMA_PATH' id='251266302230112'>/71ba38b5-79c4-427b-ac41-402db89b1f8c/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_111904/tests/__init__.py
+/home/vito/vito-agent/backups/manual_post_audit_20260223_111904/config/__init__.py
+/home/vito/vito-agent/backups/manual_post_audit_20260223_111904/<MagicMock name='settings.CHROMA_PATH' id='277394086457472'>/46475b14-4ec6-4c02-9d85-91b7822e0f91/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_111904/<MagicMock name='settings.CHROMA_PATH' id='267298492702192'>/5fec5735-1748-4a2c-a200-433a8251addb/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_111904/<MagicMock name='settings.CHROMA_PATH' id='251266280746608'>/d57322b0-9b2c-43c2-82d6-f312def2ccf0/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_111904/<MagicMock name='settings.CHROMA_PATH' id='251266281013952'>/3fad6be2-a59d-4917-8850-7a06a8e80e9c/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_111904/platforms/__init__.py
+/home/vito/vito-agent/backups/backup_20260224_003445/<MagicMock name='settings.CHROMA_PATH' id='277394036357936'>/94d23a62-b415-47f6-8835-2a2e9a35dee4/link_lists.bin
+/home/vito/vito-agent/backups/backup_20260224_003445/memory/__init__.py
+/home/vito/vito-agent/backups/backup_20260224_003445/<MagicMock name='settings.CHROMA_PATH' id='267298571537776'>/b12f9334-5704-471d-a588-bac1e97065e7/link_lists.bin
+/home/vito/vito-agent/backups/backup_20260224_003445/<MagicMock name='settings.CHROMA_PATH' id='277394086070560'>/0ac6472d-37c6-433c-9121-38ffacb8730e/link_lists.bin
+/home/vito/vito-agent/backups/backup_20260224_003445/<MagicMock name='settings.CHROMA_PATH' id='267298450256480'>/21b82277-b4ea-424a-9136-211ce8b9dfa4/link_lists.bin
+/home/vito/vito-agent/backups/backup_20260224_003445/<MagicMock name='settings.CHROMA_PATH' id='251266302230112'>/71ba38b5-79c4-427b-ac41-402db89b1f8c/link_lists.bin
+/home/vito/vito-agent/backups/backup_20260224_003445/tests/__init__.py
+/home/vito/vito-agent/backups/backup_20260224_003445/config/__init__.py
+/home/vito/vito-agent/backups/backup_20260224_003445/<MagicMock name='settings.CHROMA_PATH' id='277394086457472'>/46475b14-4ec6-4c02-9d85-91b7822e0f91/link_lists.bin
+/home/vito/vito-agent/backups/backup_20260224_003445/<MagicMock name='settings.CHROMA_PATH' id='267298492702192'>/5fec5735-1748-4a2c-a200-433a8251addb/link_lists.bin
+/home/vito/vito-agent/backups/backup_20260224_003445/<MagicMock name='settings.CHROMA_PATH' id='251266280746608'>/d57322b0-9b2c-43c2-82d6-f312def2ccf0/link_lists.bin
+/home/vito/vito-agent/backups/backup_20260224_003445/<MagicMock name='settings.CHROMA_PATH' id='251266281013952'>/3fad6be2-a59d-4917-8850-7a06a8e80e9c/link_lists.bin
+/home/vito/vito-agent/backups/backup_20260224_003445/platforms/__init__.py
+/home/vito/vito-agent/backups/manual_post_audit_20260223_105325/<MagicMock name='settings.CHROMA_PATH' id='277394036357936'>/94d23a62-b415-47f6-8835-2a2e9a35dee4/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_105325/memory/__init__.py
+/home/vito/vito-agent/backups/manual_post_audit_20260223_105325/memory/chroma_db/3d9270d4-3045-4c3b-9dcd-5595c5f91424/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_105325/<MagicMock name='settings.CHROMA_PATH' id='267298571537776'>/b12f9334-5704-471d-a588-bac1e97065e7/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_105325/<MagicMock name='settings.CHROMA_PATH' id='277394086070560'>/0ac6472d-37c6-433c-9121-38ffacb8730e/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_105325/<MagicMock name='settings.CHROMA_PATH' id='267298450256480'>/21b82277-b4ea-424a-9136-211ce8b9dfa4/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_105325/<MagicMock name='settings.CHROMA_PATH' id='251266302230112'>/71ba38b5-79c4-427b-ac41-402db89b1f8c/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_105325/tests/__init__.py
+/home/vito/vito-agent/backups/manual_post_audit_20260223_105325/config/__init__.py
+/home/vito/vito-agent/backups/manual_post_audit_20260223_105325/<MagicMock name='settings.CHROMA_PATH' id='277394086457472'>/46475b14-4ec6-4c02-9d85-91b7822e0f91/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_105325/<MagicMock name='settings.CHROMA_PATH' id='267298492702192'>/5fec5735-1748-4a2c-a200-433a8251addb/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_105325/<MagicMock name='settings.CHROMA_PATH' id='251266280746608'>/d57322b0-9b2c-43c2-82d6-f312def2ccf0/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_105325/<MagicMock name='settings.CHROMA_PATH' id='251266281013952'>/3fad6be2-a59d-4917-8850-7a06a8e80e9c/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_105325/platforms/__init__.py
+/home/vito/vito-agent/backups/20260222_140114/test_vito.db
+/home/vito/vito-agent/backups/backup_20260223_063600/<MagicMock name='settings.CHROMA_PATH' id='277394036357936'>/94d23a62-b415-47f6-8835-2a2e9a35dee4/link_lists.bin
+/home/vito/vito-agent/backups/backup_20260223_063600/memory/__init__.py
+/home/vito/vito-agent/backups/backup_20260223_063600/<MagicMock name='settings.CHROMA_PATH' id='267298571537776'>/b12f9334-5704-471d-a588-bac1e97065e7/link_lists.bin
+/home/vito/vito-agent/backups/backup_20260223_063600/<MagicMock name='settings.CHROMA_PATH' id='277394086070560'>/0ac6472d-37c6-433c-9121-38ffacb8730e/link_lists.bin
+/home/vito/vito-agent/backups/backup_20260223_063600/<MagicMock name='settings.CHROMA_PATH' id='267298450256480'>/21b82277-b4ea-424a-9136-211ce8b9dfa4/link_lists.bin
+/home/vito/vito-agent/backups/backup_20260223_063600/<MagicMock name='settings.CHROMA_PATH' id='251266302230112'>/71ba38b5-79c4-427b-ac41-402db89b1f8c/link_lists.bin
+/home/vito/vito-agent/backups/backup_20260223_063600/tests/__init__.py
+/home/vito/vito-agent/backups/backup_20260223_063600/config/__init__.py
+/home/vito/vito-agent/backups/backup_20260223_063600/<MagicMock name='settings.CHROMA_PATH' id='277394086457472'>/46475b14-4ec6-4c02-9d85-91b7822e0f91/link_lists.bin
+/home/vito/vito-agent/backups/backup_20260223_063600/<MagicMock name='settings.CHROMA_PATH' id='267298492702192'>/5fec5735-1748-4a2c-a200-433a8251addb/link_lists.bin
+/home/vito/vito-agent/backups/backup_20260223_063600/<MagicMock name='settings.CHROMA_PATH' id='251266280746608'>/d57322b0-9b2c-43c2-82d6-f312def2ccf0/link_lists.bin
+/home/vito/vito-agent/backups/backup_20260223_063600/<MagicMock name='settings.CHROMA_PATH' id='251266281013952'>/3fad6be2-a59d-4917-8850-7a06a8e80e9c/link_lists.bin
+/home/vito/vito-agent/backups/backup_20260223_063600/platforms/__init__.py
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104855/<MagicMock name='settings.CHROMA_PATH' id='277394036357936'>/94d23a62-b415-47f6-8835-2a2e9a35dee4/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104855/memory/__init__.py
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104855/memory/chroma_db/3d9270d4-3045-4c3b-9dcd-5595c5f91424/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104855/<MagicMock name='settings.CHROMA_PATH' id='267298571537776'>/b12f9334-5704-471d-a588-bac1e97065e7/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104855/<MagicMock name='settings.CHROMA_PATH' id='277394086070560'>/0ac6472d-37c6-433c-9121-38ffacb8730e/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104855/<MagicMock name='settings.CHROMA_PATH' id='267298450256480'>/21b82277-b4ea-424a-9136-211ce8b9dfa4/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104855/<MagicMock name='settings.CHROMA_PATH' id='251266302230112'>/71ba38b5-79c4-427b-ac41-402db89b1f8c/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104855/tests/__init__.py
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104855/config/__init__.py
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104855/<MagicMock name='settings.CHROMA_PATH' id='277394086457472'>/46475b14-4ec6-4c02-9d85-91b7822e0f91/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104855/<MagicMock name='settings.CHROMA_PATH' id='267298492702192'>/5fec5735-1748-4a2c-a200-433a8251addb/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104855/<MagicMock name='settings.CHROMA_PATH' id='251266280746608'>/d57322b0-9b2c-43c2-82d6-f312def2ccf0/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104855/<MagicMock name='settings.CHROMA_PATH' id='251266281013952'>/3fad6be2-a59d-4917-8850-7a06a8e80e9c/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104855/platforms/__init__.py
+/home/vito/vito-agent/backups/manual_20260223_094659/<MagicMock name='settings.CHROMA_PATH' id='277394036357936'>/94d23a62-b415-47f6-8835-2a2e9a35dee4/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260223_094659/<MagicMock name='settings.CHROMA_PATH' id='267298571537776'>/b12f9334-5704-471d-a588-bac1e97065e7/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260223_094659/<MagicMock name='settings.CHROMA_PATH' id='277394086070560'>/0ac6472d-37c6-433c-9121-38ffacb8730e/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260223_094659/<MagicMock name='settings.CHROMA_PATH' id='267298450256480'>/21b82277-b4ea-424a-9136-211ce8b9dfa4/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260223_094659/<MagicMock name='settings.CHROMA_PATH' id='251266302230112'>/71ba38b5-79c4-427b-ac41-402db89b1f8c/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260223_094659/tests/__init__.py
+/home/vito/vito-agent/backups/manual_20260223_094659/config/__init__.py
+/home/vito/vito-agent/backups/manual_20260223_094659/<MagicMock name='settings.CHROMA_PATH' id='277394086457472'>/46475b14-4ec6-4c02-9d85-91b7822e0f91/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260223_094659/<MagicMock name='settings.CHROMA_PATH' id='267298492702192'>/5fec5735-1748-4a2c-a200-433a8251addb/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260223_094659/<MagicMock name='settings.CHROMA_PATH' id='251266280746608'>/d57322b0-9b2c-43c2-82d6-f312def2ccf0/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260223_094659/<MagicMock name='settings.CHROMA_PATH' id='251266281013952'>/3fad6be2-a59d-4917-8850-7a06a8e80e9c/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260223_094659/platforms/__init__.py
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104436/<MagicMock name='settings.CHROMA_PATH' id='277394036357936'>/94d23a62-b415-47f6-8835-2a2e9a35dee4/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104436/memory/__init__.py
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104436/memory/chroma_db/3d9270d4-3045-4c3b-9dcd-5595c5f91424/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104436/<MagicMock name='settings.CHROMA_PATH' id='267298571537776'>/b12f9334-5704-471d-a588-bac1e97065e7/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104436/<MagicMock name='settings.CHROMA_PATH' id='277394086070560'>/0ac6472d-37c6-433c-9121-38ffacb8730e/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104436/<MagicMock name='settings.CHROMA_PATH' id='267298450256480'>/21b82277-b4ea-424a-9136-211ce8b9dfa4/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104436/<MagicMock name='settings.CHROMA_PATH' id='251266302230112'>/71ba38b5-79c4-427b-ac41-402db89b1f8c/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104436/tests/__init__.py
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104436/config/__init__.py
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104436/<MagicMock name='settings.CHROMA_PATH' id='277394086457472'>/46475b14-4ec6-4c02-9d85-91b7822e0f91/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104436/<MagicMock name='settings.CHROMA_PATH' id='267298492702192'>/5fec5735-1748-4a2c-a200-433a8251addb/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104436/<MagicMock name='settings.CHROMA_PATH' id='251266280746608'>/d57322b0-9b2c-43c2-82d6-f312def2ccf0/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104436/<MagicMock name='settings.CHROMA_PATH' id='251266281013952'>/3fad6be2-a59d-4917-8850-7a06a8e80e9c/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_104436/platforms/__init__.py
+/home/vito/vito-agent/backups/manual_post_audit_20260223_193149/<MagicMock name='settings.CHROMA_PATH' id='277394036357936'>/94d23a62-b415-47f6-8835-2a2e9a35dee4/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_193149/memory/__init__.py
+/home/vito/vito-agent/backups/manual_post_audit_20260223_193149/memory/chroma_db/3d9270d4-3045-4c3b-9dcd-5595c5f91424/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_193149/<MagicMock name='settings.CHROMA_PATH' id='267298571537776'>/b12f9334-5704-471d-a588-bac1e97065e7/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_193149/<MagicMock name='settings.CHROMA_PATH' id='277394086070560'>/0ac6472d-37c6-433c-9121-38ffacb8730e/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_193149/<MagicMock name='settings.CHROMA_PATH' id='267298450256480'>/21b82277-b4ea-424a-9136-211ce8b9dfa4/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_193149/<MagicMock name='settings.CHROMA_PATH' id='251266302230112'>/71ba38b5-79c4-427b-ac41-402db89b1f8c/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_193149/tests/__init__.py
+/home/vito/vito-agent/backups/manual_post_audit_20260223_193149/config/__init__.py
+/home/vito/vito-agent/backups/manual_post_audit_20260223_193149/<MagicMock name='settings.CHROMA_PATH' id='277394086457472'>/46475b14-4ec6-4c02-9d85-91b7822e0f91/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_193149/<MagicMock name='settings.CHROMA_PATH' id='267298492702192'>/5fec5735-1748-4a2c-a200-433a8251addb/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_193149/<MagicMock name='settings.CHROMA_PATH' id='251266280746608'>/d57322b0-9b2c-43c2-82d6-f312def2ccf0/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_193149/<MagicMock name='settings.CHROMA_PATH' id='251266281013952'>/3fad6be2-a59d-4917-8850-7a06a8e80e9c/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_audit_20260223_193149/platforms/__init__.py
+/home/vito/vito-agent/backups/manual_20260223_020809/<MagicMock name='settings.CHROMA_PATH' id='277394036357936'>/94d23a62-b415-47f6-8835-2a2e9a35dee4/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260223_020809/<MagicMock name='settings.CHROMA_PATH' id='267298571537776'>/b12f9334-5704-471d-a588-bac1e97065e7/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260223_020809/<MagicMock name='settings.CHROMA_PATH' id='277394086070560'>/0ac6472d-37c6-433c-9121-38ffacb8730e/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260223_020809/<MagicMock name='settings.CHROMA_PATH' id='267298450256480'>/21b82277-b4ea-424a-9136-211ce8b9dfa4/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260223_020809/<MagicMock name='settings.CHROMA_PATH' id='251266302230112'>/71ba38b5-79c4-427b-ac41-402db89b1f8c/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260223_020809/tests/__init__.py
+/home/vito/vito-agent/backups/manual_20260223_020809/config/__init__.py
+/home/vito/vito-agent/backups/manual_20260223_020809/<MagicMock name='settings.CHROMA_PATH' id='277394086457472'>/46475b14-4ec6-4c02-9d85-91b7822e0f91/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260223_020809/<MagicMock name='settings.CHROMA_PATH' id='267298492702192'>/5fec5735-1748-4a2c-a200-433a8251addb/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260223_020809/<MagicMock name='settings.CHROMA_PATH' id='251266280746608'>/d57322b0-9b2c-43c2-82d6-f312def2ccf0/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260223_020809/<MagicMock name='settings.CHROMA_PATH' id='251266281013952'>/3fad6be2-a59d-4917-8850-7a06a8e80e9c/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260223_020809/platforms/__init__.py
+/home/vito/vito-agent/backups/manual_20260224_174941/<MagicMock name='settings.CHROMA_PATH' id='277394036357936'>/94d23a62-b415-47f6-8835-2a2e9a35dee4/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260224_174941/memory/__init__.py
+/home/vito/vito-agent/backups/manual_20260224_174941/memory/chroma_db/3d9270d4-3045-4c3b-9dcd-5595c5f91424/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260224_174941/<MagicMock name='settings.CHROMA_PATH' id='267298571537776'>/b12f9334-5704-471d-a588-bac1e97065e7/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260224_174941/<MagicMock name='settings.CHROMA_PATH' id='277394086070560'>/0ac6472d-37c6-433c-9121-38ffacb8730e/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260224_174941/<MagicMock name='settings.CHROMA_PATH' id='267298450256480'>/21b82277-b4ea-424a-9136-211ce8b9dfa4/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260224_174941/output/boevoy/boevoy_run_2.log
+/home/vito/vito-agent/backups/manual_20260224_174941/<MagicMock name='settings.CHROMA_PATH' id='251266302230112'>/71ba38b5-79c4-427b-ac41-402db89b1f8c/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260224_174941/tests/__init__.py
+/home/vito/vito-agent/backups/manual_20260224_174941/config/__init__.py
+/home/vito/vito-agent/backups/manual_20260224_174941/<MagicMock name='settings.CHROMA_PATH' id='277394086457472'>/46475b14-4ec6-4c02-9d85-91b7822e0f91/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260224_174941/<MagicMock name='settings.CHROMA_PATH' id='267298492702192'>/5fec5735-1748-4a2c-a200-433a8251addb/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260224_174941/<MagicMock name='settings.CHROMA_PATH' id='251266280746608'>/d57322b0-9b2c-43c2-82d6-f312def2ccf0/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260224_174941/<MagicMock name='settings.CHROMA_PATH' id='251266281013952'>/3fad6be2-a59d-4917-8850-7a06a8e80e9c/link_lists.bin
+/home/vito/vito-agent/backups/manual_20260224_174941/platforms/__init__.py
+/home/vito/vito-agent/backups/manual_envfix_20260223_204350/<MagicMock name='settings.CHROMA_PATH' id='277394036357936'>/94d23a62-b415-47f6-8835-2a2e9a35dee4/link_lists.bin
+/home/vito/vito-agent/backups/manual_envfix_20260223_204350/memory/__init__.py
+/home/vito/vito-agent/backups/manual_envfix_20260223_204350/memory/chroma_db/3d9270d4-3045-4c3b-9dcd-5595c5f91424/link_lists.bin
+/home/vito/vito-agent/backups/manual_envfix_20260223_204350/<MagicMock name='settings.CHROMA_PATH' id='267298571537776'>/b12f9334-5704-471d-a588-bac1e97065e7/link_lists.bin
+/home/vito/vito-agent/backups/manual_envfix_20260223_204350/<MagicMock name='settings.CHROMA_PATH' id='277394086070560'>/0ac6472d-37c6-433c-9121-38ffacb8730e/link_lists.bin
+/home/vito/vito-agent/backups/manual_envfix_20260223_204350/<MagicMock name='settings.CHROMA_PATH' id='267298450256480'>/21b82277-b4ea-424a-9136-211ce8b9dfa4/link_lists.bin
+/home/vito/vito-agent/backups/manual_envfix_20260223_204350/<MagicMock name='settings.CHROMA_PATH' id='251266302230112'>/71ba38b5-79c4-427b-ac41-402db89b1f8c/link_lists.bin
+/home/vito/vito-agent/backups/manual_envfix_20260223_204350/tests/__init__.py
+/home/vito/vito-agent/backups/manual_envfix_20260223_204350/config/__init__.py
+/home/vito/vito-agent/backups/manual_envfix_20260223_204350/<MagicMock name='settings.CHROMA_PATH' id='277394086457472'>/46475b14-4ec6-4c02-9d85-91b7822e0f91/link_lists.bin
+/home/vito/vito-agent/backups/manual_envfix_20260223_204350/<MagicMock name='settings.CHROMA_PATH' id='267298492702192'>/5fec5735-1748-4a2c-a200-433a8251addb/link_lists.bin
+/home/vito/vito-agent/backups/manual_envfix_20260223_204350/<MagicMock name='settings.CHROMA_PATH' id='251266280746608'>/d57322b0-9b2c-43c2-82d6-f312def2ccf0/link_lists.bin
+/home/vito/vito-agent/backups/manual_envfix_20260223_204350/<MagicMock name='settings.CHROMA_PATH' id='251266281013952'>/3fad6be2-a59d-4917-8850-7a06a8e80e9c/link_lists.bin
+/home/vito/vito-agent/backups/manual_envfix_20260223_204350/platforms/__init__.py
+/home/vito/vito-agent/backups/backup_20260222_083409/memory/__init__.py
+/home/vito/vito-agent/backups/backup_20260222_083409/tests/__init__.py
+/home/vito/vito-agent/backups/backup_20260222_083409/config/__init__.py
+/home/vito/vito-agent/backups/backup_20260222_083409/platforms/__init__.py
+/home/vito/vito-agent/backups/manual_post_20260223_061142/<MagicMock name='settings.CHROMA_PATH' id='277394036357936'>/94d23a62-b415-47f6-8835-2a2e9a35dee4/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_20260223_061142/<MagicMock name='settings.CHROMA_PATH' id='267298571537776'>/b12f9334-5704-471d-a588-bac1e97065e7/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_20260223_061142/<MagicMock name='settings.CHROMA_PATH' id='277394086070560'>/0ac6472d-37c6-433c-9121-38ffacb8730e/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_20260223_061142/<MagicMock name='settings.CHROMA_PATH' id='267298450256480'>/21b82277-b4ea-424a-9136-211ce8b9dfa4/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_20260223_061142/<MagicMock name='settings.CHROMA_PATH' id='251266302230112'>/71ba38b5-79c4-427b-ac41-402db89b1f8c/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_20260223_061142/tests/__init__.py
+/home/vito/vito-agent/backups/manual_post_20260223_061142/config/__init__.py
+/home/vito/vito-agent/backups/manual_post_20260223_061142/<MagicMock name='settings.CHROMA_PATH' id='277394086457472'>/46475b14-4ec6-4c02-9d85-91b7822e0f91/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_20260223_061142/<MagicMock name='settings.CHROMA_PATH' id='267298492702192'>/5fec5735-1748-4a2c-a200-433a8251addb/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_20260223_061142/<MagicMock name='settings.CHROMA_PATH' id='251266280746608'>/d57322b0-9b2c-43c2-82d6-f312def2ccf0/link_lists.bin
+/home/vito/vito-agent/backups/manual_post_20260223_061142/<MagicMock name='settings.CHROMA_PATH' id='251266281013952'>/3fad6be2-a59d-4917-8850-7a06a8e80e9c/link_lists.bin
+
+=== BROKEN SYMLINKS (/home/vito) ===
+
+=== TOP 80 BIGGEST FILES IN vito-agent ===
+819947290	/home/vito/vito-agent/backups/manual_before_gumroad_20260224_091542.tgz
+27844152	/home/vito/vito-agent/backups/manual_before_gumroad_20260224_091626.tgz
+7807717	/home/vito/vito-agent/logs/vito.log
+7387923	/home/vito/vito-agent/backups/manual_20260224_174941/logs/vito.log
+5566464	/home/vito/vito-agent/memory/chroma_db/chroma.sqlite3
+4517888	/home/vito/vito-agent/backups/manual_20260224_174941/memory/chroma_db/chroma.sqlite3
+4136432	/home/vito/vito-agent/backups/manual_20260224_020252/logs/vito.log
+3341975	/home/vito/vito-agent/backups/manual_skill_registry_20260223_213958/logs/vito.log
+3309422	/home/vito/vito-agent/backups/manual_learning_protocol_20260223_211946/logs/vito.log
+3244712	/home/vito/vito-agent/backups/manual_envfix_20260223_204350/logs/vito.log
+3226384	/home/vito/vito-agent/backups/manual_media_20260223_202700/logs/vito.log
+3068029	/home/vito/vito-agent/backups/manual_post_audit_20260223_193813/logs/vito.log
+3053353	/home/vito/vito-agent/backups/manual_post_audit_20260223_193149/logs/vito.log
+2727936	/home/vito/vito-agent/backups/manual_20260224_020252/memory/chroma_db/chroma.sqlite3
+2265479	/home/vito/vito-agent/backups/manual_post_audit_20260223_111904/logs/vito.log
+2247867	/home/vito/vito-agent/backups/manual_post_audit_20260223_105325/logs/vito.log
+2247867	/home/vito/vito-agent/backups/manual_audit_20260223_105144/logs/vito.log
+2233492	/home/vito/vito-agent/backups/manual_post_audit_20260223_104855/logs/vito.log
+2218387	/home/vito/vito-agent/backups/manual_post_audit_20260223_104436/logs/vito.log
+2218387	/home/vito/vito-agent/backups/manual_audit_20260223_104250/logs/vito.log
+2105344	/home/vito/vito-agent/backups/manual_skill_registry_20260223_213958/memory/chroma_db/chroma.sqlite3
+2105344	/home/vito/vito-agent/backups/manual_post_audit_20260223_193813/memory/chroma_db/chroma.sqlite3
+2105344	/home/vito/vito-agent/backups/manual_post_audit_20260223_193149/memory/chroma_db/chroma.sqlite3
+2105344	/home/vito/vito-agent/backups/manual_post_audit_20260223_111904/memory/chroma_db/chroma.sqlite3
+2105344	/home/vito/vito-agent/backups/manual_post_audit_20260223_105325/memory/chroma_db/chroma.sqlite3
+2105344	/home/vito/vito-agent/backups/manual_post_audit_20260223_104855/memory/chroma_db/chroma.sqlite3
+2105344	/home/vito/vito-agent/backups/manual_post_audit_20260223_104436/memory/chroma_db/chroma.sqlite3
+2105344	/home/vito/vito-agent/backups/manual_media_20260223_202700/memory/chroma_db/chroma.sqlite3
+2105344	/home/vito/vito-agent/backups/manual_learning_protocol_20260223_211946/memory/chroma_db/chroma.sqlite3
+2105344	/home/vito/vito-agent/backups/manual_envfix_20260223_204350/memory/chroma_db/chroma.sqlite3
+2105344	/home/vito/vito-agent/backups/manual_audit_20260223_105144/memory/chroma_db/chroma.sqlite3
+2105344	/home/vito/vito-agent/backups/manual_audit_20260223_104250/memory/chroma_db/chroma.sqlite3
+1867495	/home/vito/vito-agent/logs/errors.log
+1867495	/home/vito/vito-agent/backups/manual_20260224_174941/logs/errors.log
+1671168	/home/vito/vito-agent/memory/vito_local.db
+1635040	/home/vito/vito-agent/backups/manual_20260224_020252/logs/errors.log
+1385461	/home/vito/vito-agent/backups/manual_skill_registry_20260223_213958/logs/errors.log
+1385461	/home/vito/vito-agent/backups/manual_post_audit_20260223_193813/logs/errors.log
+1385461	/home/vito/vito-agent/backups/manual_post_audit_20260223_193149/logs/errors.log
+1385461	/home/vito/vito-agent/backups/manual_media_20260223_202700/logs/errors.log
+1385461	/home/vito/vito-agent/backups/manual_learning_protocol_20260223_211946/logs/errors.log
+1385461	/home/vito/vito-agent/backups/manual_envfix_20260223_204350/logs/errors.log
+1040384	/home/vito/vito-agent/backups/manual_20260224_174941/memory/vito_local.db
+962560	/home/vito/vito-agent/backups/manual_20260224_110640/vito_local.db
+919833	/home/vito/vito-agent/backups/manual_post_audit_20260223_111904/logs/errors.log
+919833	/home/vito/vito-agent/backups/manual_post_audit_20260223_105325/logs/errors.log
+919833	/home/vito/vito-agent/backups/manual_post_audit_20260223_104855/logs/errors.log
+919833	/home/vito/vito-agent/backups/manual_post_audit_20260223_104436/logs/errors.log
+919833	/home/vito/vito-agent/backups/manual_audit_20260223_105144/logs/errors.log
+919833	/home/vito/vito-agent/backups/manual_audit_20260223_104250/logs/errors.log
+585728	/home/vito/vito-agent/backups/manual_20260224_020252/memory/vito_local.db
+565248	/home/vito/vito-agent/backups/manual_skill_registry_20260223_213958/memory/vito_local.db
+565248	/home/vito/vito-agent/backups/manual_post_audit_20260223_193813/memory/vito_local.db
+565248	/home/vito/vito-agent/backups/manual_post_audit_20260223_193149/memory/vito_local.db
+565248	/home/vito/vito-agent/backups/manual_media_20260223_202700/memory/vito_local.db
+565248	/home/vito/vito-agent/backups/manual_learning_protocol_20260223_211946/memory/vito_local.db
+565248	/home/vito/vito-agent/backups/manual_envfix_20260223_204350/memory/vito_local.db
+435645	/home/vito/vito-agent/output/screenshots/xvfb_02.png
+435645	/home/vito/vito-agent/backups/manual_skill_registry_20260223_213958/output/screenshots/xvfb_02.png
+435645	/home/vito/vito-agent/backups/manual_post_audit_20260223_193813/output/screenshots/xvfb_02.png
+435645	/home/vito/vito-agent/backups/manual_post_audit_20260223_193149/output/screenshots/xvfb_02.png
+435645	/home/vito/vito-agent/backups/manual_post_audit_20260223_111904/output/screenshots/xvfb_02.png
+435645	/home/vito/vito-agent/backups/manual_post_audit_20260223_105325/output/screenshots/xvfb_02.png
+435645	/home/vito/vito-agent/backups/manual_post_audit_20260223_104855/output/screenshots/xvfb_02.png
+435645	/home/vito/vito-agent/backups/manual_post_audit_20260223_104436/output/screenshots/xvfb_02.png
+435645	/home/vito/vito-agent/backups/manual_media_20260223_202700/output/screenshots/xvfb_02.png
+435645	/home/vito/vito-agent/backups/manual_learning_protocol_20260223_211946/output/screenshots/xvfb_02.png
+435645	/home/vito/vito-agent/backups/manual_envfix_20260223_204350/output/screenshots/xvfb_02.png
+435645	/home/vito/vito-agent/backups/manual_audit_20260223_105144/output/screenshots/xvfb_02.png
+435645	/home/vito/vito-agent/backups/manual_audit_20260223_104250/output/screenshots/xvfb_02.png
+435645	/home/vito/vito-agent/backups/manual_20260224_174941/output/screenshots/xvfb_02.png
+435645	/home/vito/vito-agent/backups/manual_20260224_020252/output/screenshots/xvfb_02.png
+435645	/home/vito/vito-agent/backups/backup_20260224_003445/output/screenshots/xvfb_02.png
+435645	/home/vito/vito-agent/backups/backup_20260223_063600/output/screenshots/xvfb_02.png
+421888	/home/vito/vito-agent/backups/manual_post_audit_20260223_111904/memory/vito_local.db
+421888	/home/vito/vito-agent/backups/manual_post_audit_20260223_105325/memory/vito_local.db
+421888	/home/vito/vito-agent/backups/manual_post_audit_20260223_104855/memory/vito_local.db
+421888	/home/vito/vito-agent/backups/manual_post_audit_20260223_104436/memory/vito_local.db
+421888	/home/vito/vito-agent/backups/manual_audit_20260223_105144/memory/vito_local.db
+421888	/home/vito/vito-agent/backups/manual_audit_20260223_104250/memory/vito_local.db
+
+=== DUPLICATE BASENAMES (vito-agent, top 80) ===
+    831 chroma.sqlite3
+    276 link_lists.bin
+    276 length.bin
+    276 header.bin
+    276 data_level0.bin
+    167 __init__.py
+    126 __init__.cpython-312.pyc
+     69 settings.py
+     69 .env
+     60 conftest.py
+     60 .gitignore
+     52 master
+     35 conftest.cpython-312-pytest-9.0.2.pyc
+     30 youtube.py
+     30 wordpress.py
+     30 watchdog.sh
+     30 vito_core.py
+     30 vito.service
+     30 vito-watchdog.service
+     30 twitter.py
+     30 trend_scout.py
+     30 translation_agent.py
+     30 test_vito_core.py
+     30 test_trend_scout.py
+     30 test_translation_agent.py
+     30 test_smm_agent.py
+     30 test_settings.py
+     30 test_seo_agent.py
+     30 test_self_updater.py
+     30 test_self_healer.py
+     30 test_security_agent.py
+     30 test_risk_agent.py
+     30 test_research_agent.py
+     30 test_quality_judge.py
+     30 test_publisher_agent.py
+     30 test_platform_youtube.py
+     30 test_platform_substack.py
+     30 test_platform_printful.py
+     30 test_platform_creative_fabrica.py
+     30 test_platform_amazon_kdp.py
+     30 test_partnership_agent.py
+     30 test_memory_manager.py
+     30 test_marketing_agent.py
+     30 test_logger.py
+     30 test_llm_router.py
+     30 test_legal_agent.py
+     30 test_knowledge_updater.py
+     30 test_judge_protocol.py
+     30 test_integration_offline.py
+     30 test_hr_agent.py
+     30 test_goal_engine.py
+     30 test_financial_controller.py
+     30 test_email_agent.py
+     30 test_economics_agent.py
+     30 test_ecommerce_agent.py
+     30 test_document_agent.py
+     30 test_devops_agent.py
+     30 test_decision_loop.py
+     30 test_conversation_engine.py
+     30 test_content_creator.py
+     30 test_comms_agent.py
+     30 test_browser_agent.py
+     30 test_base_agent.py
+     30 test_analytics_agent.py
+     30 test_agent_registry.py
+     30 test_account_manager.py
+     30 substack.py
+     30 smm_agent.py
+     30 settings.local.json
+     30 seo_agent.py
+     30 self_updater.py
+     30 self_healer.py
+     30 security_agent.py
+     30 risk_agent.py
+     30 resource_guard.py
+     30 research_agent.py
+     30 quality_judge.py
+     30 publisher_agent.py
+     30 printful.py
+     30 partnership_agent.py
+
+=== RECENTLY MODIFIED FILES (last 48h, top 200) ===
+2026-02-24 18:27	/home/vito/vito-agent/output/articles/ai_guide_1771957675.md
+2026-02-24 18:27	/home/vito/vito-agent/output/articles/python_tips_1771957675.md
+2026-02-24 18:27	/home/vito/vito-agent/output/ebooks/python_guide_1771957675.md
+2026-02-24 18:27	/home/vito/vito-agent/output/owner_outbox/response_20260224_182755.txt
+2026-02-24 18:27	/home/vito/vito-agent/output/products/etsy_digital_planner_1771957675.md
+2026-02-24 18:28	/home/vito/vito-agent/<MagicMock name='settings.CHROMA_PATH' id='276094681042432'>/chroma.sqlite3
+2026-02-24 18:28	/home/vito/vito-agent/<MagicMock name='settings.CHROMA_PATH' id='276094682555328'>/chroma.sqlite3
+2026-02-24 18:28	/home/vito/vito-agent/<MagicMock name='settings.CHROMA_PATH' id='276094682633120'>/chroma.sqlite3
+2026-02-24 18:28	/home/vito/vito-agent/output/previews/medium_preview_19f6bbb8.md
+2026-02-24 18:28	/home/vito/vito-agent/output/previews/wordpress_preview_290035d9.md
+2026-02-24 18:28	/home/vito/vito-agent/output/previews/wordpress_preview_2b41a0c3.md
+2026-02-24 18:28	/home/vito/vito-agent/output/previews/wordpress_preview_c7cf44d2.md
+2026-02-24 18:28	/home/vito/vito-agent/output/social/instagram_1771957692.txt
+2026-02-24 18:28	/home/vito/vito-agent/output/social/twitter_1771957692.txt
+2026-02-24 18:32	/home/vito/vito-agent/modules/data_lake.py
+2026-02-24 18:33	/home/vito/vito-agent/<MagicMock name='settings.CHROMA_PATH' id='261414297784096'>/chroma.sqlite3
+2026-02-24 18:33	/home/vito/vito-agent/<MagicMock name='settings.CHROMA_PATH' id='261414299281952'>/chroma.sqlite3
+2026-02-24 18:33	/home/vito/vito-agent/<MagicMock name='settings.CHROMA_PATH' id='261414299381600'>/chroma.sqlite3
+2026-02-24 18:33	/home/vito/vito-agent/__pycache__/financial_controller.cpython-312.pyc
+2026-02-24 18:33	/home/vito/vito-agent/financial_controller.py
+2026-02-24 18:33	/home/vito/vito-agent/modules/__pycache__/data_lake.cpython-312.pyc
+2026-02-24 18:33	/home/vito/vito-agent/output/articles/ai_guide_1771958019.md
+2026-02-24 18:33	/home/vito/vito-agent/output/articles/python_tips_1771958019.md
+2026-02-24 18:33	/home/vito/vito-agent/output/ebooks/python_guide_1771958019.md
+2026-02-24 18:33	/home/vito/vito-agent/output/owner_outbox/response_20260224_183339.txt
+2026-02-24 18:33	/home/vito/vito-agent/output/previews/medium_preview_2710a9b3.md
+2026-02-24 18:33	/home/vito/vito-agent/output/previews/wordpress_preview_14b5a03b.md
+2026-02-24 18:33	/home/vito/vito-agent/output/previews/wordpress_preview_e2b85362.md
+2026-02-24 18:33	/home/vito/vito-agent/output/previews/wordpress_preview_eecc1ec7.md
+2026-02-24 18:33	/home/vito/vito-agent/output/products/etsy_digital_planner_1771958019.md
+2026-02-24 18:33	/home/vito/vito-agent/output/social/instagram_1771958035.txt
+2026-02-24 18:33	/home/vito/vito-agent/output/social/twitter_1771958035.txt
+2026-02-24 18:42	/home/vito/vito-agent/agents/vito_core.py
+2026-02-24 18:43	/home/vito/vito-agent/<MagicMock name='settings.CHROMA_PATH' id='258886192512032'>/chroma.sqlite3
+2026-02-24 18:43	/home/vito/vito-agent/<MagicMock name='settings.CHROMA_PATH' id='258886193565280'>/chroma.sqlite3
+2026-02-24 18:43	/home/vito/vito-agent/<MagicMock name='settings.CHROMA_PATH' id='258886268202320'>/chroma.sqlite3
+2026-02-24 18:43	/home/vito/vito-agent/__pycache__/llm_router.cpython-312.pyc
+2026-02-24 18:43	/home/vito/vito-agent/agents/__pycache__/vito_core.cpython-312.pyc
+2026-02-24 18:43	/home/vito/vito-agent/llm_router.py
+2026-02-24 18:43	/home/vito/vito-agent/output/articles/ai_guide_1771958581.md
+2026-02-24 18:43	/home/vito/vito-agent/output/articles/ai_guide_1771958638.md
+2026-02-24 18:43	/home/vito/vito-agent/output/articles/python_tips_1771958581.md
+2026-02-24 18:43	/home/vito/vito-agent/output/articles/python_tips_1771958638.md
+2026-02-24 18:43	/home/vito/vito-agent/output/ebooks/python_guide_1771958581.md
+2026-02-24 18:43	/home/vito/vito-agent/output/ebooks/python_guide_1771958638.md
+2026-02-24 18:43	/home/vito/vito-agent/output/owner_outbox/response_20260224_184301.txt
+2026-02-24 18:43	/home/vito/vito-agent/output/owner_outbox/response_20260224_184358.txt
+2026-02-24 18:43	/home/vito/vito-agent/output/previews/medium_preview_951ab57a.md
+2026-02-24 18:43	/home/vito/vito-agent/output/previews/wordpress_preview_0f78a679.md
+2026-02-24 18:43	/home/vito/vito-agent/output/previews/wordpress_preview_d0e37efa.md
+2026-02-24 18:43	/home/vito/vito-agent/output/previews/wordpress_preview_ecc8cbdb.md
+2026-02-24 18:43	/home/vito/vito-agent/output/products/etsy_digital_planner_1771958581.md
+2026-02-24 18:43	/home/vito/vito-agent/output/products/etsy_digital_planner_1771958638.md
+2026-02-24 18:43	/home/vito/vito-agent/output/social/instagram_1771958598.txt
+2026-02-24 18:43	/home/vito/vito-agent/output/social/twitter_1771958598.txt
+2026-02-24 18:44	/home/vito/vito-agent/<MagicMock name='settings.CHROMA_PATH' id='272224681458048'>/chroma.sqlite3
+2026-02-24 18:44	/home/vito/vito-agent/<MagicMock name='settings.CHROMA_PATH' id='272224681656448'>/chroma.sqlite3
+2026-02-24 18:44	/home/vito/vito-agent/<MagicMock name='settings.CHROMA_PATH' id='272224682172032'>/chroma.sqlite3
+2026-02-24 18:44	/home/vito/vito-agent/output/previews/medium_preview_72863f91.md
+2026-02-24 18:44	/home/vito/vito-agent/output/previews/wordpress_preview_2c62ef76.md
+2026-02-24 18:44	/home/vito/vito-agent/output/previews/wordpress_preview_b86372c8.md
+2026-02-24 18:44	/home/vito/vito-agent/output/previews/wordpress_preview_fd356f4e.md
+2026-02-24 18:44	/home/vito/vito-agent/output/social/instagram_1771958654.txt
+2026-02-24 18:44	/home/vito/vito-agent/output/social/twitter_1771958654.txt
+2026-02-24 19:31	/home/vito/vito-agent/dashboard.py
+2026-02-24 19:51	/home/vito/vito-agent/dashboard_server.py
+2026-02-24 19:52	/home/vito/vito-agent/__pycache__/dashboard_server.cpython-312.pyc
+2026-02-24 20:25	/home/vito/vito-agent/memory/chroma_db/3d9270d4-3045-4c3b-9dcd-5595c5f91424/data_level0.bin
+2026-02-24 20:25	/home/vito/vito-agent/memory/chroma_db/3d9270d4-3045-4c3b-9dcd-5595c5f91424/header.bin
+2026-02-24 20:25	/home/vito/vito-agent/memory/chroma_db/3d9270d4-3045-4c3b-9dcd-5595c5f91424/length.bin
+2026-02-24 20:25	/home/vito/vito-agent/memory/chroma_db/3d9270d4-3045-4c3b-9dcd-5595c5f91424/link_lists.bin
+2026-02-24 20:32	/home/vito/vito-agent/memory/vito_memory.db
+2026-02-24 20:53	/home/vito/vito-agent/docs/vito_dashboard_review.md
+2026-02-24 21:04	/home/vito/vito-agent/Dashboard.tsx
+2026-02-24 21:12	/home/vito/vito-agent/tmp_dashboard.tsx
+2026-02-24 21:29	/home/vito/vito-agent/.git/HEAD
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/04/4eddcafbd89020fd91b3863cae70cf52c617d3
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/07/961b89e5ce647f0505232b8132d0256f6d1418
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/09/1fa187c20ab0c461f696c7b0caebb64fcaa7cb
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/0b/c12f4a389d1ef103dc475ea88ff04f79e68352
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/10/f287a0018388e21c812371d1b41760c3b3fd1e
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/11/f58cffba5502fd936f0e193ba77f8d7f157fe1
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/12/7792de0206e9a719ee8e0f6954d554cb284aad
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/13/144fff6f50e5fc6c4efba064c5b3e5a8d9ee4e
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/1a/8ef704d03138883b80bf6db4d53d6ea2615aac
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/1b/2935dfebaba886400307a9647a8dc97f4741db
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/1b/66cadcc35d34eb5097ebaaa0301b21ca17d784
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/1c/0723bd05f489cf3188267cc2616d053349f912
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/1c/631d1cc6535ae41afd3378e45bcc8814e3b734
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/24/2ef75ae59bf4649d38da45aec3831a96d2753e
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/24/7509b40cde50d7433bf22f90e2a5663d8ed398
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/25/5dbe045b28e5f21394a233d2f1702f5a1cb639
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/25/b8c9939cc59b564525b44e933cae23b04583df
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/2f/78a9e4fcf1bf98da29b24c005057122f2d26ec
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/31/287d15b6dcdeffdf22ed5449a3c8525a03ff76
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/38/9c21f4d29aa6440b93160db99b5602cfc6c2a3
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/3c/8ae31d0703e035d33ddad3c1d2782f602ae7e9
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/41/57b9f8d984bc2a73ba03cb6e629cc77d1cf7b6
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/48/3d863bd71e66b7b3a55090c11acb6ee798fc91
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/50/080cba10fa089f37f1c5a183fa75e2154c09a3
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/50/55f8f8a60090d4ad27bad6ef400052362d22a4
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/50/6802fc7f00c2e21753b3c84ce8cfea9eabc99a
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/51/42b243caca7892e1aceca1f6e0d263379780a5
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/51/62bfca8626e54f0e0291646a1c5247a19d6591
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/53/d3f9348efdaa2a4b936984ed950d93aa9c9b7c
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/5e/15cc03df1ebebed43658c17c0eabbd1dfb2bb7
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/61/48fab7772161bfa5c628c3219a199b9080d0ca
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/64/a4f8b8b6e15bdaf381e9adb960603fbf2d76ff
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/66/a50afd1f145c7535e56ede0e5a874c516d1d79
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/67/8cbcbf167548ccc2d137b3cf8ff194b9a021af
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/69/cb8bbc506bb4296a288899510704fb58846d3d
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/6c/7ff7f83a39de9d8c5af3bee3179581fb3f8a3f
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/6d/5330e831cdf286348d1fb819aeb72edfe781b5
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/6e/82cf41b3c033c61d496060778f90ac90e08009
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/6e/c0ad0c1ee60681076571e1150dfebbe0c6a27a
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/6f/36431720526ba430e2c5bc9104189d80eaee44
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/72/b7fcad810552b480b3e12f0230673f1a65d707
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/73/a1182a6372c086fb575e60445343b8f28615c5
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/74/9a1f9872e76f3bf8b3922c1f88e5223f69aeae
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/74/bde794553b4cda5f336b8aacea405cc0d08479
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/79/0dd6120da5eece96cb498a07f098b7ebc3e1e4
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/7f/11d2b93899e7692244ed57e79d50d19c24e263
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/7f/3587dd3161a5a54180aa2945dbba556657203a
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/81/8c88da8ee4de05d231a3111a6ce99913f27e1a
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/83/55f4c35e0edff70cbed3f01fd7b309d2143f74
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/84/4946a67f823721028dc16dfbbb6e6efd78715f
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/85/9fc7b6b300b1aa6627e65c62e31373b9d748f1
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/87/0f8ea69b8454da5601b871e801de86d1eb8360
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/87/62e5e18b28bc245a04cca7ef3aee8649c5451e
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/8a/fd64e8eddd77587b344e0c041f2e67df9424ad
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/8e/b68bdaecb9dfabea5e43d419b03cbbf3898647
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/93/f2e41a0d35d8ac8dad2e8abe86bf5a542b0a59
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/94/097e0b6044ab6e6a1d1b247fadaafc5be311dc
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/94/e456083e3cb0a226bf027d90e4e5c3f2e8b949
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/97/2b2cb6c76335c6e284232ca573fbbed8e4ef08
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/97/ca0a4e895c3cca5c69f84dc82bfc5c99987672
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/98/174e0cbf74c6b86dacad3ff931645b5ccef6fe
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/9e/a2a44f30dd323a74695e765058250cb8935c6a
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/a1/0f0cc1f58b12e07b17c77c8cdcac320c89e95d
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/a2/80c2c8bc8855ebb751a5f6c541adcd278661d8
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/a2/a79d3fdb6ceb9348e31a66d75822ecd27f3d98
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/a3/32c36c5ca69e15d9e6c1d824f1e066d47efb28
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/a5/08d6f3a51a3c78a1fd8863ab217258993bb757
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/aa/76cbd155af3214cad81bc08216d4487eb48e70
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/ac/cc40fd6d5c8ed2abd08e445d5f1b604e9b5feb
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/af/7b2e9da44768d2c9239bcb4d13a2cff2955ec5
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/b5/812f7a969d576b0ed817b04b9f81b007a420ab
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/b6/71a70cbf2bfa7f43ce54524fab45a8b24e1763
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/b6/a908ddfbd2f7621d50b48d3aaea16ed3fcdd80
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/b6/d5e84553cb1dcbcbfeb3f6589f7a9c980c00e1
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/bd/737d317ce1002d333b0e831b22e0a1601d2da0
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/c3/3f43a57161fc176ff85cab45096f1877ff7bf2
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/c5/62b2fb45f7ad5e2452198b8c80ab63d98c183e
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/cc/e029530eb522ffd63f1da8a10dc453b34bf382
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/d1/bfc69f117edb7ad4767024cd0959b67ac74c4d
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/d3/c54f4f70bb8ca867c324a56bb72f8bf0a6e833
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/d5/e59fdec66ab259fcaca412f2c7443931ab57bf
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/d6/38e829535e1ef069b487ee656fff6192f8cbf2
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/d7/da607bfc3e07e499e2da3494816be79699a1ec
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/dc/2ba111a6869d94df51c95b94ec21e083cfc0e0
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/e2/31c3fdca1f561c2ebc4356bc02baa2112f58a2
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/e2/936491b430a16db9af2ce513b4d7fc1f2adc48
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/e2/f3db7c582f9e067ee5087f10aba4c3a3de2a6c
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/e6/9de29bb2d1d6434b8b29ae775ad8c2e48c5391
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/ea/0fa943a0bf697812d2b4667b2176d621acf7da
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/ee/0abe91b9c6cad9181b0243fa2f63b37920145a
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/ef/1ce9688070cd568c7b49d992c3877765786141
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/f1/3d2c2905b5cfebf96025e6bb45e4e4f0609196
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/f4/1a5ae0375197de2353a2656f11b07603106ce6
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/f4/aefc19e642100ac082ee8ecfbb30df92a66fc6
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/f9/57122a5763f5e2cc2573a78ef8c798d4f898f0
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/fc/733dc060e792bc319654c221b5d6e412521608
+2026-02-24 21:29	/home/vito/vito-agent/.git/objects/ff/2cd8c6768cacf3e854aa10c124106bf768f6f4
+2026-02-24 21:29	/home/vito/vito-agent/.git/packed-refs
+2026-02-24 21:30	/home/vito/vito-agent/.git/objects/58/24c997e553baf3f438362e482ce9be50b42df9
+2026-02-24 21:30	/home/vito/vito-agent/.git/objects/af/94ec33ebda1b071bc326d37c35a40d9eef0ace
+2026-02-24 21:30	/home/vito/vito-agent/.git/objects/bf/e9835f0b46529c2a90a51c319afee5db5db0f0
+2026-02-24 22:05	/home/vito/vito-agent/docs/OWNER_REQUIREMENTS_LOG.md
+2026-02-24 22:05	/home/vito/vito-agent/input/attachments/OpenClaw_Skills_UseCases_RU.pdf
+2026-02-24 22:05	/home/vito/vito-agent/output/attachments/OpenClaw_Skills_UseCases_RU_extracted.txt
+2026-02-24 22:07	/home/vito/vito-agent/logs/financial.log
+2026-02-24 22:15	/home/vito/vito-agent/output/images/cover_82cd7634
+2026-02-24 22:57	/home/vito/vito-agent/memory/chroma_db/chroma.sqlite3
+2026-02-24 22:57	/home/vito/vito-agent/memory/vito_local.db
+2026-02-24 23:07	/home/vito/vito-agent/.git/COMMIT_EDITMSG
+2026-02-24 23:07	/home/vito/vito-agent/.git/config
+2026-02-24 23:07	/home/vito/vito-agent/.git/index
+2026-02-24 23:07	/home/vito/vito-agent/.git/logs/HEAD
+2026-02-24 23:07	/home/vito/vito-agent/.git/logs/refs/heads/main
+2026-02-24 23:07	/home/vito/vito-agent/.git/logs/refs/remotes/origin/main
+2026-02-24 23:07	/home/vito/vito-agent/.git/objects/2c/6919e60205cacaedddbd6a99e61be9192bf930
+2026-02-24 23:07	/home/vito/vito-agent/.git/objects/4d/a55732b692849bdb58d01fe19072e301ffdd4a
+2026-02-24 23:07	/home/vito/vito-agent/.git/objects/c4/5423bd0e0b6bbf307a183a77fbfbc005215c01
+2026-02-24 23:07	/home/vito/vito-agent/.git/objects/db/fee344488b388a553362afe02a0dbd05620847
+2026-02-24 23:07	/home/vito/vito-agent/.git/objects/f5/09158d3319c0425419425b69f72c5f8e1f2338
+2026-02-24 23:07	/home/vito/vito-agent/.git/refs/heads/main
+2026-02-24 23:07	/home/vito/vito-agent/.git/refs/remotes/origin/main
+2026-02-24 23:07	/home/vito/vito-agent/.gitignore
+2026-02-24 23:09	/home/vito/vito-agent/logs/vito.log
+2026-02-24 23:09	/home/vito/vito-agent/reports/filesystem_audit_20260224_230902.md

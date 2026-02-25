@@ -19,11 +19,12 @@ MAX_AUTO_FIX_ATTEMPTS = 3
 
 
 class SelfHealer:
-    def __init__(self, llm_router: LLMRouter, memory, comms, devops_agent=None):
+    def __init__(self, llm_router: LLMRouter, memory, comms, devops_agent=None, self_updater=None):
         self.llm_router = llm_router
         self.memory = memory
         self.comms = comms
         self.devops = devops_agent
+        self.self_updater = self_updater
         self._attempt_counts: dict[str, int] = {}  # error_key → attempt count
         logger.info("SelfHealer инициализирован", extra={"event": "init"})
 
@@ -202,6 +203,7 @@ class SelfHealer:
 
     async def _apply_fix(self, analysis: dict) -> dict[str, Any]:
         """Применяет fix через DevOpsAgent shell executor.
+        Enforced flow: backup -> apply -> smoke tests -> rollback on failure.
 
         Returns:
             {"applied": bool, "output": str}
@@ -209,6 +211,13 @@ class SelfHealer:
         shell_cmd = analysis.get("shell_command")
         if not shell_cmd or not self.devops:
             return {"applied": False, "output": "no command or no devops agent"}
+
+        backup_path = None
+        if self.self_updater:
+            try:
+                backup_path = self.self_updater.backup_current_code()
+            except Exception:
+                backup_path = None
 
         logger.info(
             f"SelfHealer: применяю fix: {shell_cmd}",
@@ -218,12 +227,41 @@ class SelfHealer:
         result = await self.devops.execute_shell(shell_cmd)
 
         if result.success:
+            # Mandatory validation tests after auto-fix
+            tests_ok = True
+            tests_out = ""
+            if self.self_updater:
+                try:
+                    test_result = self.self_updater.run_tests(test_path="tests/test_llm_router.py")
+                    tests_ok = bool(test_result.get("success"))
+                    tests_out = str(test_result.get("output", ""))[:500]
+                except Exception as e:
+                    tests_ok = False
+                    tests_out = f"test error: {e}"
+
+            if not tests_ok:
+                if backup_path and self.self_updater:
+                    try:
+                        self.self_updater.rollback(backup_path)
+                    except Exception:
+                        pass
+                logger.warning(
+                    "SelfHealer: fix applied but tests failed -> rollback",
+                    extra={"event": "fix_rollback_after_tests"},
+                )
+                return {"applied": False, "output": f"fix rolled back: tests failed. {tests_out}"}
+
             logger.info(
                 f"SelfHealer: fix применён успешно",
                 extra={"event": "fix_applied", "context": {"command": shell_cmd}},
             )
-            return {"applied": True, "output": str(result.output)[:500]}
+            return {"applied": True, "output": f"{str(result.output)[:500]} | tests=ok"}
         else:
+            if backup_path and self.self_updater:
+                try:
+                    self.self_updater.rollback(backup_path)
+                except Exception:
+                    pass
             logger.warning(
                 f"SelfHealer: fix не удался: {result.error}",
                 extra={"event": "fix_failed", "context": {"command": shell_cmd, "error": result.error}},

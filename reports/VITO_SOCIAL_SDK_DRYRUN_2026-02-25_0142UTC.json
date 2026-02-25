@@ -1,0 +1,64 @@
+{
+  "timestamp": "2026-02-25T01:42:37.537882+00:00",
+  "processed": [
+    {
+      "job_id": 6,
+      "platform": "twitter",
+      "status": "done",
+      "result": {
+        "platform": "twitter",
+        "status": "prepared",
+        "dry_run": true,
+        "text_preview": "VITO social sdk pack dryrun"
+      }
+    },
+    {
+      "job_id": 7,
+      "platform": "threads",
+      "status": "done",
+      "result": {
+        "platform": "threads",
+        "status": "prepared",
+        "dry_run": true
+      }
+    },
+    {
+      "job_id": 8,
+      "platform": "reddit",
+      "status": "done",
+      "result": {
+        "platform": "reddit",
+        "status": "prepared",
+        "dry_run": true,
+        "subreddit": "test"
+      }
+    },
+    {
+      "job_id": 9,
+      "platform": "tiktok",
+      "status": "done",
+      "result": {
+        "platform": "tiktok",
+        "status": "prepared",
+        "dry_run": true
+      }
+    },
+    {
+      "job_id": 10,
+      "platform": "youtube",
+      "status": "done",
+      "result": {
+        "platform": "youtube",
+        "status": "prepared",
+        "dry_run": true
+      }
+    }
+  ],
+  "stats": {
+    "queued": 0,
+    "running": 0,
+    "done": 10,
+    "failed": 0,
+    "total": 10
+  }
+}

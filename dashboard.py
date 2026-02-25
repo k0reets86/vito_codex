@@ -128,6 +128,77 @@ def _goals_active():
     return rows
 
 
+def _schedules_list():
+    if not DB_PATH:
+        return []
+    con = sqlite3.connect(DB_PATH)
+    cur = con.cursor()
+    rows = []
+    try:
+        cur.execute(
+            "SELECT id,title,schedule_type,next_run,status FROM scheduled_tasks ORDER BY id DESC LIMIT 100"
+        )
+        rows = cur.fetchall()
+    except Exception:
+        rows = []
+    con.close()
+    return rows
+
+
+def _network_status():
+    hosts = ["api.telegram.org", "gumroad.com", "google.com"]
+    out = []
+    for h in hosts:
+        ok = not _run(["getent", "hosts", h]).startswith("ERROR:")
+        out.append([h, "ok" if ok else "fail"])
+    return out
+
+
+def _goal_delete(goal_id: str) -> bool:
+    if not DB_PATH or not goal_id:
+        return False
+    con = sqlite3.connect(DB_PATH)
+    cur = con.cursor()
+    try:
+        cur.execute("DELETE FROM goals WHERE goal_id = ?", (goal_id,))
+        con.commit()
+        return cur.rowcount > 0
+    except Exception:
+        return False
+    finally:
+        con.close()
+
+
+def _goal_clear_all() -> int:
+    if not DB_PATH:
+        return 0
+    con = sqlite3.connect(DB_PATH)
+    cur = con.cursor()
+    try:
+        cur.execute("DELETE FROM goals")
+        con.commit()
+        return int(cur.rowcount or 0)
+    except Exception:
+        return 0
+    finally:
+        con.close()
+
+
+def _schedule_delete(task_id: int) -> bool:
+    if not DB_PATH or task_id <= 0:
+        return False
+    con = sqlite3.connect(DB_PATH)
+    cur = con.cursor()
+    try:
+        cur.execute("DELETE FROM scheduled_tasks WHERE id = ?", (task_id,))
+        con.commit()
+        return cur.rowcount > 0
+    except Exception:
+        return False
+    finally:
+        con.close()
+
+
 def _finance_kpi():
     if not DB_PATH:
         return []
@@ -416,6 +487,8 @@ HTML_TEMPLATE = Template(r"""
         <a class="active" href="#status">Статус</a>
         <a href="#agents">Агенты</a>
         <a href="#goals">Цели</a>
+        <a href="#schedules">Расписание</a>
+        <a href="#network">Сеть</a>
         <a href="#platforms">Платформы</a>
         <a href="#finance">Финансы</a>
         <a href="#events">События</a>
@@ -455,6 +528,35 @@ HTML_TEMPLATE = Template(r"""
             <div class="badge">$goals_count</div>
           </div>
           $goals
+          <form method="POST" action="/goals_action" style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+            <input name="goal_id" placeholder="goal_id" style="flex:1; min-width:160px;" />
+            <button type="submit" name="action" value="delete">Удалить цель</button>
+            <button type="submit" name="action" value="clear_all">Очистить все цели</button>
+          </form>
+        </section>
+
+        <section id="schedules" class="card section">
+          <div class="card-header">
+            <div class="card-title">🗓️ Расписание</div>
+            <div class="badge">$schedules_count</div>
+          </div>
+          $schedules
+          <form method="POST" action="/schedules_action" style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+            <input name="task_id" placeholder="task_id" style="flex:1; min-width:160px;" />
+            <button type="submit" name="action" value="delete">Удалить задачу</button>
+          </form>
+        </section>
+
+        <section id="network" class="card section">
+          <div class="card-header">
+            <div class="card-title">🌐 Сеть</div>
+            <div class="badge">DNS health</div>
+          </div>
+          $network
+          <form method="POST" action="/service_action" style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+            <button type="submit" name="action" value="restart_vito">Restart VITO</button>
+            <button type="submit" name="action" value="restart_dashboard">Restart Dashboard</button>
+          </form>
         </section>
 
         <section id="platforms" class="card section">
@@ -499,6 +601,10 @@ HTML_TEMPLATE = Template(r"""
             <input name="key" placeholder="KEY" style="flex:1; min-width:160px;" />
             <input name="value" placeholder="VALUE" style="flex:1; min-width:160px;" />
             <button type="submit">Сохранить</button>
+          </form>
+          <form method="POST" action="/toggle" style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+            <input name="key" placeholder="Toggle KEY (e.g. PROACTIVE_ENABLED)" style="flex:1; min-width:220px;" />
+            <button type="submit">Toggle</button>
           </form>
         </section>
 
@@ -552,6 +658,8 @@ class Handler(BaseHTTPRequestHandler):
             status_dot = "bad"
 
         goals_rows = _goals_active()
+        schedules_rows = _schedules_list()
+        network_rows = _network_status()
         agents_rows = _agents_status()
         platform_rows = _platforms_list()
         kpi_rows = _finance_kpi()
@@ -627,6 +735,8 @@ class Handler(BaseHTTPRequestHandler):
         agents_table = _html_table(["Module", "Last Modified"], agents_rows)
         platforms_table = _html_table(["File"], platform_rows)
         goals_table = _html_table(["ID", "Title", "Status", "Priority", "Cost", "Created"], goals_rows)
+        schedules_table = _html_table(["ID", "Title", "Type", "Next run", "Status"], schedules_rows)
+        network_table = _html_table(["Host", "DNS"], network_rows)
         kpi_table = _html_table(["Date", "Spend"], kpi_rows)
         output_table = _html_table(["File", "Size", "Modified"], output_rows)
         env = _read_env()
@@ -643,6 +753,7 @@ class Handler(BaseHTTPRequestHandler):
             system_status=system_table,
             agents_count=len(agents_rows),
             goals_count=len(goals_rows),
+            schedules_count=len(schedules_rows),
             platforms_count=len(platform_rows),
             output_count=len(output_rows),
             agents_cards=agents_cards_html,
@@ -651,6 +762,8 @@ class Handler(BaseHTTPRequestHandler):
             agents_status=agents_table,
             platforms=platforms_table,
             goals=goals_table,
+            schedules=schedules_table,
+            network=network_table,
             kpi=kpi_table,
             events=html.escape(events),
             output=output_table,
@@ -674,6 +787,50 @@ class Handler(BaseHTTPRequestHandler):
         params = parse_qs(raw)
         key = params.get("key", [""])[0].strip()
         value = params.get("value", [""])[0].strip()
+        if urlparse(self.path).path == "/toggle":
+            env = _read_env()
+            cur = str(env.get(key, "false")).strip().lower()
+            env[key] = "false" if cur in ("1", "true", "yes", "on") else "true"
+            lines = [f"{k}={v}" for k, v in env.items()]
+            ENV_PATH.write_text("\n".join(lines) + "\n")
+            self.send_response(HTTPStatus.FOUND)
+            self.send_header("Location", "/")
+            self.end_headers()
+            return
+        if urlparse(self.path).path == "/goals_action":
+            action = params.get("action", [""])[0].strip()
+            goal_id = params.get("goal_id", [""])[0].strip()
+            if action == "delete" and goal_id:
+                _goal_delete(goal_id)
+            elif action == "clear_all":
+                _goal_clear_all()
+            self.send_response(HTTPStatus.FOUND)
+            self.send_header("Location", "/#goals")
+            self.end_headers()
+            return
+        if urlparse(self.path).path == "/schedules_action":
+            action = params.get("action", [""])[0].strip()
+            task_id_raw = params.get("task_id", ["0"])[0].strip()
+            try:
+                task_id = int(task_id_raw)
+            except Exception:
+                task_id = 0
+            if action == "delete" and task_id > 0:
+                _schedule_delete(task_id)
+            self.send_response(HTTPStatus.FOUND)
+            self.send_header("Location", "/#schedules")
+            self.end_headers()
+            return
+        if urlparse(self.path).path == "/service_action":
+            action = params.get("action", [""])[0].strip()
+            if action == "restart_vito":
+                _run(["systemctl", "restart", "vito"])
+            elif action == "restart_dashboard":
+                _run(["systemctl", "restart", "vito-dashboard"])
+            self.send_response(HTTPStatus.FOUND)
+            self.send_header("Location", "/#network")
+            self.end_headers()
+            return
         if not key:
             self.send_response(HTTPStatus.BAD_REQUEST)
             self.end_headers()

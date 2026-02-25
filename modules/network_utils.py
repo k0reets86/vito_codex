@@ -37,7 +37,7 @@ def dns_ok(host: str, timeout_sec: float = 2.0) -> bool:
 def network_available(hosts: list[str] | None = None) -> bool:
     if network_blocked_reason():
         return False
-    hosts = hosts or ["gumroad.com", "api.gumroad.com", "google.com"]
+    hosts = hosts or ["api.telegram.org", "gumroad.com", "api.gumroad.com", "google.com"]
     for h in hosts:
         if dns_ok(h):
             return True
@@ -48,14 +48,14 @@ def network_status(hosts: list[str] | None = None) -> dict:
     reason = network_blocked_reason()
     if reason:
         return {"ok": False, "reason": reason}
-    hosts = hosts or ["gumroad.com", "api.gumroad.com", "google.com"]
+    hosts = hosts or ["api.telegram.org", "gumroad.com", "api.gumroad.com", "google.com"]
     ok = any(dns_ok(h) for h in hosts)
     return {"ok": ok, "reason": None if ok else "dns_unavailable"}
 
 
 def basic_net_report(hosts: list[str] | None = None) -> dict:
     """Lightweight report for comms: no external HTTP, just DNS reachability."""
-    hosts = hosts or ["gumroad.com", "api.gumroad.com", "google.com"]
+    hosts = hosts or ["api.telegram.org", "gumroad.com", "api.gumroad.com", "google.com"]
     seccomp = network_blocked_reason()
     results = {h: dns_ok(h) for h in hosts} if not seccomp else {h: False for h in hosts}
     return {

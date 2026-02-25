@@ -233,6 +233,26 @@ class LLMRouter:
             (date.today().isoformat(), model_name, task_type, input_tokens, output_tokens, cost_usd),
         )
         conn.commit()
+        try:
+            from modules.data_lake import DataLake
+            dl = DataLake()
+            dl.record(
+                agent="llm_router",
+                task_type=f"llm:{task_type}",
+                status="success",
+                output={"model": model_name, "input_tokens": input_tokens, "output_tokens": output_tokens},
+                cost_usd=float(cost_usd or 0.0),
+                source="llm_router._record_spend",
+            )
+            if float(cost_usd or 0.0) > 0:
+                dl.record_budget(
+                    agent=f"llm_{task_type}",
+                    amount=float(cost_usd),
+                    category="llm",
+                    description=f"model={model_name}",
+                )
+        except Exception:
+            pass
 
     @property
     def anthropic_client(self) -> anthropic.AsyncAnthropic:
@@ -789,3 +809,37 @@ class LLMRouter:
             )
             return False
         return True
+
+    def get_policy_report(self, days: int = 1) -> dict:
+        """Policy-oriented spend report for dashboard and audits."""
+        rows = self.get_spend_breakdown(days=days)
+        model_cfg = {k: v for k, v in MODEL_REGISTRY.items()}
+        total_cost = sum(float(r.get("total_cost", 0) or 0) for r in rows)
+        free_calls = 0
+        paid_calls = 0
+        by_provider: dict[str, dict] = {}
+        for r in rows:
+            model = str(r.get("model", ""))
+            calls = int(r.get("calls", 0) or 0)
+            cost = float(r.get("total_cost", 0) or 0)
+            cfg = model_cfg.get(model)
+            provider = getattr(cfg, "provider", "unknown")
+            is_free = bool(cfg and cfg.cost_per_1k_input == 0 and cfg.cost_per_1k_output == 0)
+            if is_free:
+                free_calls += calls
+            else:
+                paid_calls += calls
+            if provider not in by_provider:
+                by_provider[provider] = {"calls": 0, "cost_usd": 0.0}
+            by_provider[provider]["calls"] += calls
+            by_provider[provider]["cost_usd"] += cost
+        return {
+            "window_days": int(days),
+            "daily_limit_usd": float(settings.DAILY_LIMIT_USD),
+            "daily_spend_usd": float(self.get_daily_spend()),
+            "total_cost_usd": round(total_cost, 6),
+            "free_calls": int(free_calls),
+            "paid_calls": int(paid_calls),
+            "providers": by_provider,
+            "top": rows[:15],
+        }
