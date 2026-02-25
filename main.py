@@ -72,6 +72,7 @@ from financial_controller import FinancialController
 from goal_engine import GoalEngine
 from llm_router import LLMRouter, TaskType
 from memory.memory_manager import MemoryManager
+from modules.owner_preference_model import OwnerPreferenceModel
 
 from agents.agent_registry import AgentRegistry
 from agents.vito_core import VITOCore
@@ -711,6 +712,19 @@ class VITO:
             )
         except Exception as e:
             logger.debug(f"Ошибка сохранения саммари: {e}", extra={"event": "summary_save_error"})
+
+        # 2.1 Store owner preference snapshot
+        try:
+            prefs = OwnerPreferenceModel().list_preferences(limit=50)
+            if prefs:
+                snapshot = "; ".join(f"{p.get('pref_key')}: {p.get('value')}" for p in prefs)
+                self.memory.store_knowledge(
+                    doc_id=f"owner_prefs_snapshot_{today}",
+                    text=f"Owner preferences snapshot {today}: {snapshot}",
+                    metadata={"type": "owner_prefs_snapshot", "date": today},
+                )
+        except Exception:
+            pass
 
         # 3. Analyze errors → update patterns
         try:
