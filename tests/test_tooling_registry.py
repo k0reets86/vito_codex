@@ -76,3 +76,26 @@ def test_tooling_registry_rotation_approval_flow(tmp_path):
     assert rows
     assert rows[0]["adapter_key"] == "rot_demo"
     assert rows[0]["adapter_version"] == "2.0.0"
+    assert rows[0]["adapter_stage"] == "staging"
+
+
+def test_tooling_registry_promote_and_rollback(tmp_path):
+    db = str(tmp_path / "tools.db")
+    reg = ToolingRegistry(sqlite_path=db)
+    reg.upsert_adapter(
+        adapter_key="prom_demo",
+        protocol="openapi",
+        endpoint="https://example.com/openapi.json",
+        schema={"openapi": "3.0.0", "paths": {}},
+        adapter_stage="staging",
+    )
+    p1 = reg.promote_adapter("prom_demo", "accepted", actor="owner", reason="qa ok")
+    assert p1["ok"] is True
+    p2 = reg.promote_adapter("prom_demo", "production", actor="owner", reason="release")
+    assert p2["ok"] is True
+    row = reg.list_adapters(limit=1)[0]
+    assert row["adapter_stage"] == "production"
+    rb = reg.rollback_adapter("prom_demo", actor="owner", reason="issue")
+    assert rb["ok"] is True
+    row2 = reg.list_adapters(limit=1)[0]
+    assert row2["adapter_stage"] in {"accepted", "staging"}

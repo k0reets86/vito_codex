@@ -54,6 +54,7 @@ def test_tooling_runner_mcp_live_path(tmp_path, monkeypatch):
     reg = ToolingRegistry(sqlite_path=db)
     reg.upsert_adapter(
         adapter_key="mcp_adapter",
+        adapter_stage="production",
         protocol="mcp",
         endpoint="stdio://python3 -c \"import json,sys; data=json.load(sys.stdin); print(json.dumps({'ok':True,'v':data.get('v')}))\"",
         schema={"tools": []},
@@ -91,6 +92,7 @@ def test_tooling_runner_blocks_live_when_pending_rotation(tmp_path, monkeypatch)
     reg = ToolingRegistry(sqlite_path=db)
     reg.upsert_adapter(
         adapter_key="pending_demo",
+        adapter_stage="production",
         protocol="mcp",
         endpoint="stdio://python3 -c \"import json; print(json.dumps({'ok':True}))\"",
         schema={"tools": []},
@@ -111,3 +113,22 @@ def test_tooling_runner_blocks_live_when_pending_rotation(tmp_path, monkeypatch)
     run = ToolingRunner(sqlite_path=db).run("pending_demo", dry_run=False)
     assert run["status"] == "error"
     assert run["error"] == "pending_rotation_approval"
+
+
+def test_tooling_runner_live_stage_gate(tmp_path, monkeypatch):
+    db = str(tmp_path / "tool_run.db")
+    reg = ToolingRegistry(sqlite_path=db)
+    reg.upsert_adapter(
+        adapter_key="stage_demo",
+        adapter_stage="accepted",
+        protocol="mcp",
+        endpoint="stdio://python3 -c \"import json; print(json.dumps({'ok':True}))\"",
+        schema={"tools": []},
+    )
+    from config import settings as settings_mod
+    monkeypatch.setattr(settings_mod.settings, "TOOLING_RUN_LIVE_ENABLED", True)
+    monkeypatch.setattr(settings_mod.settings, "TOOLING_MCP_ALLOW_CMDS", "python3")
+    monkeypatch.setattr(settings_mod.settings, "TOOLING_LIVE_REQUIRED_STAGE", "production")
+    run = ToolingRunner(sqlite_path=db).run("stage_demo", dry_run=False)
+    assert run["status"] == "error"
+    assert run["error"] == "adapter_stage_not_allowed_for_live"

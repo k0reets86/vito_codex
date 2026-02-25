@@ -30,6 +30,7 @@ class ToolingRegistry:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     adapter_key TEXT UNIQUE NOT NULL,
                     adapter_version TEXT DEFAULT '1.0.0',
+                    adapter_stage TEXT DEFAULT 'accepted',
                     protocol TEXT NOT NULL,
                     endpoint TEXT NOT NULL,
                     auth_type TEXT DEFAULT 'none',
@@ -40,6 +41,17 @@ class ToolingRegistry:
                     notes TEXT DEFAULT '',
                     created_at TEXT DEFAULT (datetime('now')),
                     updated_at TEXT DEFAULT (datetime('now'))
+                );
+                CREATE TABLE IF NOT EXISTS tooling_release_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    adapter_key TEXT NOT NULL,
+                    adapter_version TEXT DEFAULT '1.0.0',
+                    from_stage TEXT DEFAULT '',
+                    to_stage TEXT DEFAULT '',
+                    actor TEXT DEFAULT 'system',
+                    reason TEXT DEFAULT '',
+                    snapshot_json TEXT DEFAULT '{}',
+                    created_at TEXT DEFAULT (datetime('now'))
                 );
                 CREATE TABLE IF NOT EXISTS tooling_contract_approvals (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -61,6 +73,8 @@ class ToolingRegistry:
             cols = {r["name"] for r in conn.execute("PRAGMA table_info(tooling_registry)").fetchall()}
             if "adapter_version" not in cols:
                 conn.execute("ALTER TABLE tooling_registry ADD COLUMN adapter_version TEXT DEFAULT '1.0.0'")
+            if "adapter_stage" not in cols:
+                conn.execute("ALTER TABLE tooling_registry ADD COLUMN adapter_stage TEXT DEFAULT 'accepted'")
             if "contract_hash" not in cols:
                 conn.execute("ALTER TABLE tooling_registry ADD COLUMN contract_hash TEXT DEFAULT ''")
             if "contract_signature" not in cols:
@@ -78,11 +92,15 @@ class ToolingRegistry:
         enabled: bool = True,
         schema: dict | None = None,
         adapter_version: str = "1.0.0",
+        adapter_stage: str = "accepted",
         notes: str = "",
     ) -> dict:
         errs = self.validate(protocol=protocol, endpoint=endpoint, schema=schema or {})
         if errs:
             return {"ok": False, "errors": errs}
+        stage = self._normalize_stage(adapter_stage)
+        if not stage:
+            return {"ok": False, "errors": ["adapter_stage_invalid"]}
         contract_hash = self.compute_contract_hash(
             adapter_key=adapter_key,
             adapter_version=adapter_version,
@@ -96,10 +114,11 @@ class ToolingRegistry:
             conn.execute(
                 """
                 INSERT INTO tooling_registry
-                (adapter_key, adapter_version, protocol, endpoint, auth_type, enabled, schema_json, contract_hash, contract_signature, notes, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                (adapter_key, adapter_version, adapter_stage, protocol, endpoint, auth_type, enabled, schema_json, contract_hash, contract_signature, notes, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                 ON CONFLICT(adapter_key) DO UPDATE SET
                   adapter_version = excluded.adapter_version,
+                  adapter_stage = excluded.adapter_stage,
                   protocol = excluded.protocol,
                   endpoint = excluded.endpoint,
                   auth_type = excluded.auth_type,
@@ -113,6 +132,7 @@ class ToolingRegistry:
                 (
                     adapter_key[:120],
                     (adapter_version or "1.0.0")[:32],
+                    stage,
                     protocol[:20],
                     endpoint[:500],
                     auth_type[:30],
@@ -196,6 +216,7 @@ class ToolingRegistry:
         payload = {
             "adapter_key": adapter_key,
             "adapter_version": adapter_version,
+            "adapter_stage": "staging",
             "protocol": protocol,
             "endpoint": endpoint,
             "auth_type": auth_type,
@@ -274,6 +295,7 @@ class ToolingRegistry:
             applied = self.upsert_adapter(
                 adapter_key=str(payload.get("adapter_key", "")).strip(),
                 adapter_version=str(payload.get("adapter_version", "1.0.0")).strip() or "1.0.0",
+                adapter_stage=str(payload.get("adapter_stage", "staging")).strip() or "staging",
                 protocol=str(payload.get("protocol", "")).strip().lower(),
                 endpoint=str(payload.get("endpoint", "")).strip(),
                 auth_type=str(payload.get("auth_type", "none")).strip(),
@@ -292,6 +314,23 @@ class ToolingRegistry:
                 WHERE id = ?
                 """,
                 (f"approved_by:{approver}; {reason}"[:500], int(approval_id)),
+            )
+            # Snapshot release history event: pending -> staging applied
+            conn.execute(
+                """
+                INSERT INTO tooling_release_history
+                (adapter_key, adapter_version, from_stage, to_stage, actor, reason, snapshot_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(payload.get("adapter_key", ""))[:120],
+                    str(payload.get("adapter_version", "1.0.0"))[:32],
+                    "pending",
+                    str(payload.get("adapter_stage", "staging"))[:32],
+                    str(approver)[:120],
+                    ("approval_apply " + str(reason or ""))[:500],
+                    json.dumps(payload, ensure_ascii=False)[:20000],
+                ),
             )
             conn.commit()
             return {"ok": True}
@@ -335,6 +374,121 @@ class ToolingRegistry:
             return row is not None
         finally:
             conn.close()
+
+    def promote_adapter(self, adapter_key: str, to_stage: str, actor: str = "owner", reason: str = "") -> dict:
+        stage = self._normalize_stage(to_stage)
+        if not stage:
+            return {"ok": False, "error": "stage_invalid"}
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute("SELECT * FROM tooling_registry WHERE adapter_key = ?", (adapter_key,)).fetchone()
+            if not row:
+                return {"ok": False, "error": "adapter_not_found"}
+            cur_stage = str(row["adapter_stage"] or "accepted")
+            if cur_stage == stage:
+                return {"ok": True, "noop": True}
+            if not self._valid_transition(cur_stage, stage):
+                return {"ok": False, "error": f"invalid_transition:{cur_stage}->{stage}"}
+            snap = dict(row)
+            conn.execute(
+                "UPDATE tooling_registry SET adapter_stage = ?, updated_at = datetime('now') WHERE adapter_key = ?",
+                (stage, adapter_key),
+            )
+            conn.execute(
+                """
+                INSERT INTO tooling_release_history
+                (adapter_key, adapter_version, from_stage, to_stage, actor, reason, snapshot_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    adapter_key[:120],
+                    str(row["adapter_version"] or "1.0.0")[:32],
+                    cur_stage[:32],
+                    stage[:32],
+                    actor[:120],
+                    reason[:500],
+                    json.dumps(snap, ensure_ascii=False)[:20000],
+                ),
+            )
+            conn.commit()
+            return {"ok": True}
+        finally:
+            conn.close()
+
+    def rollback_adapter(self, adapter_key: str, actor: str = "owner", reason: str = "") -> dict:
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                """
+                SELECT from_stage, to_stage
+                FROM tooling_release_history
+                WHERE adapter_key = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (adapter_key,),
+            ).fetchone()
+            if not row:
+                return {"ok": False, "error": "no_release_history"}
+            target_stage = str(row["from_stage"] or "").strip()
+            if not target_stage:
+                return {"ok": False, "error": "rollback_target_missing"}
+            return self.promote_adapter(adapter_key=adapter_key, to_stage=target_stage, actor=actor, reason=f"rollback:{reason}"[:500])
+        finally:
+            conn.close()
+
+    def list_release_history(self, adapter_key: str = "", limit: int = 100) -> list[dict]:
+        conn = self._get_conn()
+        try:
+            if adapter_key:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM tooling_release_history
+                    WHERE adapter_key = ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (adapter_key, int(limit)),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM tooling_release_history
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (int(limit),),
+                ).fetchall()
+            out = []
+            for r in rows:
+                d = dict(r)
+                try:
+                    d["snapshot"] = json.loads(d.get("snapshot_json") or "{}")
+                except Exception:
+                    d["snapshot"] = {}
+                out.append(d)
+            return out
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _normalize_stage(stage: str) -> str:
+        s = str(stage or "").strip().lower()
+        return s if s in {"staging", "accepted", "production", "retired"} else ""
+
+    @staticmethod
+    def _valid_transition(from_stage: str, to_stage: str) -> bool:
+        graph = {
+            "staging": {"accepted", "retired"},
+            "accepted": {"production", "retired"},
+            "production": {"accepted", "retired"},
+            "retired": set(),
+        }
+        if from_stage == to_stage:
+            return True
+        return to_stage in graph.get(from_stage, set())
 
     def verify_contract(self, adapter_row: dict) -> tuple[bool, str]:
         try:

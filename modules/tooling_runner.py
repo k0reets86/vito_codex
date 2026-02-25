@@ -71,6 +71,18 @@ class ToolingRunner:
             }
             self._record_event(adapter_key, result)
             return result
+        required_stage = str(getattr(settings, "TOOLING_LIVE_REQUIRED_STAGE", "production") or "production").strip().lower()
+        current_stage = str(adapter.get("adapter_stage", "accepted") or "accepted").strip().lower()
+        if required_stage and current_stage != required_stage:
+            result = {
+                "status": "error",
+                "error": "adapter_stage_not_allowed_for_live",
+                "adapter_key": adapter_key,
+                "current_stage": current_stage,
+                "required_stage": required_stage,
+            }
+            self._record_event(adapter_key, result)
+            return result
         if bool(getattr(settings, "TOOLING_BLOCK_WITH_PENDING_ROTATION", True)):
             try:
                 if self.registry.has_pending_rotation(adapter_key):
