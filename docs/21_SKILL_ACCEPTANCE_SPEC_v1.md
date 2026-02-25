@@ -27,5 +27,8 @@
 - `/skills` — показывает acceptance статус навыков.
 - `/skills_pending` — список навыков, ожидающих acceptance.
 
+## Отчёты
+- `scripts/skill_acceptance_report.py` — срез статуса acceptance.
+
 ## Принцип безопасности
 Owner-facing отчёты не должны заявлять “навык надёжный/готов”, пока статус не `accepted`.
