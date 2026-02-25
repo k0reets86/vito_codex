@@ -15,6 +15,7 @@ import atexit
 import os
 import signal
 import sys
+from pathlib import Path
 from datetime import datetime, timezone
 
 # ── Защита от дублирования процессов ──
@@ -727,6 +728,27 @@ class VITO:
                     text=f"Owner preferences snapshot {today}: {snapshot}",
                     metadata={"type": "owner_prefs_snapshot", "date": today},
                 )
+        except Exception:
+            pass
+        # 2.2 Write owner preference report
+        try:
+            from modules.owner_pref_metrics import OwnerPreferenceMetrics
+            prefs = OwnerPreferenceModel().list_preferences(limit=200)
+            metrics = OwnerPreferenceMetrics().summary()
+            lines = [f"# Owner Preferences Report ({today})", "", "## Metrics"]
+            for k, v in metrics.items():
+                lines.append(f"- {k}: {v}")
+            lines.append("")
+            lines.append("## Preferences")
+            if not prefs:
+                lines.append("- None")
+            else:
+                for p in prefs:
+                    lines.append(
+                        f"- {p.get('pref_key')}: {p.get('value')} (conf={float(p.get('confidence',0)):.2f}, status={p.get('status')})"
+                    )
+            report_path = Path("/home/vito/vito-agent/reports") / f"OWNER_PREFS_{today}.md"
+            report_path.write_text("\n".join(lines), encoding="utf-8")
         except Exception:
             pass
 
