@@ -115,3 +115,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added owner preferences report script.
 - Injected owner preferences into weekly planning.
 - Added owner preference model spec.
+- Added optional owner preference auto-detect (off by default).

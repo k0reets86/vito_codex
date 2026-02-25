@@ -151,6 +151,26 @@ class CommsAgent:
                 f.write(entry)
         except Exception:
             pass
+        # Best-effort preference auto-detect (disabled by default)
+        try:
+            if getattr(settings, "OWNER_PREF_AUTO_DETECT", False):
+                self._auto_detect_preference(text)
+        except Exception:
+            pass
+
+    def _auto_detect_preference(self, text: str) -> None:
+        """Heuristic preference detection. Disabled by default."""
+        raw = (text or "").strip()
+        lower = raw.lower()
+        if "пиши кратко" in lower or lower == "кратко":
+            OwnerPreferenceModel().record_signal(
+                key="style.verbosity",
+                value="concise",
+                signal_type="observation",
+                source="owner",
+                confidence_delta=0.1,
+                notes="auto_detect",
+            )
 
     def _main_keyboard(self) -> ReplyKeyboardMarkup:
         """Persistent-клавиатура с основными командами."""

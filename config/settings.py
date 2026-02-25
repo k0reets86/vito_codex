@@ -123,5 +123,8 @@ class Settings:
     # Workflow resume
     RESUME_FROM_CHECKPOINT: bool = os.getenv("RESUME_FROM_CHECKPOINT", "false").lower() in ("1", "true", "yes", "on")
 
+    # Owner preference auto-detect (off by default)
+    OWNER_PREF_AUTO_DETECT: bool = os.getenv("OWNER_PREF_AUTO_DETECT", "false").lower() in ("1", "true", "yes", "on")
+
 
 settings = Settings()

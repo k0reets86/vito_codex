@@ -16,6 +16,10 @@
 - Deactivate: `/pref_del key` or `forget key` / `забыть key`
 - List: `/prefs`
 
+## Auto-Detect (Optional)
+- Disabled by default via `OWNER_PREF_AUTO_DETECT=false`.
+- If enabled, can log weak signals like “пиши кратко” → `style.verbosity=concise`.
+
 ## Storage
 - SQLite `owner_preferences`
 - Events table `owner_preference_events`
@@ -30,4 +34,3 @@
 ## Safety
 - Owner can deactivate any preference.
 - Preferences never execute unsafe actions without existing policy/approval gates.
-
