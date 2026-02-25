@@ -133,6 +133,7 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Next: expose workflow events in dashboard (optional).
 - Added test to validate capability pack spec fields.
 - Added stub adapters for initial capability packs (accepted).
+- Added capability pack execution spec.
 - Added capability pack matrix script.
 - Added owner preference eval script.
 - Included owner preferences in question answering context.
