@@ -126,6 +126,7 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added DataLake events for capability pack runs.
 - Added runtime gate for pending capability packs (configurable).
 - Added nightly owner preference report writeout.
+- Added nightly capability pack report writeout.
 - Added /prefs_metrics command for owner preference metrics.
 - Added /packs command to list capability packs.
 - Added startup sync of capability packs into SkillRegistry.

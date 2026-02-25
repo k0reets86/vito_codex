@@ -793,6 +793,31 @@ class VITO:
             SkillRegistry().register_from_capability_packs()
         except Exception:
             pass
+        # 4.2 Write capability pack report
+        try:
+            import json
+            root = Path("/home/vito/vito-agent/capability_packs")
+            rows = []
+            for spec in root.glob("*/spec.json"):
+                try:
+                    data = json.loads(spec.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                rows.append({
+                    "name": data.get("name") or spec.parent.name,
+                    "category": data.get("category", ""),
+                    "status": data.get("acceptance_status", "pending"),
+                    "version": data.get("version", ""),
+                    "risk": data.get("risk_score", 0),
+                })
+            rows.sort(key=lambda r: r["name"])
+            out = Path("/home/vito/vito-agent/reports") / f"CAPABILITY_PACK_REPORT_{today}.md"
+            lines = [f"# Capability Pack Report ({today})", "", "| Name | Category | Status | Version | Risk |", "|---|---|---|---|---|"]
+            for r in rows:
+                lines.append(f"| {r['name']} | {r['category']} | {r['status']} | {r['version']} | {r['risk']} |")
+            out.write_text("\\n".join(lines), encoding="utf-8")
+        except Exception:
+            pass
 
         # 5. Cleanup resolved errors older than 7 days
         try:
