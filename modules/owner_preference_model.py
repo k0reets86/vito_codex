@@ -84,6 +84,17 @@ class OwnerPreferenceModel:
             conn.commit()
         finally:
             conn.close()
+        # Best-effort semantic memory sync
+        try:
+            from memory.memory_manager import MemoryManager
+            mm = MemoryManager()
+            mm.store_knowledge(
+                doc_id=f"owner_pref_{key}",
+                text=f"owner preference: {key} = {value}",
+                metadata={"type": "owner_preference", "key": key, "source": source},
+            )
+        except Exception:
+            pass
 
     def get_preference(self, key: str) -> Optional[dict[str, Any]]:
         conn = sqlite3.connect(self.sqlite_path)
