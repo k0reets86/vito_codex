@@ -61,6 +61,10 @@ class OwnerPreferenceModel:
         confidence = _clamp_confidence(confidence)
         conn = sqlite3.connect(self.sqlite_path)
         try:
+            prev = conn.execute(
+                "SELECT value_json FROM owner_preferences WHERE pref_key = ?",
+                (key,),
+            ).fetchone()
             conn.execute(
                 """INSERT INTO owner_preferences
                    (pref_key, value_json, source, confidence, status, notes)
@@ -81,6 +85,13 @@ class OwnerPreferenceModel:
                    VALUES (?, 'explicit', ?, ?, 0.0, ?)""",
                 (key, payload, source, notes or "explicit_set"),
             )
+            if prev and str(prev[0]) != payload:
+                conn.execute(
+                    """INSERT INTO owner_preference_events
+                       (pref_key, signal_type, value_json, source, confidence_delta, notes)
+                       VALUES (?, 'correction', ?, ?, 0.0, ?)""",
+                    (key, payload, source, "explicit_override"),
+                )
             conn.commit()
         finally:
             conn.close()

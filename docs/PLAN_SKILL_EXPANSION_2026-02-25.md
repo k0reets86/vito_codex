@@ -151,3 +151,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Expanded owner preference auto-detect heuristics and metrics (auto_detect/explicit).
 - Added pending approvals visibility in dashboard (operator UI).
 - Added optional self-refine pass for LLM fallback outputs (gated by settings).
+- Added preference correction events + metrics (explicit overrides tracked).

@@ -32,6 +32,9 @@ class OwnerPreferenceMetrics:
             explicit = conn.execute(
                 "SELECT COUNT(*) n FROM owner_preference_events WHERE signal_type='explicit'"
             ).fetchone()
+            corrections = conn.execute(
+                "SELECT COUNT(*) n FROM owner_preference_events WHERE signal_type='correction'"
+            ).fetchone()
             last = conn.execute(
                 "SELECT MAX(updated_at) ts FROM owner_preferences"
             ).fetchone()
@@ -42,6 +45,7 @@ class OwnerPreferenceMetrics:
                 "deactivate_events": int(deacts[0] or 0),
                 "auto_detect_events": int(auto[0] or 0),
                 "explicit_events": int(explicit[0] or 0),
+                "correction_events": int(corrections[0] or 0),
                 "last_updated": last[0] or "",
             }
         except Exception:
