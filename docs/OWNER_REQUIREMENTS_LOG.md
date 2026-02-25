@@ -1024,3 +1024,4 @@ Append all new owner requests here as they arrive.
 - [2026-02-25T12:26:40.893011+00:00] (text) Отклонить
 - [2026-02-25T12:26:41.114188+00:00] (text) Отклонить
 - 2026-02-25: Added stage change approvals and signed release bundle verification for adapter promotions/rollbacks.
+- 2026-02-25: Added tooling governance report + signature key rotation workflow (contract/release key IDs, pending approvals, dashboard controls).

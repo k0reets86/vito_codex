@@ -171,3 +171,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added contract rotation approval workflow (request/approve/reject) and runtime live-block while rotation is pending.
 - Added multi-stage adapter promotion (staging->accepted->production) with rollback and release history; live runtime now enforces required stage.
 - Added stage-approval policies for production/rollback and signed release bundles in release history (bundle_hash + signature).
+- Added tooling governance report (integrity/pending/remediation metrics) and cryptographic key-rotation flow for contract/release signing keys, with dashboard APIs/UI.

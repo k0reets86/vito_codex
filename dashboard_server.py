@@ -323,13 +323,27 @@ class DashboardServer:
                         rows = reg.list_adapters(limit=200)
                         approvals = reg.list_contract_approvals(status="pending", limit=100)
                         stage_approvals = reg.list_stage_approvals(status="pending", limit=100)
+                        key_rotations = reg.list_signature_key_rotations(status="pending", limit=100)
                         history = reg.list_release_history(limit=100)
+                        governance = reg.build_governance_report(days=7)
+                        signature_policy = reg.get_signature_policy()
                     except Exception:
                         rows = []
                         approvals = []
                         stage_approvals = []
+                        key_rotations = []
                         history = []
-                    self._json({"adapters": rows, "approvals": approvals, "stage_approvals": stage_approvals, "history": history})
+                        governance = {}
+                        signature_policy = {}
+                    self._json({
+                        "adapters": rows,
+                        "approvals": approvals,
+                        "stage_approvals": stage_approvals,
+                        "key_rotations": key_rotations,
+                        "history": history,
+                        "governance": governance,
+                        "signature_policy": signature_policy,
+                    })
                     return
                 if parsed.path == "/api/events":
                     try:
@@ -590,6 +604,16 @@ class DashboardServer:
           <button onclick=\"approveStageToolingChange()\">Approve Stage</button>
           <button onclick=\"rejectStageToolingChange()\">Reject Stage</button>
         </div>
+        <div style=\"margin-top:6px\">\n
+          <input id=\"tool_key_type\" placeholder=\"key_type contract/release\" style=\"width:30%\"/>
+          <input id=\"tool_key_id\" placeholder=\"requested_key_id\" style=\"width:28%\"/>
+          <button onclick=\"requestToolingKeyRotation()\">Request Key Rotate</button>
+        </div>
+        <div style=\"margin-top:6px\">\n
+          <input id=\"tool_key_rot_id\" placeholder=\"key_rotation_id\" style=\"width:24%\"/>
+          <button onclick=\"approveToolingKeyRotation()\">Approve Key</button>
+          <button onclick=\"rejectToolingKeyRotation()\">Reject Key</button>
+        </div>
       </div>
       <div class=\"card\"><div class=\"mut\">Memory Policy Audit</div><div id=\"memory_policy\"></div></div>
       <div class=\"card\"><div class=\"mut\">Memory Controls</div>
@@ -657,7 +681,7 @@ async function load(){
     else if (k === 'llm_policy') renderLlmPolicy(j.policy||{});
     else if (k === 'guardrails') renderGuardrails(j);
     else if (k === 'llm_evals') renderLlmEvals(j);
-    else if (k === 'tooling_registry') renderToolingRegistry(j.adapters||[], j.approvals||[], j.stage_approvals||[], j.history||[]);
+    else if (k === 'tooling_registry') renderToolingRegistry(j.adapters||[], j.approvals||[], j.stage_approvals||[], j.key_rotations||[], j.history||[], j.governance||{}, j.signature_policy||{});
   }
 }
 function renderPrefs(prefs){
@@ -703,17 +727,26 @@ function renderSelfLearning(j){
     `<div class=\"mut\">Lessons</div><table><thead><tr><th>Goal</th><th>Status</th><th>Score</th><th>Lesson</th></tr></thead><tbody>${lrows}</tbody></table>` +
     `<div class=\"mut\" style=\"margin-top:8px\">Candidates</div><table><thead><tr><th>Skill</th><th>Confidence</th><th>Status</th></tr></thead><tbody>${crows}</tbody></table>`;
 }
-function renderToolingRegistry(items, approvals, stageApprovals, history){
+function renderToolingRegistry(items, approvals, stageApprovals, keyRotations, history, governance, signaturePolicy){
   const el = document.getElementById('tooling_registry');
   const app = approvals || [];
   const sapp = stageApprovals || [];
+  const krot = keyRotations || [];
   const hist = history || [];
+  const gov = governance || {};
+  const policy = signaturePolicy || {};
+  const rem = (gov.remediations || []).slice(0, 6).map(r => `<li>${r}</li>`).join('');
+  const govRows = Object.entries(gov).filter(([k,_]) => k !== 'remediations').map(([k,v]) => `<tr><td>${k}</td><td>${JSON.stringify(v)}</td></tr>`).join('');
+  const keyRows = krot.map(a => `<tr><td>${a.id}</td><td>${a.key_type}</td><td>${a.requested_key_id}</td><td>${a.requested_by}</td></tr>`).join('');
+  const keySummary = `<div class=\"mut\" style=\"margin-top:8px\">Active Keys: contract=<code>${policy.contract_active_key_id||''}</code>, release=<code>${policy.release_active_key_id||''}</code></div>`;
   if (!items.length){
     const prow0 = app.map(a => `<tr><td>${a.id}</td><td>${a.adapter_key}</td><td>${a.proposed_version}</td><td>${a.requested_by}</td></tr>`).join('');
     const s0 = sapp.map(a => `<tr><td>${a.id}</td><td>${a.adapter_key}</td><td>${a.action}</td><td>${a.target_stage||''}</td><td>${a.requested_by}</td></tr>`).join('');
+    const k0 = keyRows;
     const h0 = hist.slice(0,6).map(h => `<tr><td>${h.adapter_key}</td><td>${h.from_stage}</td><td>${h.to_stage}</td><td>${h.created_at||''}</td></tr>`).join('');
     el.innerHTML = `<div class=\"mut\">No adapters</div><table><thead><tr><th>ID</th><th>Adapter</th><th>Version</th><th>By</th></tr></thead><tbody>${prow0}</tbody></table>` +
       `<div class=\"mut\" style=\"margin-top:8px\">Pending Stage Changes</div><table><thead><tr><th>ID</th><th>Adapter</th><th>Action</th><th>Target</th><th>By</th></tr></thead><tbody>${s0}</tbody></table>` +
+      `<div class=\"mut\" style=\"margin-top:8px\">Pending Key Rotations</div><table><thead><tr><th>ID</th><th>Type</th><th>Key ID</th><th>By</th></tr></thead><tbody>${k0}</tbody></table>` +
       `<div class=\"mut\" style=\"margin-top:8px\">Release History</div><table><thead><tr><th>Adapter</th><th>From</th><th>To</th><th>Time</th></tr></thead><tbody>${h0}</tbody></table>`;
     return;
   }
@@ -727,8 +760,13 @@ function renderToolingRegistry(items, approvals, stageApprovals, history){
     `<table><thead><tr><th>ID</th><th>Adapter</th><th>Version</th><th>By</th></tr></thead><tbody>${prows}</tbody></table>` +
     `<div class=\"mut\" style=\"margin-top:8px\">Pending Stage Changes</div>` +
     `<table><thead><tr><th>ID</th><th>Adapter</th><th>Action</th><th>Target</th><th>By</th></tr></thead><tbody>${srows}</tbody></table>` +
+    `<div class=\"mut\" style=\"margin-top:8px\">Pending Key Rotations</div>` +
+    `<table><thead><tr><th>ID</th><th>Type</th><th>Key ID</th><th>By</th></tr></thead><tbody>${keyRows}</tbody></table>` +
     `<div class=\"mut\" style=\"margin-top:8px\">Release History</div>` +
-    `<table><thead><tr><th>Adapter</th><th>From</th><th>To</th><th>Actor</th><th>Time</th></tr></thead><tbody>${hrows}</tbody></table>`;
+    `<table><thead><tr><th>Adapter</th><th>From</th><th>To</th><th>Actor</th><th>Time</th></tr></thead><tbody>${hrows}</tbody></table>` +
+    keySummary +
+    `<div class=\"mut\" style=\"margin-top:8px\">Governance</div><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>${govRows}</tbody></table>` +
+    `<div class=\"mut\" style=\"margin-top:8px\">Remediations</div><ul>${rem}</ul>`;
 }
 function renderMemoryPolicy(items){
   const el = document.getElementById('memory_policy');
@@ -1006,6 +1044,25 @@ async function rejectStageToolingChange(){
   const approval_id = parseInt((document.getElementById('tool_stage_appr_id').value||'0').trim(), 10);
   if (!approval_id) return;
   await fetch('/api/tooling_registry', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'reject_stage_change', approval_id, approver:'dashboard'})});
+  await load();
+}
+async function requestToolingKeyRotation(){
+  const key_type = (document.getElementById('tool_key_type').value || '').trim();
+  const requested_key_id = (document.getElementById('tool_key_id').value || '').trim();
+  if (!key_type || !requested_key_id) return;
+  await fetch('/api/tooling_registry', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'request_key_rotation', key_type, requested_key_id, requested_by:'dashboard'})});
+  await load();
+}
+async function approveToolingKeyRotation(){
+  const rotation_id = parseInt((document.getElementById('tool_key_rot_id').value||'0').trim(), 10);
+  if (!rotation_id) return;
+  await fetch('/api/tooling_registry', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'approve_key_rotation', rotation_id, approver:'dashboard'})});
+  await load();
+}
+async function rejectToolingKeyRotation(){
+  const rotation_id = parseInt((document.getElementById('tool_key_rot_id').value||'0').trim(), 10);
+  if (!rotation_id) return;
+  await fetch('/api/tooling_registry', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'reject_key_rotation', rotation_id, approver:'dashboard'})});
   await load();
 }
 async function setSecret(){
@@ -1419,6 +1476,37 @@ load();
                             ok = bool(result.get("ok"))
                             if not ok:
                                 errors = [str(result.get("error", "reject_stage_failed"))]
+                            run_result = result
+                        elif action == "request_key_rotation":
+                            result = reg.request_signature_key_rotation(
+                                key_type=str(payload.get("key_type", "")).strip().lower(),
+                                requested_key_id=str(payload.get("requested_key_id", "")).strip(),
+                                requested_by=str(payload.get("requested_by", "dashboard")),
+                                reason=str(payload.get("reason", "")),
+                            )
+                            ok = bool(result.get("ok"))
+                            if not ok:
+                                errors = [str(result.get("error", "request_key_rotation_failed"))]
+                            run_result = result
+                        elif action == "approve_key_rotation":
+                            result = reg.approve_signature_key_rotation(
+                                rotation_id=int(payload.get("rotation_id", 0) or 0),
+                                approver=str(payload.get("approver", "dashboard")),
+                                reason=str(payload.get("reason", "")),
+                            )
+                            ok = bool(result.get("ok"))
+                            if not ok:
+                                errors = [str(result.get("error", "approve_key_rotation_failed"))]
+                            run_result = result
+                        elif action == "reject_key_rotation":
+                            result = reg.reject_signature_key_rotation(
+                                rotation_id=int(payload.get("rotation_id", 0) or 0),
+                                approver=str(payload.get("approver", "dashboard")),
+                                reason=str(payload.get("reason", "")),
+                            )
+                            ok = bool(result.get("ok"))
+                            if not ok:
+                                errors = [str(result.get("error", "reject_key_rotation_failed"))]
                             run_result = result
                         elif action == "run":
                             from modules.tooling_runner import ToolingRunner

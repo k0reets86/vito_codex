@@ -1,4 +1,5 @@
 from modules.tooling_registry import ToolingRegistry
+from config.settings import settings
 
 
 def test_tooling_registry_upsert_and_list(tmp_path):
@@ -135,3 +136,62 @@ def test_tooling_registry_promote_and_rollback(tmp_path):
     ok_bundle, reason = reg.verify_release_bundle(hist[0])
     assert ok_bundle is True
     assert reason == "bundle_ok"
+
+
+def test_tooling_registry_key_rotation_flow(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "TOOLING_CONTRACT_KEYS", "k1:s1,k2:s2")
+    monkeypatch.setattr(settings, "TOOLING_CONTRACT_ACTIVE_KEY_ID", "k1")
+    monkeypatch.setattr(settings, "TOOLING_RELEASE_KEYS", "r1:x1,r2:x2")
+    monkeypatch.setattr(settings, "TOOLING_RELEASE_ACTIVE_KEY_ID", "r1")
+    db = str(tmp_path / "tools.db")
+    reg = ToolingRegistry(sqlite_path=db)
+    out = reg.upsert_adapter(
+        adapter_key="rot_keys",
+        protocol="openapi",
+        endpoint="https://example.com/openapi.json",
+        schema={"openapi": "3.0.0", "paths": {}},
+    )
+    assert out["ok"] is True
+    assert out["contract_key_id"] == "k1"
+    req = reg.request_signature_key_rotation(
+        key_type="contract",
+        requested_key_id="k2",
+        requested_by="owner",
+    )
+    assert req["ok"] is True
+    ok = reg.approve_signature_key_rotation(req["rotation_id"], approver="owner")
+    assert ok["ok"] is True
+    out2 = reg.upsert_adapter(
+        adapter_key="rot_keys_2",
+        protocol="openapi",
+        endpoint="https://example.com/openapi-v2.json",
+        schema={"openapi": "3.0.0", "paths": {}},
+    )
+    assert out2["ok"] is True
+    assert out2["contract_key_id"] == "k2"
+    policy = reg.get_signature_policy()
+    assert policy["contract_active_key_id"] == "k2"
+
+
+def test_tooling_registry_governance_report(tmp_path):
+    db = str(tmp_path / "tools.db")
+    reg = ToolingRegistry(sqlite_path=db)
+    reg.upsert_adapter(
+        adapter_key="gov_demo",
+        protocol="openapi",
+        endpoint="https://example.com/openapi.json",
+        schema={"openapi": "3.0.0", "paths": {}},
+        adapter_stage="accepted",
+    )
+    req = reg.request_stage_change(
+        adapter_key="gov_demo",
+        action="promote",
+        target_stage="production",
+        requested_by="owner",
+    )
+    assert req["ok"] is True
+    rep = reg.build_governance_report(days=7)
+    assert rep["adapters_total"] >= 1
+    assert "contract_integrity" in rep
+    assert rep["pending_stage_changes"] >= 1
+    assert isinstance(rep["remediations"], list)
