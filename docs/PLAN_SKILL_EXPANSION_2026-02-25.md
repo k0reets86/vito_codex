@@ -129,6 +129,7 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added nightly capability pack report writeout.
 - Added owner preferences summary to system context.
 - Added manual capability pack event logging script.
+- Marked self_improve skills as pending until acceptance.
 - Added preference block seed script.
 - Next: expose workflow events in dashboard (optional).
 - Added test to validate capability pack spec fields.

@@ -373,6 +373,7 @@ class VITOCore(BaseAgent):
                     status="learned",
                     security_status=security_status,
                     notes=(plan.get("summary", "")[:200] + (f" | security: {security_notes}" if security_notes else ""))[:400],
+                    acceptance_status="pending",
                 )
                 if skill_name:
                     self.skill_registry.register_skill(
@@ -382,6 +383,7 @@ class VITOCore(BaseAgent):
                         status="learned",
                         security_status=security_status,
                         notes=plan.get("summary", "")[:200],
+                        acceptance_status="pending",
                     )
         except Exception:
             pass
