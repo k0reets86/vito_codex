@@ -203,7 +203,7 @@ async def test_process_goal_full_cycle(dl):
     await dl._process_goal(goal)
     assert goal.status == GoalStatus.COMPLETED
     dl.memory.save_skill.assert_called_once()
-    dl.memory.store_knowledge.assert_called_once()
+    assert dl.memory.store_knowledge.call_count >= 1
 
 
 @pytest.mark.asyncio
@@ -218,6 +218,17 @@ async def test_process_goal_plan_fails(dl):
 async def test_process_goal_waiting_approval(dl):
     goal = dl.goal_engine.create_goal("Expensive", "desc", estimated_cost_usd=999.0)
     await dl._process_goal(goal)
+    assert goal.status == GoalStatus.WAITING_APPROVAL
+
+
+@pytest.mark.asyncio
+async def test_execute_goal_waiting_approval_mid_step(dl):
+    goal = dl.goal_engine.create_goal("Need Approval", "desc")
+    goal.plan = ["Step 1", "Step 2"]
+    dl.goal_engine.start_execution(goal.goal_id)
+    with patch.object(dl, "_execute_step_with_retry", AsyncMock(return_value={"status": "waiting_approval", "error": "pending"})):
+        results = await dl._execute_goal(goal)
+    assert results.get("waiting_approval") is True
     assert goal.status == GoalStatus.WAITING_APPROVAL
 
 

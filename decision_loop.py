@@ -179,6 +179,9 @@ class DecisionLoop:
             return
 
         results = await self._execute_goal(goal)
+        if results.get("waiting_approval"):
+            self.workflow.transition(goal.goal_id, "waiting_approval", reason="step_approval_pending", detail=goal.title)
+            return
 
         # LEARN
         self.workflow.transition(goal.goal_id, "learning", reason="execution_finished", detail=str(results.get("steps_completed", 0)))
@@ -300,6 +303,14 @@ class DecisionLoop:
                             f"[{goal.goal_id}] Resume from checkpoint step {step_num + 1}/{len(goal.plan)}",
                             extra={"event": "resume_from_checkpoint", "context": {"goal_id": goal.goal_id, "step": step_num}},
                         )
+                elif ck and ck.get("status") in ("waiting_approval", "in_progress", "pending"):
+                    step_num = ck.get("step_num")
+                    if isinstance(step_num, int) and 0 < step_num <= len(goal.plan):
+                        i = max(step_num - 1, 0)  # resume same step
+                        logger.info(
+                            f"[{goal.goal_id}] Resume waiting approval at step {step_num}/{len(goal.plan)}",
+                            extra={"event": "resume_waiting_approval", "context": {"goal_id": goal.goal_id, "step": step_num}},
+                        )
         except Exception:
             pass
         while i < len(goal.plan):
@@ -323,6 +334,14 @@ class DecisionLoop:
                 )
             except Exception:
                 pass
+            if step_result.get("status") == "waiting_approval":
+                results["waiting_approval"] = True
+                results["paused_step"] = i + 1
+                try:
+                    self.goal_engine.wait_for_approval(goal.goal_id, reason=step_result.get("error", "pending approval"))
+                except Exception:
+                    pass
+                return results
             if step_result.get("status") == "completed":
                 results["steps_completed"] += 1
             await self._maybe_send_progress(goal, results)
@@ -796,6 +815,8 @@ class DecisionLoop:
                                 files=files[:5],
                                 timeout_seconds=3600,
                             )
+                            if approved is None:
+                                return {"status": "waiting_approval", "error": "Owner approval pending", "agent": "comms"}
                             if approved is not True:
                                 return {"status": "failed", "error": "Owner approval rejected or timed out", "agent": "comms"}
                             return {"status": "completed", "output": "Owner approval granted", "agent": "comms"}
@@ -813,6 +834,8 @@ class DecisionLoop:
                             ),
                             timeout_seconds=3600,
                         )
+                        if approved is None:
+                            return {"status": "waiting_approval", "error": "Owner approval pending", "agent": "comms"}
                         if approved is not True:
                             return {"status": "failed", "error": "Owner approval rejected or timed out", "agent": "comms"}
                     # Cooldown for repetitive test goals
@@ -1247,6 +1270,8 @@ class DecisionLoop:
                             ),
                             timeout_seconds=3600,
                         )
+                        if approved is None:
+                            return {"status": "waiting_approval", "error": "Owner approval pending", "agent": "comms"}
                         if approved is not True:
                             return {"status": "failed", "error": "Owner approval rejected or timed out", "agent": "comms"}
                     except Exception:

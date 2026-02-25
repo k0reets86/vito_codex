@@ -297,6 +297,26 @@ class GoalEngine:
             pass
         return True
 
+    def wait_for_approval(self, goal_id: str, reason: str = "") -> bool:
+        """Переводит цель в WAITING_APPROVAL без потери контекста выполнения."""
+        goal = self._goals.get(goal_id)
+        if not goal:
+            logger.error(f"Цель не найдена: {goal_id}", extra={"event": "goal_not_found"})
+            return False
+        goal.status = GoalStatus.WAITING_APPROVAL
+        self._persist_goal(goal)
+        logger.info(
+            f"Цель ожидает одобрения: [{goal_id}] {goal.title}",
+            extra={"event": "goal_waiting_approval", "context": {"goal_id": goal_id, "reason": reason[:200]}},
+        )
+        try:
+            from modules.data_lake import DataLake
+            DataLake().record(agent="goal_engine", task_type="goal_waiting_approval", status="success",
+                              output={"goal_id": goal_id, "reason": reason[:200]})
+        except Exception:
+            pass
+        return True
+
     def complete_goal(self, goal_id: str, results: dict[str, Any], lessons: str = "") -> None:
         """Фаза LEARN: завершает цель и сохраняет уроки."""
         goal = self._goals.get(goal_id)

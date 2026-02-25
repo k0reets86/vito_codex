@@ -146,3 +146,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added /packs command to list capability packs.
 - Added startup sync of capability packs into SkillRegistry.
 - Added deactivation count to owner preference metrics.
+- Added durable step-level pause for pending approvals (DecisionLoop waits without failing).
