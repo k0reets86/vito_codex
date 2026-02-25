@@ -135,6 +135,7 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added stub adapters for initial capability packs (accepted).
 - Added capability pack execution spec.
 - Fixed script imports for owner preference tools.
+- Ignored auto-generated capability pack reports.
 - Added capability pack matrix script.
 - Added owner preference eval script.
 - Included owner preferences in question answering context.
