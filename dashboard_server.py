@@ -21,6 +21,7 @@ from urllib.parse import urlparse, parse_qs
 
 from config.settings import settings
 from modules.owner_preference_model import OwnerPreferenceModel
+from modules.owner_pref_metrics import OwnerPreferenceMetrics
 
 
 
@@ -144,6 +145,13 @@ class DashboardServer:
                     except Exception:
                         prefs = []
                     self._json({"preferences": prefs})
+                    return
+                if parsed.path == "/api/prefs_metrics":
+                    try:
+                        metrics = OwnerPreferenceMetrics().summary()
+                    except Exception:
+                        metrics = {}
+                    self._json({"metrics": metrics})
                     return
                 if parsed.path == "/api/capability_packs":
                     try:
@@ -381,6 +389,7 @@ class DashboardServer:
         </div>
       </div>
       <div class=\"card\"><div class=\"mut\">Owner Prefs</div><div id=\"prefs\"></div></div>
+      <div class=\"card\"><div class=\"mut\">Pref Metrics</div><div id=\"prefs_metrics\"></div></div>
       <div class=\"card\"><div class=\"mut\">Capability Packs</div><div id=\"capability_packs\"></div></div>
       <div class=\"card\"><div class=\"mut\">Secrets</div>
         <div class=\"mut\" style=\"font-size:12px\">Keys are write‑only here.</div>
@@ -404,7 +413,7 @@ async function load(){
   const endpoints = {
     status:'/api/status', network:'/api/network', agents:'/api/agents', finance:'/api/finance',
     goals:'/api/goals', schedules:'/api/schedules', config:'/api/config',
-    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', prefs:'/api/prefs', capability_packs:'/api/capability_packs',
+    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs',
     facts:'/api/execution_facts', events:'/api/events', decisions:'/api/decisions', budget:'/api/budget'
   };
   for (const [k,url] of Object.entries(endpoints)){
@@ -426,6 +435,7 @@ async function load(){
     else if (k === 'schedules') renderSchedules(j.tasks||[]);
     else if (k === 'config') renderConfig(j.config||j);
     else if (k === 'prefs') renderPrefs(j.preferences||[]);
+    else if (k === 'prefs_metrics') renderPrefsMetrics(j.metrics||{});
     else if (k === 'capability_packs') renderCapabilityPacks(j.packs||[]);
     else if (k === 'models') renderModels(j);
     else if (k === 'llm_policy') renderLlmPolicy(j.policy||{});
@@ -436,6 +446,11 @@ function renderPrefs(prefs){
   if (!prefs.length){ el.innerHTML = '<div class=\"mut\">No prefs</div>'; return; }
   const rows = prefs.map(p => `<div style=\"margin:4px 0\"><code>${p.pref_key}</code>: ${JSON.stringify(p.value)} <span class=\"mut\">(conf=${(p.confidence||0).toFixed(2)})</span></div>`);
   el.innerHTML = rows.join('');
+}
+function renderPrefsMetrics(m){
+  const el = document.getElementById('prefs_metrics');
+  const rows = Object.entries(m||{}).map(([k,v])=>`<tr><td>${k}</td><td>${JSON.stringify(v)}</td></tr>`).join('');
+  el.innerHTML = `<table><thead><tr><th>Key</th><th>Value</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 function renderCapabilityPacks(packs){
   const el = document.getElementById('capability_packs');
