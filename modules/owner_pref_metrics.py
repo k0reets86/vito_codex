@@ -23,6 +23,9 @@ class OwnerPreferenceMetrics:
             uses = conn.execute(
                 "SELECT COUNT(*) n FROM data_lake_events WHERE task_type='owner_prefs_used'"
             ).fetchone()
+            deacts = conn.execute(
+                "SELECT COUNT(*) n FROM owner_preference_events WHERE signal_type='deactivate'"
+            ).fetchone()
             last = conn.execute(
                 "SELECT MAX(updated_at) ts FROM owner_preferences"
             ).fetchone()
@@ -30,9 +33,10 @@ class OwnerPreferenceMetrics:
                 "active_prefs": int(prefs[0] or 0),
                 "set_events": int(sets[0] or 0),
                 "use_events": int(uses[0] or 0),
+                "deactivate_events": int(deacts[0] or 0),
                 "last_updated": last[0] or "",
             }
         except Exception:
-            return {"active_prefs": 0, "set_events": 0, "use_events": 0, "last_updated": ""}
+            return {"active_prefs": 0, "set_events": 0, "use_events": 0, "deactivate_events": 0, "last_updated": ""}
         finally:
             conn.close()
