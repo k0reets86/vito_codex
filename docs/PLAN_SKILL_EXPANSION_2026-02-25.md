@@ -92,3 +92,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added capability pack scaffolding script.
 - Added Owner Prefs panel on dashboard UI.
 - Added capability pack sync into SkillRegistry.
+- Added optional resume-from-checkpoint in DecisionLoop (guarded by setting).

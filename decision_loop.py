@@ -288,6 +288,20 @@ class DecisionLoop:
         replanned = False
 
         i = 0
+        try:
+            from config.settings import settings
+            if settings.RESUME_FROM_CHECKPOINT:
+                ck = self.workflow.latest_checkpoint(goal.goal_id)
+                if ck and ck.get("status") == "completed":
+                    step_num = ck.get("step_num")
+                    if isinstance(step_num, int) and 0 < step_num < len(goal.plan):
+                        i = step_num  # resume from next step
+                        logger.info(
+                            f"[{goal.goal_id}] Resume from checkpoint step {step_num + 1}/{len(goal.plan)}",
+                            extra={"event": "resume_from_checkpoint", "context": {"goal_id": goal.goal_id, "step": step_num}},
+                        )
+        except Exception:
+            pass
         while i < len(goal.plan):
             step = goal.plan[i]
             logger.info(

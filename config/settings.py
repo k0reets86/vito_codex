@@ -120,5 +120,8 @@ class Settings:
     # Calendar update
     CALENDAR_UPDATE_LLM: bool = os.getenv("CALENDAR_UPDATE_LLM", "false").lower() in ("1", "true", "yes", "on")
 
+    # Workflow resume
+    RESUME_FROM_CHECKPOINT: bool = os.getenv("RESUME_FROM_CHECKPOINT", "false").lower() in ("1", "true", "yes", "on")
+
 
 settings = Settings()
