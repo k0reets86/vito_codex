@@ -124,6 +124,8 @@ class Settings:
     RESUME_FROM_CHECKPOINT: bool = os.getenv("RESUME_FROM_CHECKPOINT", "false").lower() in ("1", "true", "yes", "on")
     SELF_REFINE_ENABLED: bool = os.getenv("SELF_REFINE_ENABLED", "false").lower() in ("1", "true", "yes", "on")
     SELF_REFINE_MAX_PASSES: int = int(os.getenv("SELF_REFINE_MAX_PASSES", "1") or 1)
+    SELF_LEARNING_ENABLED: bool = os.getenv("SELF_LEARNING_ENABLED", "false").lower() in ("1", "true", "yes", "on")
+    SELF_LEARNING_SKILL_SCORE_MIN: float = float(os.getenv("SELF_LEARNING_SKILL_SCORE_MIN", "0.78") or 0.78)
 
     # Owner preference auto-detect (off by default)
     OWNER_PREF_AUTO_DETECT: bool = os.getenv("OWNER_PREF_AUTO_DETECT", "false").lower() in ("1", "true", "yes", "on")

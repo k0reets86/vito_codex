@@ -158,3 +158,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Integrated workflow threads tracking + dashboard visibility.
 - Added explicit memory save/forget policy with SQLite audit trail and manual forget API in dashboard.
 - Added operator policy layer (tool allowlist + per-capability budget policy) with dashboard API/UI controls and DecisionLoop pre-check enforcement.
+- Added self-learning reflection pipeline (lessons + reusable skill candidates) with optional DecisionLoop integration and dashboard visibility.

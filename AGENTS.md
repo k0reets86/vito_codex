@@ -6,6 +6,7 @@
   - Added optional self-refine for LLM fallback and expanded owner preference auto-detect + metrics.
   - Implemented explicit memory save/forget policy with audit trail and dashboard controls for manual forget.
   - Added operator policy controls for tool allowlist and per-capability budget caps, with DecisionLoop pre-check enforcement.
+  - Added gated self-learning reflection loop with lesson scoring and pending skill-candidate generation.
 - Current blockers:
   - Social network integrations (Threads/YouTube/TikTok/etc.) are paused until accounts are ready.
 - Important commands:
@@ -23,6 +24,6 @@
   - Extend durable orchestration: interrupts/approvals + step contracts across more agents/tools.
   - Memory/skills pipeline: retention tuning (TTL classes), memory quality scoring, and policy dashboards.
   - Operator UI: model-profile workflows and safer secret/provider management UX.
-  - Self-learning: reflection loop + DSPy-like optimization + skill generation pipeline.
+  - Self-learning: DSPy-like optimization and safe auto-promotion pipeline from candidates to accepted skills.
   - Security/cost/observability: gateway + guardrails + evals.
   - Tooling standards: MCP/OpenAPI integration.

@@ -25,6 +25,7 @@ from memory.memory_manager import MemoryManager
 from modules.operator_policy import OperatorPolicy
 from modules.owner_preference_model import OwnerPreferenceModel
 from modules.owner_pref_metrics import OwnerPreferenceMetrics
+from modules.self_learning import SelfLearningEngine
 
 
 
@@ -193,6 +194,15 @@ class DashboardServer:
                     except Exception:
                         tools, budgets = [], []
                     self._json({"tools": tools, "budgets": budgets})
+                    return
+                if parsed.path == "/api/self_learning":
+                    try:
+                        sl = SelfLearningEngine()
+                        lessons = sl.list_lessons(limit=100)
+                        candidates = sl.list_candidates(limit=100)
+                    except Exception:
+                        lessons, candidates = [], []
+                    self._json({"lessons": lessons, "candidates": candidates})
                     return
                 if parsed.path == "/api/memory_policy":
                     try:
@@ -375,6 +385,8 @@ class DashboardServer:
                         "CALENDAR_UPDATE_LLM",
                         "LLM_DISABLED_MODELS",
                         "LLM_ENABLED_MODELS",
+                        "SELF_LEARNING_ENABLED",
+                        "SELF_LEARNING_SKILL_SCORE_MIN",
                     ]
                     data = {k: getattr(settings, k, None) for k in allowed}
                     self._json({"config": data})
@@ -487,6 +499,7 @@ class DashboardServer:
           <button onclick=\"setBudgetPolicy()\">Set Budget</button>
         </div>
       </div>
+      <div class=\"card\"><div class=\"mut\">Self Learning</div><div id=\"self_learning\"></div></div>
       <div class=\"card\"><div class=\"mut\">Memory Policy Audit</div><div id=\"memory_policy\"></div></div>
       <div class=\"card\"><div class=\"mut\">Memory Controls</div>
         <div style=\"margin-top:8px\">\n
@@ -518,7 +531,7 @@ async function load(){
   const endpoints = {
     status:'/api/status', network:'/api/network', agents:'/api/agents', finance:'/api/finance',
     goals:'/api/goals', schedules:'/api/schedules', config:'/api/config',
-    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs', skills:'/api/skills', operator_policy:'/api/operator_policy', memory_policy:'/api/memory_policy?limit=80', workflow_threads:'/api/workflow_threads',
+    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs', skills:'/api/skills', operator_policy:'/api/operator_policy', self_learning:'/api/self_learning', memory_policy:'/api/memory_policy?limit=80', workflow_threads:'/api/workflow_threads',
     facts:'/api/execution_facts', approvals:'/api/approvals', events:'/api/events', decisions:'/api/decisions', budget:'/api/budget', workflow_events:'/api/workflow_events'
   };
   for (const [k,url] of Object.entries(endpoints)){
@@ -546,6 +559,7 @@ async function load(){
     else if (k === 'capability_packs') renderCapabilityPacks(j.packs||[]);
     else if (k === 'skills') renderSkills(j.skills||[]);
     else if (k === 'operator_policy') renderOperatorPolicy(j);
+    else if (k === 'self_learning') renderSelfLearning(j);
     else if (k === 'memory_policy') renderMemoryPolicy(j.audit||[]);
     else if (k === 'workflow_threads') renderWorkflowThreads(j.threads||[]);
     else if (k === 'models') renderModels(j);
@@ -584,6 +598,16 @@ function renderOperatorPolicy(j){
   el.innerHTML =
     `<div class=\"mut\">Tools</div><table><thead><tr><th>Key</th><th>On</th><th>Notes</th></tr></thead><tbody>${trows}</tbody></table>` +
     `<div class=\"mut\" style=\"margin-top:8px\">Budgets</div><table><thead><tr><th>Actor</th><th>Daily</th><th>Hard</th><th>Notes</th></tr></thead><tbody>${brows}</tbody></table>`;
+}
+function renderSelfLearning(j){
+  const el = document.getElementById('self_learning');
+  const lessons = (j && j.lessons) ? j.lessons : [];
+  const candidates = (j && j.candidates) ? j.candidates : [];
+  const lrows = lessons.slice(0,8).map(r => `<tr><td>${r.goal_id||''}</td><td>${r.status||''}</td><td>${(r.score||0).toFixed? (r.score||0).toFixed(2):r.score}</td><td>${(r.lesson||'').slice(0,80)}</td></tr>`).join('');
+  const crows = candidates.slice(0,8).map(r => `<tr><td>${r.skill_name}</td><td>${r.confidence}</td><td>${r.status}</td></tr>`).join('');
+  el.innerHTML =
+    `<div class=\"mut\">Lessons</div><table><thead><tr><th>Goal</th><th>Status</th><th>Score</th><th>Lesson</th></tr></thead><tbody>${lrows}</tbody></table>` +
+    `<div class=\"mut\" style=\"margin-top:8px\">Candidates</div><table><thead><tr><th>Skill</th><th>Confidence</th><th>Status</th></tr></thead><tbody>${crows}</tbody></table>`;
 }
 function renderMemoryPolicy(items){
   const el = document.getElementById('memory_policy');
@@ -832,10 +856,12 @@ load();
                         "LLM_DISABLED_MODELS",
                         "LLM_ENABLED_MODELS",
                         "OPENROUTER_DEFAULT_MODEL",
+                        "SELF_LEARNING_ENABLED",
+                        "SELF_LEARNING_SKILL_SCORE_MIN",
                     }
                     updated = {}
-                    bool_keys = {"PROACTIVE_ENABLED", "BRAINSTORM_WEEKLY", "OWNER_INBOX_ENABLED", "CALENDAR_UPDATE_LLM"}
-                    num_keys = {"DAILY_LIMIT_USD", "OPERATION_NOTIFY_USD", "OPERATION_APPROVE_USD", "OPERATION_MAX_USD"}
+                    bool_keys = {"PROACTIVE_ENABLED", "BRAINSTORM_WEEKLY", "OWNER_INBOX_ENABLED", "CALENDAR_UPDATE_LLM", "SELF_LEARNING_ENABLED"}
+                    num_keys = {"DAILY_LIMIT_USD", "OPERATION_NOTIFY_USD", "OPERATION_APPROVE_USD", "OPERATION_MAX_USD", "SELF_LEARNING_SKILL_SCORE_MIN"}
                     for k,v in payload.items():
                         if k in allowed:
                             if k in bool_keys:

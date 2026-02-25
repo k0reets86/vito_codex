@@ -24,6 +24,7 @@ from goal_engine import Goal, GoalEngine, GoalPriority, GoalStatus
 from llm_router import LLMRouter, TaskType
 from memory.memory_manager import MemoryManager
 from modules.operator_policy import OperatorPolicy
+from modules.self_learning import SelfLearningEngine
 from modules.workflow_state_machine import WorkflowStateMachine
 from modules.workflow_threads import WorkflowThreads
 from modules.data_lake import DataLake
@@ -57,6 +58,7 @@ class DecisionLoop:
         self.workflow = WorkflowStateMachine()
         self.threads = WorkflowThreads()
         self.operator_policy = OperatorPolicy()
+        self.self_learning = None
         logger.info("DecisionLoop инициализирован", extra={"event": "init"})
 
     def set_self_healer(self, self_healer) -> None:
@@ -389,6 +391,7 @@ class DecisionLoop:
                 return results
             if step_result.get("status") == "completed":
                 results["steps_completed"] += 1
+            await self._maybe_reflect_step(goal, step, step_result)
             await self._maybe_send_progress(goal, results)
 
             if step_result.get("status") == "failed":
@@ -467,6 +470,40 @@ class DecisionLoop:
                         level="result",
                     )
                     break
+        except Exception:
+            pass
+
+    async def _maybe_reflect_step(self, goal: Goal, step: str, step_result: dict[str, Any]) -> None:
+        """Optional reflection loop: store lessons and generate skill candidates."""
+        try:
+            if not settings.SELF_LEARNING_ENABLED:
+                return
+            if step_result.get("status") not in {"completed", "failed"}:
+                return
+            if self.self_learning is None:
+                self.self_learning = SelfLearningEngine(sqlite_path=settings.SQLITE_PATH)
+            reflection = await self.self_learning.reflect_step(
+                llm_router=self.llm_router,
+                task_type=self._classify_step(step),
+                goal_id=goal.goal_id,
+                step_text=step,
+                step_result=step_result,
+                min_skill_score=float(settings.SELF_LEARNING_SKILL_SCORE_MIN or 0.78),
+            )
+            candidate_name = (reflection or {}).get("candidate_name", "")
+            if candidate_name:
+                try:
+                    from modules.skill_registry import SkillRegistry
+                    SkillRegistry().register_skill(
+                        name=f"selflearn:{candidate_name}",
+                        category="self_learning",
+                        source="self_learning",
+                        status="learned",
+                        acceptance_status="pending",
+                        notes=f"reflection_candidate:{step[:180]}",
+                    )
+                except Exception:
+                    pass
         except Exception:
             pass
 
