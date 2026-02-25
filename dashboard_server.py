@@ -421,6 +421,17 @@ class DashboardServer:
         </div>
       </div>
       <div class=\"card\"><div class=\"mut\">Owner Prefs</div><div id=\"prefs\"></div></div>
+      <div class=\"card\"><div class=\"mut\">Pref Controls</div>
+        <div style=\"margin-top:8px\">\n
+          <input id=\"pref_key\" placeholder=\"pref_key\" style=\"width:40%\"/>
+          <input id=\"pref_val\" placeholder=\"value\" style=\"width:45%\"/>
+          <button onclick=\"setPref()\">Set</button>
+        </div>
+        <div style=\"margin-top:6px\">\n
+          <input id=\"pref_del_key\" placeholder=\"pref_key to deactivate\" style=\"width:60%\"/>
+          <button onclick=\"delPref()\">Deactivate</button>
+        </div>
+      </div>
       <div class=\"card\"><div class=\"mut\">Pref Metrics</div><div id=\"prefs_metrics\"></div></div>
       <div class=\"card\"><div class=\"mut\">Capability Packs</div><div id=\"capability_packs\"></div></div>
       <div class=\"card\"><div class=\"mut\">Secrets</div>
@@ -626,6 +637,19 @@ async function addRss(){
   await fetch('/api/rss', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'add', name, url})});
   await load();
 }
+async function setPref(){
+  const key = document.getElementById('pref_key').value.trim();
+  const val = document.getElementById('pref_val').value.trim();
+  if (!key) return;
+  await fetch('/api/prefs', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'set', key, value: val})});
+  await load();
+}
+async function delPref(){
+  const key = document.getElementById('pref_del_key').value.trim();
+  if (!key) return;
+  await fetch('/api/prefs', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'deactivate', key})});
+  await load();
+}
 async function setSecret(){
   const k = document.getElementById('sec_key').value.trim();
   const v = document.getElementById('sec_val').value.trim();
@@ -746,6 +770,49 @@ load();
                     except Exception:
                         pass
                     self._json({"updated": updated})
+                    return
+                if parsed.path == "/api/prefs":
+                    length = int(self.headers.get("Content-Length", "0") or "0")
+                    raw = self.rfile.read(length) if length else b"{}"
+                    try:
+                        payload = json.loads(raw.decode("utf-8"))
+                    except Exception:
+                        payload = {}
+                    action = str(payload.get("action", "")).strip().lower()
+                    key = str(payload.get("key", "")).strip()
+                    updated = False
+                    if key:
+                        try:
+                            pref = OwnerPreferenceModel()
+                            if action == "set":
+                                val = payload.get("value", "")
+                                if isinstance(val, str):
+                                    v = val.strip()
+                                    if (v.startswith("{") and v.endswith("}")) or (v.startswith("[") and v.endswith("]")):
+                                        try:
+                                            val = json.loads(v)
+                                        except Exception:
+                                            val = v
+                                    elif v.lower() in ("true", "false"):
+                                        val = v.lower() == "true"
+                                    elif v.lower() in ("null", "none"):
+                                        val = None
+                                    else:
+                                        val = v
+                                pref.set_preference(key=key, value=val, source="dashboard", confidence=1.0, notes="dashboard_set")
+                                updated = True
+                            elif action == "deactivate":
+                                pref.deactivate_preference(key, notes="dashboard_deactivate")
+                                updated = True
+                        except Exception:
+                            updated = False
+                    if updated:
+                        try:
+                            from modules.data_lake import DataLake
+                            DataLake().record_decision(actor="dashboard", decision="prefs_update", rationale=f"{action}:{key}")
+                        except Exception:
+                            pass
+                    self._json({"updated": updated, "action": action, "key": key})
                     return
                 if parsed.path == "/api/secrets":
                     length = int(self.headers.get("Content-Length", "0") or "0")

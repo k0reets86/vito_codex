@@ -152,3 +152,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added pending approvals visibility in dashboard (operator UI).
 - Added optional self-refine pass for LLM fallback outputs (gated by settings).
 - Added preference correction events + metrics (explicit overrides tracked).
+- Added dashboard preference controls (set/deactivate) for operator memory management.

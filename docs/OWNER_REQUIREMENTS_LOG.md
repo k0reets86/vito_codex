@@ -986,3 +986,4 @@ Append all new owner requests here as they arrive.
 - [2026-02-25T10:59:50.581267+00:00] (codex_chat) Added pending approvals panel in dashboard for operator visibility.
 - [2026-02-25T11:00:41.598127+00:00] (codex_chat) Added optional self-refine pass for LLM fallback outputs (disabled by default).
 - [2026-02-25T11:01:28.802505+00:00] (codex_chat) Added preference correction events + metrics for explicit overrides.
+- [2026-02-25T11:02:55.396554+00:00] (codex_chat) Added dashboard preference controls (set/deactivate) for operator memory management.
