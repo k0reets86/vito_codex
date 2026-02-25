@@ -10,6 +10,7 @@ from typing import Optional
 from agents.base_agent import BaseAgent, TaskResult
 from config.logger import get_logger
 from llm_router import TaskType
+from modules.owner_preference_model import OwnerPreferenceModel
 
 logger = get_logger("vito_core", agent="vito_core")
 
@@ -144,10 +145,18 @@ class VITOCore(BaseAgent):
         """Создаёт план выполнения цели с фокусом на делегирование агентам."""
         if not self.llm_router:
             return []
+        pref_context = ""
+        try:
+            prefs = OwnerPreferenceModel().list_preferences(limit=5)
+            if prefs:
+                lines = [f"- {p.get('pref_key')}: {p.get('value')}" for p in prefs]
+                pref_context = "Предпочтения владельца:\n" + "\n".join(lines) + "\n"
+        except Exception:
+            pass
         prompt = (
             f"Ты VITO Core — оркестратор. Составь план из 4-7 шагов.\n"
             f"Цель: {title}\nОписание: {description}\n"
-            f"{memory_context}\n{skills_context}\n\n"
+            f"{memory_context}\n{skills_context}\n{pref_context}\n\n"
             f"ПРАВИЛА:\n"
             f"1) Каждый шаг должен быть делегируем конкретному агенту.\n"
             f"2) Пиши шаги как действия (глагол + объект).\n"
