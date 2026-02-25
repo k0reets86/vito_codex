@@ -36,3 +36,6 @@ Use `scripts/create_capability_pack.py <name> <category>` to generate a pack ske
 
 ## Sync Script
 Use `scripts/sync_capability_packs.py [root]` to register packs into SkillRegistry.
+
+## Report Script
+Use `scripts/capability_pack_report.py` to generate a pack status report.

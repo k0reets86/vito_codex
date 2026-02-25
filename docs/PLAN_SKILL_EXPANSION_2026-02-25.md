@@ -97,3 +97,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added starter capability packs for GAP areas (transport, smart_home, health, games, iOS/macOS, voice).
 - Added nightly owner preference snapshot into knowledge base.
 - Added nightly sync of capability packs into SkillRegistry.
+- Added capability pack report script.
