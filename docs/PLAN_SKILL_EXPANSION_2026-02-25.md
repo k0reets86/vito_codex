@@ -104,3 +104,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Logged owner preference usage in DataLake.
 - Added additional capability packs (ecommerce_e2e, security_hardening, agent_protocols, voice_streaming).
 - Added dashboard capability pack listing + API.
+- Extended skill audit to include capability pack tests.

@@ -280,7 +280,9 @@ class SkillRegistry:
         try:
             tests_dir = Path(tests_root)
             test_files = list(tests_dir.glob("test_*.py")) if tests_dir.exists() else []
-            test_names = [p.name.lower() for p in test_files]
+            packs_dir = Path(__file__).resolve().parent.parent / "capability_packs"
+            pack_tests = list(packs_dir.glob("*/tests/test_*.py")) if packs_dir.exists() else []
+            test_names = [p.name.lower() for p in (test_files + pack_tests)]
             rows = conn.execute(
                 "SELECT name, category, source, notes, acceptance_status FROM skill_registry"
             ).fetchall()
