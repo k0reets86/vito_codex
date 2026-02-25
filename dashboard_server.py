@@ -222,6 +222,16 @@ class DashboardServer:
                         threads = []
                     self._json({"threads": threads})
                     return
+                if parsed.path == "/api/workflow_interrupts":
+                    try:
+                        from modules.workflow_interrupts import WorkflowInterrupts
+                        status = (query.get("status", [""])[0] or "").strip()
+                        limit = int(query.get("limit", ["80"])[0] or 80)
+                        interrupts = WorkflowInterrupts().list_interrupts(status=status, limit=limit)
+                    except Exception:
+                        interrupts = []
+                    self._json({"interrupts": interrupts})
+                    return
 
                 if parsed.path == "/api/platforms":
                     rows = []
@@ -624,6 +634,7 @@ class DashboardServer:
         </div>
       </div>
       <div class=\"card\"><div class=\"mut\">Workflow Threads</div><div id=\"workflow_threads\"></div></div>
+      <div class=\"card\"><div class=\"mut\">Workflow Interrupts</div><div id=\"workflow_interrupts\"></div></div>
       <div class=\"card\"><div class=\"mut\">Secrets</div>
         <div class=\"mut\" style=\"font-size:12px\">Keys are write‑only here.</div>
         <div style=\"margin-top:8px\">\n
@@ -646,7 +657,7 @@ async function load(){
   const endpoints = {
     status:'/api/status', network:'/api/network', agents:'/api/agents', finance:'/api/finance',
     goals:'/api/goals', schedules:'/api/schedules', config:'/api/config',
-    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', guardrails:'/api/guardrails', llm_evals:'/api/llm_evals', tooling_registry:'/api/tooling_registry', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs', skills:'/api/skills', operator_policy:'/api/operator_policy', self_learning:'/api/self_learning', memory_policy:'/api/memory_policy?limit=80', workflow_threads:'/api/workflow_threads',
+    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', guardrails:'/api/guardrails', llm_evals:'/api/llm_evals', tooling_registry:'/api/tooling_registry', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs', skills:'/api/skills', operator_policy:'/api/operator_policy', self_learning:'/api/self_learning', memory_policy:'/api/memory_policy?limit=80', workflow_threads:'/api/workflow_threads', workflow_interrupts:'/api/workflow_interrupts',
     facts:'/api/execution_facts', approvals:'/api/approvals', events:'/api/events', decisions:'/api/decisions', budget:'/api/budget', workflow_events:'/api/workflow_events'
   };
   for (const [k,url] of Object.entries(endpoints)){
@@ -677,6 +688,7 @@ async function load(){
     else if (k === 'self_learning') renderSelfLearning(j);
     else if (k === 'memory_policy') renderMemoryPolicy(j.audit||[]);
     else if (k === 'workflow_threads') renderWorkflowThreads(j.threads||[]);
+    else if (k === 'workflow_interrupts') renderWorkflowInterrupts(j.interrupts||[]);
     else if (k === 'models') renderModels(j);
     else if (k === 'llm_policy') renderLlmPolicy(j.policy||{});
     else if (k === 'guardrails') renderGuardrails(j);
@@ -779,6 +791,12 @@ function renderWorkflowThreads(threads){
   if (!threads.length){ el.innerHTML = '<div class=\"mut\">No threads</div>'; return; }
   const rows = threads.map(t => `<tr><td>${t.thread_id}</td><td>${t.goal_id||''}</td><td>${t.status}</td><td>${t.last_node}</td><td>${t.updated_at||''}</td></tr>`).join('');
   el.innerHTML = `<table><thead><tr><th>Thread</th><th>Goal</th><th>Status</th><th>Last</th><th>Updated</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+function renderWorkflowInterrupts(items){
+  const el = document.getElementById('workflow_interrupts');
+  if (!items.length){ el.innerHTML = '<div class=\"mut\">No interrupts</div>'; return; }
+  const rows = items.slice(0,50).map(i => `<tr><td>${i.goal_id||''}</td><td>${i.step_num||0}</td><td>${i.interrupt_type||''}</td><td>${i.status||''}</td><td>${(i.reason||'').slice(0,80)}</td><td>${i.created_at||''}</td></tr>`).join('');
+  el.innerHTML = `<table><thead><tr><th>Goal</th><th>Step</th><th>Type</th><th>Status</th><th>Reason</th><th>Created</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 function renderRss(sources){
   const el = document.getElementById('rss');

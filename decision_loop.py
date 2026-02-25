@@ -28,6 +28,7 @@ from modules.self_learning import SelfLearningEngine
 from modules.llm_evals import LLMEvals
 from modules.workflow_state_machine import WorkflowStateMachine
 from modules.workflow_threads import WorkflowThreads
+from modules.workflow_interrupts import WorkflowInterrupts
 from modules.data_lake import DataLake
 from modules.step_contract import validate_step_output, validate_step_result
 
@@ -58,6 +59,7 @@ class DecisionLoop:
         self._progress_sent: dict[str, set[int]] = {}
         self.workflow = WorkflowStateMachine()
         self.threads = WorkflowThreads()
+        self.interrupts = WorkflowInterrupts()
         self.operator_policy = OperatorPolicy()
         self.self_learning = None
         self._last_llm_alert_at_tick = 0
@@ -203,6 +205,17 @@ class DecisionLoop:
                 f"[{goal.goal_id}] ожидает одобрения владельца",
                 extra={"event": "goal_awaiting_approval"},
             )
+            try:
+                self.interrupts.open_interrupt(
+                    goal_id=goal.goal_id,
+                    step_num=0,
+                    thread_id=f"goal_{goal.goal_id}",
+                    interrupt_type="owner_approval_required",
+                    reason="goal_cost_gate",
+                    payload={"goal_title": goal.title},
+                )
+            except Exception:
+                pass
             return
 
         results = await self._execute_goal(goal)
@@ -417,16 +430,37 @@ class DecisionLoop:
                 results["waiting_approval"] = True
                 results["paused_step"] = i + 1
                 try:
+                    self.interrupts.open_interrupt(
+                        goal_id=goal.goal_id,
+                        step_num=i + 1,
+                        thread_id=f"goal_{goal.goal_id}",
+                        interrupt_type="step_approval_pending",
+                        reason=str(step_result.get("error", "pending approval"))[:500],
+                        payload={"step": step[:200], "agent": str(step_result.get("agent", ""))[:80]},
+                    )
+                except Exception:
+                    pass
+                try:
                     self.goal_engine.wait_for_approval(goal.goal_id, reason=step_result.get("error", "pending approval"))
                 except Exception:
                     pass
                 return results
             if step_result.get("status") == "completed":
                 results["steps_completed"] += 1
+                try:
+                    self.interrupts.resolve_pending_for_goal(goal.goal_id, resolution="resumed")
+                except Exception:
+                    pass
             await self._maybe_reflect_step(goal, step, step_result)
             await self._maybe_send_progress(goal, results)
 
             if step_result.get("status") == "failed":
+                try:
+                    err_low = str(step_result.get("error", "")).lower()
+                    if "reject" in err_low or "отклон" in err_low:
+                        self.interrupts.resolve_pending_for_goal(goal.goal_id, resolution="cancelled")
+                except Exception:
+                    pass
                 logger.warning(
                     f"[{goal.goal_id}] Шаг {i + 1} провалился после {STEP_MAX_RETRIES} попыток: {step_result.get('error')}",
                     extra={"event": "step_failed", "context": {"goal_id": goal.goal_id, "step": i + 1}},

@@ -173,3 +173,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added stage-approval policies for production/rollback and signed release bundles in release history (bundle_hash + signature).
 - Added tooling governance report (integrity/pending/remediation metrics) and cryptographic key-rotation flow for contract/release signing keys, with dashboard APIs/UI.
 - Extended strict step contracts to DecisionLoop step-result envelopes and AgentRegistry dispatch outputs (agents + tooling + capability-pack fallbacks).
+- Added workflow interrupt ledger (`workflow_interrupts`) with pending/resolved/cancelled lifecycle and dashboard endpoint for durable approval pauses.
