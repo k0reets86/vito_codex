@@ -171,6 +171,20 @@ async def test_cmd_prefs(comms, mock_update, tmp_path: Path):
         settings.SQLITE_PATH = old_path
 
 
+@pytest.mark.asyncio
+async def test_pref_deactivate_command(comms, tmp_path: Path):
+    old_path = settings.SQLITE_PATH
+    try:
+        settings.SQLITE_PATH = str(tmp_path / "prefs.db")
+        OwnerPreferenceModel().set_preference("style", "brief")
+        await comms._handle_owner_text("/pref_del style")
+        pref = OwnerPreferenceModel().get_preference("style")
+        assert pref is not None
+        assert pref["status"] == "inactive"
+    finally:
+        settings.SQLITE_PATH = old_path
+
+
 # ── Одобрение ──
 
 @pytest.mark.asyncio

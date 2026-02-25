@@ -107,3 +107,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Extended skill audit to include capability pack tests.
 - Added owner preference metrics module + dashboard endpoint.
 - Stored failure lessons into semantic memory.
+- Added owner preference deactivation command and tracking.

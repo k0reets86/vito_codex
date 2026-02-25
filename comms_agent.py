@@ -366,6 +366,9 @@ class CommsAgent:
             await self.send_message("Ключ принят и сохранён. Если нужен перезапуск сервиса — скажи 'перезапусти'.")
             return
         # Explicit preference update (opt-in)
+        if self._try_deactivate_preference_from_text(text):
+            await self.send_message("Предпочтение деактивировано.")
+            return
         if self._try_set_preference_from_text(text):
             await self.send_message("Предпочтение сохранено. Могу учитывать в будущих задачах.")
             return
@@ -2092,6 +2095,46 @@ class CommsAgent:
                     task_type="owner_preference_set",
                     status="success",
                     output={"key": key, "value": parsed_value},
+                    source="owner",
+                )
+            except Exception:
+                pass
+            return True
+        except Exception:
+            return False
+
+    def _try_deactivate_preference_from_text(self, text: str) -> bool:
+        """Parse preference removal commands.
+
+        Supported:
+        - /pref_del key
+        - /pref_remove key
+        - forget key
+        - забыть key
+        """
+        raw = (text or "").strip()
+        if not raw:
+            return False
+        lower = raw.lower()
+        prefixes = ("/pref_del", "/pref_remove", "forget ", "забыть ")
+        if not any(lower.startswith(p) for p in prefixes):
+            return False
+        for p in prefixes:
+            if lower.startswith(p):
+                key = raw[len(p):].strip()
+                break
+        else:
+            key = ""
+        if not key:
+            return False
+        try:
+            OwnerPreferenceModel().deactivate_preference(key, notes="owner_request")
+            try:
+                DataLake().record(
+                    agent="comms_agent",
+                    task_type="owner_preference_deactivate",
+                    status="success",
+                    output={"key": key},
                     source="owner",
                 )
             except Exception:

@@ -49,3 +49,13 @@ def test_owner_preference_list_and_update_confidence(tmp_path: Path):
     pref = model.get_preference("timezone")
     assert pref is not None
     assert float(pref["confidence"]) == 0.8
+
+
+def test_owner_preference_deactivate(tmp_path: Path):
+    db = str(tmp_path / "prefs.db")
+    model = OwnerPreferenceModel(sqlite_path=db)
+    model.set_preference(key="style", value="brief")
+    model.deactivate_preference("style", notes="owner request")
+    pref = model.get_preference("style")
+    assert pref is not None
+    assert pref["status"] == "inactive"

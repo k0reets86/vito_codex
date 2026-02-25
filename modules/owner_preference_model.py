@@ -217,6 +217,25 @@ class OwnerPreferenceModel:
         finally:
             conn.close()
 
+    def deactivate_preference(self, key: str, notes: str = "") -> None:
+        conn = sqlite3.connect(self.sqlite_path)
+        try:
+            conn.execute(
+                """UPDATE owner_preferences
+                   SET status = 'inactive', updated_at = datetime('now'), notes = ?
+                   WHERE pref_key = ?""",
+                (notes[:200], key),
+            )
+            conn.execute(
+                """INSERT INTO owner_preference_events
+                   (pref_key, signal_type, value_json, source, confidence_delta, notes)
+                   VALUES (?, 'deactivate', '{}', 'owner', 0.0, ?)""",
+                (key, notes[:200]),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
 
 def _safe_json_loads(raw: str) -> Any:
     try:
