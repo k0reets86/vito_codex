@@ -103,6 +103,15 @@ class SelfLearningEngine:
                 conn.execute("ALTER TABLE self_learning_test_jobs ADD COLUMN attempts INTEGER DEFAULT 0")
             if "flaky" not in job_cols:
                 conn.execute("ALTER TABLE self_learning_test_jobs ADD COLUMN flaky INTEGER DEFAULT 0")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS self_learning_thresholds (
+                    task_family TEXT PRIMARY KEY,
+                    confidence_min REAL DEFAULT 0.78,
+                    updated_at TEXT DEFAULT (datetime('now'))
+                )
+                """
+            )
             conn.commit()
         finally:
             conn.close()
@@ -402,8 +411,9 @@ class SelfLearningEngine:
                 family_bias = 0.03 if family_pass_rate >= 0.75 else (-0.03 if family_pass_rate <= 0.4 else 0.0)
                 optimized = (0.42 * base_conf) + (0.33 * avg_score) + (0.20 * pass_rate) + (0.05 * family_pass_rate) + family_bias
                 optimized = max(0.0, min(1.0, optimized))
+                threshold = self.get_threshold_for_family(task_family, float(promote_confidence_min))
                 recommendation = "hold"
-                if lessons_count >= int(min_lessons) and pass_rate >= 0.65 and optimized >= float(promote_confidence_min):
+                if lessons_count >= int(min_lessons) and pass_rate >= 0.65 and optimized >= threshold:
                     recommendation = "ready"
                 next_status = "optimized" if recommendation == "hold" else "ready"
                 conn.execute(
@@ -441,8 +451,10 @@ class SelfLearningEngine:
                         "task_family": task_family,
                         "family_pass_rate": round(family_pass_rate, 4),
                         "recommendation": recommendation,
+                        "threshold": round(threshold,4),
                     }
                 )
+                self.adjust_threshold_for_family(task_family, pass_rate, avg_score)
             conn.commit()
         finally:
             conn.close()
@@ -579,6 +591,63 @@ class SelfLearningEngine:
             return changed
         finally:
             conn.close()
+
+    def get_threshold_for_family(self, task_family: str, default: float = 0.78) -> float:
+        if not task_family:
+            return default
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                """
+                SELECT confidence_min
+                FROM self_learning_thresholds
+                WHERE task_family = ?
+                """,
+                (task_family[:60],),
+            ).fetchone()
+            if row and row["confidence_min"] not in (None, ""):
+                return float(row["confidence_min"])
+        finally:
+            conn.close()
+        return default
+
+    def adjust_threshold_for_family(self, task_family: str, pass_rate: float, avg_score: float) -> None:
+        if not task_family:
+            return
+        current = self.get_threshold_for_family(task_family)
+        delta = 0.0
+        if pass_rate >= 0.85 and avg_score >= 0.7:
+            delta = -0.03
+        elif pass_rate <= 0.5:
+            delta = 0.04
+        new_value = self._clamp_threshold(current + delta)
+        if abs(new_value - current) < 0.005:
+            return
+        self.set_threshold_for_family(task_family, new_value)
+
+    def set_threshold_for_family(self, task_family: str, value: float) -> None:
+        if not task_family:
+            return
+        value = self._clamp_threshold(value)
+        conn = self._get_conn()
+        try:
+            conn.execute(
+                """
+                INSERT INTO self_learning_thresholds (task_family, confidence_min, updated_at)
+                VALUES (?, ?, datetime('now'))
+                ON CONFLICT(task_family) DO UPDATE SET
+                  confidence_min = excluded.confidence_min,
+                  updated_at = excluded.updated_at
+                """,
+                (task_family[:60], value),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _clamp_threshold(value: float) -> float:
+        return max(0.65, min(0.95, float(value or 0.0)))
 
     def summary(self, days: int = 30) -> dict:
         conn = self._get_conn()

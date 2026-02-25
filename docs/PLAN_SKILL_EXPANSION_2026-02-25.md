@@ -40,6 +40,7 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Self-refine loop for outputs and prompts.
 - DSPy-style optimization for prompt/policy modules.
 - Skill generation path: propose -> test -> review -> enable.
+- Added adaptive family-level thresholds stored in `self_learning_thresholds` to tune promotion gates dynamically (tests cover table + adjust logic).
 
 ### Phase 5 — Publications & Commerce
 - Scheduler + queue + retries + dedupe for social posts.

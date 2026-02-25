@@ -24,6 +24,7 @@
   - Extended step-result contracts across DecisionLoop retry pipeline and AgentRegistry dispatch (including tooling/capability fallbacks).
   - Added durable workflow interrupt registry (pending/resolved/cancelled) and dashboard visibility for approval pauses/resume traces.
   - Added workflow sessions visibility/resume/cancel/reset (backend `/api/workflow_sessions`, dashboard card, `OrchestrationManager` actions).
+  - Self-learning live: added adaptive thresholds per task family (`self_learning_thresholds` table) that tune promotion thresholds and included `tests/test_self_learning_thresholds.py`.
   - Upgraded memory policy with retention classes, TTL metadata (`expires_at`), and quality scoring summary in dashboard.
   - Развернул pipeline памяти: добавлен `MemoryBlocks` для owner-centric блоков и консолидируемый short→long поток в `MemoryManager`.
   - Добавил `MemorySkillReporter` + скрипт `scripts/generate_weekly_memory_report.py` для owner-facing weekly retention + per-skill quality отчёта.
