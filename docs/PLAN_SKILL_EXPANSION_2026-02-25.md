@@ -119,3 +119,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Next: integrate capability packs into acceptance flow (pending -> accepted with tests).
 - Added capability pack acceptance script.
 - Fixed sync_capability_packs import path.
+- Added capability pack name fallback in VITOCore classifier.

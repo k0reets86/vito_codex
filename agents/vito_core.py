@@ -139,6 +139,18 @@ class VITOCore(BaseAgent):
         for keyword, capability in KEYWORD_CAPABILITY_MAP.items():
             if keyword in step_lower:
                 return capability
+        # fallback: capability pack by name
+        try:
+            from pathlib import Path
+            packs_dir = Path(__file__).resolve().parent.parent / "capability_packs"
+            if packs_dir.exists():
+                for pack in packs_dir.iterdir():
+                    if not pack.is_dir():
+                        continue
+                    if pack.name.replace("_", " ") in step_lower or pack.name in step_lower:
+                        return pack.name
+        except Exception:
+            pass
         return None
 
     async def plan_goal(self, title: str, description: str, memory_context: str = "", skills_context: str = "") -> list[str]:
