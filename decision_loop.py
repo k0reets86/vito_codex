@@ -24,6 +24,7 @@ from goal_engine import Goal, GoalEngine, GoalPriority, GoalStatus
 from llm_router import LLMRouter, TaskType
 from memory.memory_manager import MemoryManager
 from modules.workflow_state_machine import WorkflowStateMachine
+from modules.workflow_threads import WorkflowThreads
 from modules.data_lake import DataLake
 from modules.step_contract import validate_step_output
 
@@ -53,6 +54,7 @@ class DecisionLoop:
         self._consecutive_idle = 0
         self._progress_sent: dict[str, set[int]] = {}
         self.workflow = WorkflowStateMachine()
+        self.threads = WorkflowThreads()
         logger.info("DecisionLoop инициализирован", extra={"event": "init"})
 
     def set_self_healer(self, self_healer) -> None:
@@ -144,6 +146,11 @@ class DecisionLoop:
     async def _process_goal(self, goal: Goal) -> None:
         """Проводит цель через полный цикл."""
         trace_id = self.workflow.start_or_attach(goal.goal_id)
+        try:
+            self.threads.start_thread(thread_id=f"goal_{goal.goal_id}", goal_id=goal.goal_id)
+            self.threads.update_thread(thread_id=f"goal_{goal.goal_id}", status="planning", last_node="planning")
+        except Exception:
+            pass
         logger.info(
             f"Обработка цели: [{goal.goal_id}] {goal.title}",
             extra={
@@ -162,6 +169,10 @@ class DecisionLoop:
         plan = await self._plan_goal(goal)
         if not plan:
             self.workflow.transition(goal.goal_id, "failed", reason="planning_failed", detail="empty_plan")
+            try:
+                self.threads.update_thread(thread_id=f"goal_{goal.goal_id}", status="failed", last_node="planning_failed")
+            except Exception:
+                pass
             self.goal_engine.fail_goal(goal.goal_id, "Не удалось составить план")
             return
 
@@ -169,9 +180,17 @@ class DecisionLoop:
 
         # EXECUTE
         self.workflow.transition(goal.goal_id, "executing", reason="plan_ready", detail=f"steps={len(plan)}")
+        try:
+            self.threads.update_thread(thread_id=f"goal_{goal.goal_id}", status="executing", last_node="executing")
+        except Exception:
+            pass
         if not self.goal_engine.start_execution(goal.goal_id):
             # Цель ушла в WAITING_APPROVAL — ждём одобрения владельца
             self.workflow.transition(goal.goal_id, "waiting_approval", reason="owner_approval_required", detail=goal.title)
+            try:
+                self.threads.update_thread(thread_id=f"goal_{goal.goal_id}", status="waiting_approval", last_node="waiting_approval")
+            except Exception:
+                pass
             logger.info(
                 f"[{goal.goal_id}] ожидает одобрения владельца",
                 extra={"event": "goal_awaiting_approval"},
@@ -181,15 +200,31 @@ class DecisionLoop:
         results = await self._execute_goal(goal)
         if results.get("waiting_approval"):
             self.workflow.transition(goal.goal_id, "waiting_approval", reason="step_approval_pending", detail=goal.title)
+            try:
+                self.threads.update_thread(thread_id=f"goal_{goal.goal_id}", status="waiting_approval", last_node="waiting_approval")
+            except Exception:
+                pass
             return
 
         # LEARN
         self.workflow.transition(goal.goal_id, "learning", reason="execution_finished", detail=str(results.get("steps_completed", 0)))
+        try:
+            self.threads.update_thread(thread_id=f"goal_{goal.goal_id}", status="learning", last_node="learning")
+        except Exception:
+            pass
         await self._learn_from_goal(goal, results)
         if results.get("all_completed"):
             self.workflow.transition(goal.goal_id, "completed", reason="learn_done", detail="ok")
+            try:
+                self.threads.update_thread(thread_id=f"goal_{goal.goal_id}", status="completed", last_node="completed")
+            except Exception:
+                pass
         else:
             self.workflow.transition(goal.goal_id, "failed", reason="partial_or_failed", detail=str(results.get("steps_completed", 0)))
+            try:
+                self.threads.update_thread(thread_id=f"goal_{goal.goal_id}", status="failed", last_node="failed")
+            except Exception:
+                pass
         try:
             DataLake().record(
                 agent="decision_loop",
@@ -315,6 +350,14 @@ class DecisionLoop:
             pass
         while i < len(goal.plan):
             step = goal.plan[i]
+            try:
+                self.threads.update_thread(
+                    thread_id=f"goal_{goal.goal_id}",
+                    status="executing",
+                    last_node=f"step_{i + 1}",
+                )
+            except Exception:
+                pass
             logger.info(
                 f"[{goal.goal_id}] Шаг {i + 1}/{len(goal.plan)}: {step}",
                 extra={

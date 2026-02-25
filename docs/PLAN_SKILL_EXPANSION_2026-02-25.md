@@ -155,3 +155,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added dashboard preference controls (set/deactivate) for operator memory management.
 - Registered auto-installed self_improve skills as pending in SkillRegistry.
 - Added skills listing endpoint + dashboard panel.
+- Integrated workflow threads tracking + dashboard visibility.

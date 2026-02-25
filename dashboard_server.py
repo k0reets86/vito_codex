@@ -182,6 +182,15 @@ class DashboardServer:
                         skills = []
                     self._json({"skills": skills})
                     return
+                if parsed.path == "/api/workflow_threads":
+                    try:
+                        from modules.workflow_threads import WorkflowThreads
+                        limit = int(query.get("limit", ["50"])[0] or 50)
+                        threads = WorkflowThreads().list_threads(limit=limit)
+                    except Exception:
+                        threads = []
+                    self._json({"threads": threads})
+                    return
 
                 if parsed.path == "/api/platforms":
                     rows = []
@@ -443,6 +452,7 @@ class DashboardServer:
       <div class=\"card\"><div class=\"mut\">Pref Metrics</div><div id=\"prefs_metrics\"></div></div>
       <div class=\"card\"><div class=\"mut\">Capability Packs</div><div id=\"capability_packs\"></div></div>
       <div class=\"card\"><div class=\"mut\">Skills</div><div id=\"skills\"></div></div>
+      <div class=\"card\"><div class=\"mut\">Workflow Threads</div><div id=\"workflow_threads\"></div></div>
       <div class=\"card\"><div class=\"mut\">Secrets</div>
         <div class=\"mut\" style=\"font-size:12px\">Keys are write‑only here.</div>
         <div style=\"margin-top:8px\">\n
@@ -465,7 +475,7 @@ async function load(){
   const endpoints = {
     status:'/api/status', network:'/api/network', agents:'/api/agents', finance:'/api/finance',
     goals:'/api/goals', schedules:'/api/schedules', config:'/api/config',
-    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs', skills:'/api/skills',
+    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs', skills:'/api/skills', workflow_threads:'/api/workflow_threads',
     facts:'/api/execution_facts', approvals:'/api/approvals', events:'/api/events', decisions:'/api/decisions', budget:'/api/budget', workflow_events:'/api/workflow_events'
   };
   for (const [k,url] of Object.entries(endpoints)){
@@ -492,6 +502,7 @@ async function load(){
     else if (k === 'prefs_metrics') renderPrefsMetrics(j.metrics||{});
     else if (k === 'capability_packs') renderCapabilityPacks(j.packs||[]);
     else if (k === 'skills') renderSkills(j.skills||[]);
+    else if (k === 'workflow_threads') renderWorkflowThreads(j.threads||[]);
     else if (k === 'models') renderModels(j);
     else if (k === 'llm_policy') renderLlmPolicy(j.policy||{});
   }
@@ -518,6 +529,12 @@ function renderSkills(skills){
   if (!skills.length){ el.innerHTML = '<div class=\"mut\">No skills</div>'; return; }
   const rows = skills.map(s => `<div style=\"margin:4px 0\"><code>${s.name}</code> ${s.category} <span class=\"mut\">(${s.acceptance_status})</span></div>`);
   el.innerHTML = rows.join('');
+}
+function renderWorkflowThreads(threads){
+  const el = document.getElementById('workflow_threads');
+  if (!threads.length){ el.innerHTML = '<div class=\"mut\">No threads</div>'; return; }
+  const rows = threads.map(t => `<tr><td>${t.thread_id}</td><td>${t.goal_id||''}</td><td>${t.status}</td><td>${t.last_node}</td><td>${t.updated_at||''}</td></tr>`).join('');
+  el.innerHTML = `<table><thead><tr><th>Thread</th><th>Goal</th><th>Status</th><th>Last</th><th>Updated</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 function renderRss(sources){
   const el = document.getElementById('rss');

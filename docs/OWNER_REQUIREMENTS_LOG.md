@@ -989,6 +989,7 @@ Append all new owner requests here as they arrive.
 - [2026-02-25T11:02:55.396554+00:00] (codex_chat) Added dashboard preference controls (set/deactivate) for operator memory management.
 - [2026-02-25T11:03:47.527040+00:00] (codex_chat) Auto-installed self_improve skills now register as pending in SkillRegistry.
 - [2026-02-25T11:04:55.247441+00:00] (codex_chat) Added skills listing in dashboard for operator visibility.
+- [2026-02-25T11:09:38.379201+00:00] (codex_chat) Integrated workflow threads tracking + dashboard visibility.
 - [2026-02-25T11:03:24.690697+00:00] (text) Расходы
 - [2026-02-25T11:03:26.671891+00:00] (text) Отклонить
 - [2026-02-25T11:03:26.814688+00:00] (text) Отклонить
