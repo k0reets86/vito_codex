@@ -126,5 +126,8 @@ class Settings:
     # Owner preference auto-detect (off by default)
     OWNER_PREF_AUTO_DETECT: bool = os.getenv("OWNER_PREF_AUTO_DETECT", "false").lower() in ("1", "true", "yes", "on")
 
+    # Capability pack gating
+    CAPABILITY_PACK_ALLOW_PENDING: bool = os.getenv("CAPABILITY_PACK_ALLOW_PENDING", "false").lower() in ("1", "true", "yes", "on")
+
 
 settings = Settings()

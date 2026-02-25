@@ -48,3 +48,6 @@ Use `scripts/validate_capability_packs.py` to validate required fields.
 
 ## Acceptance Script
 Use `scripts/accept_capability_packs.py --tests-passed --evidence <report>` to accept pending packs.
+
+## Runtime Gate
+By default, pending packs are blocked at runtime unless `CAPABILITY_PACK_ALLOW_PENDING=true`.

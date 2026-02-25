@@ -5,6 +5,8 @@ import importlib.util
 from pathlib import Path
 from typing import Any
 
+from config.settings import settings
+
 
 class CapabilityPackRunner:
     def __init__(self, root: str | None = None):
@@ -13,11 +15,22 @@ class CapabilityPackRunner:
 
     def run(self, name: str, input_data: dict[str, Any] | None = None) -> dict[str, Any]:
         pack_dir = self.root / name
+        spec_path = pack_dir / "spec.json"
         adapter = pack_dir / "adapter.py"
         if not adapter.exists():
             result = {"status": "error", "error": "adapter_not_found"}
             _record_pack_event(name, result)
             return result
+        if spec_path.exists() and not settings.CAPABILITY_PACK_ALLOW_PENDING:
+            try:
+                import json
+                spec = json.loads(spec_path.read_text(encoding="utf-8"))
+                if str(spec.get("acceptance_status", "pending")).lower() != "accepted":
+                    result = {"status": "error", "error": "pack_not_accepted"}
+                    _record_pack_event(name, result)
+                    return result
+            except Exception:
+                pass
         spec = importlib.util.spec_from_file_location(f"cap_pack_{name}", adapter)
         if not spec or not spec.loader:
             result = {"status": "error", "error": "load_failed"}
