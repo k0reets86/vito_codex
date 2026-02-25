@@ -150,3 +150,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added workflow events endpoint + dashboard panel for durable workflow visibility.
 - Expanded owner preference auto-detect heuristics and metrics (auto_detect/explicit).
 - Added pending approvals visibility in dashboard (operator UI).
+- Added optional self-refine pass for LLM fallback outputs (gated by settings).

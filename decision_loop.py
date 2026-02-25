@@ -587,6 +587,20 @@ class DecisionLoop:
                 estimated_tokens=1500,
             )
             if response:
+                try:
+                    from config.settings import settings
+                    if settings.SELF_REFINE_ENABLED:
+                        from modules.self_refine import refine_once
+                        passes = max(1, min(3, int(settings.SELF_REFINE_MAX_PASSES or 1)))
+                        refined = response
+                        for _ in range(passes):
+                            improved = await refine_once(self.llm_router, task_type, refined)
+                            if improved:
+                                refined = improved
+                        response = refined
+                except Exception:
+                    pass
+            if response:
                 # Save LLM result to file if it looks like content
                 file_path = await self._save_step_output(goal, step, response)
                 result_data = {"status": "completed", "output": response[:500]}
