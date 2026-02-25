@@ -179,3 +179,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added retention drift analytics and TTL cleanup workflow (preview/apply) plus periodic DecisionLoop retention checks.
 - Added provider health panel with key-rotation reminders and safe remediation actions (economy profile, strict guardrails, disable tooling live, minimal notify).
 - Added self-learning optimizer loop: candidate confidence recalibration (lesson/pass-rate weighted), readiness states, and safe auto-promotion to accepted skills via SkillRegistry quality gates.
+- Added explicit self-learning test-jobs (open/passed/failed), dashboard controls, and task-family calibration metrics for confidence scoring.

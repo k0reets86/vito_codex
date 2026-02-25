@@ -35,6 +35,10 @@ async def test_self_learning_reflect_creates_candidate(tmp_path):
     candidates = sl.list_candidates(limit=10)
     assert candidates
     assert candidates[0]["skill_name"] == "selflearn:research_flow"
+    assert candidates[0]["task_family"] == "research"
+    lessons = sl.list_lessons(limit=10)
+    assert lessons
+    assert lessons[0]["task_family"] == "research"
 
 
 def test_self_learning_optimize_candidates(tmp_path):
@@ -93,3 +97,33 @@ def test_self_learning_auto_promote_ready_with_skill_registry_gates(tmp_path):
     row = reg.get_skill(skill_name)
     assert row is not None
     assert row.get("acceptance_status") == "accepted"
+
+
+def test_self_learning_generate_test_jobs_and_complete(tmp_path):
+    db = str(tmp_path / "sl.db")
+    sl = SelfLearningEngine(sqlite_path=db)
+    reg = SkillRegistry(sqlite_path=db)
+    skill_name = "selflearn:test_job_skill"
+    reg.register_skill(skill_name, category="self_learning", source="self_learning", acceptance_status="pending")
+    sl.register_candidate(skill_name, confidence=0.9, notes="needs tests", task_family="research")
+    sl.set_candidate_status(skill_name, "ready")
+    out = sl.generate_test_jobs(limit=10)
+    assert out["ok"] is True
+    assert out["created"] >= 1
+    jobs = sl.list_test_jobs(status="open", limit=10)
+    assert jobs
+    assert jobs[0]["skill_name"] == skill_name
+    done = sl.complete_test_job(int(jobs[0]["id"]), passed=True, notes="pytest ok")
+    assert done is True
+    jobs2 = sl.list_test_jobs(status="passed", limit=10)
+    assert jobs2
+
+
+def test_self_learning_summary_has_family_calibration(tmp_path):
+    db = str(tmp_path / "sl.db")
+    sl = SelfLearningEngine(sqlite_path=db)
+    sl.record_lesson("g1", "research step", "completed", 0.9, "ok", task_family="research")
+    sl.record_lesson("g2", "research step", "failed", 0.2, "fail", task_family="research")
+    summary = sl.summary(days=30)
+    assert "family_calibration" in summary
+    assert isinstance(summary["family_calibration"], list)

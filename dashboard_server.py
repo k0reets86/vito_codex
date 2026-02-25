@@ -203,15 +203,17 @@ class DashboardServer:
                         summary = sl.summary(days=30)
                         optimizations = sl.optimization_runs(limit=50)
                         promotions = sl.promotion_events(limit=50)
+                        test_jobs = sl.list_test_jobs(limit=80)
                     except Exception:
                         lessons, candidates = [], []
-                        summary, optimizations, promotions = {}, [], []
+                        summary, optimizations, promotions, test_jobs = {}, [], [], []
                     self._json({
                         "lessons": lessons,
                         "candidates": candidates,
                         "summary": summary,
                         "optimizations": optimizations,
                         "promotions": promotions,
+                        "test_jobs": test_jobs,
                     })
                     return
                 if parsed.path == "/api/memory_policy":
@@ -649,6 +651,12 @@ class DashboardServer:
         <div style=\"margin-top:6px\">
           <button onclick=\"optimizeSelfLearning()\">Optimize</button>
           <button onclick=\"autoPromoteSelfLearning()\">Auto Promote Ready</button>
+          <button onclick=\"generateSelfLearningTestJobs()\">Generate Test Jobs</button>
+        </div>
+        <div style=\"margin-top:6px\">
+          <input id=\"sl_job_id\" placeholder=\"job_id\" style=\"width:20%\"/>
+          <button onclick=\"completeSelfLearningTestJob(true)\">Mark Job Passed</button>
+          <button onclick=\"completeSelfLearningTestJob(false)\">Mark Job Failed</button>
         </div>
       </div>
       <div class=\"card\"><div class=\"mut\">Tooling Registry</div><div id=\"tooling_registry\"></div></div>
@@ -821,16 +829,21 @@ function renderSelfLearning(j){
   const summary = (j && j.summary) ? j.summary : {};
   const optimizations = (j && j.optimizations) ? j.optimizations : [];
   const promotions = (j && j.promotions) ? j.promotions : [];
-  const srows = Object.entries(summary).map(([k,v])=>`<tr><td>${k}</td><td>${JSON.stringify(v)}</td></tr>`).join('');
+  const testJobs = (j && j.test_jobs) ? j.test_jobs : [];
+  const srows = Object.entries(summary).filter(([k,_])=>k!=='family_calibration').map(([k,v])=>`<tr><td>${k}</td><td>${JSON.stringify(v)}</td></tr>`).join('');
+  const frows = (summary.family_calibration||[]).slice(0,8).map(r=>`<tr><td>${r.task_family||''}</td><td>${r.lessons||0}</td><td>${r.pass_rate||0}</td><td>${r.avg_score||0}</td></tr>`).join('');
   const lrows = lessons.slice(0,8).map(r => `<tr><td>${r.goal_id||''}</td><td>${r.status||''}</td><td>${(r.score||0).toFixed? (r.score||0).toFixed(2):r.score}</td><td>${(r.lesson||'').slice(0,80)}</td></tr>`).join('');
   const crows = candidates.slice(0,8).map(r => `<tr><td>${r.skill_name}</td><td>${r.confidence}</td><td>${r.optimized_confidence||0}</td><td>${r.lessons_count||0}</td><td>${r.pass_rate||0}</td><td>${r.status}</td></tr>`).join('');
   const orows = optimizations.slice(0,8).map(r => `<tr><td>${r.skill_name}</td><td>${r.confidence_before}</td><td>${r.confidence_after}</td><td>${r.lessons_count}</td><td>${r.pass_rate}</td><td>${r.recommendation}</td></tr>`).join('');
   const prows = promotions.slice(0,8).map(r => `<tr><td>${r.skill_name}</td><td>${r.decision}</td><td>${(r.reason||'').slice(0,80)}</td><td>${r.created_at||''}</td></tr>`).join('');
+  const jrows = testJobs.slice(0,8).map(r => `<tr><td>${r.id}</td><td>${r.skill_name}</td><td>${r.task_family||''}</td><td>${r.reason||''}</td><td>${r.status||''}</td></tr>`).join('');
   el.innerHTML =
     `<div class=\"mut\">Summary</div><table><thead><tr><th>Key</th><th>Value</th></tr></thead><tbody>${srows}</tbody></table>` +
+    `<div class=\"mut\" style=\"margin-top:8px\">Family Calibration</div><table><thead><tr><th>Family</th><th>Lessons</th><th>Pass</th><th>Avg</th></tr></thead><tbody>${frows}</tbody></table>` +
     `<div class=\"mut\">Lessons</div><table><thead><tr><th>Goal</th><th>Status</th><th>Score</th><th>Lesson</th></tr></thead><tbody>${lrows}</tbody></table>` +
     `<div class=\"mut\" style=\"margin-top:8px\">Candidates</div><table><thead><tr><th>Skill</th><th>Conf</th><th>Opt</th><th>Lessons</th><th>Pass</th><th>Status</th></tr></thead><tbody>${crows}</tbody></table>` +
     `<div class=\"mut\" style=\"margin-top:8px\">Optimizations</div><table><thead><tr><th>Skill</th><th>Before</th><th>After</th><th>Lessons</th><th>Pass</th><th>Rec</th></tr></thead><tbody>${orows}</tbody></table>` +
+    `<div class=\"mut\" style=\"margin-top:8px\">Test Jobs</div><table><thead><tr><th>ID</th><th>Skill</th><th>Family</th><th>Reason</th><th>Status</th></tr></thead><tbody>${jrows}</tbody></table>` +
     `<div class=\"mut\" style=\"margin-top:8px\">Promotion Events</div><table><thead><tr><th>Skill</th><th>Decision</th><th>Reason</th><th>Time</th></tr></thead><tbody>${prows}</tbody></table>`;
 }
 function renderToolingRegistry(items, approvals, stageApprovals, keyRotations, history, governance, signaturePolicy){
@@ -1172,6 +1185,16 @@ async function optimizeSelfLearning(){
 }
 async function autoPromoteSelfLearning(){
   await fetch('/api/self_learning', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'auto_promote'})});
+  await load();
+}
+async function generateSelfLearningTestJobs(){
+  await fetch('/api/self_learning', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'generate_test_jobs', limit:20})});
+  await load();
+}
+async function completeSelfLearningTestJob(passed){
+  const job_id = parseInt((document.getElementById('sl_job_id').value||'0').trim(), 10);
+  if (!job_id) return;
+  await fetch('/api/self_learning', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'complete_test_job', job_id, passed})});
   await load();
 }
 async function setToolPolicy(){
@@ -1612,6 +1635,17 @@ load();
                             changed = sl.auto_promote_ready_candidates()
                             result = {"ok": True, "promoted": changed}
                             ok = True
+                        elif action == "generate_test_jobs":
+                            result = sl.generate_test_jobs(limit=int(payload.get("limit", 20) or 20))
+                            ok = bool(result.get("ok"))
+                        elif action == "complete_test_job":
+                            done = sl.complete_test_job(
+                                job_id=int(payload.get("job_id", 0) or 0),
+                                passed=bool(payload.get("passed", False)),
+                                notes=str(payload.get("notes", "")),
+                            )
+                            result = {"ok": done}
+                            ok = done
                         elif action == "set_candidate_status":
                             skill_name = str(payload.get("skill_name", "")).strip()
                             status = str(payload.get("status", "")).strip()

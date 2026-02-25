@@ -33,6 +33,7 @@ class SelfLearningEngine:
                     lesson TEXT DEFAULT '',
                     notes TEXT DEFAULT '',
                     candidate_skill TEXT DEFAULT '',
+                    task_family TEXT DEFAULT '',
                     created_at TEXT DEFAULT (datetime('now'))
                 );
                 CREATE TABLE IF NOT EXISTS self_learning_candidates (
@@ -41,6 +42,7 @@ class SelfLearningEngine:
                     category TEXT DEFAULT 'self_learning',
                     confidence REAL DEFAULT 0,
                     source TEXT DEFAULT 'reflection',
+                    task_family TEXT DEFAULT '',
                     notes TEXT DEFAULT '',
                     status TEXT DEFAULT 'pending',
                     optimized_confidence REAL DEFAULT 0,
@@ -67,11 +69,24 @@ class SelfLearningEngine:
                     reason TEXT DEFAULT '',
                     created_at TEXT DEFAULT (datetime('now'))
                 );
+                CREATE TABLE IF NOT EXISTS self_learning_test_jobs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    skill_name TEXT NOT NULL,
+                    task_family TEXT DEFAULT '',
+                    reason TEXT DEFAULT '',
+                    status TEXT DEFAULT 'open',
+                    result_notes TEXT DEFAULT '',
+                    created_at TEXT DEFAULT (datetime('now')),
+                    updated_at TEXT DEFAULT (datetime('now')),
+                    UNIQUE(skill_name, reason, status)
+                );
                 """
             )
             lesson_cols = {r["name"] for r in conn.execute("PRAGMA table_info(self_learning_lessons)").fetchall()}
             if "candidate_skill" not in lesson_cols:
                 conn.execute("ALTER TABLE self_learning_lessons ADD COLUMN candidate_skill TEXT DEFAULT ''")
+            if "task_family" not in lesson_cols:
+                conn.execute("ALTER TABLE self_learning_lessons ADD COLUMN task_family TEXT DEFAULT ''")
             cand_cols = {r["name"] for r in conn.execute("PRAGMA table_info(self_learning_candidates)").fetchall()}
             if "optimized_confidence" not in cand_cols:
                 conn.execute("ALTER TABLE self_learning_candidates ADD COLUMN optimized_confidence REAL DEFAULT 0")
@@ -79,6 +94,8 @@ class SelfLearningEngine:
                 conn.execute("ALTER TABLE self_learning_candidates ADD COLUMN lessons_count INTEGER DEFAULT 0")
             if "pass_rate" not in cand_cols:
                 conn.execute("ALTER TABLE self_learning_candidates ADD COLUMN pass_rate REAL DEFAULT 0")
+            if "task_family" not in cand_cols:
+                conn.execute("ALTER TABLE self_learning_candidates ADD COLUMN task_family TEXT DEFAULT ''")
             conn.commit()
         finally:
             conn.close()
@@ -92,13 +109,14 @@ class SelfLearningEngine:
         lesson: str,
         notes: str = "",
         candidate_skill: str = "",
+        task_family: str = "",
     ) -> None:
         conn = self._get_conn()
         try:
             conn.execute(
                 """
-                INSERT INTO self_learning_lessons (goal_id, step_text, status, score, lesson, notes, candidate_skill)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO self_learning_lessons (goal_id, step_text, status, score, lesson, notes, candidate_skill, task_family)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     goal_id[:120],
@@ -108,25 +126,34 @@ class SelfLearningEngine:
                     lesson[:1500],
                     notes[:1000],
                     candidate_skill[:140],
+                    task_family[:60],
                 ),
             )
             conn.commit()
         finally:
             conn.close()
 
-    def register_candidate(self, skill_name: str, confidence: float, notes: str, category: str = "self_learning") -> None:
+    def register_candidate(
+        self,
+        skill_name: str,
+        confidence: float,
+        notes: str,
+        category: str = "self_learning",
+        task_family: str = "",
+    ) -> None:
         conn = self._get_conn()
         try:
             conn.execute(
                 """
-                INSERT INTO self_learning_candidates (skill_name, category, confidence, notes, status, updated_at)
-                VALUES (?, ?, ?, ?, 'pending', datetime('now'))
+                INSERT INTO self_learning_candidates (skill_name, category, confidence, task_family, notes, status, updated_at)
+                VALUES (?, ?, ?, ?, ?, 'pending', datetime('now'))
                 ON CONFLICT(skill_name) DO UPDATE SET
                   confidence = excluded.confidence,
+                  task_family = CASE WHEN excluded.task_family != '' THEN excluded.task_family ELSE task_family END,
                   notes = excluded.notes,
                   updated_at = datetime('now')
                 """,
-                (skill_name[:120], category[:80], float(confidence or 0), notes[:1000]),
+                (skill_name[:120], category[:80], float(confidence or 0), task_family[:60], notes[:1000]),
             )
             conn.commit()
         finally:
@@ -137,7 +164,7 @@ class SelfLearningEngine:
         try:
             rows = conn.execute(
                 """
-                SELECT goal_id, step_text, status, score, lesson, notes, created_at
+                SELECT goal_id, step_text, status, score, lesson, notes, candidate_skill, task_family, created_at
                 FROM self_learning_lessons
                 ORDER BY id DESC
                 LIMIT ?
@@ -153,7 +180,7 @@ class SelfLearningEngine:
         try:
             rows = conn.execute(
                 """
-                SELECT skill_name, category, confidence, optimized_confidence, lessons_count, pass_rate, source, notes, status, created_at, updated_at
+                SELECT skill_name, category, confidence, optimized_confidence, lessons_count, pass_rate, source, task_family, notes, status, created_at, updated_at
                 FROM self_learning_candidates
                 ORDER BY updated_at DESC
                 LIMIT ?
@@ -195,6 +222,96 @@ class SelfLearningEngine:
         finally:
             conn.close()
 
+    def list_test_jobs(self, status: str = "", limit: int = 100) -> list[dict]:
+        conn = self._get_conn()
+        try:
+            if status:
+                rows = conn.execute(
+                    """
+                    SELECT id, skill_name, task_family, reason, status, result_notes, created_at, updated_at
+                    FROM self_learning_test_jobs
+                    WHERE status = ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (status, int(limit)),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT id, skill_name, task_family, reason, status, result_notes, created_at, updated_at
+                    FROM self_learning_test_jobs
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (int(limit),),
+                ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def complete_test_job(self, job_id: int, passed: bool, notes: str = "") -> bool:
+        conn = self._get_conn()
+        try:
+            status = "passed" if passed else "failed"
+            cur = conn.execute(
+                """
+                UPDATE self_learning_test_jobs
+                SET status = ?, result_notes = ?, updated_at = datetime('now')
+                WHERE id = ? AND status = 'open'
+                """,
+                (status, notes[:500], int(job_id)),
+            )
+            conn.commit()
+            return int(cur.rowcount or 0) > 0
+        finally:
+            conn.close()
+
+    def generate_test_jobs(self, limit: int = 20) -> dict:
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        created = 0
+        try:
+            from modules.skill_registry import SkillRegistry
+            reg = SkillRegistry(sqlite_path=self.sqlite_path)
+            rows = conn.execute(
+                """
+                SELECT skill_name, task_family, status, optimized_confidence, lessons_count
+                FROM self_learning_candidates
+                WHERE status IN ('ready', 'hold')
+                ORDER BY updated_at DESC
+                LIMIT 200
+                """
+            ).fetchall()
+            for r in rows:
+                if created >= int(limit):
+                    break
+                skill_name = str(r["skill_name"] or "")
+                skill = reg.get_skill(skill_name)
+                tests_cov = float((skill or {}).get("tests_coverage", 0) or 0.0)
+                conf = float(r["optimized_confidence"] or 0.0)
+                reason = ""
+                if tests_cov < 0.75:
+                    reason = "tests_coverage_low"
+                elif str(r["status"] or "") == "hold" and conf >= float(settings.SELF_LEARNING_SKILL_SCORE_MIN or 0.78):
+                    reason = "confidence_ready_but_hold"
+                if not reason:
+                    continue
+                cur = conn.execute(
+                    """
+                    INSERT OR IGNORE INTO self_learning_test_jobs
+                    (skill_name, task_family, reason, status, updated_at)
+                    VALUES (?, ?, ?, 'open', datetime('now'))
+                    """,
+                    (skill_name[:140], str(r["task_family"] or "")[:60], reason[:120]),
+                )
+                if int(cur.rowcount or 0) > 0:
+                    created += 1
+            conn.commit()
+            return {"ok": True, "created": created}
+        finally:
+            conn.close()
+
     def promotion_events(self, limit: int = 100) -> list[dict]:
         conn = self._get_conn()
         try:
@@ -226,7 +343,7 @@ class SelfLearningEngine:
         try:
             candidates = conn.execute(
                 """
-                SELECT skill_name, confidence, notes, status
+                SELECT skill_name, confidence, notes, status, task_family
                 FROM self_learning_candidates
                 WHERE status IN ('pending', 'optimized', 'ready')
                 ORDER BY updated_at DESC
@@ -236,11 +353,12 @@ class SelfLearningEngine:
             for row in candidates:
                 skill = str(row["skill_name"] or "")
                 base_conf = float(row["confidence"] or 0.0)
+                task_family = str(row["task_family"] or "")
                 stem = skill.split(":")[-1].replace("selflearn_", "").replace("selflearn", "").strip("_")
                 pattern = f"%{stem}%"
                 lessons = conn.execute(
                     """
-                    SELECT status, score
+                    SELECT status, score, task_family
                     FROM self_learning_lessons
                     WHERE created_at >= datetime('now', ?)
                       AND (candidate_skill = ? OR lower(step_text) LIKE lower(?) OR lower(lesson) LIKE lower(?))
@@ -252,7 +370,7 @@ class SelfLearningEngine:
                 if not lessons:
                     lessons = conn.execute(
                         """
-                        SELECT status, score
+                        SELECT status, score, task_family
                         FROM self_learning_lessons
                         WHERE created_at >= datetime('now', ?)
                         ORDER BY id DESC
@@ -268,7 +386,14 @@ class SelfLearningEngine:
                     pass_count = sum(1 for r in lessons if str(r["status"] or "") == "completed")
                     pass_rate = pass_count / max(1, lessons_count)
                     avg_score = sum(float(r["score"] or 0.0) for r in lessons) / max(1, lessons_count)
-                optimized = (0.45 * base_conf) + (0.35 * avg_score) + (0.20 * pass_rate)
+                family_rows = [r for r in lessons if task_family and str(r["task_family"] or "") == task_family]
+                if family_rows:
+                    family_pass = sum(1 for r in family_rows if str(r["status"] or "") == "completed")
+                    family_pass_rate = family_pass / max(1, len(family_rows))
+                else:
+                    family_pass_rate = pass_rate
+                family_bias = 0.03 if family_pass_rate >= 0.75 else (-0.03 if family_pass_rate <= 0.4 else 0.0)
+                optimized = (0.42 * base_conf) + (0.33 * avg_score) + (0.20 * pass_rate) + (0.05 * family_pass_rate) + family_bias
                 optimized = max(0.0, min(1.0, optimized))
                 recommendation = "hold"
                 if lessons_count >= int(min_lessons) and pass_rate >= 0.65 and optimized >= float(promote_confidence_min):
@@ -295,7 +420,7 @@ class SelfLearningEngine:
                         lessons_count,
                         pass_rate,
                         recommendation,
-                        f"min_lessons={int(min_lessons)}; threshold={float(promote_confidence_min)}"[:300],
+                        f"task_family={task_family}; family_pass_rate={family_pass_rate:.3f}; min_lessons={int(min_lessons)}; threshold={float(promote_confidence_min)}"[:300],
                     ),
                 )
                 updated += 1
@@ -306,6 +431,8 @@ class SelfLearningEngine:
                         "confidence_after": round(optimized, 4),
                         "lessons_count": lessons_count,
                         "pass_rate": round(pass_rate, 4),
+                        "task_family": task_family,
+                        "family_pass_rate": round(family_pass_rate, 4),
                         "recommendation": recommendation,
                     }
                 )
@@ -315,7 +442,14 @@ class SelfLearningEngine:
 
         if auto_promote:
             promoted = self.auto_promote_ready_candidates()
-        return {"ok": True, "updated": updated, "promoted": promoted, "decisions": decisions[:40]}
+        test_jobs = self.generate_test_jobs(limit=20)
+        return {
+            "ok": True,
+            "updated": updated,
+            "promoted": promoted,
+            "test_jobs_created": int(test_jobs.get("created", 0) or 0),
+            "decisions": decisions[:40],
+        }
 
     def auto_promote_ready_candidates(self) -> int:
         """Safe promotion: only when skill-registry quality gates pass."""
@@ -325,7 +459,7 @@ class SelfLearningEngine:
         try:
             candidates = conn.execute(
                 """
-                SELECT skill_name, optimized_confidence, lessons_count, pass_rate
+                SELECT skill_name, optimized_confidence, lessons_count, pass_rate, task_family
                 FROM self_learning_candidates
                 WHERE status = 'ready'
                 ORDER BY updated_at ASC
@@ -366,6 +500,15 @@ class SelfLearningEngine:
                         "UPDATE self_learning_candidates SET status='hold', updated_at=datetime('now') WHERE skill_name=?",
                         (skill_name,),
                     )
+                    if tests_cov < 0.75:
+                        conn.execute(
+                            """
+                            INSERT OR IGNORE INTO self_learning_test_jobs
+                            (skill_name, task_family, reason, status, updated_at)
+                            VALUES (?, ?, 'tests_coverage_low', 'open', datetime('now'))
+                            """,
+                            (skill_name[:140], str(row["task_family"] or "")[:60]),
+                        )
                     conn.execute(
                         "INSERT INTO self_learning_promotion_events (skill_name, decision, reason) VALUES (?, 'hold', ?)",
                         (skill_name, f"gate_failed:cov={tests_cov:.2f},risk={risk:.2f},sec={security},conf={conf:.2f}"),
@@ -419,6 +562,21 @@ class SelfLearningEngine:
             pending = int((conn.execute("SELECT COUNT(*) AS n FROM self_learning_candidates WHERE status='pending'").fetchone() or {"n": 0})["n"] or 0)
             ready = int((conn.execute("SELECT COUNT(*) AS n FROM self_learning_candidates WHERE status='ready'").fetchone() or {"n": 0})["n"] or 0)
             promoted = int((conn.execute("SELECT COUNT(*) AS n FROM self_learning_candidates WHERE status='promoted'").fetchone() or {"n": 0})["n"] or 0)
+            open_jobs = int((conn.execute("SELECT COUNT(*) AS n FROM self_learning_test_jobs WHERE status='open'").fetchone() or {"n": 0})["n"] or 0)
+            calib_rows = conn.execute(
+                """
+                SELECT task_family,
+                       COUNT(*) AS n,
+                       AVG(CASE WHEN status='completed' THEN 1.0 ELSE 0.0 END) AS pass_rate,
+                       AVG(score) AS avg_score
+                FROM self_learning_lessons
+                WHERE created_at >= datetime('now', ?)
+                GROUP BY task_family
+                ORDER BY n DESC
+                LIMIT 10
+                """,
+                (window,),
+            ).fetchall()
             return {
                 "window_days": int(days or 30),
                 "lessons": lessons,
@@ -426,6 +584,16 @@ class SelfLearningEngine:
                 "pending_candidates": pending,
                 "ready_candidates": ready,
                 "promoted_candidates": promoted,
+                "open_test_jobs": open_jobs,
+                "family_calibration": [
+                    {
+                        "task_family": str(r["task_family"] or ""),
+                        "lessons": int(r["n"] or 0),
+                        "pass_rate": round(float(r["pass_rate"] or 0.0), 4),
+                        "avg_score": round(float(r["avg_score"] or 0.0), 4),
+                    }
+                    for r in calib_rows
+                ],
             }
         finally:
             conn.close()
@@ -439,6 +607,7 @@ class SelfLearningEngine:
         step_result: dict,
         min_skill_score: float = 0.78,
     ) -> dict:
+        task_family = _task_family(task_type)
         status = str(step_result.get("status", "unknown"))
         output = step_result.get("output", "")
         error = step_result.get("error", "")
@@ -485,6 +654,7 @@ class SelfLearningEngine:
             lesson=lesson,
             notes=notes,
             candidate_skill=candidate_skill_key,
+            task_family=task_family,
         )
         candidate_name = ""
         if bool(parsed.get("reusable_skill", False)) and score >= float(min_skill_score):
@@ -494,6 +664,7 @@ class SelfLearningEngine:
                     skill_name=f"selflearn:{candidate_name}",
                     confidence=score,
                     notes=f"{lesson}; {notes}"[:1000],
+                    task_family=task_family,
                 )
         return {"score": score, "lesson": lesson, "candidate_name": candidate_name}
 
@@ -515,3 +686,12 @@ def _parse_reflection(raw: str) -> Optional[dict]:
         except Exception:
             return None
     return None
+
+
+def _task_family(task_type) -> str:
+    try:
+        if hasattr(task_type, "value"):
+            return str(task_type.value or "").strip().lower()[:60]
+        return str(task_type or "").strip().lower()[:60]
+    except Exception:
+        return "unknown"

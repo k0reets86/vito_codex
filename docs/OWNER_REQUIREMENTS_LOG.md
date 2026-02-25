@@ -1032,3 +1032,4 @@ Append all new owner requests here as they arrive.
 - 2026-02-25: Added retention drift alerts and TTL cleanup workflow (preview/apply) with periodic DecisionLoop retention checks.
 - 2026-02-25: Added provider health checks with key-rotation reminders and safe dashboard remediation actions.
 - 2026-02-25: Added self-learning optimizer and safe auto-promotion pipeline (gated by tests/risk/security/lesson quality) with dashboard actions and event history.
+- 2026-02-25: Added self-learning test-job queue and task-family confidence calibration, with dashboard actions to generate and resolve test jobs.
