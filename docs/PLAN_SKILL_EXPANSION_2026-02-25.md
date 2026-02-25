@@ -111,4 +111,5 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Injected owner preferences into VITOCore planning.
 - Added capability pack runner for safe dynamic execution.
 - Added capability pack run script.
+- Added capability pack validation script.
 - Added owner preferences report script.
