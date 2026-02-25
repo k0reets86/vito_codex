@@ -75,6 +75,12 @@ class OwnerPreferenceModel:
                      last_observed_at = datetime('now')""",
                 (key, payload, source, confidence, status, notes),
             )
+            conn.execute(
+                """INSERT INTO owner_preference_events
+                   (pref_key, signal_type, value_json, source, confidence_delta, notes)
+                   VALUES (?, 'explicit', ?, ?, 0.0, ?)""",
+                (key, payload, source, notes or "explicit_set"),
+            )
             conn.commit()
         finally:
             conn.close()
@@ -106,6 +112,34 @@ class OwnerPreferenceModel:
                    LIMIT ?""",
                 (status, limit),
             ).fetchall()
+            results = []
+            for r in rows:
+                item = dict(r)
+                item["value"] = _safe_json_loads(item.get("value_json", "{}"))
+                results.append(item)
+            return results
+        finally:
+            conn.close()
+
+    def list_events(self, pref_key: Optional[str] = None, limit: int = 50) -> list[dict[str, Any]]:
+        conn = sqlite3.connect(self.sqlite_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            if pref_key:
+                rows = conn.execute(
+                    """SELECT * FROM owner_preference_events
+                       WHERE pref_key = ?
+                       ORDER BY id DESC
+                       LIMIT ?""",
+                    (pref_key, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT * FROM owner_preference_events
+                       ORDER BY id DESC
+                       LIMIT ?""",
+                    (limit,),
+                ).fetchall()
             results = []
             for r in rows:
                 item = dict(r)

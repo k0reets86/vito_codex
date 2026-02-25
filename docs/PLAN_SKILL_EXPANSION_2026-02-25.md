@@ -87,3 +87,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added Capability Pack Spec v1.
 - Added workflow latest checkpoint retrieval.
 - Added /api/prefs endpoint for dashboard.
+- Added owner preference event tracking and listing.

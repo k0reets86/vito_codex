@@ -18,6 +18,9 @@ def test_owner_preference_set_get(tmp_path: Path):
     assert pref["pref_key"] == "tone.style"
     assert pref["value"]["tone"] == "concise"
     assert float(pref["confidence"]) >= 0.9
+    events = model.list_events(pref_key="tone.style", limit=5)
+    assert events
+    assert events[0]["signal_type"] in {"explicit", "observation", "correction"}
 
 
 def test_owner_preference_record_signal(tmp_path: Path):
