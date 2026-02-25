@@ -54,3 +54,6 @@ By default, pending packs are blocked at runtime unless `CAPABILITY_PACK_ALLOW_P
 
 ## Manual Event Script
 Use `scripts/register_capability_pack_event.py <name> --status <success|failed>` for manual logging.
+
+## Matrix Script
+Use `scripts/capability_pack_matrix.py` to generate category matrix.
