@@ -433,6 +433,7 @@ function renderStatus(j){
     <tr><td>running</td><td>${loop.running}</td></tr>
     <tr><td>tick_count</td><td>${loop.tick_count||0}</td></tr>
     <tr><td>daily_spend</td><td>${loop.daily_spend||0}</td></tr>
+    <tr><td>pending_approvals</td><td>${loop.pending_approvals||0}</td></tr>
   </tbody></table>`;
 }
 function renderNetwork(j){
