@@ -348,6 +348,13 @@ class ConversationEngine:
                     )
             except Exception:
                 pass
+        try:
+            prefs = OwnerPreferenceModel().list_preferences(limit=5)
+            if prefs:
+                pref_lines = "\n".join(f"- {p.get('pref_key')}: {p.get('value')}" for p in prefs)
+                context_from_memory += f"\n\nПредпочтения владельца:\n{pref_lines}"
+        except Exception:
+            pass
 
         system_context = self._format_system_context()
         prompt = (
