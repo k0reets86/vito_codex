@@ -85,3 +85,4 @@ Scope: Expand capability spectrum vs OpenClaw while enforcing tests + evidence g
 - Added structured preference hints in goal planning prompt.
 - Added /prefs command to review owner preferences.
 - Added Capability Pack Spec v1.
+- Added workflow latest checkpoint retrieval.

@@ -188,6 +188,39 @@ class WorkflowStateMachine:
         conn.close()
         return [dict(r) for r in rows]
 
+    def latest_checkpoint(self, goal_id: str) -> Optional[dict]:
+        """Return last step checkpoint for goal (step_num, status, detail, created_at)."""
+        conn = self._conn()
+        row = conn.execute(
+            """
+            SELECT reason, detail, created_at
+            FROM goal_workflow_events
+            WHERE goal_id=? AND reason LIKE 'step:%'
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (goal_id,),
+        ).fetchone()
+        conn.close()
+        if not row:
+            return None
+        reason = str(row["reason"] or "")
+        parts = reason.split(":")
+        step_num = None
+        status = ""
+        if len(parts) >= 3:
+            try:
+                step_num = int(parts[1])
+            except Exception:
+                step_num = None
+            status = parts[2] or ""
+        return {
+            "step_num": step_num,
+            "status": status,
+            "detail": row["detail"] or "",
+            "created_at": row["created_at"] or "",
+        }
+
     def health(self) -> dict:
         conn = self._conn()
         row = conn.execute(
