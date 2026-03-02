@@ -142,6 +142,24 @@ async def test_idle_skips_non_multiple_of_6(dl):
     assert len(dl.goal_engine._goals) == 0
 
 
+@pytest.mark.asyncio
+async def test_idle_skips_proactive_daily_if_already_created_today_even_failed(dl):
+    created = dl.goal_engine.create_goal(
+        "Market analysis + product improvement",
+        "desc",
+        priority=GoalPriority.BACKGROUND,
+        source="proactive_daily",
+    )
+    dl.goal_engine.fail_goal(created.goal_id, "forced test fail")
+    # Simulate process restart/reload where only active goals are loaded into memory.
+    dl.goal_engine.reload_goals()
+    assert len(dl.goal_engine._goals) == 0
+
+    dl._consecutive_idle = 6
+    await dl._idle_action()
+    assert len(dl.goal_engine._goals) == 0
+
+
 # ── Plan goal ──
 
 @pytest.mark.asyncio

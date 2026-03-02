@@ -2513,13 +2513,8 @@ class DecisionLoop:
         import hashlib
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-        # Check we haven't already created a daily task today
-        already_today = any(
-            g.source == "proactive_daily"
-            and g.created_at
-            and today_str in (g.created_at if isinstance(g.created_at, str) else g.created_at.isoformat())
-            for g in existing
-        )
+        # Check history in SQLite, not only active in-memory goals.
+        already_today = self._has_goal_created_today(source="proactive_daily", today_str=today_str)
         if already_today:
             return
 
@@ -2616,6 +2611,45 @@ class DecisionLoop:
             conn.close()
         except Exception:
             pass
+
+    def _has_goal_created_today(self, source: str, today_str: str | None = None) -> bool:
+        """Return True when at least one goal from source exists for current UTC date.
+
+        Uses persisted goals table to avoid duplicate proactive creation after
+        failed/completed/cancelled goals are removed from in-memory active set.
+        """
+        src = str(source or "").strip()
+        if not src:
+            return False
+        day = str(today_str or datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+        conn = None
+        try:
+            import sqlite3
+            goal_conn = getattr(self.goal_engine, "_conn", None)
+            if goal_conn is not None:
+                conn = goal_conn
+            else:
+                conn = sqlite3.connect(settings.SQLITE_PATH)
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM goals
+                WHERE source = ?
+                  AND substr(created_at, 1, 10) = ?
+                LIMIT 1
+                """,
+                (src, day),
+            ).fetchone()
+            return bool(row)
+        except Exception:
+            return False
+        finally:
+            # Close only ad-hoc connection opened in this helper.
+            if conn is not None and conn is not getattr(self.goal_engine, "_conn", None):
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     def _mark_today_calendar_completed(self, goal_title: str) -> None:
         """Mark today's calendar task as completed after goal finishes."""
