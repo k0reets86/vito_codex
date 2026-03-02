@@ -89,6 +89,10 @@ class CommsAgent:
             "Одобрить": "approve",
             "Отклонить": "reject",
             "Новая цель": "goal",
+            "Помощь": "help",
+            "Ежедневные": "help_daily",
+            "Редкие": "help_rare",
+            "Системные": "help_system",
         }
 
         logger.info("CommsAgent инициализирован", extra={"event": "init"})
@@ -221,12 +225,14 @@ class CommsAgent:
             )
 
     def _main_keyboard(self) -> ReplyKeyboardMarkup:
-        """Persistent-клавиатура с основными командами."""
+        """Persistent-клавиатура: частые действия + быстрый вход в справку."""
         return ReplyKeyboardMarkup(
             [
                 [KeyboardButton("Статус"), KeyboardButton("Цели")],
+                [KeyboardButton("Новая цель"), KeyboardButton("Помощь")],
+                [KeyboardButton("Ежедневные"), KeyboardButton("Редкие")],
                 [KeyboardButton("Расходы"), KeyboardButton("Одобрить")],
-                [KeyboardButton("Отклонить"), KeyboardButton("Новая цель")],
+                [KeyboardButton("Отклонить"), KeyboardButton("Системные")],
             ],
             resize_keyboard=True,
             is_persistent=True,
@@ -294,6 +300,7 @@ class CommsAgent:
         self._bot = self._app.bot
 
         self._app.add_handler(CommandHandler("start", self._cmd_start))
+        self._app.add_handler(CommandHandler("help", self._cmd_help))
         self._app.add_handler(CommandHandler("status", self._cmd_status))
         self._app.add_handler(CommandHandler("goals", self._cmd_goals))
         self._app.add_handler(CommandHandler("spend", self._cmd_spend))
@@ -360,51 +367,23 @@ class CommsAgent:
         except Exception:
             pass
 
+        # Keep Telegram menu concise; full command catalog is available via /help.
         await self._bot.set_my_commands([
+            BotCommand("help", "Справка по командам и сценариям"),
             BotCommand("status", "Статус системы"),
             BotCommand("goals", "Активные цели"),
-            BotCommand("spend", "Расходы за сегодня"),
-            BotCommand("approve", "Одобрить запрос"),
-            BotCommand("reject", "Отклонить запрос"),
             BotCommand("goal", "Создать цель"),
-            BotCommand("agents", "Список агентов"),
-            BotCommand("report", "Полный отчёт"),
-            BotCommand("stop", "Остановить Decision Loop"),
-            BotCommand("resume", "Возобновить Decision Loop"),
-            BotCommand("budget", "Бюджет и P&L"),
-            BotCommand("tasks", "Активные задачи"),
-            BotCommand("trends", "Сканирование трендов"),
-            BotCommand("earnings", "Доходы за 7 дней"),
-            BotCommand("deep", "Глубокий анализ ниши"),
-            BotCommand("healer", "Статистика самолечения"),
-            BotCommand("logs", "Последние логи"),
-            BotCommand("backup", "Создать бэкап"),
-            BotCommand("rollback", "Откат кода"),
-            BotCommand("health", "Проверка здоровья"),
-            BotCommand("errors", "Последние ошибки"),
-            BotCommand("balances", "Балансы сервисов"),
-            BotCommand("goals_all", "Все цели (история)"),
-            BotCommand("fix", "Самоисправление/интеграции"),
-            BotCommand("skills", "Реестр навыков"),
-            BotCommand("skills_pending", "Навыки ждут принятия"),
-            BotCommand("skills_audit", "Аудит навыков (риск/покрытие)"),
-            BotCommand("skills_fix", "Создать remediation-задачи навыков"),
-            BotCommand("playbooks", "Топ playbooks"),
-            BotCommand("workflow", "Статус workflow/state"),
-            BotCommand("handoffs", "Трассировка handoff"),
-            BotCommand("prefs", "Предпочтения владельца"),
-            BotCommand("prefs_metrics", "Метрики предпочтений"),
-            BotCommand("packs", "Список capability packs"),
-            BotCommand("pubq", "Очередь публикаций"),
-            BotCommand("pubrun", "Запустить очередь публикаций"),
-            BotCommand("webop", "Web-operator сценарии"),
+            BotCommand("spend", "Расходы за сегодня"),
+            BotCommand("report", "Сводный отчёт"),
+            BotCommand("approve", "Одобрить ожидающий запрос"),
+            BotCommand("reject", "Отклонить ожидающий запрос"),
+            BotCommand("cancel", "Пауза текущих задач"),
+            BotCommand("resume", "Возобновить работу"),
             BotCommand("task_current", "Текущая задача владельца"),
             BotCommand("task_done", "Закрыть текущую задачу"),
-            BotCommand("task_cancel", "Отменить текущую задачу"),
-            BotCommand("task_replace", "Заменить текущую задачу"),
-            BotCommand("clear_goals", "Очистить все цели"),
-            BotCommand("nettest", "Проверка сети/интернета"),
-            BotCommand("smoke", "Платформенный smoke-check"),
+            BotCommand("balances", "Балансы сервисов"),
+            BotCommand("health", "Проверка здоровья системы"),
+            BotCommand("logs", "Последние логи"),
         ])
 
         await self._app.start()
@@ -493,6 +472,18 @@ class CommsAgent:
                 return
 
         # Simple shortcuts
+        if lower.strip() in ("/help", "help"):
+            await self.send_message(self._render_help())
+            return
+        if lower.strip() in ("/help daily", "help daily", "/help daily_commands"):
+            await self.send_message(self._render_help("daily"))
+            return
+        if lower.strip() in ("/help rare", "help rare"):
+            await self.send_message(self._render_help("rare"))
+            return
+        if lower.strip() in ("/help system", "help system"):
+            await self.send_message(self._render_help("system"))
+            return
         if (not strict_cmds and any(kw in lower for kw in ["статус", "/status"])) or lower.strip() in ("/status", "status"):
             if self._decision_loop and self._goal_engine:
                 st = self._decision_loop.get_status()
@@ -788,20 +779,130 @@ class CommsAgent:
 
     # ── Команды ──
 
+    @staticmethod
+    def _help_catalog() -> dict[str, Any]:
+        return {
+            "daily": [
+                ("status", "Короткий статус VITO"),
+                ("goals", "Активные цели"),
+                ("goal <текст>", "Создать новую цель"),
+                ("report", "Сводка: цели + финансы"),
+                ("spend", "Лимит и траты за сегодня"),
+                ("approve", "Одобрить ожидающий запрос"),
+                ("reject", "Отклонить ожидающий запрос"),
+                ("task_current", "Показать текущую owner-задачу"),
+                ("task_done", "Отметить текущую задачу как выполненную"),
+                ("balances", "Проверить балансы сервисов"),
+            ],
+            "rare": [
+                ("tasks", "Задачи в выполнении"),
+                ("goals_all", "История целей"),
+                ("trends", "Сканер трендов"),
+                ("earnings", "Доходы за 7 дней"),
+                ("pubq", "Очередь публикаций"),
+                ("pubrun", "Принудительно прогнать очередь публикаций"),
+                ("workflow", "Состояние workflow"),
+                ("handoffs", "Трассировка handoff событий"),
+                ("prefs", "Предпочтения владельца"),
+                ("packs", "Capability packs"),
+            ],
+            "system": [
+                ("cancel", "Пауза/отмена текущих задач"),
+                ("resume", "Продолжить после паузы"),
+                ("stop yes", "Остановить Decision Loop (с подтверждением)"),
+                ("health", "Статистика SelfHealer/здоровья"),
+                ("errors", "Последние ошибки"),
+                ("logs", "Последние строки логов"),
+                ("backup", "Сделать бэкап кода"),
+                ("rollback", "Откатить последний апдейт"),
+                ("clear_goals yes", "Очистить все цели (опасно)"),
+                ("nettest", "Проверка сети и DNS"),
+            ],
+            "commands": {
+                "status": ("Текущий статус ядра, бюджета и задач.", "Когда нужно понять, жив ли контур."),
+                "goals": ("Показывает активные цели.", "Быстрый контроль очереди работ."),
+                "goal": ("Создаёт новую цель.", "Используй: /goal <что сделать>."),
+                "report": ("Сводный отчёт по системе.", "Когда нужен полный срез в одном сообщении."),
+                "spend": ("Дневной расход LLM.", "Контроль токенов и бюджета."),
+                "approve": ("Одобряет pending approval.", "Только если уверен в действии."),
+                "reject": ("Отклоняет pending approval.", "Безопасно отклонять сомнительные запросы."),
+                "cancel": ("Ставит выполнение на паузу.", "Когда нужно мгновенно остановить активность."),
+                "resume": ("Возобновляет выполнение.", "После /cancel."),
+                "health": ("Показывает состояние self-healing.", "Для диагностики стабильности."),
+                "logs": ("Выводит последние строки логов.", "Для быстрого поиска причины ошибки."),
+                "backup": ("Делает резервную копию.", "Перед рискованными изменениями."),
+                "rollback": ("Откат к последнему бэкапу.", "Если последняя доработка сломала поведение."),
+                "clear_goals": ("Удаляет все цели.", "Использовать только осознанно."),
+            },
+        }
+
+    def _render_help(self, topic: str | None = None) -> str:
+        topic_norm = str(topic or "").strip().lower()
+        catalog = self._help_catalog()
+
+        if topic_norm in {"daily", "day", "ежедневные", "daily_commands"}:
+            lines = ["Ежедневные команды (часто используемые):"]
+            lines.extend([f"/{cmd} — {desc}" for cmd, desc in catalog["daily"]])
+            return "\n".join(lines)
+        if topic_norm in {"rare", "редкие", "ops"}:
+            lines = ["Редкие команды (по ситуации):"]
+            lines.extend([f"/{cmd} — {desc}" for cmd, desc in catalog["rare"]])
+            return "\n".join(lines)
+        if topic_norm in {"system", "sys", "системные", "danger"}:
+            lines = ["Системные/осторожные команды:"]
+            lines.extend([f"/{cmd} — {desc}" for cmd, desc in catalog["system"]])
+            lines.append("Совет: для рискованных команд сначала делай /backup.")
+            return "\n".join(lines)
+
+        cmd_key = topic_norm.lstrip("/")
+        cmd_info = catalog["commands"].get(cmd_key)
+        if cmd_info:
+            what, when = cmd_info
+            return (
+                f"/{cmd_key}\n"
+                f"Что делает: {what}\n"
+                f"Когда использовать: {when}"
+            )
+
+        return (
+            "Справка по командам VITO\n\n"
+            "Разделы:\n"
+            "/help daily — ежедневные команды\n"
+            "/help rare — редкие команды\n"
+            "/help system — системные/осторожные\n\n"
+            "Точечно по команде:\n"
+            "/help status\n"
+            "/help goal\n"
+            "/help backup\n\n"
+            "Быстрый старт:\n"
+            "1) /status\n"
+            "2) /goals\n"
+            "3) /goal <что сделать>\n"
+            "4) /approve или /reject"
+        )
+
     async def _cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self._reject_stranger(update):
             return
         await update.message.reply_text(
             "VITO на связи.\n\n"
-            "/status — статус системы\n"
-            "/goals — активные цели\n"
-            "/spend — расходы за сегодня\n"
-            "/approve — одобрить запрос\n"
-            "/reject — отклонить запрос\n"
-            "/goal <текст> — создать цель\n"
-            "/prefs — предпочтения владельца",
+            "Чтобы не путаться в командах:\n"
+            "/help — обзор\n"
+            "/help daily — ежедневные\n"
+            "/help rare — редкие\n"
+            "/help system — системные\n\n"
+            "Быстрый старт:\n"
+            "/status, /goals, /goal <текст>",
             reply_markup=self._main_keyboard(),
         )
+
+    async def _cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if await self._reject_stranger(update):
+            return
+        args = getattr(context, "args", None) or []
+        topic = args[0] if args else None
+        text = self._render_help(topic=topic)
+        await update.message.reply_text(text, reply_markup=self._main_keyboard())
 
     async def _cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self._reject_stranger(update):
@@ -1614,6 +1715,18 @@ class CommsAgent:
         # 1. Обработка нажатий persistent-кнопок
         if text in self._button_map:
             cmd = self._button_map[text]
+            if cmd == "help":
+                await update.message.reply_text(self._render_help(), reply_markup=self._main_keyboard())
+                return
+            if cmd == "help_daily":
+                await update.message.reply_text(self._render_help("daily"), reply_markup=self._main_keyboard())
+                return
+            if cmd == "help_rare":
+                await update.message.reply_text(self._render_help("rare"), reply_markup=self._main_keyboard())
+                return
+            if cmd == "help_system":
+                await update.message.reply_text(self._render_help("system"), reply_markup=self._main_keyboard())
+                return
             handler = {
                 "status": self._cmd_status,
                 "goals": self._cmd_goals,

@@ -596,11 +596,15 @@ def test_main_keyboard():
     kb = agent._main_keyboard()
     from telegram import ReplyKeyboardMarkup
     assert isinstance(kb, ReplyKeyboardMarkup)
-    # 3 ряда по 2 кнопки
-    assert len(kb.keyboard) == 3
+    # Основные действия + секции справки
+    assert len(kb.keyboard) == 5
     texts = [btn.text for row in kb.keyboard for btn in row]
     assert "Статус" in texts
     assert "Цели" in texts
+    assert "Помощь" in texts
+    assert "Ежедневные" in texts
+    assert "Редкие" in texts
+    assert "Системные" in texts
     assert "Расходы" in texts
     assert "Одобрить" in texts
     assert "Отклонить" in texts
