@@ -59,8 +59,8 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
     # -- Бесплатный / рутинный уровень --
     "gemini-flash": ModelConfig(
         provider="google",
-        model_id="gemini-2.5-flash-lite",
-        display_name="Gemini 2.5 Flash Lite",
+        model_id=str(getattr(settings, "LLM_FORCE_GEMINI_MODEL", "gemini-2.5-flash") or "gemini-2.5-flash"),
+        display_name="Gemini 2.5 Flash",
         cost_per_1k_input=0.0,
         cost_per_1k_output=0.0,
         max_tokens=8192,

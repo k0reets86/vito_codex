@@ -97,6 +97,7 @@ class Settings:
     LLM_DISABLED_MODELS: str = os.getenv("LLM_DISABLED_MODELS", "")
     LLM_ENABLED_MODELS: str = os.getenv("LLM_ENABLED_MODELS", "")
     LLM_FORCE_GEMINI_FREE: bool = os.getenv("LLM_FORCE_GEMINI_FREE", "false").lower() in ("1", "true", "yes", "on")
+    LLM_FORCE_GEMINI_MODEL: str = os.getenv("LLM_FORCE_GEMINI_MODEL", "gemini-2.5-flash")
     MODEL_ACTIVE_PROFILE: str = os.getenv("MODEL_ACTIVE_PROFILE", "balanced")
 
     # Notifications

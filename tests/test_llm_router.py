@@ -259,10 +259,11 @@ async def test_call_llm_blocked_by_guardrails(router):
 def test_select_model_forced_free_gemini(router):
     with patch("llm_router.settings") as s:
         s.LLM_FORCE_GEMINI_FREE = True
+        s.LLM_FORCE_GEMINI_MODEL = "gemini-2.5-flash"
         s.LLM_ENABLED_MODELS = ""
         s.LLM_DISABLED_MODELS = ""
         result = router.select_model(TaskType.STRATEGY, estimated_tokens=1000)
-    assert result.model.model_id == "gemini-2.5-flash-lite"
+    assert result.model.model_id == "gemini-2.5-flash"
     assert result.estimated_cost_usd == 0.0
 
 

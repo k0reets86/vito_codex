@@ -51,6 +51,7 @@
   - decision_loop.py (orchestration)
   - modules/workflow_state_machine.py, modules/workflow_threads.py
 - Next steps:
+  - BOEVOY test execution protocol: at session start always read `docs/BOEVOY_TEST_MASTER_PLAN_2026-03-02.md` and `docs/BOEVOY_TEST_CHECKLIST_2026-03-02.md`; update checklist after each completed scenario and report progress in percent.
   - Extend durable orchestration: attach interrupt context to agent-handoff chain and auto-resume policies.
   - Memory/skills pipeline: add owner-facing weekly retention report and per-skill memory quality linkage.
   - Self-learning: add adaptive threshold tuning using long-term promotion outcomes and flaky history decay.
