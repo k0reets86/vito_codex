@@ -28,6 +28,9 @@ from typing import Any, Optional
 from config.logger import get_logger
 from config.settings import settings
 from modules.owner_preference_model import OwnerPreferenceModel
+from modules.conversation_memory import ConversationMemory
+from modules.cancel_state import CancelState
+from modules.owner_task_state import OwnerTaskState
 from llm_router import LLMRouter, TaskType, MODEL_REGISTRY
 from modules.prompt_guard import wrap_untrusted_text
 
@@ -77,7 +80,9 @@ class ConversationEngine:
                  finance=None, agent_registry=None, decision_loop=None,
                  self_healer=None, self_updater=None,
                  knowledge_updater=None, judge_protocol=None,
-                 code_generator=None, comms=None):
+                 code_generator=None, comms=None,
+                 conversation_memory: ConversationMemory | None = None, cancel_state: CancelState | None = None,
+                 owner_task_state: OwnerTaskState | None = None):
         self.llm_router = llm_router
         self.memory = memory
         self.goal_engine = goal_engine
@@ -90,11 +95,30 @@ class ConversationEngine:
         self.judge_protocol = judge_protocol
         self.code_generator = code_generator
         self.comms = comms
+        self.conversation_memory = conversation_memory
+        self.cancel_state = cancel_state
+        self.owner_task_state = owner_task_state
+        self._session_id = "default"
         self._context: list[Turn] = []
+        if self.conversation_memory:
+            self._load_context_from_memory()
         logger.info("ConversationEngine инициализирован", extra={"event": "init"})
+
+    def set_session(self, session_id: str | None) -> None:
+        sid = str(session_id or "default").strip() or "default"
+        if sid == self._session_id:
+            return
+        self._session_id = sid
+        self._load_context_from_memory()
 
     async def process_message(self, text: str) -> dict[str, Any]:
         """Обрабатывает сообщение от владельца."""
+        owner_task_preserved = False
+        if self.cancel_state and self.cancel_state.is_cancelled():
+            return {
+                "intent": Intent.CONVERSATION.value,
+                "response": "Выполнение задач на паузе. Отправь /resume, чтобы продолжить.",
+            }
         # Fast path: browser/web fetch without LLM
         url = self._extract_url(text)
         if url and self.agent_registry and settings.BROWSER_DEFAULT_ON_URL:
@@ -148,6 +172,13 @@ class ConversationEngine:
 
         # 2. Save user turn
         self._add_turn("user", text, intent)
+        if self.owner_task_state and intent in (Intent.GOAL_REQUEST, Intent.SYSTEM_ACTION):
+            try:
+                active_before = self.owner_task_state.get_active()
+                saved = self.owner_task_state.set_active(text=text, source="telegram", intent=intent.value, force=False)
+                owner_task_preserved = bool(active_before and not saved)
+            except Exception:
+                pass
 
         # 2.5. Сохраняем важные запросы владельца в долгосрочную память
         if intent in (Intent.GOAL_REQUEST, Intent.QUESTION, Intent.SYSTEM_ACTION) and self.memory:
@@ -164,13 +195,20 @@ class ConversationEngine:
         result = await self._process_by_intent(intent, text)
 
         # 4. Execute actions if LLM requested them
-        if result.get("actions"):
+        if result.get("actions") and not result.get("needs_confirmation", False):
             action_results = await self._execute_actions(result["actions"])
             if action_results:
                 result["response"] = (result.get("response") or "") + "\n\n" + action_results
 
         # 5. Save assistant turn
         if result.get("response"):
+            if owner_task_preserved and intent in (Intent.GOAL_REQUEST, Intent.SYSTEM_ACTION):
+                result["response"] = (
+                    (result.get("response") or "")
+                    + "\n\n"
+                    + "Активная задача уже зафиксирована и не заменена. "
+                      "Если нужно заменить её: /task_replace <новая задача>."
+                )
             self._add_turn("assistant", result["response"])
 
         return result
@@ -383,6 +421,8 @@ class ConversationEngine:
         """Выполняет системное действие по запросу владельца."""
         system_context = self._format_system_context()
         available_actions = self._get_available_actions()
+        conversation_ctx = self._format_context()
+        owner_focus = self._owner_task_focus_text()
 
         # Fast path for explicit self-improve requests
         lower = text.lower()
@@ -394,21 +434,25 @@ class ConversationEngine:
         if any(kw in lower for kw in self_improve_keywords):
             return {
                 "intent": Intent.SYSTEM_ACTION.value,
-                "response": "Запускаю self-improve пайплайн (анализ → код → тесты).",
+                "response": "Подтверждаешь запуск self-improve пайплайна (анализ → код → тесты)? Ответь: да/нет.",
                 "actions": [{"action": "self_improve", "params": {"request": text}}],
+                "needs_confirmation": True,
             }
         if any(kw in lower for kw in ["изучи сервис", "изучи платформ", "добавь знания", "найди требования"]):
             # crude extraction of service name from text
             service = text.replace("изучи", "").replace("платформу", "").replace("сервис", "").strip()
             return {
                 "intent": Intent.SYSTEM_ACTION.value,
-                "response": "Изучаю сервис и добавляю знания в базу.",
+                "response": f"Подтверждаешь изучение сервиса '{service or 'unknown'}' и обновление базы знаний? Ответь: да/нет.",
                 "actions": [{"action": "learn_service", "params": {"service": service}}],
+                "needs_confirmation": True,
             }
 
         prompt = (
             f"{VITO_PERSONALITY}\n\n"
             f"=== СОСТОЯНИЕ СИСТЕМЫ ===\n{system_context}\n=== КОНЕЦ ===\n\n"
+            f"{owner_focus}\n\n"
+            f"История разговора:\n{conversation_ctx}\n\n"
             f"Доступные действия:\n{available_actions}\n\n"
             f"Владелец просит: \"{wrap_untrusted_text(text)}\"\n\n"
             f"Определи какие действия нужно выполнить и дай подтверждение.\n"
@@ -435,11 +479,20 @@ class ConversationEngine:
                     actions = parsed.get("actions", [])
             except Exception:
                 reply = response
+        if actions:
+            action_list = ", ".join(str(a.get("action", "")).strip() for a in actions if isinstance(a, dict) and a.get("action"))
+            if action_list:
+                reply = (
+                    f"{reply}\n\n"
+                    f"План действий: {action_list}.\n"
+                    f"Подтверди выполнение: да/нет."
+                )
 
         return {
             "intent": Intent.SYSTEM_ACTION.value,
             "response": reply,
             "actions": actions,
+            "needs_confirmation": bool(actions),
         }
 
     async def _handle_goal_request(self, text: str) -> dict[str, Any]:
@@ -456,6 +509,8 @@ class ConversationEngine:
         вариантов — VITO уточняет у владельца перед началом.
         """
         system_context = self._format_system_context()
+        conversation_ctx = self._format_context()
+        owner_focus = self._owner_task_focus_text()
 
         # Проверяем навыки и знания для этой задачи (no extra LLM call)
         skills_context = ""
@@ -507,6 +562,8 @@ class ConversationEngine:
         prompt = (
             f"{VITO_PERSONALITY}\n\n"
             f"=== СОСТОЯНИЕ СИСТЕМЫ ===\n{system_context}\n=== КОНЕЦ ===\n\n"
+            f"{owner_focus}\n\n"
+            f"История разговора:\n{conversation_ctx}\n\n"
             f"{skills_context}{owner_prefs}\n\n"
             f"Владелец просит: \"{wrap_untrusted_text(text)}\"\n\n"
             f"ПРАВИЛА:\n"
@@ -608,6 +665,7 @@ class ConversationEngine:
         prompt = (
             f"{VITO_PERSONALITY}\n\n"
             f"{light_context}\n\n"
+            f"{self._owner_task_focus_text()}\n\n"
             f"История:\n{self._format_context()}\n\n"
             f"Владелец: {text}\n\n"
             f"Ответь коротко и по теме. Не добавляй информацию, о которой не спрашивали."
@@ -658,18 +716,6 @@ class ConversationEngine:
             params = act.get("params", {})
             try:
                 if action_name not in allowed:
-                    # Auto self-improve for missing actions requested by owner
-                    if self.agent_registry:
-                        try:
-                            await self.agent_registry.dispatch(
-                                "self_improve",
-                                step=f"Implement missing system action '{action_name}' to satisfy owner request.",
-                                goal_title="auto_self_improve",
-                            )
-                            results.append(f"[{action_name}] Auto self-improve triggered")
-                            continue
-                        except Exception:
-                            pass
                     results.append(f"[{action_name}] Действие запрещено allowlist")
                     continue
                 if action_name == "apply_code_change":
@@ -959,6 +1005,13 @@ class ConversationEngine:
             pending = len(getattr(self.comms, "_pending_approvals", {}) or {})
             if pending:
                 parts.append(f"Ожидают одобрения: {pending}")
+        if self.owner_task_state:
+            try:
+                active = self.owner_task_state.get_active()
+                if active:
+                    parts.append(f"Активная задача владельца: {str(active.get('text', ''))[:120]}")
+            except Exception:
+                pass
         return "\n".join(parts)
 
     def _quick_spend(self) -> str:
@@ -1161,6 +1214,21 @@ class ConversationEngine:
             except Exception:
                 pass
 
+        # 4.5 Active owner task (persisted across messages/sessions)
+        if self.owner_task_state:
+            try:
+                active = self.owner_task_state.get_active()
+                if active:
+                    parts.append(
+                        "Активная задача владельца:\n"
+                        f"  text: {str(active.get('text', ''))[:300]}\n"
+                        f"  intent: {str(active.get('intent', ''))}\n"
+                        f"  status: {str(active.get('status', 'active'))}\n"
+                        f"  updated_at: {str(active.get('updated_at', ''))}"
+                    )
+            except Exception:
+                pass
+
         # 5. Агенты (все 23)
         if self.agent_registry:
             try:
@@ -1266,18 +1334,37 @@ class ConversationEngine:
         return None
 
     def _add_turn(self, role: str, text: str, intent: Optional[Intent] = None) -> None:
-        self._context.append(Turn(role=role, text=text, intent=intent))
+        turn = Turn(role=role, text=text, intent=intent)
+        self._context.append(turn)
         if len(self._context) > MAX_CONTEXT_TURNS:
             self._context = self._context[-MAX_CONTEXT_TURNS:]
+        self._persist_turn(turn)
 
     def _format_context(self) -> str:
         if not self._context:
             return "(начало разговора)"
+        turns = max(5, min(20, int(getattr(settings, "CONVERSATION_CONTEXT_TURNS", 10) or 10)))
         lines = []
-        for turn in self._context[-10:]:
+        for turn in self._context[-turns:]:
             role_label = "Владелец" if turn.role == "user" else "VITO"
             lines.append(f"{role_label}: {turn.text[:200]}")
         return "\n".join(lines)
+
+    def _owner_task_focus_text(self) -> str:
+        if not self.owner_task_state:
+            return "Фокус владельца: (не зафиксирован)"
+        try:
+            active = self.owner_task_state.get_active()
+            if not active:
+                return "Фокус владельца: (не зафиксирован)"
+            return (
+                "Фокус владельца:\n"
+                f"- текущая задача: {str(active.get('text', ''))[:260]}\n"
+                f"- intent: {str(active.get('intent', ''))[:80]}\n"
+                f"- статус: {str(active.get('status', 'active'))[:40]}"
+            )
+        except Exception:
+            return "Фокус владельца: (не зафиксирован)"
 
     def get_context(self) -> list[dict]:
         return [
@@ -1292,3 +1379,52 @@ class ConversationEngine:
 
     def clear_context(self) -> None:
         self._context.clear()
+        if self.conversation_memory:
+            try:
+                self.conversation_memory.clear(session_id=self._session_id)
+            except Exception:
+                pass
+
+    def _load_context_from_memory(self) -> None:
+        if not self.conversation_memory:
+            return
+        entries = self.conversation_memory.load(limit=MAX_CONTEXT_TURNS, session_id=self._session_id)
+        loaded: list[Turn] = []
+        for entry in entries:
+            turn = self._turn_from_entry(entry)
+            if turn:
+                loaded.append(turn)
+        self._context = loaded[-MAX_CONTEXT_TURNS:]
+
+    def _turn_from_entry(self, entry: dict) -> Turn | None:
+        role = entry.get("role")
+        text = entry.get("text")
+        if not role or not text:
+            return None
+        intent_value = entry.get("intent")
+        timestamp = entry.get("timestamp")
+        intent = None
+        if intent_value:
+            try:
+                intent = Intent(intent_value)
+            except ValueError:
+                intent = None
+        try:
+            ts = datetime.fromisoformat(timestamp) if timestamp else datetime.now(timezone.utc)
+        except Exception:
+            ts = datetime.now(timezone.utc)
+        return Turn(role=role, text=text, intent=intent, timestamp=ts)
+
+    def _persist_turn(self, turn: Turn) -> None:
+        if not self.conversation_memory:
+            return
+        entry = {
+            "role": turn.role,
+            "text": turn.text,
+            "intent": turn.intent.value if turn.intent else None,
+            "timestamp": turn.timestamp.isoformat(),
+        }
+        try:
+            self.conversation_memory.append(entry, session_id=self._session_id)
+        except Exception:
+            pass

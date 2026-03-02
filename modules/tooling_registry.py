@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import sqlite3
+from datetime import datetime, timezone
 from typing import Optional
 
 from config.settings import settings
@@ -1071,10 +1072,42 @@ class ToolingRegistry:
             ).fetchone()
             recent_event_count = int((recent_events["n"] if recent_events else 0) or 0)
             recent_rotation_count = int((recent_rot["n"] if recent_rot else 0) or 0)
+            key_rotation_last = conn.execute(
+                """
+                SELECT key_type, MAX(COALESCE(decided_at, created_at)) AS last_at
+                FROM tooling_key_rotation_requests
+                WHERE status = 'approved'
+                GROUP BY key_type
+                """
+            ).fetchall()
         finally:
             conn.close()
         keyring_contract = sorted(self._keyring("contract").keys())
         keyring_release = sorted(self._keyring("release").keys())
+        rotation_max_days = max(7, int(getattr(settings, "TOOLING_KEY_ROTATION_MAX_DAYS", 90) or 90))
+        rotation_warn_days = max(1, int(getattr(settings, "TOOLING_KEY_ROTATION_WARN_DAYS", 14) or 14))
+        last_map = {str(r["key_type"] or ""): str(r["last_at"] or "") for r in key_rotation_last}
+        contract_last = last_map.get("contract", str(policy.get("updated_at") or ""))
+        release_last = last_map.get("release", str(policy.get("updated_at") or ""))
+        contract_age_days = self._days_since(contract_last)
+        release_age_days = self._days_since(release_last)
+        expiry_alerts: list[dict[str, str | int | float]] = []
+        if contract_age_days is not None and contract_age_days > (rotation_max_days - rotation_warn_days):
+            expiry_alerts.append(
+                {
+                    "key_type": "contract",
+                    "age_days": round(contract_age_days, 1),
+                    "message": "Contract signing key rotation is near/over cadence limit.",
+                }
+            )
+        if release_age_days is not None and release_age_days > (rotation_max_days - rotation_warn_days):
+            expiry_alerts.append(
+                {
+                    "key_type": "release",
+                    "age_days": round(release_age_days, 1),
+                    "message": "Release signing key rotation is near/over cadence limit.",
+                }
+            )
         remediations: list[str] = []
         if contract_bad > 0:
             remediations.append("Fix contract signature/hash mismatches before live runs.")
@@ -1090,6 +1123,8 @@ class ToolingRegistry:
             remediations.append("Set a valid active contract signing key ID.")
         if policy.get("release_active_key_id") not in keyring_release:
             remediations.append("Set a valid active release signing key ID.")
+        if expiry_alerts:
+            remediations.append("Rotate signature keys according to cadence policy (contract/release).")
         return {
             "window_days": window_days,
             "adapters_total": len(adapters),
@@ -1110,8 +1145,32 @@ class ToolingRegistry:
                 "contract": keyring_contract,
                 "release": keyring_release,
             },
+            "key_rotation_health": {
+                "max_days": rotation_max_days,
+                "warn_days": rotation_warn_days,
+                "contract_last_rotation_at": contract_last,
+                "release_last_rotation_at": release_last,
+                "contract_age_days": round(contract_age_days, 2) if contract_age_days is not None else None,
+                "release_age_days": round(release_age_days, 2) if release_age_days is not None else None,
+                "alerts": expiry_alerts,
+            },
             "remediations": remediations,
         }
+
+    @staticmethod
+    def _days_since(ts: str) -> Optional[float]:
+        raw = str(ts or "").strip()
+        if not raw:
+            return None
+        try:
+            norm = raw.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(norm)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            now = datetime.now(timezone.utc)
+            return max(0.0, (now - dt.astimezone(timezone.utc)).total_seconds() / 86400.0)
+        except Exception:
+            return None
 
     def _ensure_signature_policy(self, conn: sqlite3.Connection) -> dict:
         row = conn.execute(

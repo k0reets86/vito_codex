@@ -195,3 +195,28 @@ def test_tooling_registry_governance_report(tmp_path):
     assert "contract_integrity" in rep
     assert rep["pending_stage_changes"] >= 1
     assert isinstance(rep["remediations"], list)
+
+
+def test_tooling_registry_governance_rotation_cadence_alert(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "TOOLING_KEY_ROTATION_MAX_DAYS", 30)
+    monkeypatch.setattr(settings, "TOOLING_KEY_ROTATION_WARN_DAYS", 7)
+    db = str(tmp_path / "tools.db")
+    reg = ToolingRegistry(sqlite_path=db)
+    conn = reg._get_conn()
+    try:
+        conn.execute(
+            """
+            UPDATE tooling_signature_policy
+            SET updated_at = datetime('now', '-45 day')
+            WHERE id = 1
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    rep = reg.build_governance_report(days=7)
+    health = rep.get("key_rotation_health", {})
+    assert int(health.get("max_days") or 0) == 30
+    assert isinstance(health.get("alerts"), list)
+    assert health.get("alerts")
+    assert any("Rotate signature keys" in r for r in rep.get("remediations", []))

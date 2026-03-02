@@ -129,6 +129,7 @@ def test_self_learning_summary_has_family_calibration(tmp_path):
     summary = sl.summary(days=30)
     assert "family_calibration" in summary
     assert isinstance(summary["family_calibration"], list)
+    assert "thresholds" in summary
 
 
 def test_self_learning_auto_promote_blocks_recent_flaky(tmp_path, monkeypatch):
@@ -214,3 +215,94 @@ def test_self_learning_auto_promote_blocks_high_flaky_rate(tmp_path, monkeypatch
     assert changed == 0
     cand = sl.list_candidates(limit=10)[0]
     assert cand["status"] == "hold"
+
+
+def test_self_learning_auto_promote_ignores_old_flaky_with_decay(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "SELF_LEARNING_FLAKY_COOLDOWN_HOURS", 0)
+    monkeypatch.setattr(settings, "SELF_LEARNING_FLAKY_WINDOW_DAYS", 120)
+    monkeypatch.setattr(settings, "SELF_LEARNING_FLAKY_RATE_MAX", 0.3)
+    monkeypatch.setattr(settings, "SELF_LEARNING_FLAKY_DECAY_DAYS", 7)
+    monkeypatch.setattr(settings, "SELF_LEARNING_FLAKY_MIN_WEIGHT", 0.05)
+    db = str(tmp_path / "sl.db")
+    sl = SelfLearningEngine(sqlite_path=db)
+    reg = SkillRegistry(sqlite_path=db)
+    skill_name = "selflearn:stable_after_flake"
+    reg.register_skill(skill_name, category="self_learning", source="self_learning", acceptance_status="pending")
+    conn = reg._get_conn()
+    try:
+        conn.execute(
+            "UPDATE skill_registry SET tests_coverage = 0.95, risk_score = 0.1, security_status = 'safe' WHERE name = ?",
+            (skill_name,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    sl.register_candidate(skill_name, confidence=0.9, notes="ready", task_family="research")
+    sl.set_candidate_status(skill_name, "ready")
+    for i in range(4):
+        sl.record_lesson(f"g{i}", "research flow", "completed", 0.9, "ok", candidate_skill=skill_name, task_family="research")
+    sl.optimize_candidates(days=30, min_lessons=3, promote_confidence_min=0.78, auto_promote=False)
+    conn = sl._get_conn()
+    try:
+        conn.execute(
+            """
+            INSERT INTO self_learning_test_jobs (skill_name, task_family, reason, status, flaky, attempts, updated_at)
+            VALUES
+              (?, 'research', 'very_old_flaky', 'passed', 1, 2, datetime('now', '-90 day')),
+              (?, 'research', 'recent_stable_1', 'passed', 0, 1, datetime('now')),
+              (?, 'research', 'recent_stable_2', 'passed', 0, 1, datetime('now'))
+            """,
+            (skill_name, skill_name, skill_name),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    changed = sl.auto_promote_ready_candidates()
+    assert changed >= 1
+    cand = sl.list_candidates(limit=10)[0]
+    assert cand["status"] == "promoted"
+
+
+def test_self_learning_remediate_degraded_promoted_skills(tmp_path):
+    db = str(tmp_path / "sl_remediate.db")
+    sl = SelfLearningEngine(sqlite_path=db)
+    skill_name = "selflearn:degraded_skill"
+    sl.register_candidate(skill_name, confidence=0.93, notes="promoted", task_family="research")
+    sl.set_candidate_status(skill_name, "promoted")
+    conn = sl._get_conn()
+    try:
+        conn.execute(
+            """
+            INSERT INTO self_learning_promotion_events (skill_name, decision, reason, created_at)
+            VALUES (?, 'postcheck_fail', 'postcheck:fail_rate=0.7', datetime('now'))
+            """,
+            (skill_name,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    out = sl.remediate_degraded_promoted_skills(days=30, max_actions=5)
+    assert out["ok"] is True
+    assert out["remediated"] == 1
+    rows = sl.list_candidates(limit=10)
+    assert rows[0]["status"] == "hold"
+    jobs = sl.list_test_jobs(status="open", limit=10)
+    assert any(j["skill_name"] == skill_name and str(j["reason"]).startswith("postcheck_remediation_") for j in jobs)
+    out2 = sl.remediate_degraded_promoted_skills(days=30, max_actions=5)
+    assert out2["remediated"] == 0
+
+
+def test_self_learning_remediation_reason_for_family():
+    assert SelfLearningEngine._remediation_reason_for_family("research") == "postcheck_remediation_research"
+    assert SelfLearningEngine._remediation_reason_for_family("security/ops") == "postcheck_remediation_security_ops"
+    assert SelfLearningEngine._remediation_reason_for_family("") == "postcheck_remediation_generic"
+
+
+def test_self_learning_remediation_reasons_for_failure_playbooks():
+    reasons = SelfLearningEngine._remediation_reasons_for_failure(
+        "research",
+        "postcheck:fail_rate=0.63;flaky_rate=0.28",
+    )
+    assert reasons[0] == "postcheck_remediation_research"
+    assert "postcheck_remediation_research_regression" in reasons
+    assert "postcheck_remediation_research_stability" in reasons

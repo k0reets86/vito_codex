@@ -26,6 +26,23 @@ class SelfLearningTestRunner:
         )
 
     @staticmethod
+    def _resolve_job_family(task_family: str, reason: str = "") -> str:
+        fam = str(task_family or "").strip().lower()
+        if fam:
+            return fam
+        rsn = str(reason or "").strip().lower()
+        prefix = "postcheck_remediation_"
+        if rsn.startswith(prefix):
+            parsed = rsn[len(prefix):].strip("_")
+            for suffix in ("_regression", "_stability"):
+                if parsed.endswith(suffix):
+                    parsed = parsed[: -len(suffix)].strip("_")
+                    break
+            if parsed and parsed != "generic":
+                return parsed[:60]
+        return fam
+
+    @staticmethod
     def _coverage_from_return_code(code: int) -> float:
         if code == 0:
             return 0.92
@@ -82,7 +99,10 @@ class SelfLearningTestRunner:
         for job in jobs:
             job_id = int(job.get("id", 0) or 0)
             skill_name = str(job.get("skill_name", "") or "")
-            task_family = str(job.get("task_family", "") or "")
+            task_family = self._resolve_job_family(
+                str(job.get("task_family", "") or ""),
+                str(job.get("reason", "") or ""),
+            )
             if not job_id or not skill_name:
                 continue
             ok, notes, coverage, attempts, flaky = self._run_job_tests(task_family=task_family, timeout_sec=timeout_sec)

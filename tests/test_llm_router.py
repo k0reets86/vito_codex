@@ -29,7 +29,10 @@ def tmp_db(tmp_path):
 
 
 @pytest.fixture
-def router(tmp_db):
+def router(tmp_db, monkeypatch):
+    monkeypatch.setattr(settings, "LLM_FORCE_GEMINI_FREE", False, raising=False)
+    monkeypatch.setattr(settings, "LLM_ENABLED_MODELS", "", raising=False)
+    monkeypatch.setattr(settings, "LLM_DISABLED_MODELS", "", raising=False)
     return LLMRouter(sqlite_path=tmp_db)
 
 
@@ -251,3 +254,32 @@ async def test_call_llm_blocked_by_guardrails(router):
             )
     assert result is None
     assert mock_call.call_count == 0
+
+
+def test_select_model_forced_free_gemini(router):
+    with patch("llm_router.settings") as s:
+        s.LLM_FORCE_GEMINI_FREE = True
+        s.LLM_ENABLED_MODELS = ""
+        s.LLM_DISABLED_MODELS = ""
+        result = router.select_model(TaskType.STRATEGY, estimated_tokens=1000)
+    assert result.model.model_id == "gemini-2.5-flash-lite"
+    assert result.estimated_cost_usd == 0.0
+
+
+@pytest.mark.asyncio
+async def test_call_llm_forced_free_gemini_no_fallback_to_paid(router):
+    with patch("llm_router.settings") as s:
+        s.LLM_FORCE_GEMINI_FREE = True
+        s.LLM_ENABLED_MODELS = ""
+        s.LLM_DISABLED_MODELS = ""
+        s.GUARDRAILS_ENABLED = False
+        s.LLM_CACHE_TTL_HOURS = 0
+        s.DAILY_LIMIT_USD = 1000
+        s.GEMINI_API_KEY = ""
+        s.GOOGLE_API_KEY = ""
+        s.OPENROUTER_API_KEY = "present_but_must_not_be_used"
+        s.ANTHROPIC_API_KEY = "present"
+        s.OPENAI_API_KEY = "present"
+        s.PERPLEXITY_API_KEY = "present"
+        result = await router.call_llm(TaskType.CODE, "test prompt", estimated_tokens=100)
+    assert result is None

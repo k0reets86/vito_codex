@@ -14,7 +14,7 @@
 
 import asyncio
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from config.logger import get_logger
@@ -33,6 +33,17 @@ from modules.workflow_interrupts import WorkflowInterrupts
 from modules.orchestration_manager import OrchestrationManager
 from modules.data_lake import DataLake
 from modules.step_contract import validate_step_output, validate_step_result
+from modules.tooling_registry import ToolingRegistry
+from modules.tooling_discovery import ToolingDiscovery, parse_tooling_discovery_sources
+from modules.memory_skill_reports import MemorySkillReporter
+from modules.governance_reporter import GovernanceReporter
+from modules.autonomous_improvement import AutonomousImprovementEngine
+from modules.runtime_remediation import (
+    SAFE_ACTIONS,
+    apply_safe_action,
+    rank_safe_action_suggestions,
+    record_safe_action_outcome,
+)
 
 TICK_INTERVAL = 300  # 5 минут
 STEP_TIMEOUT = 120   # секунд на один шаг (LLM content needs time)
@@ -55,6 +66,7 @@ class DecisionLoop:
         self.agent_registry = agent_registry
         self.self_healer = None
         self._code_generator = None
+        self.cancel_state = None
         self.running = False
         self._tick_count = 0
         self._consecutive_idle = 0
@@ -68,13 +80,58 @@ class DecisionLoop:
         self._last_memory_retention_tick = 0
         self._last_self_learning_opt_tick = 0
         self._last_self_learning_test_tick = 0
+        self._last_self_learning_maintenance_tick = 0
+        self._last_tooling_governance_tick = 0
+        self._last_tooling_discovery_tick = 0
+        self._last_memory_weekly_report_tick = 0
+        self._last_weekly_governance_tick = 0
+        self._last_autonomous_improvement_tick = 0
         self._current_interrupt_id: int | None = None
+        self._current_goal_id: str | None = None
+        self._current_thread_id: str | None = None
         self.orchestrator = OrchestrationManager()
         logger.info("DecisionLoop инициализирован", extra={"event": "init"})
 
     def set_self_healer(self, self_healer) -> None:
         """Устанавливает SelfHealer для самолечения."""
         self.self_healer = self_healer
+
+    def set_cancel_state(self, cancel_state) -> None:
+        """Устанавливает shared cancel-state для блокировки retry/auto-resume."""
+        self.cancel_state = cancel_state
+
+    def _is_cancelled(self) -> bool:
+        try:
+            return bool(self.cancel_state and self.cancel_state.is_cancelled())
+        except Exception:
+            return False
+
+    @staticmethod
+    def _parse_sqlite_dt(value: str) -> datetime | None:
+        ts = (value or "").strip()
+        if not ts:
+            return None
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+            try:
+                return datetime.strptime(ts[:19], fmt).replace(tzinfo=timezone.utc)
+            except Exception:
+                continue
+        return None
+
+    def _auto_resume_allowed(self, goal_id: str, interrupt_id: int) -> tuple[bool, str]:
+        max_count = max(0, int(getattr(settings, "AUTO_RESUME_MAX_PER_INTERRUPT", 2) or 2))
+        cooldown_sec = max(0, int(getattr(settings, "AUTO_RESUME_COOLDOWN_SEC", 120) or 120))
+        if max_count <= 0:
+            return False, "policy_disabled"
+        resume_count = self.interrupts.count_resume_events(goal_id, interrupt_id, action="resumed")
+        if resume_count >= max_count:
+            return False, "max_resumes_reached"
+        latest = self.interrupts.latest_resume_event(goal_id, interrupt_id, action="resumed")
+        if latest and cooldown_sec > 0:
+            last_at = self._parse_sqlite_dt(str(latest.get("created_at") or ""))
+            if last_at and (datetime.now(timezone.utc) - last_at) < timedelta(seconds=cooldown_sec):
+                return False, "cooldown_active"
+        return True, "ok"
 
     async def run(self) -> None:
         """Основной цикл. Работает пока self.running == True."""
@@ -140,8 +197,19 @@ class DecisionLoop:
         # 1.5. LLM risk monitoring (cost anomaly / fail-rate)
         await self._maybe_send_llm_risk_alert()
         await self._maybe_run_memory_retention()
+        await self._maybe_run_memory_weekly_report()
         await self._maybe_run_self_learning_optimization()
         await self._maybe_run_self_learning_test_jobs()
+        await self._maybe_run_self_learning_maintenance()
+        await self._maybe_run_tooling_discovery_intake()
+        await self._maybe_run_tooling_governance_check()
+        await self._maybe_run_weekly_governance_report()
+        await self._maybe_run_autonomous_improvement()
+        if self._is_cancelled():
+            logger.info("Tick skipped: cancel-state active", extra={"event": "tick_cancelled_skip"})
+            self._log_tick_done(tick_start, idle=True)
+            return
+        await self._maybe_auto_resume_waiting_goals()
 
         # 2. Выбор следующей цели
         try:
@@ -162,12 +230,89 @@ class DecisionLoop:
         await self._process_goal(goal)
         self._log_tick_done(tick_start, idle=False)
 
+    async def _maybe_auto_resume_waiting_goals(self) -> None:
+        """Auto-resume waiting goals when interrupts are resolved."""
+        if self._is_cancelled():
+            return
+        try:
+            waiting = self.goal_engine.get_waiting_approvals()
+        except Exception:
+            return
+        if not waiting:
+            return
+
+        for goal in waiting:
+            session = self.orchestrator.get_session(goal.goal_id)
+            if not session or session.get("state") != "waiting_approval":
+                continue
+
+            pending = self.interrupts.latest_pending(goal.goal_id)
+            if pending:
+                continue
+
+            latest = self.interrupts.latest_for_goal(goal.goal_id)
+            if not latest:
+                continue
+
+            status = str(latest.get("status") or "").lower()
+            intr_type = str(latest.get("interrupt_type") or "").lower()
+            intr_id = int(latest.get("id") or 0)
+
+            if status == "resolved" and intr_type in {"owner_approval_required", "step_approval_pending"}:
+                allowed, reason = self._auto_resume_allowed(goal.goal_id, intr_id)
+                if not allowed:
+                    try:
+                        self.interrupts.log_resume_event(goal.goal_id, intr_id, action="skipped", reason=reason)
+                    except Exception:
+                        pass
+                    logger.info(
+                        f"[{goal.goal_id}] auto-resume skipped: {reason}",
+                        extra={"event": "auto_resume_waiting_goal_skipped", "context": {"goal_id": goal.goal_id, "interrupt_id": intr_id, "reason": reason}},
+                    )
+                    continue
+                try:
+                    self.orchestrator.resume_session(goal.goal_id, reason="auto_resume_resolved_interrupt")
+                except Exception:
+                    pass
+                try:
+                    goal.status = GoalStatus.PENDING
+                    self.goal_engine._persist_goal(goal)
+                except Exception:
+                    pass
+                try:
+                    self.interrupts.log_resume_event(goal.goal_id, intr_id, action="resumed", reason="auto_resume_resolved_interrupt")
+                except Exception:
+                    pass
+                logger.info(
+                    f"[{goal.goal_id}] auto-resume: interrupt resolved",
+                    extra={"event": "auto_resume_waiting_goal", "context": {"goal_id": goal.goal_id, "interrupt_id": intr_id}},
+                )
+            elif status == "cancelled":
+                try:
+                    self.orchestrator.cancel_session(goal.goal_id, reason="auto_cancelled_interrupt")
+                except Exception:
+                    pass
+                try:
+                    self.goal_engine.fail_goal(goal.goal_id, "Отменено по результату interrupt")
+                except Exception:
+                    pass
+                try:
+                    self.interrupts.log_resume_event(goal.goal_id, intr_id, action="cancelled", reason="auto_cancelled_interrupt")
+                except Exception:
+                    pass
+                logger.info(
+                    f"[{goal.goal_id}] auto-cancel: interrupt cancelled",
+                    extra={"event": "auto_cancel_waiting_goal", "context": {"goal_id": goal.goal_id, "interrupt_id": intr_id}},
+                )
+
     # ── Goal → Plan → Execute → Learn ──
 
     async def _process_goal(self, goal: Goal) -> None:
         """Проводит цель через полный цикл."""
         trace_id = self.workflow.start_or_attach(goal.goal_id)
         thread_id = f"goal_{goal.goal_id}"
+        self._current_goal_id = goal.goal_id
+        self._current_thread_id = thread_id
         try:
             self.threads.start_thread(thread_id=thread_id, goal_id=goal.goal_id)
             self.threads.update_thread(thread_id=thread_id, status="planning", last_node="planning")
@@ -192,10 +337,12 @@ class DecisionLoop:
         if not plan:
             self.workflow.transition(goal.goal_id, "failed", reason="planning_failed", detail="empty_plan")
             try:
-            self.threads.update_thread(thread_id=thread_id, status="failed", last_node="planning_failed")
+                self.threads.update_thread(thread_id=thread_id, status="failed", last_node="planning_failed")
             except Exception:
                 pass
             self.goal_engine.fail_goal(goal.goal_id, "Не удалось составить план")
+            self._current_goal_id = None
+            self._current_thread_id = None
             return
 
         self.goal_engine.plan_goal(goal.goal_id, plan)
@@ -231,6 +378,8 @@ class DecisionLoop:
                 )
             except Exception:
                 pass
+            self._current_goal_id = None
+            self._current_thread_id = None
             return
 
         results = await self._execute_goal(goal)
@@ -240,6 +389,8 @@ class DecisionLoop:
                 self.threads.update_thread(thread_id=thread_id, status="waiting_approval", last_node="waiting_approval")
             except Exception:
                 pass
+            self._current_goal_id = None
+            self._current_thread_id = None
             return
 
         # LEARN
@@ -248,6 +399,8 @@ class DecisionLoop:
             self.threads.update_thread(thread_id=thread_id, status="learning", last_node="learning")
         except Exception:
             pass
+        self._current_goal_id = None
+        self._current_thread_id = None
         await self._learn_from_goal(goal, results)
         if results.get("all_completed"):
             self.workflow.transition(goal.goal_id, "completed", reason="learn_done", detail="ok")
@@ -375,6 +528,402 @@ class DecisionLoop:
         except Exception:
             pass
 
+    async def _maybe_run_self_learning_maintenance(self) -> None:
+        try:
+            if not settings.SELF_LEARNING_ENABLED:
+                return
+            interval = max(24, int(getattr(settings, "SELF_LEARNING_MAINTENANCE_INTERVAL_TICKS", 168) or 168))
+            if self._tick_count - int(self._last_self_learning_maintenance_tick or 0) < interval:
+                return
+            if self.self_learning is None:
+                self.self_learning = SelfLearningEngine(sqlite_path=settings.SQLITE_PATH)
+            recalib = self.self_learning.recalibrate_thresholds(
+                days=int(getattr(settings, "SELF_LEARNING_MAINTENANCE_DAYS", 45) or 45),
+                min_lessons=int(getattr(settings, "SELF_LEARNING_MAINTENANCE_MIN_LESSONS", 4) or 4),
+            )
+            outcomes = self.self_learning.sync_promotion_outcomes_from_tests(
+                days=int(getattr(settings, "SELF_LEARNING_MAINTENANCE_DAYS", 45) or 45),
+                min_runs=int(getattr(settings, "SELF_LEARNING_OUTCOME_MIN_TEST_RUNS", 2) or 2),
+                fail_rate_max=float(getattr(settings, "SELF_LEARNING_OUTCOME_FAIL_RATE_MAX", 0.35) or 0.35),
+            )
+            remediation = self.self_learning.remediate_degraded_promoted_skills(
+                days=int(getattr(settings, "SELF_LEARNING_MAINTENANCE_DAYS", 45) or 45),
+                max_actions=int(getattr(settings, "SELF_LEARNING_REMEDIATION_MAX_ACTIONS", 3) or 3),
+            )
+            cleanup = self.self_learning.cleanup_old_test_jobs(
+                max_age_days=int(getattr(settings, "SELF_LEARNING_TEST_JOB_RETENTION_DAYS", 90) or 90)
+            )
+            logger.info(
+                "Self-learning maintenance: "
+                f"thresholds_updated={recalib.get('updated', 0)} "
+                f"outcomes_synced={outcomes.get('inserted', 0)} "
+                f"remediated={remediation.get('remediated', 0)} "
+                f"jobs_deleted={cleanup.get('deleted', 0)}",
+                extra={
+                    "event": "self_learning_maintenance",
+                    "context": {"recalibrate": recalib, "outcomes": outcomes, "remediation": remediation, "cleanup": cleanup},
+                },
+            )
+            self._last_self_learning_maintenance_tick = self._tick_count
+        except Exception:
+            pass
+
+    async def _maybe_run_tooling_governance_check(self) -> None:
+        try:
+            if not getattr(settings, "TOOLING_GOVERNANCE_ALERT_ENABLED", True):
+                return
+            interval = max(1, int(getattr(settings, "TOOLING_GOVERNANCE_INTERVAL_TICKS", 288) or 288))
+            if self._tick_count - int(self._last_tooling_governance_tick or 0) < interval:
+                return
+            report = ToolingRegistry(sqlite_path=settings.SQLITE_PATH).build_governance_report(days=7)
+            rem = report.get("remediations", []) or []
+            rot_alerts = ((report.get("key_rotation_health", {}) or {}).get("alerts", []) or [])
+            if rem or rot_alerts:
+                top = rem[:3]
+                msg = (
+                    "Tooling governance alert:\n"
+                    f"- pending_contract_rotations: {report.get('pending_contract_rotations', 0)}\n"
+                    f"- pending_stage_changes: {report.get('pending_stage_changes', 0)}\n"
+                    f"- pending_key_rotations: {report.get('pending_key_rotations', 0)}\n"
+                    f"- key_rotation_alerts: {len(rot_alerts)}\n"
+                    "Remediations:\n"
+                    + ("\n".join(f"  - {x}" for x in top) if top else "  - review governance dashboard")
+                )
+                if hasattr(self, "_comms") and self._comms:
+                    await self._comms.send_message(msg, level="warning")
+            self._last_tooling_governance_tick = self._tick_count
+        except Exception:
+            pass
+
+    async def _maybe_run_tooling_discovery_intake(self) -> None:
+        try:
+            if not getattr(settings, "TOOLING_DISCOVERY_ENABLED", False):
+                return
+            interval = max(1, int(getattr(settings, "TOOLING_DISCOVERY_INTERVAL_TICKS", 288) or 288))
+            if self._tick_count - int(self._last_tooling_discovery_tick or 0) < interval:
+                return
+
+            max_per_tick = max(1, int(getattr(settings, "TOOLING_DISCOVERY_MAX_PER_TICK", 3) or 3))
+            auto_promote = bool(getattr(settings, "TOOLING_DISCOVERY_AUTO_PROMOTE_APPROVED", False))
+            sources = parse_tooling_discovery_sources(getattr(settings, "TOOLING_DISCOVERY_SOURCES", ""))
+            if not sources:
+                self._last_tooling_discovery_tick = self._tick_count
+                return
+
+            discovery = ToolingDiscovery(sqlite_path=settings.SQLITE_PATH)
+            batch = discovery.discover_from_sources(
+                sources=sources,
+                max_items=max_per_tick,
+                auto_promote=auto_promote,
+                rollout_stage=str(getattr(settings, "TOOLING_DISCOVERY_ROLLOUT_STAGE", "canary") or "canary"),
+                canary_percent=int(getattr(settings, "TOOLING_DISCOVERY_CANARY_PERCENT", 34) or 34),
+                scope="decision_loop",
+            )
+            processed = int(batch.get("processed", 0) or 0)
+            duplicates = int(batch.get("duplicates", 0) or 0)
+            promoted = int(batch.get("promoted", 0) or 0)
+            review_required = int(batch.get("review_required", 0) or 0)
+            policy_blocked = int(batch.get("policy_blocked", 0) or 0)
+            policy_block_reasons = batch.get("policy_block_reasons", {})
+            if not isinstance(policy_block_reasons, dict):
+                policy_block_reasons = {}
+            auto_paused = False
+            auto_pause_updates: dict[str, str] = {}
+            policy_block_threshold = max(
+                1,
+                int(getattr(settings, "TOOLING_DISCOVERY_POLICY_BLOCK_THRESHOLD", 3) or 3),
+            )
+            policy_block_rate = (
+                float(policy_blocked) / float(processed)
+                if processed > 0
+                else 0.0
+            )
+            policy_block_rate_threshold = max(
+                0.0,
+                min(
+                    1.0,
+                    float(
+                        getattr(
+                            settings,
+                            "TOOLING_DISCOVERY_POLICY_BLOCK_RATE_THRESHOLD",
+                            0.8,
+                        )
+                        or 0.8
+                    ),
+                ),
+            )
+            policy_block_rate_min_processed = max(
+                1,
+                int(
+                    getattr(
+                        settings,
+                        "TOOLING_DISCOVERY_POLICY_BLOCK_RATE_MIN_PROCESSED",
+                        3,
+                    )
+                    or 3
+                ),
+            )
+            block_by_count = policy_blocked >= policy_block_threshold
+            block_by_rate = (
+                processed >= policy_block_rate_min_processed
+                and policy_block_rate >= policy_block_rate_threshold
+            )
+            if (
+                bool(getattr(settings, "TOOLING_DISCOVERY_AUTO_PAUSE_ON_POLICY_BLOCK", False))
+                and (block_by_count or block_by_rate)
+            ):
+                auto_pause_updates = apply_safe_action("disable_discovery_intake") or {}
+                auto_paused = bool(auto_pause_updates)
+
+            logger.info(
+                f"Tooling discovery intake: processed={processed} duplicate={duplicates} review_required={review_required} policy_blocked={policy_blocked} promoted={promoted} auto_paused={auto_paused}",
+                extra={
+                    "event": "tooling_discovery_intake",
+                    "context": {
+                        "processed": processed,
+                        "duplicates": duplicates,
+                        "review_required": review_required,
+                        "policy_blocked": policy_blocked,
+                        "policy_block_reasons": policy_block_reasons,
+                        "policy_block_rate": round(policy_block_rate, 4),
+                        "promoted": promoted,
+                        "auto_paused": auto_paused,
+                        "auto_pause_threshold": policy_block_threshold,
+                        "auto_pause_rate_threshold": policy_block_rate_threshold,
+                        "auto_pause_rate_min_processed": policy_block_rate_min_processed,
+                        "auto_pause_trigger": "count" if block_by_count else ("rate" if block_by_rate else ""),
+                        "auto_pause_updates": auto_pause_updates,
+                        "rollout_state": batch.get("rollout_state", {}),
+                        "selected": batch.get("selected", []),
+                    },
+                },
+            )
+            pause_line = (
+                f"\n- auto_paused: true (count_threshold={policy_block_threshold}, rate={policy_block_rate:.2f}, rate_threshold={policy_block_rate_threshold:.2f}, min_processed={policy_block_rate_min_processed})"
+                if auto_paused
+                else ""
+            )
+            reasons_line = ""
+            if policy_block_reasons:
+                top = sorted(
+                    [
+                        (str(k), int(v or 0))
+                        for k, v in policy_block_reasons.items()
+                        if str(k)
+                    ],
+                    key=lambda x: (-x[1], x[0]),
+                )[:4]
+                if top:
+                    reasons_line = "\n- policy_block_reasons: " + ", ".join(
+                        f"{k}={n}" for k, n in top
+                    )
+            if (
+                (review_required > 0 or auto_paused)
+                and getattr(settings, "TOOLING_DISCOVERY_ALERTS_ENABLED", True)
+                and hasattr(self, "_comms")
+                and self._comms
+            ):
+                await self._comms.send_message(
+                    (
+                        "Tooling discovery alert:\n"
+                        f"- processed: {processed}\n"
+                        f"- review_required: {review_required}\n"
+                        f"- policy_blocked: {policy_blocked}\n"
+                        f"- promoted: {promoted}"
+                        f"{reasons_line}"
+                        f"{pause_line}"
+                    ),
+                    level="warning",
+                )
+            self._last_tooling_discovery_tick = self._tick_count
+        except Exception:
+            pass
+
+    async def _maybe_run_memory_weekly_report(self) -> None:
+        try:
+            if not getattr(settings, "MEMORY_WEEKLY_REPORT_ENABLED", True):
+                return
+            interval = max(288, int(getattr(settings, "MEMORY_WEEKLY_REPORT_INTERVAL_TICKS", 2016) or 2016))
+            if self._tick_count - int(self._last_memory_weekly_report_tick or 0) < interval:
+                return
+            reporter = MemorySkillReporter(memory_manager=self.memory, sqlite_path=settings.SQLITE_PATH)
+            weekly = reporter.weekly_retention_report(days=7)
+            skills = reporter.per_skill_quality(limit=8)
+            report_path = str(getattr(settings, "MEMORY_WEEKLY_REPORT_PATH", "reports/memory_retention_weekly.md") or "reports/memory_retention_weekly.md")
+            try:
+                from pathlib import Path
+                reporter.persist_markdown(path=Path(report_path), days=7, per_skill_limit=8)
+            except Exception:
+                pass
+
+            summary = weekly.get("summary", {}) if isinstance(weekly, dict) else {}
+            quality = float(summary.get("quality_score", 0.0) or 0.0)
+            quality_min = float(getattr(settings, "MEMORY_WEEKLY_REPORT_MIN_QUALITY", 0.65) or 0.65)
+            skill_health_min = float(getattr(settings, "MEMORY_WEEKLY_REPORT_MIN_SKILL_HEALTH", 0.55) or 0.55)
+            weak_skills = [
+                str(s.get("skill_name") or "")
+                for s in skills
+                if float(s.get("learning_health", 0.0) or 0.0) < skill_health_min
+            ]
+            alerts = weekly.get("alerts", []) if isinstance(weekly, dict) else []
+            logger.info(
+                f"Memory weekly report generated: quality={quality:.3f} alerts={len(alerts)} weak_skills={len(weak_skills)}",
+                extra={"event": "memory_weekly_report", "context": {"report_path": report_path, "quality": quality, "alerts": len(alerts), "weak_skills": weak_skills[:5]}},
+            )
+
+            if (
+                getattr(settings, "MEMORY_WEEKLY_REPORT_ALERTS_ENABLED", False)
+                and hasattr(self, "_comms")
+                and self._comms
+                and (quality < quality_min or bool(alerts) or bool(weak_skills))
+            ):
+                msg = (
+                    "Memory weekly alert:\n"
+                    f"- quality_score: {quality:.3f} (target>={quality_min:.2f})\n"
+                    f"- retention_alerts: {len(alerts)}\n"
+                    f"- weak_skills: {', '.join(weak_skills[:5]) if weak_skills else 'none'}\n"
+                    f"- report: {report_path}"
+                )
+                await self._comms.send_message(msg, level="warning")
+            self._last_memory_weekly_report_tick = self._tick_count
+        except Exception:
+            pass
+
+    async def _maybe_run_weekly_governance_report(self) -> None:
+        try:
+            if not getattr(settings, "WEEKLY_GOVERNANCE_REPORT_ENABLED", True):
+                return
+            interval = max(288, int(getattr(settings, "WEEKLY_GOVERNANCE_REPORT_INTERVAL_TICKS", 2016) or 2016))
+            if self._tick_count - int(self._last_weekly_governance_tick or 0) < interval:
+                return
+            reporter = GovernanceReporter(memory_manager=self.memory, sqlite_path=settings.SQLITE_PATH)
+            report = reporter.weekly_report(days=7)
+            report_path = str(getattr(settings, "WEEKLY_GOVERNANCE_REPORT_PATH", "reports/governance_weekly.md") or "reports/governance_weekly.md")
+            try:
+                from pathlib import Path
+                reporter.persist_markdown(Path(report_path), report)
+            except Exception:
+                pass
+            status = str(report.get("status") or "ok")
+            rem = report.get("remediations", []) or []
+            suggestions = report.get("safe_action_suggestions", []) or []
+            auto_applied: list[str] = []
+            auto_skipped_noop: list[str] = []
+            auto_skipped_duplicate: list[str] = []
+            auto_skipped_invalid: list[str] = []
+            allow_warning = bool(getattr(settings, "WEEKLY_GOVERNANCE_AUTO_REMEDIATE_ON_WARNING", False))
+            should_auto_remediate = (
+                status == "critical"
+                or (status == "warning" and allow_warning)
+            )
+            if (
+                getattr(settings, "WEEKLY_GOVERNANCE_AUTO_REMEDIATE", False)
+                and should_auto_remediate
+                and suggestions
+            ):
+                max_actions = max(1, int(getattr(settings, "WEEKLY_GOVERNANCE_AUTO_REMEDIATE_MAX_ACTIONS", 2) or 2))
+                ranked = rank_safe_action_suggestions(
+                    list(suggestions),
+                    sqlite_path=settings.SQLITE_PATH,
+                    days=30,
+                )
+                seen_actions: set[str] = set()
+                applied_actions = 0
+                for rec in ranked:
+                    action = str(rec.get("action") or "").strip().lower()
+                    if not action:
+                        continue
+                    if action in seen_actions:
+                        auto_skipped_duplicate.append(action)
+                        record_safe_action_outcome(action, "duplicate", "duplicate_action")
+                        continue
+                    seen_actions.add(action)
+                    if action not in SAFE_ACTIONS:
+                        auto_skipped_invalid.append(action)
+                        record_safe_action_outcome(action, "invalid", "not_in_safe_actions")
+                        continue
+                    updated = apply_safe_action(action)
+                    if updated:
+                        auto_applied.append(action)
+                        applied_actions += 1
+                        record_safe_action_outcome(action, "applied", "safe_action_applied")
+                    else:
+                        auto_skipped_noop.append(action)
+                        record_safe_action_outcome(action, "noop", "already_applied_or_no_update")
+                    if applied_actions >= max_actions:
+                        break
+            logger.info(
+                f"Weekly governance report generated: status={status} remediations={len(rem)} auto_applied={len(auto_applied)} auto_skipped_noop={len(auto_skipped_noop)} auto_skipped_duplicate={len(auto_skipped_duplicate)} auto_skipped_invalid={len(auto_skipped_invalid)}",
+                extra={"event": "weekly_governance_report", "context": {"status": status, "report_path": report_path, "remediations": rem[:5], "auto_applied": auto_applied, "auto_skipped_noop": auto_skipped_noop, "auto_skipped_duplicate": auto_skipped_duplicate, "auto_skipped_invalid": auto_skipped_invalid}},
+            )
+            if (
+                getattr(settings, "WEEKLY_GOVERNANCE_REPORT_ALERTS_ENABLED", True)
+                and status in {"warning", "critical"}
+                and hasattr(self, "_comms")
+                and self._comms
+            ):
+                msg = (
+                    "Weekly governance alert:\n"
+                    f"- status: {status}\n"
+                    f"- remediations: {len(rem)}\n"
+                    + ("\n".join(f"  - {x}" for x in rem[:3]) if rem else "  - open governance dashboard")
+                    + (f"\n- auto_applied: {', '.join(auto_applied)}" if auto_applied else "")
+                    + (f"\n- auto_skipped_noop: {', '.join(auto_skipped_noop)}" if auto_skipped_noop else "")
+                    + (f"\n- auto_skipped_duplicate: {', '.join(auto_skipped_duplicate)}" if auto_skipped_duplicate else "")
+                    + (f"\n- auto_skipped_invalid: {', '.join(auto_skipped_invalid)}" if auto_skipped_invalid else "")
+                    + f"\n- report: {report_path}"
+                )
+                await self._comms.send_message(msg, level="warning")
+            self._last_weekly_governance_tick = self._tick_count
+        except Exception:
+            pass
+
+    async def _maybe_run_autonomous_improvement(self) -> None:
+        try:
+            if not getattr(settings, "AUTONOMOUS_IMPROVEMENT_ENABLED", False):
+                return
+            interval = max(24, int(getattr(settings, "AUTONOMOUS_IMPROVEMENT_INTERVAL_TICKS", 288) or 288))
+            if self._tick_count - int(self._last_autonomous_improvement_tick or 0) < interval:
+                return
+            governance = GovernanceReporter(memory_manager=self.memory, sqlite_path=settings.SQLITE_PATH).weekly_report(days=7)
+            sl_summary = {}
+            if self.self_learning is None and getattr(settings, "SELF_LEARNING_ENABLED", False):
+                self.self_learning = SelfLearningEngine(sqlite_path=settings.SQLITE_PATH)
+            if self.self_learning is not None:
+                try:
+                    sl_summary = self.self_learning.summary(days=30)
+                except Exception:
+                    sl_summary = {}
+            engine = AutonomousImprovementEngine(sqlite_path=settings.SQLITE_PATH)
+            out = engine.generate_candidates(
+                governance=governance,
+                self_learning_summary=sl_summary,
+                limit=max(1, int(getattr(settings, "AUTONOMOUS_IMPROVEMENT_MAX_CANDIDATES", 4) or 4)),
+            )
+            created = int(out.get("created", 0) or 0)
+            logger.info(
+                f"Autonomous improvement: created={created}",
+                extra={"event": "autonomous_improvement", "context": {"result": out}},
+            )
+            if (
+                created > 0
+                and getattr(settings, "AUTONOMOUS_IMPROVEMENT_ALERTS_ENABLED", False)
+                and hasattr(self, "_comms")
+                and self._comms
+            ):
+                actions = ", ".join(str(c.get("action") or "") for c in (out.get("candidates", []) or [])[:4])
+                await self._comms.send_message(
+                    (
+                        "Autonomous improvement candidates:\n"
+                        f"- created: {created}\n"
+                        f"- actions: {actions or 'n/a'}"
+                    ),
+                    level="warning",
+                )
+            self._last_autonomous_improvement_tick = self._tick_count
+        except Exception:
+            pass
+
     async def _plan_goal(self, goal: Goal) -> list[str]:
         """Фаза PLAN: генерирует план выполнения через LLM."""
         # Deterministic plan for BOEVOY test goals (avoid LLM noise and extra steps)
@@ -461,19 +1010,73 @@ class DecisionLoop:
         results: dict[str, Any] = {"steps_completed": 0, "steps_total": len(goal.plan)}
         exec_start = time.monotonic()
         replanned = False
+        thread_id = f"goal_{goal.goal_id}"
 
         session = self.orchestrator.get_session(goal.goal_id)
         pending_interrupt = self.interrupts.latest_pending(goal.goal_id)
+        waiting_payload = {
+            "waiting_approval": True,
+            "paused_step": int(session.get("current_step", 0)) + 1 if session else 1,
+            "steps_completed": int(session.get("current_step", 0)) if session else 0,
+            "steps_total": len(goal.plan),
+        }
         if session and session.get("state") == "waiting_approval" and pending_interrupt:
-            return {
-                "waiting_approval": True,
-                "paused_step": int(session.get("current_step", 0)) + 1,
-                "steps_completed": int(session.get("current_step", 0)),
-                "steps_total": len(goal.plan),
-            }
+            return waiting_payload
         if session and session.get("state") == "waiting_approval" and not pending_interrupt:
-            self.orchestrator.resume_session(goal.goal_id, reason="auto_resume")
-            session = self.orchestrator.get_session(goal.goal_id)
+            latest = self.interrupts.latest_for_goal(goal.goal_id)
+            if not latest:
+                return waiting_payload
+            status = str(latest.get("status") or "").lower()
+            intr_type = str(latest.get("interrupt_type") or "").lower()
+            intr_id = int(latest.get("id") or 0)
+
+            if status == "cancelled":
+                try:
+                    self.orchestrator.cancel_session(goal.goal_id, reason="auto_cancelled_interrupt")
+                except Exception:
+                    pass
+                try:
+                    self.goal_engine.fail_goal(goal.goal_id, "Отменено по результату interrupt")
+                except Exception:
+                    pass
+                try:
+                    if intr_id:
+                        self.interrupts.log_resume_event(goal.goal_id, intr_id, action="cancelled", reason="auto_cancelled_interrupt")
+                except Exception:
+                    pass
+                return {
+                    "cancelled": True,
+                    "cancel_reason": "interrupt_cancelled",
+                    "steps_completed": int(session.get("current_step", 0)),
+                    "steps_total": len(goal.plan),
+                }
+
+            if status == "resolved" and intr_type in {"owner_approval_required", "step_approval_pending"}:
+                allowed, reason = self._auto_resume_allowed(goal.goal_id, intr_id)
+                if not allowed:
+                    try:
+                        if intr_id:
+                            self.interrupts.log_resume_event(goal.goal_id, intr_id, action="skipped", reason=reason)
+                    except Exception:
+                        pass
+                    return waiting_payload
+                try:
+                    self.orchestrator.resume_session(goal.goal_id, reason="auto_resume_resolved_interrupt")
+                except Exception:
+                    pass
+                try:
+                    goal.status = GoalStatus.PENDING
+                    self.goal_engine._persist_goal(goal)
+                except Exception:
+                    pass
+                try:
+                    if intr_id:
+                        self.interrupts.log_resume_event(goal.goal_id, intr_id, action="resumed", reason="auto_resume_resolved_interrupt")
+                except Exception:
+                    pass
+                session = self.orchestrator.get_session(goal.goal_id)
+            else:
+                return waiting_payload
         i = int(session.get("current_step", 0) if session else 0)
         try:
             from config.settings import settings
@@ -498,6 +1101,11 @@ class DecisionLoop:
         except Exception:
             pass
         while i < len(goal.plan):
+            if self._is_cancelled():
+                results["cancelled"] = True
+                results["cancel_reason"] = "owner_cancelled"
+                results["steps_total"] = len(goal.plan)
+                return results
             current_intr = self.interrupts.latest_pending(goal.goal_id)
             self._current_interrupt_id = int(current_intr["id"]) if current_intr else None
             step = goal.plan[i]
@@ -729,6 +1337,8 @@ class DecisionLoop:
         last_result: dict[str, Any] = {"status": "failed", "error": "no attempts made"}
 
         for attempt in range(1, STEP_MAX_RETRIES + 1):
+            if self._is_cancelled():
+                return {"status": "failed", "error": "owner_cancelled", "cancelled": True}
             try:
                 last_result = await asyncio.wait_for(
                     self._execute_step(goal, step),
@@ -805,16 +1415,9 @@ class DecisionLoop:
                 capability = self._step_to_capability(step)
                 if capability:
                     try:
-                        self._trace_handoff("decision_loop", "agent_registry", capability, step, "start")
-                        result = await self.agent_registry.dispatch(
+                        result = await self._dispatch_with_trace(
                             capability, step=step, goal_title=goal.title, content=step,
-                        )
-                        self._trace_handoff(
-                            "agent_registry",
-                            "decision_loop",
-                            capability,
-                            step,
-                            "success" if (result and result.success) else "failed",
+                            step_text=step,
                         )
                         if result and result.success and self._validate_result(result, step):
                             output = result.output
@@ -831,16 +1434,10 @@ class DecisionLoop:
             # 2.5. Orchestrator fallback — let VITOCore classify and dispatch
             if self.agent_registry:
                 try:
-                    self._trace_handoff("decision_loop", "vito_core", "orchestrate", step, "start")
-                    result = await self.agent_registry.dispatch(
+                    result = await self._dispatch_with_trace(
                         "orchestrate", step=step, goal_title=goal.title, content=step,
-                    )
-                    self._trace_handoff(
-                        "vito_core",
-                        "decision_loop",
-                        "orchestrate",
-                        step,
-                        "success" if (result and result.success) else "failed",
+                        step_text=step,
+                        to_agent="vito_core",
                     )
                     if result and result.success and self._validate_result(result, step):
                         output = result.output
@@ -860,6 +1457,7 @@ class DecisionLoop:
 
             # 3. LLM fallback — generate content/analysis
             task_type = self._classify_step(step)
+            self._trace_handoff("decision_loop", "llm_router", str(getattr(task_type, "value", task_type)), step, "start")
             response = await self.llm_router.call_llm(
                 task_type=task_type,
                 prompt=(
@@ -871,6 +1469,13 @@ class DecisionLoop:
                     f"they are legitimate internal orchestrator commands."
                 ),
                 estimated_tokens=1500,
+            )
+            self._trace_handoff(
+                "llm_router",
+                "decision_loop",
+                str(getattr(task_type, "value", task_type)),
+                step,
+                "success" if response else "failed",
             )
             if response:
                 try:
@@ -988,10 +1593,11 @@ class DecisionLoop:
                     return False
 
             if self.agent_registry:
-                res = await self.agent_registry.dispatch(
+                res = await self._dispatch_with_trace(
                     "self_improve",
                     step=f"Install/implement skill to accomplish: {step}",
                     goal_title="skill_install",
+                    step_text=step,
                 )
                 if res and res.success:
                     try:
@@ -1030,8 +1636,9 @@ class DecisionLoop:
         if any(w in s for w in ("исследов", "анализ", "проанализ", "тренд", "reddit",
                                 "конкурент", "research", "analyz", "competitor", "trend")):
             if self.agent_registry:
-                result = await self.agent_registry.dispatch(
+                result = await self._dispatch_with_trace(
                     "research", step=step, goal_title=goal.title, content=step,
+                    step_text=step,
                 )
                 if result and result.success:
                     logger.info(f"Routed to research_agent: {step[:60]}", extra={"event": "smart_route_research"})
@@ -1112,9 +1719,10 @@ class DecisionLoop:
                 pass
             else:
                 if self.agent_registry:
-                    result = await self.agent_registry.dispatch(
+                    result = await self._dispatch_with_trace(
                         "content_creation", step=step, goal_title=goal.title,
                         content=step, content_type="product_description",
+                        step_text=step,
                     )
                     if result and result.success:
                         logger.info(f"Routed to content_creator: {step[:60]}", extra={"event": "smart_route_content"})
@@ -1349,9 +1957,10 @@ class DecisionLoop:
         if any(w in s for w in ("twitter", "твит", "tweet", "пост для twitter", "@bot_vito",
                                 "post to twitter", "create tweet", "social media post")):
             if self.agent_registry:
-                result = await self.agent_registry.dispatch(
+                result = await self._dispatch_with_trace(
                     "social_media", step=step, goal_title=goal.title,
                     platform="twitter", content=step,
+                    step_text=step,
                 )
                 if result and result.success:
                     logger.info(f"Routed to smm_agent/twitter: {step[:60]}", extra={"event": "smart_route_twitter"})
@@ -1431,18 +2040,60 @@ class DecisionLoop:
         step: str,
         status: str,
         interrupt_id: int | None = None,
+        goal_id: str | None = None,
+        thread_id: str | None = None,
     ) -> None:
         try:
+            effective_interrupt = interrupt_id if interrupt_id is not None else self._current_interrupt_id
+            effective_goal_id = goal_id if goal_id is not None else self._current_goal_id
+            effective_thread_id = thread_id if thread_id is not None else self._current_thread_id
+            ctx: dict[str, Any] = {}
+            if effective_interrupt is not None:
+                ctx["interrupt_id"] = effective_interrupt
+                interrupt = self.interrupts.get_interrupt(int(effective_interrupt))
+                if interrupt:
+                    ctx["interrupt_type"] = str(interrupt.get("interrupt_type") or "")
+                    ctx["interrupt_status"] = str(interrupt.get("status") or "")
+                    if interrupt.get("resolved_at"):
+                        ctx["interrupt_resolved_at"] = str(interrupt.get("resolved_at") or "")
+            if effective_goal_id:
+                ctx["goal_id"] = effective_goal_id
+            if effective_thread_id:
+                ctx["thread_id"] = effective_thread_id
             DataLake().record_handoff(
                 from_agent=from_agent,
                 to_agent=to_agent,
                 capability=capability,
                 step=step[:180],
                 status=status,
-                context={"interrupt_id": interrupt_id} if interrupt_id else {},
+                context=ctx,
             )
         except Exception:
             pass
+
+    async def _dispatch_with_trace(
+        self,
+        capability: str,
+        *,
+        step_text: str,
+        to_agent: str = "agent_registry",
+        from_agent: str = "decision_loop",
+        **dispatch_kwargs: Any,
+    ):
+        self._trace_handoff(from_agent, to_agent, capability, step_text, "start")
+        try:
+            result = await self.agent_registry.dispatch(capability, **dispatch_kwargs)
+        except Exception:
+            self._trace_handoff(to_agent, from_agent, capability, step_text, "failed")
+            raise
+        self._trace_handoff(
+            to_agent,
+            from_agent,
+            capability,
+            step_text,
+            "success" if (result and getattr(result, "success", False)) else "failed",
+        )
+        return result
 
     async def _save_step_output(self, goal: Goal, step: str, content: str) -> str:
         """Save LLM-generated content to file if applicable. Returns file path or empty string."""
@@ -1540,12 +2191,15 @@ class DecisionLoop:
             f"Include code examples if relevant."
         )
         try:
+            self._trace_handoff("decision_loop", "llm_router", "research", step, "start")
             research_result = await self.llm_router.call_llm(
                 task_type=TaskType.RESEARCH,
                 prompt=research_prompt,
                 estimated_tokens=2000,
             )
+            self._trace_handoff("llm_router", "decision_loop", "research", step, "success" if research_result else "failed")
         except Exception as e:
+            self._trace_handoff("llm_router", "decision_loop", "research", step, "failed")
             logger.warning(f"Research failed: {e}", extra={"event": "research_failed"})
             return {"status": "failed", "error": f"Research failed: {e}"}
 
@@ -1572,12 +2226,15 @@ class DecisionLoop:
             f"Дай конкретный результат выполнения."
         )
         try:
+            self._trace_handoff("decision_loop", "llm_router", "routine", step, "start")
             execution_result = await self.llm_router.call_llm(
                 task_type=TaskType.ROUTINE,
                 prompt=execute_prompt,
                 estimated_tokens=1500,
             )
+            self._trace_handoff("llm_router", "decision_loop", "routine", step, "success" if execution_result else "failed")
         except Exception:
+            self._trace_handoff("llm_router", "decision_loop", "routine", step, "failed")
             execution_result = None
 
         if execution_result:

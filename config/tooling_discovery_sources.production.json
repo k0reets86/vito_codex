@@ -1,0 +1,84 @@
+[
+  {
+    "source": "github_catalog",
+    "adapter_key": "metorial_mcp_index",
+    "protocol": "mcp",
+    "endpoint": "https://github.com/metorial/metorial-index",
+    "auth_type": "none",
+    "schema": {
+      "tools": [
+        {
+          "name": "index_search"
+        }
+      ]
+    },
+    "notes": "MCP index source from imported architecture research."
+  },
+  {
+    "source": "github_catalog",
+    "adapter_key": "stealth_browser_mcp",
+    "protocol": "mcp",
+    "endpoint": "https://github.com/vibheksoni/stealth-browser-mcp",
+    "auth_type": "none",
+    "schema": {
+      "tools": [
+        {
+          "name": "browser_navigate"
+        }
+      ]
+    },
+    "notes": "Stealth browser MCP candidate from source matrix."
+  },
+  {
+    "source": "github_catalog",
+    "adapter_key": "browser_use_mcp",
+    "protocol": "mcp",
+    "endpoint": "https://github.com/browser-use/browser-use",
+    "auth_type": "none",
+    "schema": {
+      "tools": [
+        {
+          "name": "browser_extract"
+        }
+      ]
+    },
+    "notes": "Browser automation capability source."
+  },
+  {
+    "source": "github_catalog",
+    "adapter_key": "aimailbox_mcp",
+    "protocol": "mcp",
+    "endpoint": "https://github.com/ted2048-maker/aimailbox",
+    "auth_type": "none",
+    "schema": {
+      "tools": [
+        {
+          "name": "inbox_poll"
+        }
+      ]
+    },
+    "notes": "Mailbox/OTP automation source."
+  },
+  {
+    "source": "openapi_catalog",
+    "adapter_key": "petstore_public_openapi",
+    "protocol": "openapi",
+    "endpoint": "https://petstore3.swagger.io/api/v3/openapi.json",
+    "auth_type": "none",
+    "schema": {
+      "openapi": "3.1.0",
+      "paths": {
+        "/pet/findByStatus": {
+          "get": {
+            "responses": {
+              "200": {
+                "description": "ok"
+              }
+            }
+          }
+        }
+      }
+    },
+    "notes": "Public OpenAPI probe source for parser/validation path."
+  }
+]

@@ -466,6 +466,63 @@ class FinancialController:
             "expense_breakdown": self.get_spend_by_category(days),
         }
 
+    def is_spend_anomaly(self, window_days: int = 7, multiplier: float = 1.8) -> dict[str, Any]:
+        """Detect whether today's spend is anomalous vs recent historical baseline."""
+        conn = self._get_db()
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        rows = conn.execute(
+            """
+            SELECT date, COALESCE(spent_usd, 0) AS spent_usd
+            FROM daily_budgets
+            WHERE date >= date('now', ?) AND date < ?
+            ORDER BY date DESC
+            """,
+            (f"-{max(1, int(window_days or 7))} days", today),
+        ).fetchall()
+        baseline = [float(r["spent_usd"] or 0.0) for r in rows]
+        avg = (sum(baseline) / float(len(baseline))) if baseline else 0.0
+        today_spent = float(self.get_daily_spent() or 0.0)
+        thr = max(0.01, float(avg) * max(1.0, float(multiplier or 1.8)))
+        anomaly = bool(avg > 0 and today_spent > thr)
+        return {
+            "anomaly": anomaly,
+            "today_spent": today_spent,
+            "baseline_avg_spent": round(avg, 4),
+            "threshold_spent": round(thr, 4),
+            "window_days": max(1, int(window_days or 7)),
+        }
+
+    def daily_guardrail_snapshot(
+        self,
+        *,
+        daily_limit_usd: float | None = None,
+        anomaly_window_days: int = 7,
+        anomaly_multiplier: float = 1.8,
+    ) -> dict[str, Any]:
+        """Deterministic daily finance guardrail snapshot for automation hooks."""
+        spent = float(self.get_daily_spent() or 0.0)
+        earned = float(self.get_daily_earned() or 0.0)
+        pnl = self.get_pnl(days=1)
+        net = float(pnl.get("net_profit", 0.0) or 0.0)
+        limit = float(daily_limit_usd if daily_limit_usd is not None else settings.DAILY_LIMIT_USD or 0.0)
+        limit = max(0.01, limit)
+        ratio = spent / limit
+        anomaly = self.is_spend_anomaly(window_days=anomaly_window_days, multiplier=anomaly_multiplier)
+        status = "ok"
+        if ratio >= 1.0:
+            status = "critical"
+        elif ratio >= 0.8 or net < 0 or bool(anomaly.get("anomaly")):
+            status = "warning"
+        return {
+            "status": status,
+            "daily_spent_usd": round(spent, 4),
+            "daily_earned_usd": round(earned, 4),
+            "daily_limit_usd": round(limit, 4),
+            "spend_ratio": round(ratio, 4),
+            "net_profit_usd": round(net, 4),
+            "anomaly": anomaly,
+        }
+
     def format_morning_finance(self) -> str:
         """Формирует финансовую часть утреннего отчёта."""
         daily_spent = self.get_daily_spent()

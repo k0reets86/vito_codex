@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import math
+import re
 import sqlite3
 from typing import Optional
 
@@ -454,7 +456,7 @@ class SelfLearningEngine:
                         "threshold": round(threshold,4),
                     }
                 )
-                self.adjust_threshold_for_family(task_family, pass_rate, avg_score)
+                self.adjust_threshold_for_family(task_family, pass_rate, avg_score, conn=conn)
             conn.commit()
         finally:
             conn.close()
@@ -534,24 +536,18 @@ class SelfLearningEngine:
                 if gate_ok:
                     win_days = max(1, int(getattr(settings, "SELF_LEARNING_FLAKY_WINDOW_DAYS", 30) or 30))
                     flaky_lim = float(getattr(settings, "SELF_LEARNING_FLAKY_RATE_MAX", 0.3) or 0.3)
-                    fr = conn.execute(
-                        """
-                        SELECT
-                          SUM(CASE WHEN flaky = 1 THEN 1 ELSE 0 END) AS flaky_n,
-                          COUNT(*) AS total_n
-                        FROM self_learning_test_jobs
-                        WHERE skill_name = ?
-                          AND status IN ('passed', 'failed')
-                          AND updated_at >= datetime('now', ?)
-                        """,
-                        (skill_name, f"-{win_days} day"),
-                    ).fetchone()
-                    flaky_n = int((fr["flaky_n"] if fr else 0) or 0)
-                    total_n = int((fr["total_n"] if fr else 0) or 0)
-                    flaky_rate = (flaky_n / max(1, total_n)) if total_n > 0 else 0.0
-                    if total_n >= 3 and flaky_rate > flaky_lim:
+                    decay_days = float(getattr(settings, "SELF_LEARNING_FLAKY_DECAY_DAYS", 14) or 14)
+                    min_weight = float(getattr(settings, "SELF_LEARNING_FLAKY_MIN_WEIGHT", 0.12) or 0.12)
+                    flaky_rate, weighted_runs = self._decayed_flaky_rate(
+                        conn=conn,
+                        skill_name=skill_name,
+                        window_days=win_days,
+                        decay_days=decay_days,
+                        min_weight=min_weight,
+                    )
+                    if weighted_runs >= 2.5 and flaky_rate > flaky_lim:
                         gate_ok = False
-                        gate_reason += f",flaky_rate={flaky_rate:.2f}>{flaky_lim:.2f}"
+                        gate_reason += f",flaky_rate={flaky_rate:.2f}>{flaky_lim:.2f},weighted_runs={weighted_runs:.2f}"
                 if not gate_ok:
                     conn.execute(
                         "UPDATE self_learning_candidates SET status='hold', updated_at=datetime('now') WHERE skill_name=?",
@@ -611,17 +607,64 @@ class SelfLearningEngine:
             conn.close()
         return default
 
-    def adjust_threshold_for_family(self, task_family: str, pass_rate: float, avg_score: float) -> None:
+    def adjust_threshold_for_family(self, task_family: str, pass_rate: float, avg_score: float, conn=None) -> None:
         if not task_family:
             return
-        current = self.get_threshold_for_family(task_family)
+        own_conn = conn is None
+        db = conn or self._get_conn()
+        try:
+            row = db.execute(
+                """
+                SELECT confidence_min
+                FROM self_learning_thresholds
+                WHERE task_family = ?
+                """,
+                (task_family[:60],),
+            ).fetchone()
+            current = float(row["confidence_min"]) if row and row["confidence_min"] not in (None, "") else 0.78
+        except Exception:
+            if own_conn:
+                try:
+                    db.close()
+                except Exception:
+                    pass
+            current = self.get_threshold_for_family(task_family)
+            own_conn = False
+            db = None
         delta = 0.0
         if pass_rate >= 0.85 and avg_score >= 0.7:
             delta = -0.03
         elif pass_rate <= 0.5:
             delta = 0.04
+        outcome_rate, outcome_weight = self._family_outcome_signal(task_family)
+        if outcome_rate is not None and outcome_weight >= 0.6:
+            max_shift = float(getattr(settings, "SELF_LEARNING_THRESHOLD_OUTCOME_WEIGHT", 0.02) or 0.02)
+            if outcome_rate >= 0.7:
+                delta -= max_shift * min(1.0, (outcome_rate - 0.7) / 0.3)
+            elif outcome_rate <= 0.45:
+                delta += max_shift * min(1.0, (0.45 - outcome_rate) / 0.45)
         new_value = self._clamp_threshold(current + delta)
         if abs(new_value - current) < 0.005:
+            if own_conn and db is not None:
+                db.close()
+            return
+        if db is not None:
+            try:
+                db.execute(
+                    """
+                    INSERT INTO self_learning_thresholds (task_family, confidence_min, updated_at)
+                    VALUES (?, ?, datetime('now'))
+                    ON CONFLICT(task_family) DO UPDATE SET
+                      confidence_min = excluded.confidence_min,
+                      updated_at = excluded.updated_at
+                    """,
+                    (task_family[:60], new_value),
+                )
+                if own_conn:
+                    db.commit()
+            finally:
+                if own_conn:
+                    db.close()
             return
         self.set_threshold_for_family(task_family, new_value)
 
@@ -645,9 +688,399 @@ class SelfLearningEngine:
         finally:
             conn.close()
 
+    def list_thresholds(self, limit: int = 50) -> list[dict]:
+        conn = self._get_conn()
+        try:
+            rows = conn.execute(
+                """
+                SELECT task_family, confidence_min, updated_at
+                FROM self_learning_thresholds
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+            out: list[dict] = []
+            for row in rows:
+                family = str(row["task_family"] or "")
+                outcome_rate, outcome_weight = self._family_outcome_signal(family)
+                out.append(
+                    {
+                        "task_family": family,
+                        "confidence_min": round(float(row["confidence_min"] or 0.0), 4),
+                        "updated_at": row["updated_at"] or "",
+                        "outcome_rate": round(float(outcome_rate), 4) if outcome_rate is not None else None,
+                        "outcome_weight": round(float(outcome_weight or 0.0), 4),
+                    }
+                )
+            return out
+        finally:
+            conn.close()
+
+    def recalibrate_thresholds(self, days: int = 45, min_lessons: int = 4) -> dict:
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        updated = 0
+        families: list[dict] = []
+        try:
+            rows = conn.execute(
+                """
+                SELECT task_family,
+                       COUNT(*) AS n,
+                       AVG(CASE WHEN status='completed' THEN 1.0 ELSE 0.0 END) AS pass_rate,
+                       AVG(score) AS avg_score
+                FROM self_learning_lessons
+                WHERE task_family != ''
+                  AND created_at >= datetime('now', ?)
+                GROUP BY task_family
+                HAVING COUNT(*) >= ?
+                ORDER BY n DESC
+                LIMIT 200
+                """,
+                (f"-{max(1, int(days or 45))} day", max(1, int(min_lessons or 4))),
+            ).fetchall()
+            for row in rows:
+                family = str(row["task_family"] or "")
+                before = self.get_threshold_for_family(family)
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO self_learning_thresholds (task_family, confidence_min, updated_at)
+                    VALUES (?, ?, datetime('now'))
+                    """,
+                    (family[:60], self._clamp_threshold(before)),
+                )
+                pass_rate = float(row["pass_rate"] or 0.0)
+                avg_score = float(row["avg_score"] or 0.0)
+                self.adjust_threshold_for_family(family, pass_rate=pass_rate, avg_score=avg_score, conn=conn)
+                after_row = conn.execute(
+                    "SELECT confidence_min FROM self_learning_thresholds WHERE task_family = ?",
+                    (family,),
+                ).fetchone()
+                after = float(after_row["confidence_min"] or before) if after_row else before
+                if abs(after - before) >= 0.005:
+                    updated += 1
+                families.append(
+                    {
+                        "task_family": family,
+                        "lessons": int(row["n"] or 0),
+                        "pass_rate": round(pass_rate, 4),
+                        "avg_score": round(avg_score, 4),
+                        "threshold_before": round(before, 4),
+                        "threshold_after": round(after, 4),
+                    }
+                )
+            conn.commit()
+            return {"ok": True, "updated": updated, "families": families[:30]}
+        finally:
+            conn.close()
+
+    def sync_promotion_outcomes_from_tests(
+        self,
+        days: int = 45,
+        min_runs: int = 2,
+        fail_rate_max: float = 0.35,
+        flaky_rate_max: Optional[float] = None,
+    ) -> dict:
+        """Attach long-horizon postcheck outcomes for promoted skills based on recent test jobs."""
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        inserted = 0
+        passed = 0
+        failed = 0
+        skipped = 0
+        families_touched: set[str] = set()
+        try:
+            flaky_limit = float(
+                flaky_rate_max
+                if flaky_rate_max is not None
+                else (getattr(settings, "SELF_LEARNING_FLAKY_RATE_MAX", 0.3) or 0.3)
+            )
+            rows = conn.execute(
+                """
+                SELECT c.skill_name,
+                       c.task_family,
+                       COUNT(*) AS total_n,
+                       SUM(CASE WHEN j.status = 'failed' THEN 1 ELSE 0 END) AS fail_n,
+                       SUM(CASE WHEN j.flaky = 1 THEN 1 ELSE 0 END) AS flaky_n,
+                       MAX(j.updated_at) AS latest_job_at
+                FROM self_learning_candidates c
+                JOIN self_learning_test_jobs j
+                  ON j.skill_name = c.skill_name
+                WHERE c.status = 'promoted'
+                  AND j.status IN ('passed', 'failed')
+                  AND j.updated_at >= datetime('now', ?)
+                GROUP BY c.skill_name, c.task_family
+                ORDER BY latest_job_at DESC
+                LIMIT 300
+                """,
+                (f"-{max(1, int(days or 45))} day",),
+            ).fetchall()
+            for row in rows:
+                total_n = int(row["total_n"] or 0)
+                if total_n < max(1, int(min_runs or 2)):
+                    skipped += 1
+                    continue
+                skill_name = str(row["skill_name"] or "")
+                task_family = str(row["task_family"] or "")
+                fail_n = int(row["fail_n"] or 0)
+                flaky_n = int(row["flaky_n"] or 0)
+                fail_rate = float(fail_n) / max(1.0, float(total_n))
+                flaky_rate = float(flaky_n) / max(1.0, float(total_n))
+                decision = "postcheck_pass"
+                if fail_rate > float(fail_rate_max or 0.35) or flaky_rate > flaky_limit:
+                    decision = "postcheck_fail"
+                signature = (
+                    f"postcheck:{decision};window_days={max(1, int(days or 45))};"
+                    f"runs={total_n};fails={fail_n};flaky={flaky_n};"
+                    f"fail_rate={fail_rate:.3f};flaky_rate={flaky_rate:.3f}"
+                )[:300]
+                existing = conn.execute(
+                    """
+                    SELECT 1
+                    FROM self_learning_promotion_events
+                    WHERE skill_name = ?
+                      AND decision = ?
+                      AND reason = ?
+                    LIMIT 1
+                    """,
+                    (skill_name, decision, signature),
+                ).fetchone()
+                if existing:
+                    skipped += 1
+                    continue
+                conn.execute(
+                    """
+                    INSERT INTO self_learning_promotion_events (skill_name, decision, reason)
+                    VALUES (?, ?, ?)
+                    """,
+                    (skill_name[:140], decision, signature),
+                )
+                inserted += 1
+                if decision == "postcheck_pass":
+                    passed += 1
+                else:
+                    failed += 1
+                if task_family:
+                    families_touched.add(task_family[:60])
+            conn.commit()
+            return {
+                "ok": True,
+                "inserted": inserted,
+                "passed": passed,
+                "failed": failed,
+                "skipped": skipped,
+                "families_touched": sorted(families_touched),
+            }
+        finally:
+            conn.close()
+
+    def remediate_degraded_promoted_skills(self, days: int = 45, max_actions: int = 3) -> dict:
+        """Move degraded promoted skills back to hold and queue remediation test jobs."""
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        remediated = 0
+        queued_jobs = 0
+        touched: list[str] = []
+        try:
+            rows = conn.execute(
+                """
+                SELECT c.skill_name, c.task_family, e.reason AS fail_reason
+                FROM self_learning_candidates c
+                JOIN self_learning_promotion_events e
+                  ON e.skill_name = c.skill_name
+                WHERE c.status = 'promoted'
+                  AND e.decision = 'postcheck_fail'
+                  AND e.created_at >= datetime('now', ?)
+                  AND e.id = (
+                    SELECT MAX(e2.id)
+                    FROM self_learning_promotion_events e2
+                    WHERE e2.skill_name = c.skill_name
+                      AND e2.decision = 'postcheck_fail'
+                  )
+                ORDER BY e.id DESC
+                LIMIT ?
+                """,
+                (f"-{max(1, int(days or 45))} day", max(1, int(max_actions or 3))),
+            ).fetchall()
+            for row in rows:
+                skill_name = str(row["skill_name"] or "")
+                task_family = str(row["task_family"] or "")
+                fail_reason = str(row["fail_reason"] or "")[:260]
+                conn.execute(
+                    """
+                    UPDATE self_learning_candidates
+                    SET status = 'hold',
+                        notes = CASE
+                          WHEN notes = '' THEN ?
+                          ELSE substr(notes || '; ' || ?, 1, 1000)
+                        END,
+                        updated_at = datetime('now')
+                    WHERE skill_name = ?
+                    """,
+                    (f"remediation_needed:{fail_reason}", f"remediation_needed:{fail_reason}", skill_name[:140]),
+                )
+                remediation_reasons = self._remediation_reasons_for_failure(task_family, fail_reason)
+                for remediation_reason in remediation_reasons:
+                    cur = conn.execute(
+                        """
+                        INSERT OR IGNORE INTO self_learning_test_jobs
+                        (skill_name, task_family, reason, status, updated_at)
+                        VALUES (?, ?, ?, 'open', datetime('now'))
+                        """,
+                        (skill_name[:140], task_family[:60], remediation_reason[:120]),
+                    )
+                    if int(cur.rowcount or 0) > 0:
+                        queued_jobs += 1
+                conn.execute(
+                    """
+                    INSERT INTO self_learning_promotion_events (skill_name, decision, reason)
+                    VALUES (?, 'remediation_started', ?)
+                    """,
+                    (skill_name[:140], f"auto_hold_after_postcheck_fail:{fail_reason}"[:300]),
+                )
+                remediated += 1
+                touched.append(skill_name)
+            conn.commit()
+            return {
+                "ok": True,
+                "remediated": remediated,
+                "queued_jobs": queued_jobs,
+                "skills": touched[:40],
+            }
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _remediation_reason_for_family(task_family: str) -> str:
+        fam = str(task_family or "").strip().lower()
+        if not fam:
+            return "postcheck_remediation_generic"
+        safe = re.sub(r"[^a-z0-9_]+", "_", fam).strip("_")[:40]
+        if not safe:
+            return "postcheck_remediation_generic"
+        return f"postcheck_remediation_{safe}"
+
+    @staticmethod
+    def _remediation_reasons_for_failure(task_family: str, fail_reason: str = "") -> list[str]:
+        """Build deterministic remediation playbooks from postcheck failure diagnostics."""
+        base = SelfLearningEngine._remediation_reason_for_family(task_family)
+        reasons: list[str] = [base]
+        text = str(fail_reason or "").lower()
+        fail_match = re.search(r"fail_rate=([0-9]*\.?[0-9]+)", text)
+        flaky_match = re.search(r"flaky_rate=([0-9]*\.?[0-9]+)", text)
+        fail_rate = float(fail_match.group(1)) if fail_match else 0.0
+        flaky_rate = float(flaky_match.group(1)) if flaky_match else 0.0
+        if fail_rate >= 0.45:
+            reasons.append(f"{base}_regression")
+        if flaky_rate >= 0.20:
+            reasons.append(f"{base}_stability")
+        out: list[str] = []
+        seen: set[str] = set()
+        for item in reasons:
+            key = str(item or "").strip().lower()[:120]
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            out.append(key)
+        return out
+
+    def cleanup_old_test_jobs(self, max_age_days: int = 90) -> dict:
+        conn = self._get_conn()
+        try:
+            cur = conn.execute(
+                """
+                DELETE FROM self_learning_test_jobs
+                WHERE status IN ('passed', 'failed')
+                  AND updated_at < datetime('now', ?)
+                """,
+                (f"-{max(1, int(max_age_days or 90))} day",),
+            )
+            conn.commit()
+            return {"ok": True, "deleted": int(cur.rowcount or 0)}
+        finally:
+            conn.close()
+
     @staticmethod
     def _clamp_threshold(value: float) -> float:
         return max(0.65, min(0.95, float(value or 0.0)))
+
+    def _family_outcome_signal(self, task_family: str) -> tuple[Optional[float], float]:
+        if not task_family:
+            return None, 0.0
+        conn = self._get_conn()
+        try:
+            window_days = max(7, int(getattr(settings, "SELF_LEARNING_OUTCOME_WINDOW_DAYS", 60) or 60))
+            decay_days = max(1.0, float(getattr(settings, "SELF_LEARNING_OUTCOME_DECAY_DAYS", 21) or 21))
+            rows = conn.execute(
+                """
+                SELECT e.decision, (julianday('now') - julianday(e.created_at)) AS age_days
+                FROM self_learning_promotion_events e
+                JOIN self_learning_candidates c
+                  ON c.skill_name = e.skill_name
+                WHERE c.task_family = ?
+                  AND e.created_at >= datetime('now', ?)
+                ORDER BY e.id DESC
+                LIMIT 200
+                """,
+                (task_family[:60], f"-{window_days} day"),
+            ).fetchall()
+            if not rows:
+                return None, 0.0
+            success_w = 0.0
+            total_w = 0.0
+            for row in rows:
+                age_days = max(0.0, float(row["age_days"] or 0.0))
+                weight = math.exp(-(age_days / decay_days))
+                decision = str(row["decision"] or "").strip().lower()
+                if decision in {"promoted", "postcheck_pass"}:
+                    value = 1.0
+                elif decision in {"hold", "rejected", "postcheck_fail"}:
+                    value = 0.0
+                else:
+                    value = 0.5
+                success_w += weight * value
+                total_w += weight
+            if total_w <= 0.0:
+                return None, 0.0
+            return (success_w / total_w), total_w
+        finally:
+            conn.close()
+
+    def _decayed_flaky_rate(
+        self,
+        conn,
+        skill_name: str,
+        window_days: int,
+        decay_days: float,
+        min_weight: float = 0.12,
+    ) -> tuple[float, float]:
+        rows = conn.execute(
+            """
+            SELECT flaky, (julianday('now') - julianday(updated_at)) AS age_days
+            FROM self_learning_test_jobs
+            WHERE skill_name = ?
+              AND status IN ('passed', 'failed')
+              AND updated_at >= datetime('now', ?)
+            ORDER BY id DESC
+            LIMIT 300
+            """,
+            (skill_name, f"-{max(1, int(window_days or 30))} day"),
+        ).fetchall()
+        if not rows:
+            return 0.0, 0.0
+        decay = max(1.0, float(decay_days or 14.0))
+        floor = max(0.01, min(1.0, float(min_weight or 0.12)))
+        flaky_w = 0.0
+        total_w = 0.0
+        for row in rows:
+            age_days = max(0.0, float(row["age_days"] or 0.0))
+            weight = max(floor, math.exp(-(age_days / decay)))
+            total_w += weight
+            if int(row["flaky"] or 0) == 1:
+                flaky_w += weight
+        if total_w <= 0.0:
+            return 0.0, 0.0
+        return flaky_w / total_w, total_w
 
     def summary(self, days: int = 30) -> dict:
         conn = self._get_conn()
@@ -706,6 +1139,14 @@ class SelfLearningEngine:
                 """,
                 (window,),
             ).fetchall()
+            threshold_rows = conn.execute(
+                """
+                SELECT task_family, confidence_min, updated_at
+                FROM self_learning_thresholds
+                ORDER BY updated_at DESC
+                LIMIT 12
+                """
+            ).fetchall()
             return {
                 "window_days": int(days or 30),
                 "lessons": lessons,
@@ -731,6 +1172,14 @@ class SelfLearningEngine:
                         "total_runs": int(r["total_n"] or 0),
                     }
                     for r in flaky_rows
+                ],
+                "thresholds": [
+                    {
+                        "task_family": str(r["task_family"] or ""),
+                        "confidence_min": round(float(r["confidence_min"] or 0.0), 4),
+                        "updated_at": str(r["updated_at"] or ""),
+                    }
+                    for r in threshold_rows
                 ],
             }
         finally:

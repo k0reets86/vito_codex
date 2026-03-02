@@ -15,6 +15,7 @@ import atexit
 import os
 import signal
 import sys
+import time
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -127,6 +128,10 @@ from modules.platform_registry import PlatformRegistry
 from modules.platform_smoke import PlatformSmoke
 from modules.playbook_registry import PlaybookRegistry
 from modules.publisher_queue import PublisherQueue
+from modules.conversation_memory import ConversationMemory
+from modules.cancel_state import CancelState
+from modules.owner_task_state import OwnerTaskState
+from modules.revenue_engine import RevenueEngine
 from dashboard_server import DashboardServer
 from knowledge_updater import KnowledgeUpdater
 from conversation_engine import ConversationEngine
@@ -140,9 +145,14 @@ logger = get_logger("main", agent="vito_core")
 class VITO:
     def __init__(self):
         self.running = False
+        self._last_process_guard_ts = 0.0
         self.goal_engine = GoalEngine()
         self.llm_router = LLMRouter()
         self.memory = MemoryManager()
+        self.conversation_memory = ConversationMemory(path=settings.CONVERSATION_HISTORY_PATH)
+        self.cancel_state = CancelState(path=settings.CANCEL_STATE_PATH)
+        self.owner_task_state = OwnerTaskState(path=settings.OWNER_TASK_STATE_PATH)
+        self.revenue_engine = RevenueEngine()
         self.finance = FinancialController()
         self.comms = CommsAgent()
         try:
@@ -213,6 +223,9 @@ class VITO:
             self_healer=self.self_healer, self_updater=self.self_updater,
             knowledge_updater=self.knowledge_updater,
             code_generator=self.code_generator, comms=self.comms,
+            conversation_memory=self.conversation_memory,
+            cancel_state=self.cancel_state,
+            owner_task_state=self.owner_task_state,
         )
         self.judge_protocol = JudgeProtocol(
             llm_router=self.llm_router, memory=self.memory, comms=self.comms
@@ -238,6 +251,7 @@ class VITO:
             memory=self.memory,
             agent_registry=self.registry,
         )
+        self.decision_loop.set_cancel_state(self.cancel_state)
         self.decision_loop.set_self_healer(self.self_healer)
         self.decision_loop._code_generator = self.code_generator
         # Smart routing: give decision_loop access to platforms
@@ -277,6 +291,8 @@ class VITO:
             weekly_planner=self._weekly_planning,
             schedule_manager=self.schedule_manager,
             publisher_queue=self.publisher_queue,
+            cancel_state=self.cancel_state,
+            owner_task_state=self.owner_task_state,
         )
 
     def _init_agents(self) -> None:
@@ -465,6 +481,7 @@ class VITO:
         last_run: dict[str, str] = {}
 
         while self.running:
+            self._single_instance_watchdog()
             now = datetime.now(timezone.utc)
             today = now.strftime("%Y-%m-%d")
             hour = now.hour
@@ -519,6 +536,19 @@ class VITO:
                 last_run["commerce_readiness_daily"] = today
                 try:
                     await self._commerce_readiness_loop()
+                except Exception:
+                    pass
+
+            # Wave D: Daily revenue cycle (Gumroad-first, approval-gated)
+            revenue_hour = int(getattr(settings, "REVENUE_ENGINE_DAILY_HOUR_UTC", 15) or 15) % 24
+            if (
+                getattr(settings, "REVENUE_ENGINE_ENABLED", False)
+                and hour == revenue_hour
+                and last_run.get("revenue_cycle_daily") != today
+            ):
+                last_run["revenue_cycle_daily"] = today
+                try:
+                    await self._revenue_cycle_daily()
                 except Exception:
                     pass
 
@@ -599,7 +629,11 @@ class VITO:
 
             # Run due scheduled tasks (calendar / reminders / reports)
             try:
-                due = self.schedule_manager.due_tasks()
+                due = self.schedule_manager.acquire_due_tasks(
+                    owner=f"main:{os.getpid()}",
+                    limit=20,
+                    lock_minutes=15,
+                )
                 for task in due:
                     await self._run_scheduled_task(task)
                     self.schedule_manager.mark_run(task)
@@ -608,8 +642,52 @@ class VITO:
 
             await asyncio.sleep(60)
 
+    def _single_instance_watchdog(self) -> None:
+        """Quietly self-terminate duplicate runtime instance."""
+        if os.getenv("VITO_ALLOW_MULTI") == "1":
+            return
+        if not getattr(settings, "PROCESS_GUARD_ENABLED", True):
+            return
+        interval = max(15, int(getattr(settings, "PROCESS_GUARD_INTERVAL_SEC", 90) or 90))
+        now_mono = time.monotonic()
+        if (now_mono - float(self._last_process_guard_ts or 0.0)) < interval:
+            return
+        self._last_process_guard_ts = now_mono
+        try:
+            from modules.process_guard import list_vito_main_pids, read_pidfile, select_primary_pid, write_pidfile
+
+            me = int(os.getpid())
+            pids = list_vito_main_pids()
+            if me not in pids:
+                pids.append(me)
+            pidfile_pid = read_pidfile(PIDFILE)
+            primary = select_primary_pid(pids, pidfile_pid=pidfile_pid)
+            if not primary:
+                write_pidfile(PIDFILE, me)
+                return
+            if primary == me:
+                if pidfile_pid != me:
+                    write_pidfile(PIDFILE, me)
+                return
+
+            logger.warning(
+                f"Duplicate main.py detected; self-exit (self={me}, primary={primary}, pids={pids})",
+                extra={"event": "process_guard_duplicate_exit", "context": {"self_pid": me, "primary_pid": primary, "pids": pids}},
+            )
+            self.running = False
+            try:
+                self.decision_loop.stop()
+            except Exception:
+                pass
+            os._exit(0)
+        except Exception:
+            return
+
     async def _network_watchdog(self) -> None:
         """Check Telegram DNS reachability and notify via fallback channel if broken."""
+        if not self._cron_notifications_enabled():
+            logger.debug("Network watchdog notification skipped (cron notifications disabled)", extra={"event": "net_watchdog_skipped"})
+            return
         from modules.network_utils import basic_net_report
         report = basic_net_report(["api.telegram.org", "gumroad.com", "google.com"])
         if report.get("ok"):
@@ -628,6 +706,9 @@ class VITO:
         """Daily safe platform smoke checks and summary."""
         if not self.platform_smoke:
             return
+        if not self._cron_notifications_enabled():
+            logger.debug("Platform smoke summary skipped (cron notifications disabled)", extra={"event": "platform_smoke_skipped"})
+            return
         results = await self.platform_smoke.run(names=["gumroad", "etsy", "kofi", "printful"])
         ok = sum(1 for r in results if r.get("status") == "success")
         fail = len(results) - ok
@@ -638,7 +719,7 @@ class VITO:
         try:
             await self.comms.send_message(
                 f"Platform smoke done: ok={ok}, fail={fail}",
-                level="info",
+                level="cron",
             )
         except Exception:
             pass
@@ -675,6 +756,35 @@ class VITO:
                 "context": {"enqueued": enqueued, "processed": len(results), "done": done, "failed": fail},
             },
         )
+
+    async def _revenue_cycle_daily(self) -> None:
+        """Wave D daily closed-loop cycle in safe mode (Gumroad-first)."""
+        out = await self.revenue_engine.run_gumroad_cycle(
+            registry=self.registry,
+            llm_router=self.llm_router,
+            comms=self.comms,
+            publisher_queue=self.publisher_queue,
+            topic="",
+            dry_run=bool(getattr(settings, "REVENUE_ENGINE_DRY_RUN", True)),
+            require_approval=bool(getattr(settings, "REVENUE_ENGINE_REQUIRE_APPROVAL", True)),
+        )
+        logger.info(
+            f"Revenue cycle done: ok={out.get('ok')} cycle_id={out.get('cycle_id')} status={out.get('status', out.get('error', ''))}",
+            extra={"event": "revenue_cycle_daily", "context": out},
+        )
+        if not self._cron_notifications_enabled():
+            return
+        try:
+            msg = (
+                "Revenue cycle daily:\n"
+                f"- ok: {1 if out.get('ok') else 0}\n"
+                f"- cycle_id: {out.get('cycle_id')}\n"
+                f"- status: {out.get('status', out.get('error', 'unknown'))}\n"
+                f"- topic: {out.get('topic', '')[:120]}"
+            )
+            await self.comms.send_message(msg, level="cron")
+        except Exception:
+            pass
 
     async def _night_consolidation(self) -> None:
         """03:00 — анализ дня, сохранение навыков, обновление базы знаний.
@@ -1015,11 +1125,13 @@ class VITO:
         conn.commit()
         conn.close()
 
-        # 5. Notify owner
-        plan_summary = "\n".join(lines[:7]) if lines else "(план не удалось распарсить)"
-        await self.comms.send_message(
-            f"VITO Недельный план:\n\n{plan_summary[:800]}"
-        )
+        # 5. Notify owner only when cron notifications are enabled
+        if self._cron_notifications_enabled():
+            plan_summary = "\n".join(lines[:7]) if lines else "(план не удалось распарсить)"
+            await self.comms.send_message(
+                f"VITO Недельный план:\n\n{plan_summary[:800]}",
+                level="cron",
+            )
         logger.info(
             f"Недельный план создан: {len(lines)} задач",
             extra={"event": "weekly_plan_done", "context": {"tasks": len(lines)}},
@@ -1057,6 +1169,9 @@ class VITO:
 
     async def _morning_report(self) -> None:
         """08:00 — утренний отчёт владельцу в Telegram."""
+        if not self._cron_notifications_enabled():
+            logger.debug("Morning report skipped (cron notifications disabled)", extra={"event": "morning_report_skipped"})
+            return
         stats = self.goal_engine.get_stats()
         finance_block = self.finance.format_morning_finance()
 
@@ -1171,6 +1286,16 @@ class VITO:
             logger.warning(f"Balance check failed: {e}", extra={"event": "balance_check_error"})
             return ""
 
+    def _cron_notifications_enabled(self) -> bool:
+        if not settings.TELEGRAM_CRON_ENABLED:
+            return False
+        try:
+            if self.cancel_state and self.cancel_state.is_cancelled():
+                return False
+        except Exception:
+            pass
+        return True
+
     async def _scheduled_balance_check(self) -> None:
         """12:00 — scheduled balance check, alert only on low balances."""
         logger.info("Scheduled balance check", extra={"event": "balance_check_start"})
@@ -1181,9 +1306,11 @@ class VITO:
             alerts = checker.get_low_balance_alerts(balances)
 
             if alerts:
-                msg = "VITO Balance Alert\n\n" + "\n".join(f"  {a}" for a in alerts)
-                await self.comms.send_message(msg)
-                logger.warning(f"Low balance alerts sent: {len(alerts)}", extra={"event": "low_balance_alert_sent"})
+                logger.warning(f"Low balance alerts: {alerts}", extra={"event": "low_balance_alert"})
+                if self._cron_notifications_enabled():
+                    msg = "VITO Balance Alert\n\n" + "\n".join(f"  {a}" for a in alerts)
+                    await self.comms.send_message(msg, level="cron")
+                    logger.warning(f"Low balance alerts sent: {len(alerts)}", extra={"event": "low_balance_alert_sent"})
             else:
                 logger.info("All balances OK", extra={"event": "balances_ok"})
         except Exception as e:
@@ -1191,12 +1318,18 @@ class VITO:
 
     async def _run_scheduled_task(self, task) -> None:
         """Execute scheduled task (reports/reminders)."""
+        if not self._cron_notifications_enabled():
+            logger.debug(
+                f"Scheduled task '{task.title}' skipped (cron notifications disabled)",
+                extra={"event": "scheduled_task_skipped", "context": {"task_id": task.id}},
+            )
+            return
         try:
             if task.action == "sales_report":
                 msg = "Отчёт по продажам\n"
                 if self.finance:
                     msg += self.finance.format_morning_finance()
-                await self.comms.send_message(msg)
+                await self.comms.send_message(msg, level="cron")
             elif task.action == "platform_report":
                 msg = "Отчёт по площадкам\n"
                 try:
@@ -1206,7 +1339,7 @@ class VITO:
                     msg += checker.format_report(balances, include_internal=None)
                 except Exception:
                     msg += "Нет данных по площадкам."
-                await self.comms.send_message(msg)
+                await self.comms.send_message(msg, level="cron")
             elif task.action == "content_report":
                 msg = "Отчёт по контенту\n"
                 try:
@@ -1214,11 +1347,11 @@ class VITO:
                     msg += "Нет агрегированного хранилища контента. Используй /report или уточни формат."
                 except Exception:
                     pass
-                await self.comms.send_message(msg)
+                await self.comms.send_message(msg, level="cron")
             elif task.action == "ads_report":
                 msg = "Отчёт по рекламе\n"
                 msg += "Интеграции рекламных кабинетов не настроены."
-                await self.comms.send_message(msg)
+                await self.comms.send_message(msg, level="cron")
             elif task.action == "report":
                 parts = ["VITO Report (Scheduled)"]
                 if self.finance:
@@ -1229,15 +1362,24 @@ class VITO:
                         f"Цели: {gs['completed']} выполнено, {gs['executing']} в работе, "
                         f"{gs['pending']} ожидают\nУспешность: {gs['success_rate']:.0%}"
                     )
-                await self.comms.send_message("\n\n".join(parts))
+                await self.comms.send_message("\n\n".join(parts), level="cron")
             else:
-                await self.comms.send_message(f"Напоминание: {task.title}")
+                await self.comms.send_message(f"Напоминание: {task.title}", level="cron")
         except Exception as e:
             logger.warning(f"Scheduled task error: {e}", extra={"event": "scheduled_task_error"})
 
     async def _proactive_check(self) -> None:
         """v0.3.0: Проактивная проверка каждые 4 часа — делится достижениями, предлагает шаги."""
         if not settings.PROACTIVE_ENABLED:
+            return
+        try:
+            if self.cancel_state and self.cancel_state.is_cancelled():
+                logger.debug("Proactive check skipped (owner paused via /cancel)", extra={"event": "proactive_paused"})
+                return
+        except Exception:
+            pass
+        if not self._cron_notifications_enabled():
+            logger.debug("Proactive check skipped (cron notifications disabled)", extra={"event": "proactive_check_skipped"})
             return
         logger.info("Проактивная проверка", extra={"event": "proactive_check_start"})
         try:
@@ -1249,7 +1391,8 @@ class VITO:
                     f"VITO Проактивный отчёт\n\n"
                     f"Выполнено целей: {completed_today}\n"
                     f"Потрачено: ${self.llm_router.get_daily_spend():.2f}\n"
-                    f"Рекомендую: продолжать работу по текущим целям."
+                    f"Рекомендую: продолжать работу по текущим целям.",
+                    level="cron",
                 )
 
             # Предложение следующих шагов если нет задач
@@ -1260,7 +1403,8 @@ class VITO:
                     "VITO: Нет активных задач. Предлагаю:\n"
                     "1. /trends — просканировать новые тренды\n"
                     "2. /deep <тема> — анализ перспективной ниши\n"
-                    "3. /goal <задача> — создать новую цель"
+                    "3. /goal <задача> — создать новую цель",
+                    level="cron",
                 )
 
         except Exception as e:

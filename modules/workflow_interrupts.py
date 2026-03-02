@@ -38,6 +38,16 @@ class WorkflowInterrupts:
                 );
                 CREATE INDEX IF NOT EXISTS idx_workflow_interrupts_goal_status
                 ON workflow_interrupts (goal_id, status, created_at DESC);
+                CREATE TABLE IF NOT EXISTS workflow_interrupt_resume_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    goal_id TEXT NOT NULL,
+                    interrupt_id INTEGER NOT NULL,
+                    action TEXT NOT NULL,
+                    reason TEXT DEFAULT '',
+                    created_at TEXT DEFAULT (datetime('now'))
+                );
+                CREATE INDEX IF NOT EXISTS idx_wf_interrupt_resume_goal_intr
+                ON workflow_interrupt_resume_events (goal_id, interrupt_id, action, created_at DESC);
                 """
             )
             conn.commit()
@@ -129,6 +139,131 @@ class WorkflowInterrupts:
             except Exception:
                 out["payload"] = {}
             return out
+        finally:
+            conn.close()
+
+    def latest_for_goal(self, goal_id: str) -> Optional[dict]:
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                """
+                SELECT * FROM workflow_interrupts
+                WHERE goal_id = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (goal_id,),
+            ).fetchone()
+            if not row:
+                return None
+            out = dict(row)
+            try:
+                out["payload"] = json.loads(out.get("payload_json") or "{}")
+            except Exception:
+                out["payload"] = {}
+            return out
+        finally:
+            conn.close()
+
+    def get_interrupt(self, interrupt_id: int) -> Optional[dict]:
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                "SELECT * FROM workflow_interrupts WHERE id = ? LIMIT 1",
+                (int(interrupt_id),),
+            ).fetchone()
+            if not row:
+                return None
+            out = dict(row)
+            try:
+                out["payload"] = json.loads(out.get("payload_json") or "{}")
+            except Exception:
+                out["payload"] = {}
+            return out
+        finally:
+            conn.close()
+
+    def log_resume_event(self, goal_id: str, interrupt_id: int, action: str, reason: str = "") -> int:
+        conn = self._get_conn()
+        try:
+            cur = conn.execute(
+                """
+                INSERT INTO workflow_interrupt_resume_events
+                (goal_id, interrupt_id, action, reason)
+                VALUES (?, ?, ?, ?)
+                """,
+                (goal_id[:120], int(interrupt_id), action[:40], reason[:300]),
+            )
+            conn.commit()
+            return int(cur.lastrowid)
+        finally:
+            conn.close()
+
+    def count_resume_events(self, goal_id: str, interrupt_id: int, action: str = "resumed") -> int:
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS cnt
+                FROM workflow_interrupt_resume_events
+                WHERE goal_id = ? AND interrupt_id = ? AND action = ?
+                """,
+                (goal_id, int(interrupt_id), action),
+            ).fetchone()
+            return int((row["cnt"] if row else 0) or 0)
+        finally:
+            conn.close()
+
+    def latest_resume_event(self, goal_id: str, interrupt_id: int, action: str = "resumed") -> Optional[dict]:
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM workflow_interrupt_resume_events
+                WHERE goal_id = ? AND interrupt_id = ? AND action = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (goal_id, int(interrupt_id), action),
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def list_resume_events(
+        self,
+        goal_id: str = "",
+        interrupt_id: int | None = None,
+        action: str = "",
+        limit: int = 100,
+    ) -> list[dict]:
+        conn = self._get_conn()
+        try:
+            clauses = []
+            params: list[object] = []
+            if goal_id:
+                clauses.append("goal_id = ?")
+                params.append(goal_id)
+            if interrupt_id is not None:
+                clauses.append("interrupt_id = ?")
+                params.append(int(interrupt_id))
+            if action:
+                clauses.append("action = ?")
+                params.append(action)
+            where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+            params.append(int(limit))
+            rows = conn.execute(
+                f"""
+                SELECT id, goal_id, interrupt_id, action, reason, created_at
+                FROM workflow_interrupt_resume_events
+                {where}
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                tuple(params),
+            ).fetchall()
+            return [dict(r) for r in rows]
         finally:
             conn.close()
 

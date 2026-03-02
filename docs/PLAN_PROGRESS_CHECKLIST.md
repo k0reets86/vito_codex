@@ -1,16 +1,155 @@
 # VITO Skill Expansion Checklist
 
-## Status Snapshot (2026-02-25)
-- [x] **Phase 0 — Capability Pack Framework** (spec, CI, acceptance) — foundation in place.
-- [x] **Phase 1 — Durable Orchestration** (graph sessions, checkpoints, interrupts, approval gating, `OrchestrationManager`) — implemented and wired into `DecisionLoop` + dashboard sessions + tests.
-- [x] **Phase 2 — Memory + Skills** (owner memory blocks, short→long consolidation, `MemorySkillReporter`, weekly retention/output) — covered by `MemoryBlocks`, `MemoryManager`, new reporter and retention script/tests.
-- [x] **Phase 3 — Human-in-the-Loop / Operator UI** (approvals, models, budgets, workflow sessions UI) — dashboard endpoints + controls for approvals, operator policy, workflow sessions/resume/cancel/reset.
-- [ ] **Phase 4 — Self-Learning & Optimization** (reflection loops, self-refine, DSPy-style optimization, skill generation pipeline) — adaptive threshold tuning started (self_learning_thresholds).
-- [ ] **Phase 5 — Publications & Commerce** (autoposting, payments, evidence packs) — pending.
-- [ ] **Phase 6 — Security, Cost, Observability** (gateway, guardrails, tracing, governance reports) — pending.
-- [ ] **Phase 7 — Tooling Standards (MCP/OpenAPI)** (contracts, signed releases, tooling governance) — pending.
+## Status Snapshot (2026-03-02)
+- [x] **Phase 0 — Capability Pack Framework**: spec/acceptance/evidence baseline работает.
+- [x] **Phase 1 — Durable Orchestration**: sessions/checkpoints/interrupts/auto-resume wired в `DecisionLoop` + dashboard.
+- [x] **Phase 2 — Memory + Skills**: memory blocks, retention/TTL, short->long consolidation, weekly reports, skill quality linkage.
+- [x] **Phase 3 — Human-in-the-Loop / Operator UI**: approvals, budgets, models/profiles, workflow controls, secrets/provider health.
+- [x] **Phase 4 — Self-Learning & Optimization**: reflection/thresholds/flaky/test-jobs/postcheck/remediation loop + расширенная recovery family coverage закрыты.
+- [x] **Phase 4 sub-bundle**: maintenance remediation loop for degraded promoted skills (`postcheck_fail` -> candidate `hold` + `postcheck_remediation` test job + audit event).
+- [x] **Phase 4 sub-bundle**: family-aware remediation routing (`postcheck_remediation_<family>`) + test-runner fallback family resolution from remediation reason.
+- [x] **Phase 4 sub-bundle**: family alias normalization in self-learning test-map (`security_ops`/`workflow`/`marketing` etc.) to run targeted suites instead of generic fallback.
+- [x] **Phase 4 sub-bundle**: failure-aware remediation playbooks now queue targeted jobs (`..._regression`, `..._stability`) from `postcheck fail_rate/flaky_rate` signals.
+- [x] **Phase 4 sub-bundle**: test-runner now strips remediation playbook suffixes (`_regression`, `_stability`) to resolve base family deterministically.
+- [x] **Phase 4 sub-bundle**: recovery coverage expanded with aliases (`incident_response`, `recovery_ops`, `stability`) and dedicated `recovery` test-map targets.
+- [x] **Phase 6 — Security/Cost/Observability**: guardrails/evals/governance/alerts + risk-prioritized auto-remediation playbooks закрыты.
+- [x] **Phase 6 sub-bundle**: weekly governance now includes `SkillRegistry` acceptance/risk/remediation queue (`skill_audit`, `skill_remediation`) with deterministic task generation.
+- [x] **Phase 6 sub-bundle**: severity-aware weekly auto-remediation ranking (`safe_action_suggestions.score`) with DecisionLoop applying highest-risk actions first.
+- [x] **Phase 6 sub-bundle**: extended safe auto-remediation playbooks (`disable_discovery_intake`, `enable_revenue_dry_run`) for high-risk governance states.
+- [x] **Phase 6 sub-bundle**: critical-stop playbook `disable_revenue_engine` for combined anomaly state (cost anomaly + very high fail-rate + tooling key alerts).
+- [x] **Phase 6 sub-bundle**: optional warning-level auto-remediation gate (`WEEKLY_GOVERNANCE_AUTO_REMEDIATE_ON_WARNING`) for faster safe response before `critical`.
+- [x] **Phase 6 sub-bundle**: safe-action no-op filter skips already-applied remediations (runtime + `.env` convergence), reducing duplicate auto-applies/noise.
+- [x] **Phase 6 sub-bundle**: weekly governance alerts now report `auto_skipped_noop` actions to distinguish applied vs skipped remediations.
+- [x] **Phase 6 sub-bundle**: weekly auto-remediation de-duplicates repeated actions within one cycle and reports `auto_skipped_duplicate`.
+- [x] **Phase 6 sub-bundle**: weekly auto-remediation filters unknown actions and reports `auto_skipped_invalid` instead of silent no-op calls.
+- [x] **Phase 6 sub-bundle**: auto-remediation budget now counts unique valid actions (duplicates/invalids do not consume budget), improving action throughput.
+- [x] **Phase 6 sub-bundle**: no-op actions no longer consume auto-remediation budget, so subsequent useful actions can still be applied in the same cycle.
+- [x] **Phase 6 sub-bundle**: added protective playbooks `tighten_self_healer_budget` and `pause_self_learning_autopromote` with governance risk triggers.
+- [x] **Phase 7 — Tooling Standards**: registry/contracts/signatures/stages + автономный config-driven discovery intake контур закрыты.
+- [x] **Phase 7 sub-bundle**: discovery policy-gates for sources (`TOOLING_DISCOVERY_REQUIRE_HTTPS`, `TOOLING_DISCOVERY_ALLOWED_DOMAINS`) with review-required routing.
+- [x] **Phase 7 sub-bundle**: intake observability now tracks `policy_blocked` candidates and alerts operator in DecisionLoop discovery warnings.
+- [x] **Phase 7 sub-bundle**: intake auto-pause safety (`TOOLING_DISCOVERY_AUTO_PAUSE_ON_POLICY_BLOCK`, `TOOLING_DISCOVERY_POLICY_BLOCK_THRESHOLD`) applies `disable_discovery_intake` safe-action on массовые policy blocks with explicit alert signal.
+- [x] **Phase 7 sub-bundle**: intake observability now aggregates `policy_block_reasons` (top `endpoint_*` markers) in batch output/logs/alerts for faster triage.
+- [x] **Phase 7 sub-bundle**: intake auto-pause also supports rate-based trigger (`TOOLING_DISCOVERY_POLICY_BLOCK_RATE_THRESHOLD`, `..._MIN_PROCESSED`) for bad batches with low absolute counts.
+- [x] **Phase 7 sub-bundle**: `ToolingDiscovery.discover_from_config_sources()` adds autonomous config-source intake path with rollout/summary compatibility.
+- [x] **Wave B (new) — Self-healing v1**: Pipeline Doctor + Judge + sandbox patch lifecycle.
+- [x] **Wave B sub-bundle**: SelfHealer judge-gate + structured failure snapshot + regression tests.
+- [x] **Wave B sub-bundle**: pipeline lifecycle tests (`backup -> apply -> tests -> rollback`) in `tests/test_self_healer_pipeline.py`.
+- [x] **Wave B sub-bundle**: anti-thrashing quarantine cooldown for repeated escalated errors (suppresses immediate re-escalation spam).
+- [x] **Wave B sub-bundle**: persistent quarantine state in SQLite (cooldown survives process restart).
+- [x] **Wave B sub-bundle**: strict whitelist gate in SelfHealer Judge (non-whitelisted shell fixes are blocked before execution).
+- [x] **Wave B sub-bundle**: quarantine policy moved to runtime settings (`SELF_HEALER_QUARANTINE_*`) + dashboard config wiring.
+- [x] **Wave B sub-bundle**: post-apply blast-radius gate (`SELF_HEALER_MAX_CHANGED_FILES`, `SELF_HEALER_MAX_CHANGED_LINES`) with auto-rollback on exceeded git diff delta.
+- [x] **Wave B sub-bundle**: judge blocks recursive delete patterns (`rm -rf ...`) as `dangerous_command` to prevent destructive autonomous cleanups.
+- [x] **Wave B sub-bundle**: judge blocks host shutdown/reboot class commands (`shutdown`, `reboot`, `poweroff`, `halt`) as `dangerous_command`.
+- [x] **Wave B sub-bundle**: host shutdown guard extends to legacy runlevel commands (`init 0`, `telinit 0`).
+- [x] **Wave B sub-bundle**: judge blocks disk-destructive utilities (`mkfs`, `fdisk`, `parted`) as `dangerous_command`.
+- [x] **Wave B sub-bundle**: judge blocks destructive `dd` write patterns (`dd ... of=...`) as `dangerous_command`.
+- [x] **Wave B sub-bundle**: judge blocks recursive ownership/permission rewrites (`chown/chmod -R`) as `dangerous_command`.
+- [x] **Wave B sub-bundle**: judge blocks process-kill commands (`kill ...`) in auto-fix path to avoid accidental runtime disruption.
+- [x] **Wave B sub-bundle**: process-kill guard extends to `pkill`/`killall` patterns (`process_kill_risk`) to block broader process-termination commands.
+- [x] **Wave B sub-bundle**: judge blocks service-disruption commands (`systemctl stop/disable/mask/kill`) via `service_disruption_risk`.
+- [x] **Wave B sub-bundle**: service-disruption guard also blocks `systemctl isolate` target switches.
+- [x] **Wave B sub-bundle**: service-disruption guard also blocks `systemctl set-default` target changes.
+- [x] **Wave B sub-bundle**: service-disruption guard also blocks `systemctl daemon-reexec` to prevent autonomous service-manager reexec disruptions.
+- [x] **Wave B sub-bundle**: service-disruption guard also blocks `systemctl restart/try-restart/reload-or-restart/try-reload-or-restart` commands.
+- [x] **Wave B sub-bundle**: service-disruption guard also blocks `systemctl reload` and `systemctl reenable` commands.
+- [x] **Wave B sub-bundle**: service-disruption guard also blocks legacy `service <name> stop/disable` commands.
+- [x] **Wave B sub-bundle**: service-disruption guard also blocks legacy init management `chkconfig <service> off`.
+- [x] **Wave B sub-bundle**: service-disruption guard also blocks SysV startup policy changes (`update-rc.d <service> disable/remove`, `insserv -r`).
+- [x] **Wave B sub-bundle**: service-disruption guard also blocks OpenRC autostart removal (`rc-update del ...`).
+- [x] **Wave B sub-bundle**: service-disruption guard also blocks OpenRC runtime service stop (`rc-service <name> stop`).
+- [x] **Wave B sub-bundle**: service-disruption guard also blocks runit runtime service stop commands (`sv down/exit/...`).
+- [x] **Wave B sub-bundle**: service-disruption guard also blocks s6 runtime service-stop flags (`s6-svc -d/-D/-x`).
+- [x] **Wave B sub-bundle**: service-disruption guard also blocks macOS launchd unload path (`launchctl unload`).
+- [x] **Wave B sub-bundle**: service-disruption guard also blocks macOS launchd bootout path (`launchctl bootout`).
+- [x] **Wave B sub-bundle**: service-disruption guard also blocks macOS launchd disable path (`launchctl disable`).
+- [x] **Wave B sub-bundle**: service-disruption guard also blocks macOS launchd remove path (`launchctl remove`).
+- [x] **Wave B sub-bundle**: service-disruption guard also blocks macOS launchd forced restart path (`launchctl kickstart -k`).
+- [x] **Wave B sub-bundle**: judge blocks security-degrading host commands (`ufw disable`, `iptables -F`, `setenforce 0`) via `security_degradation_risk`.
+- [x] **Wave B sub-bundle**: security-degradation guard also blocks SELinux permissive mode switch (`setenforce permissive`).
+- [x] **Wave B sub-bundle**: security-degradation guard also blocks SELinux domain permissive toggles (`semanage permissive ...`).
+- [x] **Wave B sub-bundle**: security-degradation guard extends to `ufw --force disable` and `nft flush ruleset`.
+- [x] **Wave B sub-bundle**: security-degradation guard extends to firewall flush variants (`iptables --flush`, `ip6tables -F`).
+- [x] **Wave B sub-bundle**: security-degradation guard also blocks firewall reset command `ufw reset`.
+- [x] **Wave B sub-bundle**: security-degradation guard blocks permissive default policy flips (`iptables/ip6tables -P ACCEPT`).
+- [x] **Wave B sub-bundle**: security-degradation guard also blocks account-lockout/removal patterns (`passwd -l`, `usermod -L/-l`, `userdel`).
+- [x] **Wave B sub-bundle**: judge blocks destructive `sqlite3` mutation commands (`DELETE/UPDATE/DROP/...`) in auto-fix path.
+- [x] **Wave B sub-bundle**: judge blocks supply-chain/network-risk commands (`pip/npm/apt install`, `curl/wget`) with deterministic reason `supply_chain_risk`.
+- [x] **Wave B sub-bundle**: supply-chain guard also blocks `python -m pip install` / `python3 -m pip install` to close wrapper-based bypass.
+- [x] **Wave B sub-bundle**: judge blocks privileged execution attempts (`sudo ...`) with deterministic reason `privilege_escalation_risk`.
+- [x] **Wave B sub-bundle**: judge blocks multi-command shell chains/substitutions (`&&`, `;`, `|`, backticks, `$()`) with deterministic reason `multi_command_risk`.
+- [x] **Wave B sub-bundle**: judge blocks shell background execution (`&`) as `multi_command_risk` to prevent detached auto-fix runs.
+- [x] **Wave B sub-bundle**: judge blocks detached background patterns (`nohup`, `disown`) as `multi_command_risk`.
+- [x] **Wave B sub-bundle**: judge blocks shell redirection patterns (`>`, `>>`, `<<`) with deterministic reason `shell_redirection_risk`.
+- [x] **Wave B sub-bundle**: optional canary gate after auto-fix apply (`SELF_HEALER_CANARY_ENABLED`, `SELF_HEALER_CANARY_COMMAND`) with auto-rollback on canary failure/reject.
+- [x] **Wave C sub-bundle**: tooling discovery intake lifecycle (`modules/tooling_discovery.py`, `tests/test_tooling_discovery.py`).
+- [x] **Wave C sub-bundle**: tooling discovery integrated into `DecisionLoop` periodic intake + dashboard API/UI (`/api/tooling_discovery`) with dedup and promotion controls.
+- [x] **Wave C sub-bundle**: staged rollout for discovery sources (canary/full + cursor state + dashboard/runtime controls) wired into periodic intake.
+- [x] **Wave C sub-bundle**: production discovery source-pack (`config/tooling_discovery_sources.production.json`) + `@file` parser support + staged bootstrap rollout (`scope=bootstrap_prod_sources`).
+- [x] **Wave D (new) — Revenue engine v1**: Gumroad-first closed-loop + operator API/UI + cycle evidence reporting + KPI summary + live evidence gate + deterministic iterate actions + live auth precheck/adapter-probe + browser-publish runtime hardening/e2e.
+- [x] **Wave D sub-bundle**: `RevenueEngine` lifecycle ledger + daily scheduler hook (`REVENUE_ENGINE_*`) + dashboard API/UI controls (`/api/revenue_engine`) + tests `tests/test_revenue_engine.py`.
+- [x] **Wave D sub-bundle**: LIVE publish precheck now verifies Gumroad adapter `authenticate()` with runtime timeout (`REVENUE_ENGINE_LIVE_CHECK_ADAPTER_AUTH`, `REVENUE_ENGINE_LIVE_AUTH_TIMEOUT_SEC`) and fails fast on `gumroad_adapter_auth_*`.
+- [x] **Wave D sub-bundle**: publish queue processing timeout guard (`REVENUE_ENGINE_PUBLISH_TIMEOUT_SEC`) with explicit fail-fast `publisher_queue_timeout:*` and dashboard runtime control.
+- [x] **Wave D sub-bundle**: LIVE publish evidence format validation (`publish_invalid_evidence`) so successful publish requires valid URL/file evidence.
+- [x] **Wave D sub-bundle**: LIVE queue health gate blocks publish on degraded backlog (`publisher_queue_failed_backlog` / `publisher_queue_queued_backlog`) via runtime thresholds.
+- [x] **Wave D sub-bundle**: LIVE stale-queue age gate blocks publish on over-aged queued jobs (`publisher_queue_queued_age`) via `REVENUE_ENGINE_LIVE_MAX_QUEUED_AGE_SEC`.
+- [x] **Wave D sub-bundle**: LIVE running-queue gate blocks publish on overloaded in-progress backlog (`publisher_queue_running_backlog`) via `REVENUE_ENGINE_LIVE_MAX_QUEUE_RUNNING`.
+- [x] **Wave D sub-bundle**: LIVE total-queue gate blocks publish on overloaded overall backlog (`publisher_queue_total_backlog`) via `REVENUE_ENGINE_LIVE_MAX_QUEUE_TOTAL`.
+- [x] **Wave D sub-bundle**: LIVE queue fail-rate gate blocks publish on degraded queue ratio (`publisher_queue_fail_rate`) via `REVENUE_ENGINE_LIVE_MAX_QUEUE_FAIL_RATE`.
+- [x] **Wave D sub-bundle**: fail-rate gate supports minimum sample threshold (`REVENUE_ENGINE_LIVE_FAIL_RATE_MIN_TOTAL`) to avoid noisy blocks on very small queue totals.
+- [x] **Wave D sub-bundle**: LIVE cycle path validated for `fail_rate_min_total` (small queue totals do not trigger fail-rate block when threshold not reached).
+- [x] **Wave D sub-bundle**: LIVE stale-running age gate blocks publish on over-aged in-progress jobs (`publisher_queue_running_age`) via `REVENUE_ENGINE_LIVE_MAX_RUNNING_AGE_SEC`.
+- [x] **Wave D sub-bundle**: LIVE precheck can require queue stats availability (`REVENUE_ENGINE_LIVE_REQUIRE_QUEUE_STATS`) and fails fast on `publisher_queue_stats_unavailable`.
+- [x] **Wave D sub-bundle**: optional browser-runtime LIVE gate (`REVENUE_ENGINE_LIVE_REQUIRE_BROWSER_RUNTIME`) validates gumroad adapter browser capability and blocks on `gumroad_browser_runtime_unavailable`.
+- [x] **Wave D sub-bundle**: optional LIVE session-cookie gate (`REVENUE_ENGINE_LIVE_REQUIRE_SESSION_COOKIE`, `GUMROAD_SESSION_COOKIE_FILE`) blocks publish on missing/unreadable browser session cookie.
+- [x] **Wave D sub-bundle**: LIVE cycle fail-fast path confirms `publisher_queue_stats_unavailable` when `queue.stats()` raises runtime exception.
+- [x] **Wave D sub-bundle**: LIVE cycle fail-fast path confirms `publisher_queue_stats_unavailable` when `queue.stats()` returns `None`.
+- [x] **Wave D sub-bundle**: LIVE precheck validates queue stats sanity and fails fast on negative/invalid counters (`publisher_queue_stats_invalid:*`).
+- [x] **Wave D sub-bundle**: LIVE precheck validates queue stats consistency (`total >= failed+queued+running`) and fails fast on `publisher_queue_stats_invalid:total_lt_active`.
+- [x] **Wave D sub-bundle**: LIVE precheck validates full queue accounting (`total >= failed+queued+running+done`) and fails fast on `publisher_queue_stats_invalid:total_lt_accounted`.
+- [x] **Wave D sub-bundle**: LIVE precheck safely parses malformed queue stats (non-numeric/NaN) and reports deterministic parse markers (`*_parse`) via `publisher_queue_stats_invalid:*` instead of runtime exceptions.
+- [x] **Wave D sub-bundle**: LIVE precheck flags contradictory zero-total telemetry (`total=0` with non-zero activity) via `publisher_queue_stats_invalid:total_zero_with_activity`.
+- [x] **Wave D sub-bundle**: LIVE precheck flags orphan age telemetry (`oldest_*_sec>0` при нулевом backlog) via `publisher_queue_stats_invalid:queued_age_without_queue` / `running_age_without_running`.
+- [x] **Wave D sub-bundle**: LIVE precheck flags non-dict queue stats payloads as contract violation (`publisher_queue_stats_invalid:stats_non_dict`) with explicit unavailable signal.
+- [x] **Wave D sub-bundle**: LIVE cycle fail-fast path propagates `stats_non_dict` marker in `publish_precheck_failed:*` error envelope.
+- [x] **Wave D sub-bundle**: LIVE cycle fail-fast path confirms `stats_non_dict` propagation for multiple non-dict payload forms (list/string).
+- [x] **Wave D sub-bundle**: LIVE cycle fail-fast path propagates malformed-parse markers (e.g. `queued_parse`) in `publish_precheck_failed:*` error envelope.
+- [x] **Wave D sub-bundle**: LIVE cycle fail-fast path propagates per-field parse markers (including `running_parse`) in `publish_precheck_failed:*` error envelope.
+- [x] **Wave D sub-bundle**: LIVE cycle fail-fast path propagates `done_parse` marker in `publish_precheck_failed:*` error envelope.
+- [x] **Wave D sub-bundle**: LIVE cycle fail-fast path propagates `failed_parse` marker in `publish_precheck_failed:*` error envelope.
+- [x] **Wave D sub-bundle**: LIVE cycle fail-fast path propagates `total_parse` marker in `publish_precheck_failed:*` error envelope.
+- [x] **Wave D sub-bundle**: LIVE cycle fail-fast path propagates age-field parse markers (e.g. `oldest_running_sec_parse`) in `publish_precheck_failed:*`.
+- [x] **Wave D sub-bundle**: LIVE cycle fail-fast path propagates `oldest_queued_sec_parse` marker in `publish_precheck_failed:*`.
+- [x] **Wave D sub-bundle**: LIVE cycle fail-fast path propagates negative-counter invalid markers (e.g. `queued`) in `publish_precheck_failed:*`.
+- [x] **Wave D sub-bundle**: LIVE cycle fail-fast path propagates `missing_required_keys` marker in `publish_precheck_failed:*` error envelope.
+- [x] **Wave D sub-bundle**: LIVE cycle fail-fast path propagates `total_with_zero_counters` marker in `publish_precheck_failed:*` error envelope.
+- [x] **Wave D sub-bundle**: LIVE cycle fail-fast path propagates `total_zero_with_activity` marker in `publish_precheck_failed:*` error envelope.
+- [x] **Wave D sub-bundle**: LIVE cycle fail-fast path propagates `queued_age_without_queue` marker in `publish_precheck_failed:*` error envelope.
+- [x] **Wave D sub-bundle**: LIVE cycle fail-fast path propagates `running_age_without_running` marker in `publish_precheck_failed:*` error envelope.
+- [x] **Wave D sub-bundle**: LIVE cycle fail-fast path propagates `total_lt_accounted` marker in `publish_precheck_failed:*` error envelope.
+- [x] **Wave D sub-bundle**: LIVE cycle fail-fast path propagates `total_lt_active` marker in `publish_precheck_failed:*` error envelope.
+- [x] **Wave D sub-bundle**: LIVE precheck requires mandatory queue stat keys (`failed/queued/running/total`) and flags missing fields via `publisher_queue_stats_invalid:missing_required_keys`.
+- [x] **Wave D sub-bundle**: LIVE precheck flags inconsistent positive totals with zero counters (`total_with_zero_counters`) via `publisher_queue_stats_invalid:*`.
+- [x] **Wave E/F (new) — Stealth + Finance deepening**: stealth runtime policy gates + telemetry and finance guardrail/anomaly hooks implemented.
+- [x] **Wave E/F sub-bundle**: added deterministic stealth-readiness diagnostics (`browser/cdp/policy/legal` checks with score/blockers) in `modules/stealth_finance_readiness.py`.
+- [x] **Wave E/F sub-bundle**: added finance guardrail snapshot helper (`spend_ratio/net_profit -> ok|warning|critical`) with regression tests.
+- [x] **Wave E/F sub-bundle**: added `StealthRuntimePolicy` gate + telemetry summary (`modules/stealth_runtime_policy.py`) for CDP/legal/owner-approval controlled runtime.
+- [x] **Wave E/F sub-bundle**: `FinancialController` now exposes `is_spend_anomaly()` and `daily_guardrail_snapshot()` for deterministic budget anomaly alerts.
+- [x] **Phase 6/Wave B cross-bundle**: weekly governance auto-remediation now uses historical trust ranking (`runtime_remediation_events`) and records action outcomes (`applied/noop/invalid/duplicate`) for adaptive scoring.
+
+## New Technical Assignment (from Google Doc)
+- [x] Import source snapshot: `docs/import/google_doc_1Vw0_vBXSWGo4UBiniEQPBs1GrIPrPCEEte8sE2KeOvs.txt`.
+- [x] Rebaseline master roadmap against source architecture.
+- [x] Update canonical priorities and DoD/test-gates.
+- [x] Define high-throughput execution method and anti-conflict iteration order: `docs/EXECUTION_EFFICIENCY_PLAN_2026-03-02.md`.
+- [x] Execute `Wave A` closure tasks end-to-end.
+- [x] Wave A sub-bundle: orchestration auto-resume safety in `_execute_goal` (cancelled/resolved policy-consistent handling + regression tests).
+- [x] Extend Wave C operators flow: defined production discovery sources in `TOOLING_DISCOVERY_SOURCES` and executed staged rollout.
 
 ## Ongoing Actions
-- Maintaining automated owner preference tracking.
-- Preserving durable orchestration context while adding new phases.
-- Running targeted tests (`tests/test_memory_manager.py`, `tests/test_memory_skill_reports.py`, `tests/test_orchestration_manager.py`) when components change.
+- Keep social integrations paused until accounts are ready.
+- Preserve evidence-first discipline: no "done" without tests/artifacts.
+- Run targeted suites on each change in orchestration/self-learning/tooling.
+- Batch work by cross-module iterations (no micro-stop after single-file changes).
+- Validate by local code/tests first; avoid unnecessary LLM calls.

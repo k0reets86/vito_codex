@@ -82,7 +82,9 @@ class TimeSync:
             )
             logger.warning(msg, extra={"event": "time_skew", "context": {"offset_sec": offset, "reason": reason}})
             if self.comms:
-                await self.comms.send_message(f"⚠️ {msg}", level="critical")
+                scheduled_reason = str(reason or "").lower() in {"scheduled", "daily", "weekly"}
+                if (not scheduled_reason) or settings.TELEGRAM_CRON_ENABLED:
+                    await self.comms.send_message(f"⚠️ {msg}", level="critical")
             return {"ok": False, "offset_sec": offset}
 
         logger.info("Time sync OK", extra={"event": "time_sync_ok", "context": {"offset_sec": offset, "reason": reason}})

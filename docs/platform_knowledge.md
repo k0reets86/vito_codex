@@ -95,6 +95,32 @@ Use these as defaults unless Gumroad UI indicates different requirements.
 ## Instagram Graph API
 - Publishing requires Instagram Business/Creator account connected to a Facebook Page; use Graph API and permissions. citeturn5search3
 
+## Gumroad — Digital Product Policy
+- Gumroad keeps a prohibited-products list (age-restricted goods, reselling private-label rights, adult content, financial services, weapons/ammunition, certain services such as bail bonds or telemarketing); violations can trigger removal per the Terms of Service. citeturn4search0turn4search2
+- Gumroad’s Risk team may review accounts for high-risk or fraudulent behavior before enabling payouts; repeated policy breaches, suspicious chargebacks, or disallowed content can lead to suspension without payout. citeturn4search2
+- Content protection features include unique-to-purchaser download links, optional streaming-only video delivery, and PDF stamping that prints buyer email/date on every page for copyright control. citeturn4search3
+
+## Etsy — Digital Listings
+- Instant-download listings honor five files per listing, each capped at 20 MB; supported file types include documents, images, ZIP archives, EPUB, MOBI, video, audio, and printable templates. File names are locked at 70 characters post-upload. citeturn5search0
+- Listing photos must be at least 2000 px wide (square 1:1 preferred), use JPG/PNG/GIF in sRGB, and remain below 10 MB; you can add up to 10 images plus one video per listing. citeturn5search5
+- Video assets must stay between 5 and 15 seconds, under 100 MB, at 1080p in MP4 format; Etsy removes audio during processing, so keep narration optional. citeturn5search7
+
+## Shopify — Digital Downloads
+- The Digital Downloads app lets merchants attach multiple assets per product, each upload limited to 5 GB; variants inherit download assets and you can cap download attempts per order (default unlimited). citeturn6search0
+- General admin files (images, PDFs) are limited to 20 MB per file and 20 MP resolution, so compress large imagery before uploading to avoid upload failures. citeturn6search5
+- Community reports show a 50-file-per-product ceiling inside the Digital Downloads app even if each file is under 5 GB, so bundle large catalogs into ZIP archives when possible. citeturn6search2
+
+## Ko-fi — Shop Assets and Content Guidelines
+- Free Ko-fi creators get 25 GB total asset storage with 2 GB per item; Contributors have 200 GB storage with 5 GB per item and can schedule inventory, control taxes, and add post-purchase messages inside Shop settings. citeturn7search2
+- Free posts are limited to 25 MB per image, while Contributors may embed audio up to 200 MB and rely on external video hosts (YouTube, Vimeo, TikTok) for video content. citeturn7search0
+- Ko-fi enforces payment-provider rules (PayPal/Stripe), so anything disallowed by those partners—unlicensed goods, prohibited services, or trademark violations—risks removal or account suspension; review Ko-fi’s content policy before publishing. citeturn7search8
+
+## Payhip — Large Digital Files and Controls
+- Payhip accepts any file format, up to 5 GB per file, with unlimited storage and bandwidth; bundles and multiple asset uploads are supported, and embed buttons extend purchases beyond the website. citeturn8search0turn8search5
+- Built-in protection caps download attempts (default five, adjustable) and offers optional PDF stamping that prints buyer email/date on each page (PDFs must stay under 250 MB for stamping). citeturn8search1
+- Payhip also auto-generates license keys for software, refreshes download URLs for existing customers when a product redeploys, and surfaces metadata-rich landing pages for every upload. citeturn8search3
+
+
 ## Threads API
 - Threads API uses OAuth via Meta and requires an Instagram account for access; supported endpoints are limited. citeturn6search0
 

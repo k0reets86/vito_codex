@@ -39,3 +39,48 @@ def test_workflow_interrupts_resolve_pending_for_goal(tmp_path):
     assert cnt == 2
     rows = wi.list_interrupts(status="cancelled", limit=10)
     assert len(rows) == 2
+
+
+def test_workflow_interrupts_latest_for_goal(tmp_path):
+    db = str(tmp_path / "wf.db")
+    wi = WorkflowInterrupts(sqlite_path=db)
+    wi.open_interrupt(goal_id="g4", interrupt_type="step_approval_pending", reason="first")
+    iid2 = wi.open_interrupt(goal_id="g4", interrupt_type="owner_approval_required", reason="second")
+    latest = wi.latest_for_goal("g4")
+    assert latest is not None
+    assert int(latest["id"]) == iid2
+    assert latest["interrupt_type"] == "owner_approval_required"
+
+
+def test_workflow_interrupt_resume_events(tmp_path):
+    db = str(tmp_path / "wf.db")
+    wi = WorkflowInterrupts(sqlite_path=db)
+    iid = wi.open_interrupt(goal_id="g5", interrupt_type="step_approval_pending", reason="approval")
+    event_id = wi.log_resume_event("g5", iid, action="resumed", reason="auto_resume")
+    assert event_id > 0
+    assert wi.count_resume_events("g5", iid, action="resumed") == 1
+    latest = wi.latest_resume_event("g5", iid, action="resumed")
+    assert latest is not None
+    assert latest["reason"] == "auto_resume"
+    loaded_intr = wi.get_interrupt(iid)
+    assert loaded_intr is not None
+    assert loaded_intr["goal_id"] == "g5"
+
+
+def test_workflow_interrupt_list_resume_events_filters(tmp_path):
+    db = str(tmp_path / "wf.db")
+    wi = WorkflowInterrupts(sqlite_path=db)
+    i1 = wi.open_interrupt(goal_id="ga", interrupt_type="step_approval_pending", reason="approval")
+    i2 = wi.open_interrupt(goal_id="gb", interrupt_type="owner_approval_required", reason="budget")
+    wi.log_resume_event("ga", i1, action="resumed", reason="ok")
+    wi.log_resume_event("ga", i1, action="skipped", reason="cooldown")
+    wi.log_resume_event("gb", i2, action="cancelled", reason="owner")
+
+    rows_goal = wi.list_resume_events(goal_id="ga", limit=10)
+    assert len(rows_goal) == 2
+    rows_action = wi.list_resume_events(action="cancelled", limit=10)
+    assert len(rows_action) == 1
+    assert rows_action[0]["goal_id"] == "gb"
+    rows_intr = wi.list_resume_events(interrupt_id=i1, action="resumed", limit=10)
+    assert len(rows_intr) == 1
+    assert rows_intr[0]["reason"] == "ok"

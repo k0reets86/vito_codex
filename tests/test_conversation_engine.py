@@ -1,9 +1,13 @@
 """Тесты для ConversationEngine."""
 
 import pytest
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 from conversation_engine import ConversationEngine, Intent, Turn, MAX_CONTEXT_TURNS
+from modules.cancel_state import CancelState
+from modules.conversation_memory import ConversationMemory
+from modules.owner_task_state import OwnerTaskState
 
 
 @pytest.fixture
@@ -62,6 +66,21 @@ class TestIntentDetection:
 
 class TestProcessMessage:
     @pytest.mark.asyncio
+    async def test_cancelled_state_blocks_processing(self, mock_llm_router, mock_memory, tmp_path):
+        cancel_path = tmp_path / "cancel_state.json"
+        cancel_state = CancelState(path=cancel_path)
+        cancel_state.cancel("test")
+        engine = ConversationEngine(
+            llm_router=mock_llm_router,
+            memory=mock_memory,
+            cancel_state=cancel_state,
+        )
+
+        result = await engine.process_message("Сделай отчёт")
+        assert result["intent"] == "conversation"
+        assert "паузе" in result["response"]
+
+    @pytest.mark.asyncio
     async def test_command_passes_through(self, engine):
         result = await engine.process_message("/status")
         assert result["intent"] == "command"
@@ -114,6 +133,58 @@ class TestProcessMessage:
         assert result["intent"] == "conversation"
         assert result["response"] is not None
 
+    @pytest.mark.asyncio
+    async def test_system_action_requires_confirmation_and_no_auto_execute(self, engine):
+        engine._execute_actions = AsyncMock(return_value="done")
+        result = await engine.process_message("исправь интеграцию")
+        assert result["intent"] == "system_action"
+        assert result.get("needs_confirmation") is True
+        assert result.get("actions")
+        engine._execute_actions.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_system_action_llm_actions_marked_for_confirmation(self, engine):
+        engine.llm_router.call_llm = AsyncMock(return_value='{"response":"Ок","actions":[{"action":"scan_trends","params":{}}]}')
+        engine._execute_actions = AsyncMock(return_value="done")
+        result = await engine.process_message("запусти агент и проверь тренды")
+        assert result["intent"] == "system_action"
+        assert result.get("needs_confirmation") is True
+        engine._execute_actions.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_owner_task_state_persists_after_goal_then_question(self, mock_llm_router, mock_memory, tmp_path):
+        owner_state = OwnerTaskState(path=tmp_path / "owner_task_state.json")
+        engine = ConversationEngine(
+            llm_router=mock_llm_router,
+            memory=mock_memory,
+            owner_task_state=owner_state,
+        )
+        mock_llm_router.call_llm = AsyncMock(side_effect=["{}", "Ответ"])
+        await engine.process_message("сделай отчет по продажам")
+        active = owner_state.get_active()
+        assert active is not None
+        assert "сделай отчет" in str(active.get("text", "")).lower()
+        await engine.process_message("какой у нас бюджет?")
+        active2 = owner_state.get_active()
+        assert active2 is not None
+        assert active2.get("text") == active.get("text")
+
+    @pytest.mark.asyncio
+    async def test_owner_task_state_preserve_notice_on_new_system_request(self, mock_llm_router, mock_memory, tmp_path):
+        owner_state = OwnerTaskState(path=tmp_path / "owner_task_state.json")
+        owner_state.set_active("первая задача", intent="goal_request")
+        engine = ConversationEngine(
+            llm_router=mock_llm_router,
+            memory=mock_memory,
+            owner_task_state=owner_state,
+        )
+        result = await engine.process_message("исправь интеграцию")
+        assert result["intent"] == "system_action"
+        assert "/task_replace" in result.get("response", "")
+        active = owner_state.get_active()
+        assert active is not None
+        assert "первая задача" in active.get("text", "")
+
 
 class TestContext:
     def test_add_turn(self, engine):
@@ -148,3 +219,101 @@ class TestContext:
         engine._add_turn("user", "test")
         engine.clear_context()
         assert len(engine._context) == 0
+
+    def test_context_persists_to_disk_and_reloads(self, mock_llm_router, mock_memory, tmp_path):
+        mem_path = tmp_path / "conversation_history.json"
+        cm = ConversationMemory(path=mem_path, limit=20)
+        engine = ConversationEngine(llm_router=mock_llm_router, memory=mock_memory, conversation_memory=cm)
+        engine._add_turn("user", "Первое сообщение", Intent.CONVERSATION)
+        engine._add_turn("assistant", "Ответ", Intent.CONVERSATION)
+
+        reloaded = ConversationEngine(llm_router=mock_llm_router, memory=mock_memory, conversation_memory=cm)
+        formatted = reloaded._format_context()
+        assert "Первое сообщение" in formatted
+        assert "Ответ" in formatted
+
+    def test_context_persists_per_session(self, mock_llm_router, mock_memory, tmp_path):
+        mem_path = tmp_path / "conversation_history.json"
+        cm = ConversationMemory(path=mem_path, limit=20)
+        engine = ConversationEngine(llm_router=mock_llm_router, memory=mock_memory, conversation_memory=cm)
+        engine.set_session("chat_a")
+        engine._add_turn("user", "Сообщение A", Intent.CONVERSATION)
+        engine._add_turn("assistant", "Ответ A", Intent.CONVERSATION)
+        engine.set_session("chat_b")
+        engine._add_turn("user", "Сообщение B", Intent.CONVERSATION)
+
+        reloaded = ConversationEngine(llm_router=mock_llm_router, memory=mock_memory, conversation_memory=cm)
+        reloaded.set_session("chat_a")
+        formatted_a = reloaded._format_context()
+        reloaded.set_session("chat_b")
+        formatted_b = reloaded._format_context()
+        assert "Сообщение A" in formatted_a
+        assert "Ответ A" in formatted_a
+        assert "Сообщение B" not in formatted_a
+        assert "Сообщение B" in formatted_b
+
+    def test_format_context_uses_configured_turns(self, engine, monkeypatch):
+        monkeypatch.setattr("conversation_engine.settings.CONVERSATION_CONTEXT_TURNS", 5)
+        for i in range(12):
+            engine._add_turn("user", f"u{i}")
+        formatted = engine._format_context()
+        assert "u11" in formatted
+        assert "u7" in formatted
+        assert "u6" not in formatted
+
+
+@pytest.mark.asyncio
+async def test_handle_conversation_includes_owner_task_focus(mock_llm_router, mock_memory, tmp_path):
+    owner_state = OwnerTaskState(path=tmp_path / "owner_task_state.json")
+    owner_state.set_active("подготовить лендинг", intent="goal_request")
+    engine = ConversationEngine(llm_router=mock_llm_router, memory=mock_memory, owner_task_state=owner_state)
+    mock_llm_router.call_llm = AsyncMock(return_value="ok")
+    await engine._handle_conversation("какой следующий шаг?")
+    args = mock_llm_router.call_llm.call_args.kwargs
+    prompt = args.get("prompt", "")
+    assert "Фокус владельца" in prompt
+    assert "подготовить лендинг" in prompt
+
+
+@pytest.mark.asyncio
+async def test_handle_system_action_includes_history_and_owner_focus(mock_llm_router, mock_memory, tmp_path):
+    owner_state = OwnerTaskState(path=tmp_path / "owner_task_state.json")
+    owner_state.set_active("закрыть баг в телеграм", intent="system_action")
+    engine = ConversationEngine(llm_router=mock_llm_router, memory=mock_memory, owner_task_state=owner_state)
+    engine._add_turn("user", "предыдущее сообщение")
+    mock_llm_router.call_llm = AsyncMock(return_value='{"response":"ok","actions":[]}')
+    await engine._handle_system_action("проверь логи")
+    prompt = mock_llm_router.call_llm.call_args.kwargs.get("prompt", "")
+    assert "История разговора" in prompt
+    assert "предыдущее сообщение" in prompt
+    assert "Фокус владельца" in prompt
+    assert "закрыть баг в телеграм" in prompt
+
+
+@pytest.mark.asyncio
+async def test_handle_goal_request_includes_history_and_owner_focus(mock_llm_router, mock_memory, tmp_path):
+    owner_state = OwnerTaskState(path=tmp_path / "owner_task_state.json")
+    owner_state.set_active("выпустить продукт", intent="goal_request")
+    engine = ConversationEngine(llm_router=mock_llm_router, memory=mock_memory, owner_task_state=owner_state)
+    engine._add_turn("user", "контекст перед задачей")
+    mock_llm_router.call_llm = AsyncMock(return_value='{"goal_title":"t","goal_description":"d","confirmation":"c","needs_approval":true}')
+    await engine._handle_goal_request("сделай лендинг")
+    prompt = mock_llm_router.call_llm.call_args.kwargs.get("prompt", "")
+    assert "История разговора" in prompt
+    assert "контекст перед задачей" in prompt
+    assert "Фокус владельца" in prompt
+    assert "выпустить продукт" in prompt
+
+
+@pytest.mark.asyncio
+async def test_execute_actions_blocks_unknown_action_without_auto_self_improve(mock_llm_router, mock_memory):
+    registry = MagicMock()
+    registry.dispatch = AsyncMock()
+    engine = ConversationEngine(
+        llm_router=mock_llm_router,
+        memory=mock_memory,
+        agent_registry=registry,
+    )
+    out = await engine._execute_actions([{"action": "totally_unknown_action", "params": {}}])
+    assert "запрещено allowlist" in out
+    registry.dispatch.assert_not_called()

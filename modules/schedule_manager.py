@@ -45,10 +45,17 @@ class ScheduleManager:
                 next_run TEXT,
                 last_run TEXT,
                 status TEXT DEFAULT 'active',
+                run_lock_owner TEXT DEFAULT '',
+                run_lock_until TEXT DEFAULT '',
                 created_at TEXT DEFAULT (datetime('now'))
             )
             """
         )
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(scheduled_tasks)").fetchall()}
+        if "run_lock_owner" not in cols:
+            conn.execute("ALTER TABLE scheduled_tasks ADD COLUMN run_lock_owner TEXT DEFAULT ''")
+        if "run_lock_until" not in cols:
+            conn.execute("ALTER TABLE scheduled_tasks ADD COLUMN run_lock_until TEXT DEFAULT ''")
         conn.commit()
         conn.close()
 
@@ -98,6 +105,7 @@ class ScheduleManager:
         return task_id
 
     def due_tasks(self) -> list[ScheduledTask]:
+        """Legacy non-locking fetch of due tasks. Prefer acquire_due_tasks for runtime."""
         now = datetime.now(timezone.utc).isoformat()
         conn = sqlite3.connect(self.sqlite_path)
         rows = conn.execute(
@@ -113,6 +121,69 @@ class ScheduleManager:
             ScheduledTask(*row) for row in rows
         ]
 
+    def acquire_due_tasks(self, owner: str, limit: int = 20, lock_minutes: int = 10) -> list[ScheduledTask]:
+        """Atomically claim due tasks to prevent duplicate execution across processes."""
+        owner = str(owner or "").strip()[:120] or "worker"
+        max_tasks = max(1, int(limit or 20))
+        lease_minutes = max(1, int(lock_minutes or 10))
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+        lock_until = (now_dt + timedelta(minutes=lease_minutes)).isoformat()
+
+        conn = sqlite3.connect(self.sqlite_path, isolation_level=None)
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            # Release stale leases first.
+            conn.execute(
+                """
+                UPDATE scheduled_tasks
+                SET status = 'active', run_lock_owner = '', run_lock_until = ''
+                WHERE status = 'running' AND run_lock_until IS NOT NULL AND run_lock_until != '' AND run_lock_until <= ?
+                """,
+                (now,),
+            )
+            candidates = conn.execute(
+                """
+                SELECT id
+                FROM scheduled_tasks
+                WHERE status = 'active' AND next_run IS NOT NULL AND next_run <= ?
+                ORDER BY next_run ASC, id ASC
+                LIMIT ?
+                """,
+                (now, max_tasks),
+            ).fetchall()
+            claimed_ids: list[int] = []
+            for row in candidates:
+                task_id = int(row[0])
+                cur = conn.execute(
+                    """
+                    UPDATE scheduled_tasks
+                    SET status = 'running', run_lock_owner = ?, run_lock_until = ?
+                    WHERE id = ? AND status = 'active'
+                    """,
+                    (owner, lock_until, task_id),
+                )
+                if int(cur.rowcount or 0) == 1:
+                    claimed_ids.append(task_id)
+
+            tasks: list[ScheduledTask] = []
+            if claimed_ids:
+                placeholders = ",".join("?" for _ in claimed_ids)
+                rows = conn.execute(
+                    f"""
+                    SELECT id, title, action, schedule_type, time_of_day, weekday, run_at, next_run, last_run, status
+                    FROM scheduled_tasks
+                    WHERE id IN ({placeholders})
+                    ORDER BY next_run ASC, id ASC
+                    """,
+                    tuple(claimed_ids),
+                ).fetchall()
+                tasks = [ScheduledTask(*row) for row in rows]
+            conn.commit()
+            return tasks
+        finally:
+            conn.close()
+
     def mark_run(self, task: ScheduledTask) -> None:
         now = datetime.now(timezone.utc).isoformat()
         next_run = self._compute_next_run(task.schedule_type, task.time_of_day, task.weekday, task.run_at)
@@ -122,7 +193,11 @@ class ScheduleManager:
             next_run = None
         conn = sqlite3.connect(self.sqlite_path)
         conn.execute(
-            "UPDATE scheduled_tasks SET last_run = ?, next_run = ?, status = ? WHERE id = ?",
+            """
+            UPDATE scheduled_tasks
+            SET last_run = ?, next_run = ?, status = ?, run_lock_owner = '', run_lock_until = ''
+            WHERE id = ?
+            """,
             (now, next_run, status, task.id),
         )
         conn.commit()

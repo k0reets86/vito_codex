@@ -60,6 +60,8 @@ class CommsAgent:
         self._pending_approvals: dict[str, asyncio.Future] = {}
         # Ожидаем уточнение по расписанию
         self._pending_schedule_update: dict | None = None
+        # Ожидаем подтверждение системного действия (из свободного текста)
+        self._pending_system_action: dict | None = None
         self._telegram_conflict_mode: bool = False
 
         # Обратные ссылки на модули — устанавливаются через set_modules()
@@ -76,6 +78,8 @@ class CommsAgent:
         self._weekly_planner = None
         self._schedule_manager = None
         self._publisher_queue = None
+        self._cancel_state = None
+        self._owner_task_state = None
 
         # Маппинг текста кнопок → имена команд
         self._button_map: dict[str, str] = {
@@ -88,6 +92,13 @@ class CommsAgent:
         }
 
         logger.info("CommsAgent инициализирован", extra={"event": "init"})
+
+    @staticmethod
+    def _is_confirmed(args: list[str] | None) -> bool:
+        if not args:
+            return False
+        token = str(args[0] or "").strip().lower()
+        return token in {"yes", "y", "да", "confirm", "ok"}
 
     def _try_set_env_from_text(self, text: str) -> bool:
         """Parse KEY=VALUE messages and save to .env (owner only)."""
@@ -236,6 +247,8 @@ class CommsAgent:
         weekly_planner=None,
         schedule_manager=None,
         publisher_queue=None,
+        cancel_state=None,
+        owner_task_state=None,
     ) -> None:
         """Привязывает модули после инициализации (избегаем циклических импортов)."""
         self._goal_engine = goal_engine
@@ -260,6 +273,10 @@ class CommsAgent:
             self._schedule_manager = schedule_manager
         if publisher_queue is not None:
             self._publisher_queue = publisher_queue
+        if cancel_state is not None:
+            self._cancel_state = cancel_state
+        if owner_task_state is not None:
+            self._owner_task_state = owner_task_state
 
     # ── Запуск / Остановка ──
 
@@ -287,6 +304,7 @@ class CommsAgent:
         # New v0.3.0 commands
         self._app.add_handler(CommandHandler("report", self._cmd_report))
         self._app.add_handler(CommandHandler("stop", self._cmd_stop))
+        self._app.add_handler(CommandHandler("cancel", self._cmd_cancel))
         self._app.add_handler(CommandHandler("resume", self._cmd_resume))
         self._app.add_handler(CommandHandler("budget", self._cmd_budget))
         self._app.add_handler(CommandHandler("tasks", self._cmd_tasks))
@@ -316,6 +334,10 @@ class CommsAgent:
         self._app.add_handler(CommandHandler("pubq", self._cmd_pubq))
         self._app.add_handler(CommandHandler("pubrun", self._cmd_pubrun))
         self._app.add_handler(CommandHandler("webop", self._cmd_webop))
+        self._app.add_handler(CommandHandler("task_current", self._cmd_task_current))
+        self._app.add_handler(CommandHandler("task_done", self._cmd_task_done))
+        self._app.add_handler(CommandHandler("task_cancel", self._cmd_task_cancel))
+        self._app.add_handler(CommandHandler("task_replace", self._cmd_task_replace))
         self._app.add_handler(CommandHandler("clear_goals", self._cmd_clear_goals))
         self._app.add_handler(CommandHandler("nettest", self._cmd_nettest))
         self._app.add_handler(CommandHandler("smoke", self._cmd_smoke))
@@ -376,6 +398,10 @@ class CommsAgent:
             BotCommand("pubq", "Очередь публикаций"),
             BotCommand("pubrun", "Запустить очередь публикаций"),
             BotCommand("webop", "Web-operator сценарии"),
+            BotCommand("task_current", "Текущая задача владельца"),
+            BotCommand("task_done", "Закрыть текущую задачу"),
+            BotCommand("task_cancel", "Отменить текущую задачу"),
+            BotCommand("task_replace", "Заменить текущую задачу"),
             BotCommand("clear_goals", "Очистить все цели"),
             BotCommand("nettest", "Проверка сети/интернета"),
             BotCommand("smoke", "Платформенный smoke-check"),
@@ -439,6 +465,15 @@ class CommsAgent:
             return
 
         lower = text.lower()
+        strict_cmds = bool(getattr(settings, "TELEGRAM_STRICT_COMMANDS", True))
+        if self._pending_system_action:
+            if lower in ("да", "yes", "ок", "ok", "approve", "✅", "👍"):
+                await self._execute_pending_system_action()
+                return
+            if lower in ("нет", "no", "reject", "отмена", "❌", "👎"):
+                self._pending_system_action = None
+                await self.send_message("Ок, системное действие отменено.", level="result")
+                return
         # Approvals
         if self._pending_approvals:
             if lower in ("да", "yes", "ок", "ok", "approve", "✅", "👍"):
@@ -458,7 +493,7 @@ class CommsAgent:
                 return
 
         # Simple shortcuts
-        if any(kw in lower for kw in ["статус", "/status"]):
+        if (not strict_cmds and any(kw in lower for kw in ["статус", "/status"])) or lower.strip() in ("/status", "status"):
             if self._decision_loop and self._goal_engine:
                 st = self._decision_loop.get_status()
                 gs = self._goal_engine.get_stats()
@@ -512,6 +547,39 @@ class CommsAgent:
                 return
             except Exception:
                 pass
+        if lower.strip() in ("/task_current", "task_current"):
+            if self._owner_task_state:
+                active = self._owner_task_state.get_active()
+                if active:
+                    await self.send_message(
+                        "Текущая задача владельца:\n"
+                        f"- {str(active.get('text', ''))[:800]}\n"
+                        f"- intent: {active.get('intent', '')}\n"
+                        f"- status: {active.get('status', 'active')}",
+                        level="result",
+                    )
+                else:
+                    await self.send_message("Текущая задача не зафиксирована.", level="result")
+                return
+        if lower.strip() in ("/task_done", "task_done"):
+            if self._owner_task_state:
+                self._owner_task_state.complete(note="owner_marked_done")
+                await self.send_message("Текущая задача отмечена как выполненная.", level="result")
+                return
+        if lower.strip() in ("/task_cancel", "task_cancel"):
+            if self._owner_task_state:
+                self._owner_task_state.cancel(note="owner_task_cancel")
+                await self.send_message("Текущая задача отменена.", level="result")
+                return
+        if lower.strip().startswith("/task_replace ") or lower.strip().startswith("task_replace "):
+            if self._owner_task_state:
+                parts = text.split(maxsplit=1)
+                if len(parts) >= 2 and parts[1].strip():
+                    self._owner_task_state.set_active(parts[1].strip(), source="owner_inbox", intent="manual_replace", force=True)
+                    await self.send_message("Текущая задача заменена.", level="result")
+                else:
+                    await self.send_message("Использование: /task_replace <новая задача>", level="result")
+                return
         if lower.strip() in ("/pubq", "pubq"):
             try:
                 if not self._publisher_queue:
@@ -560,6 +628,8 @@ class CommsAgent:
         # Conversation engine
         if self._conversation_engine:
             try:
+                if hasattr(self._conversation_engine, "set_session"):
+                    self._conversation_engine.set_session("owner_inbox")
                 result = await self._conversation_engine.process_message(text)
                 if result.get("create_goal") and self._goal_engine:
                     from goal_engine import GoalPriority, GoalStatus
@@ -581,6 +651,11 @@ class CommsAgent:
                     await self.send_message(response, level="result")
                 elif result.get("response"):
                     await self.send_message(result["response"], level="result")
+                    if result.get("actions") and result.get("needs_confirmation"):
+                        self._pending_system_action = {
+                            "actions": result.get("actions", []),
+                            "origin_text": text,
+                        }
                 else:
                     await self.send_message("Понял. Чем могу помочь?")
                 return
@@ -588,6 +663,32 @@ class CommsAgent:
                 logger.warning(f"ConversationEngine error: {e}", extra={"event": "conversation_error"})
 
         await self.send_message("Не понял: это вопрос или задача? Напиши одним предложением, что нужно сделать.")
+
+    async def _execute_pending_system_action(self, update: Update | None = None) -> None:
+        payload = self._pending_system_action or {}
+        self._pending_system_action = None
+        actions = payload.get("actions") or []
+        if not actions:
+            if update is not None:
+                await update.message.reply_text("Нет действий для выполнения.", reply_markup=self._main_keyboard())
+            else:
+                await self.send_message("Нет действий для выполнения.", level="result")
+            return
+        if not self._conversation_engine:
+            if update is not None:
+                await update.message.reply_text("ConversationEngine не подключён.", reply_markup=self._main_keyboard())
+            else:
+                await self.send_message("ConversationEngine не подключён.", level="result")
+            return
+        try:
+            out = await self._conversation_engine._execute_actions(actions)
+            msg = out or "Действие выполнено."
+        except Exception as e:
+            msg = f"Ошибка выполнения действия: {e}"
+        if update is not None:
+            await self._send_response(update, msg)
+        else:
+            await self.send_message(msg, level="result")
 
     async def _poll_owner_inbox(self) -> None:
         """Poll file-based owner inbox for offline testing and fallback comms."""
@@ -725,6 +826,13 @@ class CommsAgent:
 
         if self._pending_approvals:
             parts.append(f"Ожидают одобрения: {len(self._pending_approvals)}")
+        if self._owner_task_state:
+            try:
+                active = self._owner_task_state.get_active()
+                if active:
+                    parts.append(f"Текущая задача: {str(active.get('text', ''))[:120]}")
+            except Exception:
+                pass
 
         await update.message.reply_text("\n\n".join(parts), reply_markup=self._main_keyboard())
         logger.info("Команда /status выполнена", extra={"event": "cmd_status"})
@@ -842,6 +950,11 @@ class CommsAgent:
             priority=GoalPriority.HIGH,
             source="owner",
         )
+        if self._owner_task_state:
+            try:
+                self._owner_task_state.set_active(text, source="telegram", intent="goal_request", force=False)
+            except Exception:
+                pass
         await update.message.reply_text(
             f"Цель создана: [{goal.goal_id}] {goal.title}\n"
             f"Приоритет: HIGH (от владельца)",
@@ -1250,6 +1363,12 @@ class CommsAgent:
         if not self._goal_engine:
             await update.message.reply_text("GoalEngine не подключён.", reply_markup=self._main_keyboard())
             return
+        if not self._is_confirmed(getattr(context, "args", None)):
+            await update.message.reply_text(
+                "Подтверди удаление всех целей: `/clear_goals yes`",
+                reply_markup=self._main_keyboard(),
+            )
+            return
         removed = self._goal_engine.clear_all_goals()
         await update.message.reply_text(
             f"Очередь целей очищена. Удалено: {removed}.",
@@ -1385,6 +1504,9 @@ class CommsAgent:
             # If conversation_engine exists, pass extracted text for natural language handling
             if self._conversation_engine:
                 try:
+                    if hasattr(self._conversation_engine, "set_session"):
+                        sid = str(update.effective_chat.id) if update and update.effective_chat else "telegram_owner"
+                        self._conversation_engine.set_session(sid)
                     await self._conversation_engine.process_message(
                         f"[Вложение:{file_path.name}]\n{extracted[:4000]}"
                     )
@@ -1408,8 +1530,20 @@ class CommsAgent:
             return
 
         self._log_owner_request(text, source="text")
+        strict_cmds = bool(getattr(settings, "TELEGRAM_STRICT_COMMANDS", True))
 
         lower = text.lower()
+        if self._pending_system_action:
+            if lower in ("да", "yes", "ок", "ok", "approve", "✅", "👍"):
+                await self._execute_pending_system_action(update)
+                return
+            if lower in ("нет", "no", "reject", "отмена", "❌", "👎"):
+                self._pending_system_action = None
+                await update.message.reply_text(
+                    "Ок, системное действие отменено.",
+                    reply_markup=self._main_keyboard(),
+                )
+                return
         # Pending schedule clarification (user selects which to update)
         if self._pending_schedule_update:
             sel = text.strip()
@@ -1448,7 +1582,7 @@ class CommsAgent:
                     return
             # If not a valid selection, continue normal flow
 
-        if any(kw in lower for kw in [
+        if (not strict_cmds) and any(kw in lower for kw in [
             "очисти очередь",
             "очисти очередь целей",
             "удали все цели",
@@ -1462,11 +1596,11 @@ class CommsAgent:
             return
 
         # Schedule from plain text (no command required)
-        if await self._maybe_schedule_from_text(update, text):
+        if (not strict_cmds) and await self._maybe_schedule_from_text(update, text):
             return
 
         # Brainstorm from plain text (no command required)
-        if await self._maybe_brainstorm_from_text(update, text):
+        if (not strict_cmds) and await self._maybe_brainstorm_from_text(update, text):
             return
 
         # 0. Accept secrets/key updates via Telegram (KEY=VALUE or "set KEY=VALUE")
@@ -1498,7 +1632,7 @@ class CommsAgent:
 
         # 1.5. Natural language shortcuts (balance check, etc.)
         lower = text.strip().lower()
-        if any(kw in lower for kw in ["баланс", "balance", "balances", "остатки", "сколько на счетах", "сколько осталось"]):
+        if (not strict_cmds) and any(kw in lower for kw in ["баланс", "balance", "balances", "остатки", "сколько на счетах", "сколько осталось"]):
             await self._cmd_balances(update, context)
             return
 
@@ -1541,6 +1675,9 @@ class CommsAgent:
         # 3. ConversationEngine — живой разговор
         if self._conversation_engine:
             try:
+                if hasattr(self._conversation_engine, "set_session"):
+                    sid = str(update.effective_chat.id) if update and update.effective_chat else "telegram_owner"
+                    self._conversation_engine.set_session(sid)
                 result = await self._conversation_engine.process_message(text)
 
                 # Pass-through для команд и одобрений (обработаны выше)
@@ -1567,6 +1704,11 @@ class CommsAgent:
                     await update.message.reply_text(response, reply_markup=self._main_keyboard())
                 elif result.get("response"):
                     await self._send_response(update, result["response"])
+                    if result.get("actions") and result.get("needs_confirmation"):
+                        self._pending_system_action = {
+                            "actions": result.get("actions", []),
+                            "origin_text": text,
+                        }
                 else:
                     await update.message.reply_text(
                         "Понял. Чем могу помочь?", reply_markup=self._main_keyboard()
@@ -1605,12 +1747,25 @@ class CommsAgent:
                 f"Цели: {gs['completed']} выполнено, {gs['executing']} в работе, "
                 f"{gs['pending']} ожидают\nУспешность: {gs['success_rate']:.0%}"
             )
+        if self._owner_task_state:
+            try:
+                active = self._owner_task_state.get_active()
+                if active:
+                    parts.append(f"Текущая задача: {str(active.get('text', ''))[:200]}")
+            except Exception:
+                pass
         await self._send_response(update, "\n\n".join(parts))
         logger.info("Команда /report выполнена", extra={"event": "cmd_report"})
 
     async def _cmd_stop(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Остановить Decision Loop."""
         if await self._reject_stranger(update):
+            return
+        if not self._is_confirmed(getattr(context, "args", None)):
+            await update.message.reply_text(
+                "Подтверди остановку цикла: `/stop yes`",
+                reply_markup=self._main_keyboard(),
+            )
             return
         if self._decision_loop:
             self._decision_loop.stop()
@@ -1619,10 +1774,64 @@ class CommsAgent:
             await update.message.reply_text("Decision Loop не подключён.", reply_markup=self._main_keyboard())
         logger.info("Команда /stop выполнена", extra={"event": "cmd_stop"})
 
+    async def _cmd_cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Пауза всех текущих задач и очистка очередей."""
+        if await self._reject_stranger(update):
+            return
+        if self._cancel_state:
+            self._cancel_state.cancel(reason="owner_cancelled")
+        cancelled_goals = self._cancel_goal_queue(reason="owner_cancelled")
+        if self._owner_task_state:
+            try:
+                self._owner_task_state.cancel(note="owner_cancelled")
+            except Exception:
+                pass
+        self._pending_approvals.clear()
+        self._pending_schedule_update = None
+        if self._decision_loop:
+            self._decision_loop.stop()
+        await update.message.reply_text(
+            f"Всё приостановлено. Отправь /resume, когда будешь готов продолжить.\n"
+            f"Отменено задач из очереди: {cancelled_goals}.",
+            reply_markup=self._main_keyboard(),
+        )
+        logger.info("Команда /cancel выполнена", extra={"event": "cmd_cancel"})
+
+    def _cancel_goal_queue(self, reason: str = "owner_cancelled") -> int:
+        if not self._goal_engine:
+            return 0
+        try:
+            from goal_engine import GoalStatus
+            terminal = {GoalStatus.COMPLETED, GoalStatus.FAILED, GoalStatus.CANCELLED}
+            cancelled = 0
+            for goal in self._goal_engine.get_all_goals():
+                if goal.status in terminal:
+                    continue
+                goal.status = GoalStatus.CANCELLED
+                goal.completed_at = datetime.now(timezone.utc)
+                goal.results = {"cancel_reason": reason}
+                self._goal_engine._persist_goal(goal)
+                cancelled += 1
+                try:
+                    if self._decision_loop and getattr(self._decision_loop, "orchestrator", None):
+                        self._decision_loop.orchestrator.cancel_session(goal.goal_id, reason=reason)
+                except Exception:
+                    pass
+                try:
+                    if self._decision_loop and getattr(self._decision_loop, "interrupts", None):
+                        self._decision_loop.interrupts.resolve_pending_for_goal(goal.goal_id, resolution="cancelled")
+                except Exception:
+                    pass
+            return cancelled
+        except Exception:
+            return 0
+
     async def _cmd_resume(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Возобновить Decision Loop."""
         if await self._reject_stranger(update):
             return
+        if self._cancel_state:
+            self._cancel_state.clear()
         if self._decision_loop and not self._decision_loop.running:
             import asyncio
             asyncio.create_task(self._decision_loop.run())
@@ -1671,6 +1880,63 @@ class CommsAgent:
             lines.append(f"  [{g.goal_id}] {g.title} (${g.estimated_cost_usd:.2f})")
         await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
         logger.info("Команда /tasks выполнена", extra={"event": "cmd_tasks"})
+
+    async def _cmd_task_current(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Показывает текущую owner-задачу (persisted)."""
+        if await self._reject_stranger(update):
+            return
+        if not self._owner_task_state:
+            await update.message.reply_text("OwnerTaskState не подключён.", reply_markup=self._main_keyboard())
+            return
+        active = self._owner_task_state.get_active()
+        if not active:
+            await update.message.reply_text("Текущая задача не зафиксирована.", reply_markup=self._main_keyboard())
+            return
+        msg = (
+            "Текущая задача владельца:\n"
+            f"- {str(active.get('text', ''))[:800]}\n"
+            f"- intent: {active.get('intent', '')}\n"
+            f"- status: {active.get('status', 'active')}"
+        )
+        await update.message.reply_text(msg, reply_markup=self._main_keyboard())
+
+    async def _cmd_task_done(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Явно закрывает текущую owner-задачу как completed."""
+        if await self._reject_stranger(update):
+            return
+        if not self._owner_task_state:
+            await update.message.reply_text("OwnerTaskState не подключён.", reply_markup=self._main_keyboard())
+            return
+        self._owner_task_state.complete(note="owner_marked_done")
+        await update.message.reply_text("Текущая задача отмечена как выполненная.", reply_markup=self._main_keyboard())
+
+    async def _cmd_task_cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Явно отменяет текущую owner-задачу."""
+        if await self._reject_stranger(update):
+            return
+        if not self._owner_task_state:
+            await update.message.reply_text("OwnerTaskState не подключён.", reply_markup=self._main_keyboard())
+            return
+        self._owner_task_state.cancel(note="owner_task_cancel")
+        await update.message.reply_text("Текущая задача отменена.", reply_markup=self._main_keyboard())
+
+    async def _cmd_task_replace(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Явно заменяет текущую owner-задачу новой формулировкой."""
+        if await self._reject_stranger(update):
+            return
+        if not self._owner_task_state:
+            await update.message.reply_text("OwnerTaskState не подключён.", reply_markup=self._main_keyboard())
+            return
+        raw = (update.message.text or "").strip()
+        new_task = raw.removeprefix("/task_replace").strip()
+        if not new_task:
+            await update.message.reply_text(
+                "Использование: /task_replace <новая задача>",
+                reply_markup=self._main_keyboard(),
+            )
+            return
+        self._owner_task_state.set_active(new_task, source="telegram", intent="manual_replace", force=True)
+        await update.message.reply_text("Текущая задача заменена.", reply_markup=self._main_keyboard())
 
     async def _cmd_trends(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Сканирование трендов."""
@@ -2158,6 +2424,15 @@ class CommsAgent:
     def _should_send(self, text: str, level: str) -> bool:
         """Notification policy to reduce spam."""
         import os
+        if (level or "").lower() == "cron":
+            if not bool(getattr(settings, "TELEGRAM_CRON_ENABLED", False)):
+                return False
+            try:
+                if self._cancel_state and self._cancel_state.is_cancelled():
+                    return False
+            except Exception:
+                pass
+            return True
         if os.getenv("PYTEST_CURRENT_TEST"):
             return True
         mode = (self._notify_mode or "minimal").lower()
@@ -2389,6 +2664,8 @@ class CommsAgent:
                 "Auto-approve enabled for tests",
                 extra={"event": "approval_auto", "context": {"request_id": request_id}},
             )
+            if timeout_seconds <= 0:
+                return None
             return True
         future: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending_approvals[request_id] = future
@@ -2415,6 +2692,14 @@ class CommsAgent:
             f"Запрос одобрения: {request_id}",
             extra={"event": "approval_requested", "context": {"request_id": request_id}},
         )
+
+        if timeout_seconds <= 0:
+            self._pending_approvals.pop(request_id, None)
+            logger.warning(
+                f"Таймаут одобрения: {request_id}",
+                extra={"event": "approval_timeout", "context": {"request_id": request_id}},
+            )
+            return None
 
         try:
             result = await asyncio.wait_for(future, timeout=timeout_seconds)

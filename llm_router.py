@@ -303,28 +303,33 @@ class LLMRouter:
             pass
         return settings.OPENROUTER_DEFAULT_MODEL or "openai/gpt-4o-mini"
 
+    def _model_allowed(self, model: ModelConfig) -> bool:
+        enabled = {x.strip() for x in (settings.LLM_ENABLED_MODELS or "").split(",") if x.strip()}
+        disabled = {x.strip() for x in (settings.LLM_DISABLED_MODELS or "").split(",") if x.strip()}
+        if enabled:
+            return model.model_id in enabled or model.display_name in enabled
+        if disabled:
+            return not (model.model_id in disabled or model.display_name in disabled)
+        return True
+
+    def _candidate_model_keys(self, task_type: TaskType) -> list[str]:
+        # Temporary cost-safe mode: force all tasks through free Gemini 2.5 Flash Lite.
+        if bool(getattr(settings, "LLM_FORCE_GEMINI_FREE", False)):
+            return ["gemini-flash"]
+
+        keys = list(TASK_MODEL_MAP[task_type])
+        allowed = [k for k in keys if self._model_allowed(MODEL_REGISTRY[k])]
+        if allowed:
+            return allowed
+        # If allowlist/denylist accidentally blocks all candidates, prefer free Gemini fallback.
+        return ["gemini-flash"]
+
     def select_model(
         self, task_type: TaskType, estimated_tokens: int = 2000, context: str = ""
     ) -> RouteResult:
         """Выбирает оптимальную модель для задачи."""
-        model_keys = TASK_MODEL_MAP[task_type]
-        # Respect allow/deny lists from settings
-        disabled = {x.strip() for x in (settings.LLM_DISABLED_MODELS or "").split(",") if x.strip()}
-        enabled = {x.strip() for x in (settings.LLM_ENABLED_MODELS or "").split(",") if x.strip()}
-        def _is_allowed(m):
-            if enabled:
-                return m.model_id in enabled or m.display_name in enabled
-            if disabled:
-                return not (m.model_id in disabled or m.display_name in disabled)
-            return True
-        model = None
-        for key in model_keys:
-            cand = MODEL_REGISTRY[key]
-            if _is_allowed(cand):
-                model = cand
-                break
-        if model is None:
-            model = MODEL_REGISTRY[model_keys[0]]
+        model_keys = self._candidate_model_keys(task_type)
+        model = MODEL_REGISTRY[model_keys[0]]
 
         estimated_cost = (
             (estimated_tokens / 1000) * model.cost_per_1k_input
@@ -439,7 +444,7 @@ class LLMRouter:
                     # Offer recommended model + cheaper fallback (if exists)
                     alt = None
                     try:
-                        keys = TASK_MODEL_MAP[task_type]
+                        keys = self._candidate_model_keys(task_type)
                         if len(keys) > 1:
                             alt = MODEL_REGISTRY[keys[1]]
                     except Exception:
@@ -466,7 +471,7 @@ class LLMRouter:
                 return None
 
         start = time.monotonic()
-        model_keys = TASK_MODEL_MAP[task_type]
+        model_keys = self._candidate_model_keys(task_type)
 
         retry_delays = [5, 15, 30]  # exponential backoff for 529/overloaded
 
@@ -474,7 +479,15 @@ class LLMRouter:
             model = MODEL_REGISTRY[key]
             for retry in range(len(retry_delays) + 1):
                 try:
-                    # Fallback to OpenRouter if direct provider not available
+                    # Fallback to OpenRouter if direct provider not available.
+                    # In forced free-Gemini mode we do not fallback to paid providers.
+                    force_free = bool(getattr(settings, "LLM_FORCE_GEMINI_FREE", False))
+                    if force_free and not self._provider_available(model.provider):
+                        logger.warning(
+                            "Free Gemini mode enabled and Gemini key unavailable; LLM call skipped.",
+                            extra={"event": "llm_free_mode_no_provider"},
+                        )
+                        return None
                     if not self._provider_available(model.provider) and self._provider_available("openrouter"):
                         or_model = ModelConfig(
                             provider="openrouter",

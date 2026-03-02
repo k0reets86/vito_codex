@@ -205,9 +205,10 @@ class DashboardServer:
                         optimizations = sl.optimization_runs(limit=50)
                         promotions = sl.promotion_events(limit=50)
                         test_jobs = sl.list_test_jobs(limit=80)
+                        thresholds = sl.list_thresholds(limit=40)
                     except Exception:
                         lessons, candidates = [], []
-                        summary, optimizations, promotions, test_jobs = {}, [], [], []
+                        summary, optimizations, promotions, test_jobs, thresholds = {}, [], [], [], []
                     self._json({
                         "lessons": lessons,
                         "candidates": candidates,
@@ -215,6 +216,7 @@ class DashboardServer:
                         "optimizations": optimizations,
                         "promotions": promotions,
                         "test_jobs": test_jobs,
+                        "thresholds": thresholds,
                     })
                     return
                 if parsed.path == "/api/memory_policy":
@@ -234,6 +236,28 @@ class DashboardServer:
                         cleanup_preview = {}
                     self._json({"audit": audit, "summary": summary, "drift": drift, "cleanup_preview": cleanup_preview})
                     return
+                if parsed.path == "/api/memory_skill_report":
+                    try:
+                        from modules.memory_skill_reports import MemorySkillReporter
+                        days = int(query.get("days", ["7"])[0] or 7)
+                        limit = int(query.get("limit", ["12"])[0] or 12)
+                        reporter = MemorySkillReporter()
+                        weekly = reporter.weekly_retention_report(days=days)
+                        skills = reporter.per_skill_quality(limit=limit)
+                    except Exception:
+                        weekly = {}
+                        skills = []
+                    self._json({"weekly": weekly, "skills": skills})
+                    return
+                if parsed.path == "/api/governance_weekly":
+                    try:
+                        from modules.governance_reporter import GovernanceReporter
+                        days = int(query.get("days", ["7"])[0] or 7)
+                        report = GovernanceReporter().weekly_report(days=days)
+                    except Exception:
+                        report = {}
+                    self._json({"report": report})
+                    return
                 if parsed.path == "/api/workflow_threads":
                     try:
                         from modules.workflow_threads import WorkflowThreads
@@ -247,11 +271,24 @@ class DashboardServer:
                     try:
                         from modules.workflow_interrupts import WorkflowInterrupts
                         status = (query.get("status", [""])[0] or "").strip()
+                        action = (query.get("action", [""])[0] or "").strip()
+                        goal_id = (query.get("goal_id", [""])[0] or "").strip()
+                        interrupt_id_raw = (query.get("interrupt_id", [""])[0] or "").strip()
+                        include_events = (query.get("include_events", ["1"])[0] or "1").strip().lower() in {"1", "true", "yes", "on"}
+                        interrupt_id = int(interrupt_id_raw) if interrupt_id_raw.isdigit() else None
                         limit = int(query.get("limit", ["80"])[0] or 80)
-                        interrupts = WorkflowInterrupts().list_interrupts(status=status, limit=limit)
+                        wi = WorkflowInterrupts()
+                        interrupts = wi.list_interrupts(status=status, limit=limit)
+                        resume_events = wi.list_resume_events(
+                            goal_id=goal_id,
+                            interrupt_id=interrupt_id,
+                            action=action,
+                            limit=limit,
+                        ) if include_events else []
                     except Exception:
                         interrupts = []
-                    self._json({"interrupts": interrupts})
+                        resume_events = []
+                    self._json({"interrupts": interrupts, "resume_events": resume_events})
                     return
                 if parsed.path == "/api/workflow_sessions":
                     try:
@@ -430,6 +467,47 @@ class DashboardServer:
                         "signature_policy": signature_policy,
                     })
                     return
+                if parsed.path == "/api/tooling_discovery":
+                    try:
+                        from modules.tooling_discovery import ToolingDiscovery
+                        status = (query.get("status", [""])[0] or "").strip()
+                        limit = int(query.get("limit", ["120"])[0] or 120)
+                        scope = (query.get("scope", ["dashboard"])[0] or "dashboard").strip() or "dashboard"
+                        discovery = ToolingDiscovery()
+                        candidates = discovery.list_candidates(status=status, limit=limit)
+                        summary = discovery.build_summary()
+                        rollout_state = discovery.get_rollout_state(scope=scope)
+                    except Exception:
+                        candidates = []
+                        summary = {}
+                        rollout_state = {}
+                    self._json({
+                        "candidates": candidates,
+                        "summary": summary,
+                        "rollout_state": rollout_state,
+                    })
+                    return
+                if parsed.path == "/api/revenue_engine":
+                    try:
+                        from modules.revenue_engine import RevenueEngine
+                        limit = int(query.get("limit", ["40"])[0] or 40)
+                        status = (query.get("status", [""])[0] or "").strip()
+                        days = int(query.get("days", ["30"])[0] or 30)
+                        cycle_id = int(query.get("cycle_id", ["0"])[0] or 0)
+                        include_report = str(query.get("include_report", [""])[0] or "").strip().lower() in {"1", "true", "yes", "on"}
+                        rev = RevenueEngine()
+                        cycles = rev.list_cycles(status=status, limit=limit)
+                        latest = rev.get_cycle(int(cycles[0]["id"])) if cycles else {"cycle": {}, "steps": []}
+                        summary = rev.summarize_cycles(days=days)
+                        target_id = cycle_id or int((latest.get("cycle", {}) or {}).get("id", 0) or 0)
+                        report = rev.build_cycle_report(target_id) if include_report and target_id > 0 else {}
+                    except Exception:
+                        cycles = []
+                        latest = {"cycle": {}, "steps": []}
+                        summary = {}
+                        report = {}
+                    self._json({"cycles": cycles, "latest": latest, "summary": summary, "report": report})
+                    return
                 if parsed.path == "/api/events":
                     try:
                         from modules.data_lake import DataLake
@@ -521,6 +599,9 @@ class DashboardServer:
                         "LLM_ENABLED_MODELS",
                         "SELF_LEARNING_ENABLED",
                         "SELF_LEARNING_SKILL_SCORE_MIN",
+                        "SELF_LEARNING_REMEDIATION_MAX_ACTIONS",
+                        "SELF_LEARNING_OUTCOME_MIN_TEST_RUNS",
+                        "SELF_LEARNING_OUTCOME_FAIL_RATE_MAX",
                         "GUARDRAILS_ENABLED",
                         "GUARDRAILS_BLOCK_ON_INJECTION",
                         "LLM_ALERTS_ENABLED",
@@ -532,6 +613,50 @@ class DashboardServer:
                         "TOOLING_MCP_TIMEOUT_SEC",
                         "TOOLING_MCP_MAX_OUTPUT_BYTES",
                         "TOOLING_BLOCK_WITH_PENDING_ROTATION",
+                        "TOOLING_DISCOVERY_ENABLED",
+                        "TOOLING_DISCOVERY_ALERTS_ENABLED",
+                        "TOOLING_DISCOVERY_INTERVAL_TICKS",
+                        "TOOLING_DISCOVERY_MAX_PER_TICK",
+                        "TOOLING_DISCOVERY_AUTO_PROMOTE_APPROVED",
+                        "TOOLING_DISCOVERY_DEDUP_HOURS",
+                        "TOOLING_DISCOVERY_ROLLOUT_STAGE",
+                        "TOOLING_DISCOVERY_CANARY_PERCENT",
+                        "TOOLING_DISCOVERY_REQUIRE_HTTPS",
+                        "TOOLING_DISCOVERY_ALLOWED_DOMAINS",
+                        "TOOLING_DISCOVERY_AUTO_PAUSE_ON_POLICY_BLOCK",
+                        "TOOLING_DISCOVERY_POLICY_BLOCK_THRESHOLD",
+                        "TOOLING_DISCOVERY_POLICY_BLOCK_RATE_THRESHOLD",
+                        "TOOLING_DISCOVERY_POLICY_BLOCK_RATE_MIN_PROCESSED",
+                        "TOOLING_DISCOVERY_SOURCES",
+                        "REVENUE_ENGINE_ENABLED",
+                        "REVENUE_ENGINE_DRY_RUN",
+                        "REVENUE_ENGINE_REQUIRE_APPROVAL",
+                        "REVENUE_ENGINE_DAILY_HOUR_UTC",
+                        "REVENUE_ENGINE_LIVE_REQUIRE_AUTH",
+                        "REVENUE_ENGINE_LIVE_CHECK_ADAPTER_AUTH",
+                        "REVENUE_ENGINE_LIVE_AUTH_TIMEOUT_SEC",
+                        "REVENUE_ENGINE_LIVE_MAX_QUEUE_FAILED",
+                        "REVENUE_ENGINE_LIVE_MAX_QUEUE_QUEUED",
+                        "REVENUE_ENGINE_LIVE_MAX_QUEUE_RUNNING",
+                        "REVENUE_ENGINE_LIVE_MAX_QUEUE_TOTAL",
+                        "REVENUE_ENGINE_LIVE_MAX_QUEUE_FAIL_RATE",
+                        "REVENUE_ENGINE_LIVE_FAIL_RATE_MIN_TOTAL",
+                        "REVENUE_ENGINE_LIVE_MAX_QUEUED_AGE_SEC",
+                        "REVENUE_ENGINE_LIVE_MAX_RUNNING_AGE_SEC",
+                        "REVENUE_ENGINE_LIVE_REQUIRE_QUEUE_STATS",
+                        "REVENUE_ENGINE_LIVE_REQUIRE_BROWSER_RUNTIME",
+                        "REVENUE_ENGINE_LIVE_REQUIRE_SESSION_COOKIE",
+                        "GUMROAD_SESSION_COOKIE_FILE",
+                        "REVENUE_ENGINE_PUBLISH_TIMEOUT_SEC",
+                        "REVENUE_ENGINE_AUTO_REPORT_ENABLED",
+                        "REVENUE_ENGINE_REPORT_DIR",
+                        "WEEKLY_GOVERNANCE_SKILL_REMEDIATE_ENABLED",
+                        "WEEKLY_GOVERNANCE_SKILL_REMEDIATE_LIMIT",
+                        "WEEKLY_GOVERNANCE_AUTO_REMEDIATE_ON_WARNING",
+                        "SELF_HEALER_QUARANTINE_SEC",
+                        "SELF_HEALER_QUARANTINE_MAX_MULT",
+                        "SELF_HEALER_MAX_CHANGED_FILES",
+                        "SELF_HEALER_MAX_CHANGED_LINES",
                     ]
                     data = {k: getattr(settings, k, None) for k in allowed}
                     self._json({"config": data})
@@ -676,6 +801,15 @@ class DashboardServer:
         </div>
       </div>
       <div class=\"card\"><div class=\"mut\">Tooling Registry</div><div id=\"tooling_registry\"></div></div>
+      <div class=\"card\"><div class=\"mut\">Tooling Discovery</div><div id=\"tooling_discovery\"></div></div>
+      <div class=\"card\"><div class=\"mut\">Revenue Engine</div><div id=\"revenue_engine\"></div>
+        <div style=\"margin-top:8px\">
+          <input id=\"rev_topic\" placeholder=\"topic (optional)\" style=\"width:50%\"/>
+          <input id=\"rev_dry\" placeholder=\"dry 1/0\" style=\"width:14%\"/>
+          <input id=\"rev_appr\" placeholder=\"approval 1/0\" style=\"width:16%\"/>
+          <button onclick=\"runRevenueCycle()\">Run Cycle</button>
+        </div>
+      </div>
       <div class=\"card\"><div class=\"mut\">Tooling Controls</div>
         <div style=\"margin-top:8px\">\n
           <input id=\"tool_key\" placeholder=\"adapter_key\" style=\"width:32%\"/>
@@ -716,6 +850,26 @@ class DashboardServer:
           <input id=\"tool_key_rot_id\" placeholder=\"key_rotation_id\" style=\"width:24%\"/>
           <button onclick=\"approveToolingKeyRotation()\">Approve Key</button>
           <button onclick=\"rejectToolingKeyRotation()\">Reject Key</button>
+        </div>
+        <div style=\"margin-top:10px\" class=\"mut\">Discovery Intake</div>
+        <div style=\"margin-top:6px\">\n
+          <input id=\"td_source\" placeholder=\"source\" style=\"width:20%\"/>
+          <input id=\"td_key\" placeholder=\"adapter_key\" style=\"width:28%\"/>
+          <input id=\"td_proto\" placeholder=\"mcp/openapi\" style=\"width:18%\"/>
+          <input id=\"td_ep\" placeholder=\"endpoint\" style=\"width:26%\"/>
+        </div>
+        <div style=\"margin-top:6px\">\n
+          <input id=\"td_auth\" placeholder=\"auth_type\" style=\"width:20%\"/>
+          <input id=\"td_candidate_id\" placeholder=\"candidate_id\" style=\"width:18%\"/>
+          <button onclick=\"discoverToolingCandidate()\">Discover</button>
+          <button onclick=\"approveToolingCandidate()\">Approve+Promote</button>
+          <button onclick=\"setToolingCandidateStatus('rejected')\">Reject</button>
+        </div>
+        <div style=\"margin-top:6px\">\n
+          <input id=\"td_rollout\" placeholder=\"stage canary/full\" style=\"width:26%\"/>
+          <input id=\"td_canary\" placeholder=\"canary %\" style=\"width:16%\"/>
+          <input id=\"td_max\" placeholder=\"max items\" style=\"width:16%\"/>
+          <button onclick=\"runToolingDiscoveryConfigBatch()\">Run Config Batch</button>
         </div>
       </div>
       <div class=\"card\"><div class=\"mut\">Memory Policy Audit</div><div id=\"memory_policy\"></div></div>
@@ -769,7 +923,7 @@ async function load(){
     const endpoints = {
     status:'/api/status', network:'/api/network', agents:'/api/agents', finance:'/api/finance',
     goals:'/api/goals', schedules:'/api/schedules', config:'/api/config',
-    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', guardrails:'/api/guardrails', llm_evals:'/api/llm_evals', tooling_registry:'/api/tooling_registry', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs', skills:'/api/skills', operator_policy:'/api/operator_policy', self_learning:'/api/self_learning', memory_policy:'/api/memory_policy?limit=80', workflow_threads:'/api/workflow_threads', workflow_interrupts:'/api/workflow_interrupts', workflow_sessions:'/api/workflow_sessions', secrets_status:'/api/secrets_status', provider_health:'/api/provider_health',
+    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', guardrails:'/api/guardrails', llm_evals:'/api/llm_evals', tooling_registry:'/api/tooling_registry', tooling_discovery:'/api/tooling_discovery', revenue_engine:'/api/revenue_engine', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs', skills:'/api/skills', operator_policy:'/api/operator_policy', self_learning:'/api/self_learning', memory_policy:'/api/memory_policy?limit=80', workflow_threads:'/api/workflow_threads', workflow_interrupts:'/api/workflow_interrupts', workflow_sessions:'/api/workflow_sessions', secrets_status:'/api/secrets_status', provider_health:'/api/provider_health',
     facts:'/api/execution_facts', approvals:'/api/approvals', events:'/api/events', decisions:'/api/decisions', budget:'/api/budget', workflow_events:'/api/workflow_events'
   };
     for (const [k,url] of Object.entries(endpoints)){
@@ -809,6 +963,8 @@ async function load(){
     else if (k === 'guardrails') renderGuardrails(j);
     else if (k === 'llm_evals') renderLlmEvals(j);
     else if (k === 'tooling_registry') renderToolingRegistry(j.adapters||[], j.approvals||[], j.stage_approvals||[], j.key_rotations||[], j.history||[], j.governance||{}, j.signature_policy||{});
+    else if (k === 'tooling_discovery') renderToolingDiscovery(j.candidates||[], j.summary||{}, j.rollout_state||{});
+    else if (k === 'revenue_engine') renderRevenueEngine(j.cycles||[], j.latest||{}, j.summary||{});
   }
 }
 function escAttr(value){
@@ -918,6 +1074,42 @@ function renderToolingRegistry(items, approvals, stageApprovals, keyRotations, h
     keySummary +
     `<div class=\"mut\" style=\"margin-top:8px\">Governance</div><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>${govRows}</tbody></table>` +
     `<div class=\"mut\" style=\"margin-top:8px\">Remediations</div><ul>${rem}</ul>`;
+}
+function renderToolingDiscovery(items, summary, rolloutState){
+  const el = document.getElementById('tooling_discovery');
+  if (!el) return;
+  const rs = rolloutState || {};
+  const rows = (items || []).slice(0, 20).map(c => `<tr><td>${c.id}</td><td>${c.source||''}</td><td>${c.adapter_key||''}</td><td>${c.protocol||''}</td><td>${c.status||''}</td><td>${c.risk_score||0}</td><td>${c.quality_score||0}</td></tr>`).join('');
+  const srows = Object.entries((summary && summary.by_status) ? summary.by_status : {}).map(([k,v]) => `<tr><td>${k}</td><td>${v.count||0}</td><td>${v.avg_risk||0}</td><td>${v.avg_quality||0}</td></tr>`).join('');
+  el.innerHTML =
+    `<div class=\"mut\">Total candidates: ${(summary&&summary.total)||0}</div>` +
+    `<div class=\"mut\">Rollout: scope=${rs.scope||'dashboard'} stage=${rs.last_stage||'-'} cursor=${rs.cursor||0} pool=${rs.last_pool_size||0}</div>` +
+    `<table><thead><tr><th>ID</th><th>Source</th><th>Adapter</th><th>Proto</th><th>Status</th><th>Risk</th><th>Quality</th></tr></thead><tbody>${rows}</tbody></table>` +
+    `<div class=\"mut\" style=\"margin-top:8px\">Summary by Status</div>` +
+    `<table><thead><tr><th>Status</th><th>Count</th><th>Avg Risk</th><th>Avg Quality</th></tr></thead><tbody>${srows}</tbody></table>`;
+}
+function renderRevenueEngine(cycles, latest, summary){
+  const el = document.getElementById('revenue_engine');
+  if (!el) return;
+  const s = summary || {};
+  const rows = (cycles || []).slice(0, 10).map(c => `<tr><td>${c.id}</td><td>${c.platform||''}</td><td>${c.topic||''}</td><td>${c.stage||''}</td><td>${c.status||''}</td><td>${c.quality_score||0}</td><td>${c.approval_status||''}</td><td>${c.publish_status||''}</td></tr>`).join('');
+  const steps = ((latest && latest.steps) ? latest.steps : []).slice(-8).map(s => `<tr><td>${s.step_name||''}</td><td>${s.status||''}</td><td>${(s.detail||'').slice(0,120)}</td></tr>`).join('');
+  const srows = [
+    ['window_days', s.window_days || 30],
+    ['total_cycles', s.total_cycles || 0],
+    ['completed_cycles', s.completed_cycles || 0],
+    ['completion_rate', s.completion_rate || 0],
+    ['approval_rejections', s.approval_rejections || 0],
+    ['publish_failures', s.publish_failures || 0],
+    ['avg_quality_score', s.avg_quality_score || 0],
+    ['total_cost_usd', s.total_cost_usd || 0],
+  ].map(([k,v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+  el.innerHTML =
+    `<div class=\"mut\">KPI Summary</div><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>${srows}</tbody></table>` +
+    `<div class=\"mut\" style=\"margin-top:8px\">Recent Cycles</div>` +
+    `<table><thead><tr><th>ID</th><th>Platform</th><th>Topic</th><th>Stage</th><th>Status</th><th>Quality</th><th>Approval</th><th>Publish</th></tr></thead><tbody>${rows}</tbody></table>` +
+    `<div class=\"mut\" style=\"margin-top:8px\">Latest Steps</div>` +
+    `<table><thead><tr><th>Step</th><th>Status</th><th>Detail</th></tr></thead><tbody>${steps}</tbody></table>`;
 }
 function renderMemoryPolicy(items, summary, drift, cleanupPreview){
   const el = document.getElementById('memory_policy');
@@ -1373,6 +1565,49 @@ async function rejectToolingKeyRotation(){
   await fetch('/api/tooling_registry', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'reject_key_rotation', rotation_id, approver:'dashboard'})});
   await load();
 }
+async function discoverToolingCandidate(){
+  const source = document.getElementById('td_source').value.trim() || 'dashboard_manual';
+  const adapter_key = document.getElementById('td_key').value.trim();
+  const protocol = document.getElementById('td_proto').value.trim();
+  const endpoint = document.getElementById('td_ep').value.trim();
+  const auth_type = document.getElementById('td_auth').value.trim() || 'none';
+  if (!adapter_key || !protocol || !endpoint) return;
+  await fetch('/api/tooling_discovery', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'discover', source, adapter_key, protocol, endpoint, auth_type})});
+  await load();
+}
+async function approveToolingCandidate(){
+  const candidate_id = parseInt((document.getElementById('td_candidate_id').value||'0').trim(), 10);
+  if (!candidate_id) return;
+  await fetch('/api/tooling_discovery', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'approve', candidate_id, actor:'dashboard', promote_to_registry:true})});
+  await load();
+}
+async function setToolingCandidateStatus(status){
+  const candidate_id = parseInt((document.getElementById('td_candidate_id').value||'0').trim(), 10);
+  if (!candidate_id || !status) return;
+  await fetch('/api/tooling_discovery', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'set_status', candidate_id, status, notes:'dashboard'})});
+  await load();
+}
+async function runToolingDiscoveryConfigBatch(){
+  const rollout_stage = (document.getElementById('td_rollout').value.trim() || 'canary').toLowerCase();
+  const canary_percent = parseInt((document.getElementById('td_canary').value || '34').trim(), 10) || 34;
+  const max_items = parseInt((document.getElementById('td_max').value || '3').trim(), 10) || 3;
+  await fetch('/api/tooling_discovery', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+    action:'discover_from_config',
+    rollout_stage,
+    canary_percent,
+    max_items,
+    auto_promote:false,
+    scope:'dashboard_config'
+  })});
+  await load();
+}
+async function runRevenueCycle(){
+  const topic = document.getElementById('rev_topic').value.trim();
+  const dry_run = (document.getElementById('rev_dry').value.trim() || '1') !== '0';
+  const require_approval = (document.getElementById('rev_appr').value.trim() || '1') !== '0';
+  await fetch('/api/revenue_engine', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'run_cycle', topic, dry_run, require_approval})});
+  await load();
+}
 async function setSecret(){
   const k = document.getElementById('sec_key').value.trim();
   const v = document.getElementById('sec_val').value.trim();
@@ -1454,11 +1689,18 @@ load();
                         "SELF_LEARNING_TEST_RUNNER_INTERVAL_TICKS",
                         "SELF_LEARNING_TEST_RUNNER_MAX_JOBS",
                         "SELF_LEARNING_TEST_RUNNER_TIMEOUT_SEC",
+                        "SELF_LEARNING_MAINTENANCE_INTERVAL_TICKS",
+                        "SELF_LEARNING_MAINTENANCE_DAYS",
+                        "SELF_LEARNING_MAINTENANCE_MIN_LESSONS",
+                        "SELF_LEARNING_REMEDIATION_MAX_ACTIONS",
+                        "SELF_LEARNING_TEST_JOB_RETENTION_DAYS",
                         "SELF_LEARNING_TEST_RETRY_ON_FAIL",
                         "SELF_LEARNING_TEST_MAX_ATTEMPTS",
                         "SELF_LEARNING_FLAKY_COOLDOWN_HOURS",
                         "SELF_LEARNING_FLAKY_RATE_MAX",
                         "SELF_LEARNING_FLAKY_WINDOW_DAYS",
+                        "SELF_LEARNING_OUTCOME_MIN_TEST_RUNS",
+                        "SELF_LEARNING_OUTCOME_FAIL_RATE_MAX",
                         "SELF_LEARNING_TEST_TARGET_MAP",
                         "GUARDRAILS_ENABLED",
                         "GUARDRAILS_BLOCK_ON_INJECTION",
@@ -1471,10 +1713,64 @@ load();
                         "TOOLING_MCP_TIMEOUT_SEC",
                         "TOOLING_MCP_MAX_OUTPUT_BYTES",
                         "TOOLING_BLOCK_WITH_PENDING_ROTATION",
+                        "TOOLING_DISCOVERY_ENABLED",
+                        "TOOLING_DISCOVERY_ALERTS_ENABLED",
+                        "TOOLING_DISCOVERY_INTERVAL_TICKS",
+                        "TOOLING_DISCOVERY_MAX_PER_TICK",
+                        "TOOLING_DISCOVERY_AUTO_PROMOTE_APPROVED",
+                        "TOOLING_DISCOVERY_DEDUP_HOURS",
+                        "TOOLING_DISCOVERY_ROLLOUT_STAGE",
+                        "TOOLING_DISCOVERY_CANARY_PERCENT",
+                        "TOOLING_DISCOVERY_REQUIRE_HTTPS",
+                        "TOOLING_DISCOVERY_ALLOWED_DOMAINS",
+                        "TOOLING_DISCOVERY_AUTO_PAUSE_ON_POLICY_BLOCK",
+                        "TOOLING_DISCOVERY_POLICY_BLOCK_THRESHOLD",
+                        "TOOLING_DISCOVERY_POLICY_BLOCK_RATE_THRESHOLD",
+                        "TOOLING_DISCOVERY_POLICY_BLOCK_RATE_MIN_PROCESSED",
+                        "TOOLING_DISCOVERY_SOURCES",
+                        "REVENUE_ENGINE_ENABLED",
+                        "REVENUE_ENGINE_DRY_RUN",
+                        "REVENUE_ENGINE_REQUIRE_APPROVAL",
+                        "REVENUE_ENGINE_DAILY_HOUR_UTC",
+                        "REVENUE_ENGINE_LIVE_REQUIRE_AUTH",
+                        "REVENUE_ENGINE_LIVE_CHECK_ADAPTER_AUTH",
+                        "REVENUE_ENGINE_LIVE_AUTH_TIMEOUT_SEC",
+                        "REVENUE_ENGINE_LIVE_MAX_QUEUE_FAILED",
+                        "REVENUE_ENGINE_LIVE_MAX_QUEUE_QUEUED",
+                        "REVENUE_ENGINE_LIVE_MAX_QUEUE_RUNNING",
+                        "REVENUE_ENGINE_LIVE_MAX_QUEUE_TOTAL",
+                        "REVENUE_ENGINE_LIVE_MAX_QUEUE_FAIL_RATE",
+                        "REVENUE_ENGINE_LIVE_FAIL_RATE_MIN_TOTAL",
+                        "REVENUE_ENGINE_LIVE_MAX_QUEUED_AGE_SEC",
+                        "REVENUE_ENGINE_LIVE_MAX_RUNNING_AGE_SEC",
+                        "REVENUE_ENGINE_LIVE_REQUIRE_QUEUE_STATS",
+                        "REVENUE_ENGINE_LIVE_REQUIRE_BROWSER_RUNTIME",
+                        "REVENUE_ENGINE_LIVE_REQUIRE_SESSION_COOKIE",
+                        "GUMROAD_SESSION_COOKIE_FILE",
+                        "REVENUE_ENGINE_PUBLISH_TIMEOUT_SEC",
+                        "REVENUE_ENGINE_AUTO_REPORT_ENABLED",
+                        "REVENUE_ENGINE_REPORT_DIR",
+                        "SELF_HEALER_QUARANTINE_SEC",
+                        "SELF_HEALER_QUARANTINE_MAX_MULT",
+                        "SELF_HEALER_MAX_CHANGED_FILES",
+                        "SELF_HEALER_MAX_CHANGED_LINES",
+                        "MEMORY_WEEKLY_REPORT_ENABLED",
+                        "MEMORY_WEEKLY_REPORT_ALERTS_ENABLED",
+                        "MEMORY_WEEKLY_REPORT_INTERVAL_TICKS",
+                        "MEMORY_WEEKLY_REPORT_MIN_QUALITY",
+                        "MEMORY_WEEKLY_REPORT_MIN_SKILL_HEALTH",
+                        "WEEKLY_GOVERNANCE_REPORT_ENABLED",
+                        "WEEKLY_GOVERNANCE_REPORT_ALERTS_ENABLED",
+                        "WEEKLY_GOVERNANCE_REPORT_INTERVAL_TICKS",
+                        "WEEKLY_GOVERNANCE_SKILL_REMEDIATE_ENABLED",
+                        "WEEKLY_GOVERNANCE_SKILL_REMEDIATE_LIMIT",
+                        "WEEKLY_GOVERNANCE_AUTO_REMEDIATE",
+                        "WEEKLY_GOVERNANCE_AUTO_REMEDIATE_ON_WARNING",
+                        "WEEKLY_GOVERNANCE_AUTO_REMEDIATE_MAX_ACTIONS",
                     }
                     updated = {}
-                    bool_keys = {"PROACTIVE_ENABLED", "BRAINSTORM_WEEKLY", "OWNER_INBOX_ENABLED", "CALENDAR_UPDATE_LLM", "SELF_LEARNING_ENABLED", "SELF_LEARNING_AUTO_PROMOTE", "SELF_LEARNING_TEST_RUNNER_ENABLED", "SELF_LEARNING_TEST_RETRY_ON_FAIL", "GUARDRAILS_ENABLED", "GUARDRAILS_BLOCK_ON_INJECTION", "LLM_ALERTS_ENABLED", "TOOLING_RUN_LIVE_ENABLED", "TOOLING_BLOCK_WITH_PENDING_ROTATION", "TOOLING_REQUIRE_PRODUCTION_APPROVAL", "TOOLING_REQUIRE_ROLLBACK_APPROVAL"}
-                    num_keys = {"DAILY_LIMIT_USD", "OPERATION_NOTIFY_USD", "OPERATION_APPROVE_USD", "OPERATION_MAX_USD", "SELF_LEARNING_SKILL_SCORE_MIN", "SELF_LEARNING_MIN_LESSONS", "SELF_LEARNING_OPTIMIZE_INTERVAL_TICKS", "SELF_LEARNING_TEST_RUNNER_INTERVAL_TICKS", "SELF_LEARNING_TEST_RUNNER_MAX_JOBS", "SELF_LEARNING_TEST_RUNNER_TIMEOUT_SEC", "SELF_LEARNING_TEST_MAX_ATTEMPTS", "SELF_LEARNING_FLAKY_COOLDOWN_HOURS", "SELF_LEARNING_FLAKY_RATE_MAX", "SELF_LEARNING_FLAKY_WINDOW_DAYS", "TOOLING_HTTP_TIMEOUT_SEC", "TOOLING_MCP_TIMEOUT_SEC", "TOOLING_MCP_MAX_OUTPUT_BYTES"}
+                    bool_keys = {"PROACTIVE_ENABLED", "BRAINSTORM_WEEKLY", "OWNER_INBOX_ENABLED", "CALENDAR_UPDATE_LLM", "SELF_LEARNING_ENABLED", "SELF_LEARNING_AUTO_PROMOTE", "SELF_LEARNING_TEST_RUNNER_ENABLED", "SELF_LEARNING_TEST_RETRY_ON_FAIL", "GUARDRAILS_ENABLED", "GUARDRAILS_BLOCK_ON_INJECTION", "LLM_ALERTS_ENABLED", "TOOLING_RUN_LIVE_ENABLED", "TOOLING_BLOCK_WITH_PENDING_ROTATION", "TOOLING_REQUIRE_PRODUCTION_APPROVAL", "TOOLING_REQUIRE_ROLLBACK_APPROVAL", "TELEGRAM_STRICT_COMMANDS", "TOOLING_GOVERNANCE_ALERT_ENABLED", "TOOLING_DISCOVERY_ENABLED", "TOOLING_DISCOVERY_ALERTS_ENABLED", "TOOLING_DISCOVERY_AUTO_PROMOTE_APPROVED", "TOOLING_DISCOVERY_REQUIRE_HTTPS", "TOOLING_DISCOVERY_AUTO_PAUSE_ON_POLICY_BLOCK", "REVENUE_ENGINE_ENABLED", "REVENUE_ENGINE_DRY_RUN", "REVENUE_ENGINE_REQUIRE_APPROVAL", "REVENUE_ENGINE_LIVE_REQUIRE_AUTH", "REVENUE_ENGINE_LIVE_CHECK_ADAPTER_AUTH", "REVENUE_ENGINE_LIVE_REQUIRE_QUEUE_STATS", "REVENUE_ENGINE_LIVE_REQUIRE_BROWSER_RUNTIME", "REVENUE_ENGINE_LIVE_REQUIRE_SESSION_COOKIE", "REVENUE_ENGINE_AUTO_REPORT_ENABLED", "MEMORY_WEEKLY_REPORT_ENABLED", "MEMORY_WEEKLY_REPORT_ALERTS_ENABLED", "WEEKLY_GOVERNANCE_REPORT_ENABLED", "WEEKLY_GOVERNANCE_REPORT_ALERTS_ENABLED", "WEEKLY_GOVERNANCE_SKILL_REMEDIATE_ENABLED", "WEEKLY_GOVERNANCE_AUTO_REMEDIATE", "WEEKLY_GOVERNANCE_AUTO_REMEDIATE_ON_WARNING"}
+                    num_keys = {"DAILY_LIMIT_USD", "OPERATION_NOTIFY_USD", "OPERATION_APPROVE_USD", "OPERATION_MAX_USD", "SELF_LEARNING_SKILL_SCORE_MIN", "SELF_LEARNING_MIN_LESSONS", "SELF_LEARNING_OPTIMIZE_INTERVAL_TICKS", "SELF_LEARNING_TEST_RUNNER_INTERVAL_TICKS", "SELF_LEARNING_TEST_RUNNER_MAX_JOBS", "SELF_LEARNING_TEST_RUNNER_TIMEOUT_SEC", "SELF_LEARNING_MAINTENANCE_INTERVAL_TICKS", "SELF_LEARNING_MAINTENANCE_DAYS", "SELF_LEARNING_MAINTENANCE_MIN_LESSONS", "SELF_LEARNING_REMEDIATION_MAX_ACTIONS", "SELF_LEARNING_TEST_JOB_RETENTION_DAYS", "SELF_LEARNING_TEST_MAX_ATTEMPTS", "SELF_LEARNING_FLAKY_COOLDOWN_HOURS", "SELF_LEARNING_FLAKY_RATE_MAX", "SELF_LEARNING_FLAKY_WINDOW_DAYS", "SELF_LEARNING_OUTCOME_MIN_TEST_RUNS", "SELF_LEARNING_OUTCOME_FAIL_RATE_MAX", "TOOLING_HTTP_TIMEOUT_SEC", "TOOLING_MCP_TIMEOUT_SEC", "TOOLING_MCP_MAX_OUTPUT_BYTES", "TOOLING_KEY_ROTATION_MAX_DAYS", "TOOLING_KEY_ROTATION_WARN_DAYS", "CONVERSATION_CONTEXT_TURNS", "TOOLING_GOVERNANCE_INTERVAL_TICKS", "TOOLING_DISCOVERY_INTERVAL_TICKS", "TOOLING_DISCOVERY_MAX_PER_TICK", "TOOLING_DISCOVERY_DEDUP_HOURS", "TOOLING_DISCOVERY_CANARY_PERCENT", "TOOLING_DISCOVERY_POLICY_BLOCK_THRESHOLD", "TOOLING_DISCOVERY_POLICY_BLOCK_RATE_THRESHOLD", "TOOLING_DISCOVERY_POLICY_BLOCK_RATE_MIN_PROCESSED", "REVENUE_ENGINE_DAILY_HOUR_UTC", "REVENUE_ENGINE_LIVE_AUTH_TIMEOUT_SEC", "REVENUE_ENGINE_LIVE_MAX_QUEUE_FAILED", "REVENUE_ENGINE_LIVE_MAX_QUEUE_QUEUED", "REVENUE_ENGINE_LIVE_MAX_QUEUE_RUNNING", "REVENUE_ENGINE_LIVE_MAX_QUEUE_TOTAL", "REVENUE_ENGINE_LIVE_MAX_QUEUE_FAIL_RATE", "REVENUE_ENGINE_LIVE_FAIL_RATE_MIN_TOTAL", "REVENUE_ENGINE_LIVE_MAX_QUEUED_AGE_SEC", "REVENUE_ENGINE_LIVE_MAX_RUNNING_AGE_SEC", "REVENUE_ENGINE_PUBLISH_TIMEOUT_SEC", "SELF_HEALER_QUARANTINE_SEC", "SELF_HEALER_QUARANTINE_MAX_MULT", "SELF_HEALER_MAX_CHANGED_FILES", "SELF_HEALER_MAX_CHANGED_LINES", "AUTO_RESUME_MAX_PER_INTERRUPT", "AUTO_RESUME_COOLDOWN_SEC", "MEMORY_WEEKLY_REPORT_INTERVAL_TICKS", "MEMORY_WEEKLY_REPORT_MIN_QUALITY", "MEMORY_WEEKLY_REPORT_MIN_SKILL_HEALTH", "WEEKLY_GOVERNANCE_REPORT_INTERVAL_TICKS", "WEEKLY_GOVERNANCE_SKILL_REMEDIATE_LIMIT", "WEEKLY_GOVERNANCE_AUTO_REMEDIATE_MAX_ACTIONS"}
                     for k,v in payload.items():
                         if k in allowed:
                             if k in bool_keys:
@@ -1746,6 +2042,24 @@ load();
                                 sl.set_candidate_status(skill_name=skill_name, status=status, notes=str(payload.get("notes", "")))
                                 result = {"ok": True}
                                 ok = True
+                        elif action == "recalibrate_thresholds":
+                            result = sl.recalibrate_thresholds(
+                                days=int(payload.get("days", 45) or 45),
+                                min_lessons=int(payload.get("min_lessons", 4) or 4),
+                            )
+                            ok = bool(result.get("ok"))
+                        elif action == "cleanup_old_test_jobs":
+                            result = sl.cleanup_old_test_jobs(
+                                max_age_days=int(payload.get("max_age_days", settings.SELF_LEARNING_TEST_JOB_RETENTION_DAYS) or settings.SELF_LEARNING_TEST_JOB_RETENTION_DAYS)
+                            )
+                            ok = bool(result.get("ok"))
+                        elif action == "set_threshold":
+                            family = str(payload.get("task_family", "")).strip()
+                            value = float(payload.get("value", 0.0) or 0.0)
+                            if family:
+                                sl.set_threshold_for_family(family, value)
+                                result = {"ok": True, "threshold": sl.get_threshold_for_family(family)}
+                                ok = True
                     except Exception:
                         ok = False
                     if ok:
@@ -1970,6 +2284,133 @@ load();
                             pass
                     self._json({"ok": ok, "action": action, "errors": errors, "result": run_result})
                     return
+                if parsed.path == "/api/tooling_discovery":
+                    length = int(self.headers.get("Content-Length", "0") or "0")
+                    raw = self.rfile.read(length) if length else b"{}"
+                    try:
+                        payload = json.loads(raw.decode("utf-8"))
+                    except Exception:
+                        payload = {}
+                    action = str(payload.get("action", "")).strip().lower()
+                    ok = False
+                    result = {}
+                    errors = []
+                    try:
+                        from modules.tooling_discovery import ToolingDiscovery, parse_tooling_discovery_sources
+                        discovery = ToolingDiscovery()
+                        if action == "discover":
+                            result = discovery.discover_candidate(
+                                source=str(payload.get("source", "dashboard_manual")),
+                                adapter_key=str(payload.get("adapter_key", "")).strip(),
+                                protocol=str(payload.get("protocol", "")).strip().lower(),
+                                endpoint=str(payload.get("endpoint", "")).strip(),
+                                auth_type=str(payload.get("auth_type", "none")).strip(),
+                                schema=payload.get("schema", {}) if isinstance(payload.get("schema", {}), dict) else {},
+                                notes=str(payload.get("notes", "")),
+                            )
+                            ok = bool(result.get("ok"))
+                        elif action == "set_status":
+                            ok = discovery.set_status(
+                                candidate_id=int(payload.get("candidate_id", 0) or 0),
+                                status=str(payload.get("status", "")).strip().lower(),
+                                notes=str(payload.get("notes", "")),
+                            )
+                            result = {"ok": ok}
+                        elif action == "approve":
+                            result = discovery.approve_candidate(
+                                candidate_id=int(payload.get("candidate_id", 0) or 0),
+                                actor=str(payload.get("actor", "dashboard")),
+                                promote_to_registry=bool(payload.get("promote_to_registry", True)),
+                            )
+                            ok = bool(result.get("ok"))
+                        elif action == "discover_from_sources":
+                            src = payload.get("sources", "")
+                            sources = parse_tooling_discovery_sources(src)
+                            max_items = max(1, int(payload.get("max_items", 5) or 5))
+                            auto_promote = bool(payload.get("auto_promote", False))
+                            result = discovery.discover_from_sources(
+                                sources=sources,
+                                max_items=max_items,
+                                auto_promote=auto_promote,
+                                rollout_stage=str(payload.get("rollout_stage", "canary") or "canary"),
+                                canary_percent=int(payload.get("canary_percent", 34) or 34),
+                                scope=str(payload.get("scope", "dashboard_batch") or "dashboard_batch"),
+                            )
+                            ok = True
+                        elif action == "discover_from_config":
+                            sources = parse_tooling_discovery_sources(getattr(settings, "TOOLING_DISCOVERY_SOURCES", ""))
+                            result = discovery.discover_from_sources(
+                                sources=sources,
+                                max_items=max(1, int(payload.get("max_items", getattr(settings, "TOOLING_DISCOVERY_MAX_PER_TICK", 3)) or 3)),
+                                auto_promote=bool(payload.get("auto_promote", getattr(settings, "TOOLING_DISCOVERY_AUTO_PROMOTE_APPROVED", False))),
+                                rollout_stage=str(payload.get("rollout_stage", getattr(settings, "TOOLING_DISCOVERY_ROLLOUT_STAGE", "canary")) or "canary"),
+                                canary_percent=int(payload.get("canary_percent", getattr(settings, "TOOLING_DISCOVERY_CANARY_PERCENT", 34)) or 34),
+                                scope=str(payload.get("scope", "dashboard_config") or "dashboard_config"),
+                            )
+                            ok = True
+                        else:
+                            errors = ["unsupported_action"]
+                    except Exception:
+                        ok = False
+                    if ok:
+                        try:
+                            from modules.data_lake import DataLake
+                            DataLake().record_decision(actor="dashboard", decision="tooling_discovery_action", rationale=action)
+                        except Exception:
+                            pass
+                    self._json({"ok": ok, "action": action, "errors": errors, "result": result})
+                    return
+                if parsed.path == "/api/revenue_engine":
+                    length = int(self.headers.get("Content-Length", "0") or "0")
+                    raw = self.rfile.read(length) if length else b"{}"
+                    try:
+                        payload = json.loads(raw.decode("utf-8"))
+                    except Exception:
+                        payload = {}
+                    action = str(payload.get("action", "")).strip().lower()
+                    ok = False
+                    result = {}
+                    try:
+                        from modules.revenue_engine import RevenueEngine
+                        rev = RevenueEngine()
+                        if action == "run_cycle":
+                            import asyncio as _asyncio
+                            result = _asyncio.run(
+                                rev.run_gumroad_cycle(
+                                    registry=parent.registry,
+                                    llm_router=parent.llm_router,
+                                    comms=parent.comms,
+                                    publisher_queue=parent.publisher_queue,
+                                    topic=str(payload.get("topic", "")),
+                                    dry_run=bool(payload.get("dry_run", True)),
+                                    require_approval=bool(payload.get("require_approval", True)),
+                                )
+                            )
+                            ok = bool(result.get("ok"))
+                        elif action == "list":
+                            result = {"cycles": rev.list_cycles(limit=int(payload.get("limit", 40) or 40))}
+                            ok = True
+                        elif action == "build_report":
+                            cycle_id = int(payload.get("cycle_id", 0) or 0)
+                            if cycle_id > 0:
+                                result = {"report": rev.build_cycle_report(cycle_id)}
+                                ok = True
+                        elif action == "export_report":
+                            cycle_id = int(payload.get("cycle_id", 0) or 0)
+                            out_path = str(payload.get("out_path", "") or "")
+                            if cycle_id > 0:
+                                result = rev.persist_cycle_report(cycle_id=cycle_id, out_path=out_path)
+                                ok = bool(result.get("ok"))
+                    except Exception:
+                        ok = False
+                    if ok:
+                        try:
+                            from modules.data_lake import DataLake
+                            DataLake().record_decision(actor="dashboard", decision="revenue_engine_action", rationale=action)
+                        except Exception:
+                            pass
+                    self._json({"ok": ok, "action": action, "result": result})
+                    return
                 if parsed.path == "/api/workflow_sessions":
                     length = int(self.headers.get("Content-Length", "0") or "0")
                     raw = self.rfile.read(length) if length else b"{}"
@@ -2072,47 +2513,11 @@ load();
                     except Exception:
                         payload = {}
                     action = str(payload.get("action", "")).strip().lower()
-                    updates = {}
                     try:
-                        if action == "apply_profile_economy":
-                            from modules.model_profiles import ModelProfiles
-                            updates = ModelProfiles().profile_updates("economy")
-                            if updates:
-                                updates["MODEL_ACTIVE_PROFILE"] = "economy"
-                        elif action == "disable_tooling_live":
-                            updates = {"TOOLING_RUN_LIVE_ENABLED": "false"}
-                        elif action == "enable_guardrails_block":
-                            updates = {"GUARDRAILS_BLOCK_ON_INJECTION": "true"}
-                        elif action == "set_notify_minimal":
-                            updates = {"NOTIFY_MODE": "minimal"}
+                        from modules.runtime_remediation import apply_safe_action
+                        applied = apply_safe_action(action)
                     except Exception:
-                        updates = {}
-                    applied = {}
-                    if updates:
-                        try:
-                            import os
-                            for k, v in updates.items():
-                                os.environ[k] = str(v)
-                                if hasattr(settings, k):
-                                    setattr(settings, k, str(v))
-                                applied[k] = str(v)
-                        except Exception:
-                            pass
-                        try:
-                            from pathlib import Path
-                            import re
-                            env_path = Path("/home/vito/vito-agent/.env")
-                            text = env_path.read_text() if env_path.exists() else ""
-                            for k, v in applied.items():
-                                if re.search(rf"^{k}=.*$", text, flags=re.M):
-                                    text = re.sub(rf"^{k}=.*$", f"{k}={v}", text, flags=re.M)
-                                else:
-                                    if text and not text.endswith("\n"):
-                                        text += "\n"
-                                    text += f"{k}={v}\n"
-                            env_path.write_text(text)
-                        except Exception:
-                            pass
+                        applied = {}
                     try:
                         if applied:
                             from modules.data_lake import DataLake

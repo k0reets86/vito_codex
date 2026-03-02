@@ -8,6 +8,7 @@ import pytest
 
 from comms_agent import CommsAgent
 from config.settings import settings
+from modules.owner_task_state import OwnerTaskState
 from modules.owner_preference_model import OwnerPreferenceModel
 
 
@@ -135,16 +136,44 @@ async def test_cmd_spend(comms, mock_update):
 
 
 @pytest.mark.asyncio
-async def test_cmd_goal_create(comms, mock_update):
+async def test_cmd_goal_create(comms, mock_update, tmp_path):
     from goal_engine import GoalEngine
     ge = GoalEngine()
-    comms.set_modules(goal_engine=ge)
+    owner_task_state = OwnerTaskState(path=tmp_path / "owner_task_state_goal.json")
+    comms.set_modules(goal_engine=ge, owner_task_state=owner_task_state)
 
     mock_update.message.text = "/goal Заработать на Etsy шаблонах"
     await comms._cmd_goal(mock_update, MagicMock())
     text = mock_update.message.reply_text.call_args[0][0]
     assert "Цель создана" in text
     assert len(ge._goals) == 1
+    active = owner_task_state.get_active()
+    assert active is not None
+    assert "etsy" in active.get("text", "").lower()
+
+
+@pytest.mark.asyncio
+async def test_cmd_clear_goals_requires_confirmation(comms, mock_update):
+    ge = MagicMock()
+    ge.clear_all_goals = MagicMock(return_value=3)
+    comms.set_modules(goal_engine=ge)
+    ctx = MagicMock()
+    ctx.args = []
+    await comms._cmd_clear_goals(mock_update, ctx)
+    ge.clear_all_goals.assert_not_called()
+    text = mock_update.message.reply_text.call_args[0][0]
+    assert "/clear_goals yes" in text
+
+
+@pytest.mark.asyncio
+async def test_cmd_clear_goals_with_confirmation(comms, mock_update):
+    ge = MagicMock()
+    ge.clear_all_goals = MagicMock(return_value=3)
+    comms.set_modules(goal_engine=ge)
+    ctx = MagicMock()
+    ctx.args = ["yes"]
+    await comms._cmd_clear_goals(mock_update, ctx)
+    ge.clear_all_goals.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -155,6 +184,28 @@ async def test_cmd_goal_empty(comms, mock_update):
     await comms._cmd_goal(mock_update, MagicMock())
     text = mock_update.message.reply_text.call_args[0][0]
     assert "Использование" in text
+
+
+@pytest.mark.asyncio
+async def test_cmd_stop_requires_confirmation(comms, mock_update):
+    decision_loop = MagicMock()
+    comms.set_modules(decision_loop=decision_loop)
+    ctx = MagicMock()
+    ctx.args = []
+    await comms._cmd_stop(mock_update, ctx)
+    decision_loop.stop.assert_not_called()
+    text = mock_update.message.reply_text.call_args[0][0]
+    assert "/stop yes" in text
+
+
+@pytest.mark.asyncio
+async def test_cmd_stop_with_confirmation(comms, mock_update):
+    decision_loop = MagicMock()
+    comms.set_modules(decision_loop=decision_loop)
+    ctx = MagicMock()
+    ctx.args = ["yes"]
+    await comms._cmd_stop(mock_update, ctx)
+    decision_loop.stop.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -244,6 +295,111 @@ async def test_cmd_reject_empty(comms, mock_update):
     assert "Нет запросов" in text
 
 
+@pytest.mark.asyncio
+async def test_cmd_cancel_sets_flag_stops_loop_and_clears_pending(comms, mock_update):
+    cancel_state = MagicMock()
+    decision_loop = MagicMock()
+    pending_future = asyncio.get_event_loop().create_future()
+    comms._pending_approvals["req_cancel"] = pending_future
+    comms._pending_schedule_update = {"choices": [1]}
+    comms.set_modules(cancel_state=cancel_state, decision_loop=decision_loop)
+
+    await comms._cmd_cancel(mock_update, MagicMock())
+
+    cancel_state.cancel.assert_called_once()
+    decision_loop.stop.assert_called_once()
+    assert comms._pending_approvals == {}
+    assert comms._pending_schedule_update is None
+    text = mock_update.message.reply_text.call_args[0][0]
+    assert "приостановлено" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_cmd_resume_clears_cancel_flag(comms, mock_update):
+    cancel_state = MagicMock()
+    decision_loop = MagicMock()
+    decision_loop.run = AsyncMock()
+    decision_loop.running = False
+    comms.set_modules(cancel_state=cancel_state, decision_loop=decision_loop)
+
+    await comms._cmd_resume(mock_update, MagicMock())
+
+    cancel_state.clear.assert_called_once()
+    text = mock_update.message.reply_text.call_args[0][0]
+    assert "возобновл" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_cmd_cancel_clears_owner_task_state(comms, mock_update, tmp_path):
+    from goal_engine import GoalEngine, GoalPriority, GoalStatus
+    ge = GoalEngine(sqlite_path=str(tmp_path / "goals_cancel.db"))
+    g1 = ge.create_goal("pending goal", "desc", priority=GoalPriority.HIGH)
+    g2 = ge.create_goal("waiting goal", "desc", priority=GoalPriority.HIGH)
+    ge.wait_for_approval(g2.goal_id, reason="manual")
+    owner_task_state = OwnerTaskState(path=tmp_path / "owner_task_state.json")
+    owner_task_state.set_active("сделай отчет", intent="goal_request")
+    cancel_state = MagicMock()
+    decision_loop = MagicMock()
+    decision_loop.orchestrator = MagicMock()
+    decision_loop.interrupts = MagicMock()
+    comms.set_modules(goal_engine=ge, cancel_state=cancel_state, decision_loop=decision_loop, owner_task_state=owner_task_state)
+
+    await comms._cmd_cancel(mock_update, MagicMock())
+    assert owner_task_state.get_active() is None
+    assert ge._goals[g1.goal_id].status == GoalStatus.CANCELLED
+    assert ge._goals[g2.goal_id].status == GoalStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_cmd_task_current_and_done(comms, mock_update, tmp_path):
+    owner_task_state = OwnerTaskState(path=tmp_path / "owner_task_state.json")
+    owner_task_state.set_active("подготовить публикацию", intent="goal_request")
+    comms.set_modules(owner_task_state=owner_task_state)
+
+    await comms._cmd_task_current(mock_update, MagicMock())
+    text = mock_update.message.reply_text.call_args[0][0]
+    assert "Текущая задача владельца" in text
+    await comms._cmd_task_done(mock_update, MagicMock())
+    assert owner_task_state.get_active() is None
+
+
+@pytest.mark.asyncio
+async def test_cmd_task_replace(comms, mock_update, tmp_path):
+    owner_task_state = OwnerTaskState(path=tmp_path / "owner_task_state.json")
+    owner_task_state.set_active("старая задача", intent="goal_request")
+    comms.set_modules(owner_task_state=owner_task_state)
+    mock_update.message.text = "/task_replace новая задача"
+    await comms._cmd_task_replace(mock_update, MagicMock())
+    active = owner_task_state.get_active()
+    assert active is not None
+    assert "новая задача" in active.get("text", "")
+
+
+@pytest.mark.asyncio
+async def test_cmd_task_cancel(comms, mock_update, tmp_path):
+    owner_task_state = OwnerTaskState(path=tmp_path / "owner_task_state.json")
+    owner_task_state.set_active("активная задача", intent="goal_request")
+    comms.set_modules(owner_task_state=owner_task_state)
+    await comms._cmd_task_cancel(mock_update, MagicMock())
+    assert owner_task_state.get_active() is None
+    text = mock_update.message.reply_text.call_args[0][0]
+    assert "отменена" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_cmd_status_includes_current_task(comms, mock_update, tmp_path):
+    owner_task_state = OwnerTaskState(path=tmp_path / "owner_task_state.json")
+    owner_task_state.set_active("подготовить отчёт", intent="goal_request")
+    dl_mock = MagicMock()
+    dl_mock.get_status.return_value = {"running": True, "tick_count": 5, "daily_spend": 1.23}
+    ge_mock = MagicMock()
+    ge_mock.get_stats.return_value = {"total": 3, "completed": 1, "executing": 1, "pending": 1}
+    comms.set_modules(goal_engine=ge_mock, decision_loop=dl_mock, owner_task_state=owner_task_state)
+    await comms._cmd_status(mock_update, MagicMock())
+    text = mock_update.message.reply_text.call_args[0][0]
+    assert "Текущая задача" in text
+
+
 # ── Текстовые сообщения с approval ──
 
 @pytest.mark.asyncio
@@ -264,6 +420,64 @@ async def test_on_message_reject_text(comms, mock_update):
 
     await comms._on_message(mock_update, MagicMock())
     assert future.result() is False
+
+
+@pytest.mark.asyncio
+async def test_on_message_sets_pending_system_action_without_auto_execute(comms, mock_update):
+    conv = MagicMock()
+    conv.process_message = AsyncMock(return_value={
+        "intent": "system_action",
+        "response": "Подтверди запуск",
+        "actions": [{"action": "scan_trends", "params": {}}],
+        "needs_confirmation": True,
+    })
+    conv._execute_actions = AsyncMock(return_value="ok")
+    comms.set_modules(conversation_engine=conv)
+    mock_update.message.text = "запусти сканирование"
+
+    await comms._on_message(mock_update, MagicMock())
+
+    assert comms._pending_system_action is not None
+    conv._execute_actions.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_on_message_approves_pending_system_action_and_executes(comms, mock_update):
+    conv = MagicMock()
+    conv.process_message = AsyncMock(return_value={"intent": "conversation", "response": "ok"})
+    conv._execute_actions = AsyncMock(return_value="[scan_trends] done")
+    comms.set_modules(conversation_engine=conv)
+    comms._pending_system_action = {"actions": [{"action": "scan_trends", "params": {}}]}
+    mock_update.message.text = "да"
+
+    await comms._on_message(mock_update, MagicMock())
+
+    conv._execute_actions.assert_called_once()
+    assert comms._pending_system_action is None
+
+
+@pytest.mark.asyncio
+async def test_on_message_strict_mode_skips_natural_schedule(comms, mock_update):
+    conv = MagicMock()
+    conv.process_message = AsyncMock(return_value={"intent": "conversation", "response": "ok"})
+    comms.set_modules(conversation_engine=conv)
+    comms._maybe_schedule_from_text = AsyncMock(return_value=True)
+    mock_update.message.text = "каждый день в 9 отчет по продажам"
+    with patch("comms_agent.settings.TELEGRAM_STRICT_COMMANDS", True):
+        await comms._on_message(mock_update, MagicMock())
+    comms._maybe_schedule_from_text.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_on_message_non_strict_mode_allows_natural_schedule(comms, mock_update):
+    conv = MagicMock()
+    conv.process_message = AsyncMock(return_value={"intent": "conversation", "response": "ok"})
+    comms.set_modules(conversation_engine=conv)
+    comms._maybe_schedule_from_text = AsyncMock(return_value=True)
+    mock_update.message.text = "каждый день в 9 отчет по продажам"
+    with patch("comms_agent.settings.TELEGRAM_STRICT_COMMANDS", False):
+        await comms._on_message(mock_update, MagicMock())
+    comms._maybe_schedule_from_text.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -288,6 +502,33 @@ async def test_send_message(comms):
     result = await comms.send_message("Hello")
     assert result is True
     comms._bot.send_message.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_send_message_cron_suppressed_when_disabled(comms):
+    with patch("comms_agent.settings.TELEGRAM_CRON_ENABLED", False):
+        result = await comms.send_message("Scheduled report", level="cron")
+    assert result is True
+    comms._bot.send_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_send_message_cron_allowed_when_enabled(comms):
+    with patch("comms_agent.settings.TELEGRAM_CRON_ENABLED", True):
+        result = await comms.send_message("Scheduled report", level="cron")
+    assert result is True
+    comms._bot.send_message.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_send_message_cron_suppressed_when_cancelled(comms):
+    cancel_state = MagicMock()
+    cancel_state.is_cancelled.return_value = True
+    comms.set_modules(cancel_state=cancel_state)
+    with patch("comms_agent.settings.TELEGRAM_CRON_ENABLED", True):
+        result = await comms.send_message("Scheduled report", level="cron")
+    assert result is True
+    comms._bot.send_message.assert_not_called()
 
 
 @pytest.mark.asyncio

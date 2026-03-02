@@ -190,6 +190,34 @@ def test_pnl_empty(fc):
     assert pnl["net_profit"] == 0
 
 
+def test_is_spend_anomaly_detects_spike(fc):
+    conn = fc._get_db()
+    conn.execute("INSERT INTO daily_budgets(date, spent_usd, earned_usd, api_calls, limit_usd) VALUES ('2026-02-20', 2.0, 0, 1, 10)")
+    conn.execute("INSERT INTO daily_budgets(date, spent_usd, earned_usd, api_calls, limit_usd) VALUES ('2026-02-21', 2.0, 0, 1, 10)")
+    conn.execute("INSERT INTO daily_budgets(date, spent_usd, earned_usd, api_calls, limit_usd) VALUES ('2026-02-22', 2.0, 0, 1, 10)")
+    conn.commit()
+    fc.record_expense(8.0, ExpenseCategory.API)
+    out = fc.is_spend_anomaly(window_days=30, multiplier=2.0)
+    assert out["anomaly"] is True
+    assert out["today_spent"] == 8.0
+
+
+def test_daily_guardrail_snapshot_warning_on_negative_pnl(fc):
+    fc.record_expense(4.0, ExpenseCategory.API)
+    fc.record_income(1.0, IncomeSource.ETSY)
+    out = fc.daily_guardrail_snapshot(daily_limit_usd=10.0, anomaly_window_days=30, anomaly_multiplier=3.0)
+    assert out["status"] == "warning"
+    assert out["net_profit_usd"] == -3.0
+    assert out["spend_ratio"] == 0.4
+
+
+def test_daily_guardrail_snapshot_critical_on_limit_overrun(fc):
+    fc.record_expense(12.0, ExpenseCategory.API)
+    out = fc.daily_guardrail_snapshot(daily_limit_usd=10.0)
+    assert out["status"] == "critical"
+    assert out["spend_ratio"] == 1.2
+
+
 # ── Утренний отчёт ──
 
 def test_format_morning_finance(fc):

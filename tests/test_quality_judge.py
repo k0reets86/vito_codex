@@ -4,6 +4,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 from agents.base_agent import TaskResult
+from config.settings import settings
 
 
 class TestQualityJudge:
@@ -48,3 +49,12 @@ class TestQualityJudge:
         agent.llm_router.call_llm = AsyncMock(return_value='{"score": 9, "feedback": "Excellent", "issues": []}')
         result = await agent.execute_task("quality_review", content="test content", content_type="article")
         assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_review_respects_runtime_threshold(self, agent, monkeypatch):
+        monkeypatch.setattr(settings, "QUALITY_JUDGE_APPROVAL_THRESHOLD", 8, raising=False)
+        agent.llm_router.call_llm = AsyncMock(return_value='{"score": 7, "feedback": "Good", "issues": []}')
+        result = await agent.review("decent content", "article")
+        assert result.success is True
+        assert result.output["approved"] is False
+        assert result.output["threshold"] == 8

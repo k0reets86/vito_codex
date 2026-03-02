@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
+from config.settings import settings
 from llm_router import TaskType
 
 logger = get_logger("quality_judge", agent="quality_judge")
@@ -65,7 +66,9 @@ class QualityJudge(BaseAgent):
         except (json.JSONDecodeError, ValueError):
             data = {"score": 5, "feedback": response, "issues": []}
         score = data.get("score", 5)
-        approved = score >= APPROVAL_THRESHOLD
+        threshold = max(1, min(10, int(getattr(settings, "QUALITY_JUDGE_APPROVAL_THRESHOLD", APPROVAL_THRESHOLD) or APPROVAL_THRESHOLD)))
+        approved = score >= threshold
         result_output = {"score": score, "feedback": data.get("feedback", ""), "approved": approved, "issues": data.get("issues", [])}
-        logger.info(f"Quality review: score={score}, approved={approved}", extra={"event": "quality_review", "context": result_output})
+        result_output["threshold"] = threshold
+        logger.info(f"Quality review: score={score}, approved={approved}, threshold={threshold}", extra={"event": "quality_review", "context": result_output})
         return TaskResult(success=True, output=result_output, cost_usd=0.005, duration_ms=duration_ms)
