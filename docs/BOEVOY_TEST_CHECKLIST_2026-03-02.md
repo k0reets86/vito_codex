@@ -2,14 +2,14 @@
 
 Progress formula: `completed / total * 100`
 
-Current progress: `4 / 41 = 9.8%`
+Current progress: `5 / 41 = 12.2%`
 
 ## Phase 1 — Runtime Baseline & Safety Gates
 - [x] T01 Configure Gemini-only mode and disable risky/high-cost modules for initial test wave.
 - [x] T02 Restart VITO and verify single running instance (no duplicate system/user loop).
 - [x] T03 Validate key command suites (`llm_router`, `decision_loop`, `conversation_engine`, `comms_agent`).
 - [x] T04 Run full `tests/` regression in current mode.
-- [ ] T05 Confirm no proactive spam goals for 1 full interval window in runtime logs.
+- [x] T05 Confirm no proactive spam goals for 1 full interval window in runtime logs.
 
 ## Phase 2 — Core Dialogue + Task Lifecycle
 - [ ] T06 `/start` + `/help` UX validation in Telegram (daily/rare/system sections).
