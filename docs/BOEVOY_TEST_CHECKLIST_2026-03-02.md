@@ -2,7 +2,7 @@
 
 Progress formula: `completed / total * 100`
 
-Current progress: `7 / 41 = 17.1%`
+Current progress: `4 / 41 = 9.8%`
 
 ## Phase 1 — Runtime Baseline & Safety Gates
 - [x] T01 Configure Gemini-only mode and disable risky/high-cost modules for initial test wave.
