@@ -2,9 +2,6 @@
 """Боевой тест: анализ трендов → генерация продукта → публикация на Gumroad."""
 
 import os
-os.environ["AUTO_APPROVE_TESTS"] = "1"
-os.environ["VITO_ALLOW_MULTI"] = "1"
-os.environ["FAST_MODE"] = "1"
 
 import asyncio
 from pathlib import Path
@@ -18,6 +15,9 @@ from modules.image_utils import write_minimal_png
 
 
 async def run_cycle():
+    os.environ["AUTO_APPROVE_TESTS"] = "1"
+    os.environ["VITO_ALLOW_MULTI"] = "1"
+    os.environ["FAST_MODE"] = "1"
     # Minimal deps (no full VITO boot)
     async def _ok(*args, **kwargs):
         return True

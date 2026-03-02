@@ -68,6 +68,7 @@ def comms():
     c.send_message = AsyncMock(return_value=True)
     c.send_file = AsyncMock(return_value=True)
     c.request_approval = AsyncMock(return_value=True)
+    c.request_approval_with_files = AsyncMock(return_value=True)
     c.send_morning_report = AsyncMock(return_value=True)
     return c
 
@@ -473,8 +474,9 @@ class TestDecisionLoopFullCycle:
         assert stats["completed"] + stats["failed"] >= 1 or stats["executing"] >= 1
 
     @pytest.mark.asyncio
-    async def test_idle_creates_research_goal(self, llm_router, goal_engine, memory):
+    async def test_idle_creates_research_goal(self, llm_router, goal_engine, memory, monkeypatch):
         """After multiple idle ticks (6 = кратно 6), decision loop creates research goals."""
+        monkeypatch.setattr(settings, "PROACTIVE_ENABLED", True)
         loop = DecisionLoop(goal_engine, llm_router, memory)
         loop._consecutive_idle = 6  # кратно 6 — порог создания proactive_daily
 
@@ -729,8 +731,8 @@ class TestSelfHealerOffline:
         # Mock LLM response with auto-fix
         llm_router.call_llm = AsyncMock(return_value=json.dumps({
             "can_auto_fix": True,
-            "fix_description": "Restart vito_agent service",
-            "shell_command": "systemctl restart vito_agent",
+            "fix_description": "Collect memory stats",
+            "shell_command": "free -m",
         }))
 
         # Mock devops agent
@@ -745,7 +747,7 @@ class TestSelfHealerOffline:
 
         assert result["resolved"] is True
         assert result["method"] == "llm_fix_applied"
-        assert "Restart" in result["description"]
+        assert "memory" in result["description"].lower()
         mock_devops.execute_shell.assert_called_once()
 
     @pytest.mark.asyncio
@@ -873,8 +875,9 @@ class TestEbookLoopOffline:
     """ContentCreator.create_ebook with budget checks and file output."""
 
     @pytest.mark.asyncio
-    async def test_ebook_3_chapters(self, full_registry, llm_router):
+    async def test_ebook_3_chapters(self, full_registry, llm_router, monkeypatch):
         """Ebook with 3 chapters: budget check per chapter, file saved."""
+        monkeypatch.setenv("FAST_MODE", "0")
         chapter_count = 0
 
         async def mock_ebook_llm(task_type, prompt, system_prompt="", estimated_tokens=2000):
