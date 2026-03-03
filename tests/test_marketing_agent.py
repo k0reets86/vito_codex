@@ -45,3 +45,19 @@ class TestMarketingAgent:
         agent.llm_router.call_llm = AsyncMock(return_value="strategy created")
         result = await agent.execute_task("marketing_strategy", product="AI tool", target_audience="developers")
         assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_local_fallback_without_llm(self, mock_memory, mock_finance, mock_comms):
+        from agents.marketing_agent import MarketingAgent
+
+        agent = MarketingAgent(
+            llm_router=None,
+            memory=mock_memory,
+            finance=mock_finance,
+            comms=mock_comms,
+        )
+        strategy = await agent.create_strategy("Planner", "creators", budget_usd=120)
+        assert strategy.success is True
+        assert "local fallback" in strategy.output.lower()
+        ad_copy = await agent.create_ad_copy("Planner", "facebook")
+        assert ad_copy.success is True

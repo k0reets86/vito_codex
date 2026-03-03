@@ -16,6 +16,7 @@ import sqlite3
 import time
 import hashlib
 import os
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from enum import Enum
@@ -174,8 +175,10 @@ class LLMRouter:
         """Attach CommsAgent for approval dialogs."""
         self._comms = comms
 
-    async def _gemini_rate_limit(self, max_rpm: int = 15) -> None:
+    async def _gemini_rate_limit(self, max_rpm: int | None = None) -> None:
         """Enforce Gemini free tier rate limit (15 req/min)."""
+        if max_rpm is None:
+            max_rpm = max(1, int(getattr(settings, "GEMINI_FREE_MAX_RPM", 15) or 15))
         async with self._gemini_lock:
             now = time.monotonic()
             # Remove calls older than 60 seconds
@@ -224,7 +227,46 @@ class LLMRouter:
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_llm_cache_created ON llm_cache(created_at)
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS gemini_usage_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                capability TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_gemini_usage_date_cap
+            ON gemini_usage_log(date, capability)
+        """)
         conn.commit()
+
+    def _gemini_usage_count_today(self, capability: str) -> int:
+        conn = self._get_sqlite()
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM gemini_usage_log WHERE date = ? AND capability = ?",
+            (date.today().isoformat(), str(capability)),
+        ).fetchone()
+        return int((row["n"] if row and "n" in row.keys() else 0) or 0)
+
+    def _gemini_usage_mark(self, capability: str) -> None:
+        conn = self._get_sqlite()
+        conn.execute(
+            "INSERT INTO gemini_usage_log (date, capability) VALUES (?, ?)",
+            (date.today().isoformat(), str(capability)),
+        )
+        conn.commit()
+
+    def _gemini_capability_allowed(self, capability: str, rpd_limit: int) -> bool:
+        if rpd_limit <= 0:
+            return True
+        used = self._gemini_usage_count_today(capability)
+        return used < rpd_limit
+
+    @staticmethod
+    def _extract_urls(text: str) -> list[str]:
+        raw = str(text or "")
+        return re.findall(r"https?://[^\s<>\"]+", raw)
 
     def _record_spend(self, model_name: str, task_type: str,
                       input_tokens: int, output_tokens: int, cost_usd: float) -> None:
@@ -474,6 +516,8 @@ class LLMRouter:
         model_keys = self._candidate_model_keys(task_type)
 
         retry_delays = [5, 15, 30]  # exponential backoff for 529/overloaded
+        # Backward-compatible context passing for provider layer (tests can still mock 3-arg _call_provider).
+        self._provider_task_type_ctx = task_type
 
         for attempt, key in enumerate(model_keys):
             model = MODEL_REGISTRY[key]
@@ -617,6 +661,8 @@ class LLMRouter:
             extra={"event": "all_models_failed"},
         )
         return None
+        
+        
 
     def _cache_key(self, task_type: TaskType, model: ModelConfig, prompt: str, system_prompt: str) -> str:
         raw = f"{task_type.value}|{model.model_id}|{system_prompt}|{prompt}"
@@ -689,9 +735,11 @@ class LLMRouter:
         )
 
     async def _call_provider(
-        self, model: ModelConfig, prompt: str, system_prompt: str
+        self, model: ModelConfig, prompt: str, system_prompt: str, task_type: TaskType | None = None
     ) -> tuple[str, float]:
         """Вызов конкретного провайдера. Возвращает (text, real_cost_usd)."""
+        if task_type is None:
+            task_type = getattr(self, "_provider_task_type_ctx", None)
         if model.provider == "anthropic":
             response = await asyncio.wait_for(
                 self.anthropic_client.messages.create(
@@ -736,15 +784,48 @@ class LLMRouter:
                 # Prefer GEMINI_API_KEY (AI Studio) over GOOGLE_API_KEY (Custom Search)
                 gemini_key = settings.GEMINI_API_KEY or settings.GOOGLE_API_KEY
                 self._google = genai.Client(api_key=gemini_key)
+            text_rpd = max(1, int(getattr(settings, "GEMINI_FREE_TEXT_RPD", 1000) or 1000))
+            if not self._gemini_capability_allowed("text", text_rpd):
+                raise RuntimeError("gemini_text_daily_limit_reached")
             contents = prompt
             if system_prompt:
                 contents = f"{system_prompt}\n\n{prompt}"
             # Rate limit: Gemini free tier = 15 req/min
             await self._gemini_rate_limit()
-            response = self._google.models.generate_content(
-                model=model.model_id,
-                contents=contents,
-            )
+            gen_kwargs: dict[str, Any] = {"model": model.model_id, "contents": contents}
+            enable_search = bool(getattr(settings, "GEMINI_ENABLE_GROUNDING_SEARCH", True))
+            enable_url_ctx = bool(getattr(settings, "GEMINI_ENABLE_URL_CONTEXT", True))
+            urls = self._extract_urls(prompt) if enable_url_ctx else []
+            should_ground = bool(enable_search and task_type == TaskType.RESEARCH)
+            search_rpd = max(1, int(getattr(settings, "GEMINI_FREE_SEARCH_RPD", 1500) or 1500))
+            used_search = False
+            if should_ground and self._gemini_capability_allowed("grounding_search", search_rpd):
+                try:
+                    # google-genai >= 0.7 style config
+                    from google.genai import types as genai_types  # type: ignore
+
+                    gen_kwargs["config"] = genai_types.GenerateContentConfig(
+                        tools=[genai_types.Tool(google_search=genai_types.GoogleSearch())]
+                    )
+                    used_search = True
+                except Exception:
+                    # Safe fallback: plain generation without hard failure.
+                    used_search = False
+            if urls:
+                # URL-context mode: explicit directive for model to read referenced pages directly.
+                url_hint = (
+                    "Если в запросе есть URL, прочитай их содержимое и используй как первоисточник. "
+                    "Если URL недоступен — явно укажи это в ответе."
+                )
+                if "config" in gen_kwargs:
+                    # Keep configured tools and reinforce behavior in contents.
+                    gen_kwargs["contents"] = f"{contents}\n\n{url_hint}"
+                else:
+                    gen_kwargs["contents"] = f"{contents}\n\n{url_hint}"
+            response = self._google.models.generate_content(**gen_kwargs)
+            self._gemini_usage_mark("text")
+            if used_search:
+                self._gemini_usage_mark("grounding_search")
             # Gemini free tier — cost = 0
             cost = 0.0
             if hasattr(response, "usage_metadata") and response.usage_metadata:

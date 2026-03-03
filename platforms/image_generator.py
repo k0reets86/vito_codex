@@ -15,11 +15,12 @@ from typing import Any, Optional
 import aiohttp
 
 from config.logger import get_logger
+from config.paths import PROJECT_ROOT
 from config.settings import settings
 
 logger = get_logger("image_gen", agent="image_generator")
 
-OUTPUT_DIR = Path("/home/vito/vito-agent/output/images")
+OUTPUT_DIR = PROJECT_ROOT / "output" / "images"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 

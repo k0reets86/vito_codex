@@ -1,0 +1,15 @@
+services:
+  vito:
+    build: .
+    container_name: vito-agent
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PROJECT_ROOT: /app
+    volumes:
+      - ./logs:/app/logs
+      - ./runtime:/app/runtime
+      - ./output:/app/output
+      - ./memory:/app/memory
+    command: ["python3", "-u", "main.py"]

@@ -305,7 +305,7 @@ class VITOCore(BaseAgent):
                 res = await self.code_generator.apply_repo_change(
                     instruction=instruction,
                     context_files=step_files if step_files else files[:6],
-                    allow_protected=True,
+                    allow_protected=False,
                 )
                 ok = bool(res.get("success"))
                 sec = res.get("security_status", "ok")
@@ -320,7 +320,7 @@ class VITOCore(BaseAgent):
                 res = await self.code_generator.apply_repo_change(
                     instruction=instruction,
                     context_files=files[:6],
-                    allow_protected=True,
+                    allow_protected=False,
                 )
                 ok = bool(res.get("success"))
                 sec = res.get("security_status", "ok")
@@ -336,7 +336,7 @@ class VITOCore(BaseAgent):
                     target_file=f,
                     instruction=instruction,
                     context=request,
-                    allow_protected=True,
+                    allow_protected=False,
                 )
                 ok = bool(res.get("success"))
                 sec = res.get("security_status", "ok")

@@ -2,8 +2,9 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+from config.paths import root_path
 
-ENV_PATH = Path("/home/vito/vito-agent/.env")
+ENV_PATH = Path(root_path(".env"))
 load_dotenv(ENV_PATH)
 
 
@@ -24,8 +25,8 @@ class Settings:
 
     # Database
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")
-    CHROMA_PATH: str = os.getenv("CHROMA_PATH", "/home/vito/vito-agent/memory/chroma_db")
-    SQLITE_PATH: str = os.getenv("SQLITE_PATH", "/home/vito/vito-agent/memory/vito_local.db")
+    CHROMA_PATH: str = os.getenv("CHROMA_PATH", root_path("memory", "chroma_db"))
+    SQLITE_PATH: str = os.getenv("SQLITE_PATH", root_path("memory", "vito_local.db"))
 
     # Platforms
     GUMROAD_API_KEY: str = os.getenv("GUMROAD_API_KEY", "")
@@ -47,6 +48,8 @@ class Settings:
     REDDIT_USERNAME: str = os.getenv("REDDIT_USERNAME", "")
     REDDIT_PASSWORD: str = os.getenv("REDDIT_PASSWORD", "")
     REDDIT_USER_AGENT: str = os.getenv("REDDIT_USER_AGENT", "vito-bot/0.3")
+    REDDIT_API_DISABLED: bool = os.getenv("REDDIT_API_DISABLED", "false").lower() in ("1", "true", "yes", "on")
+    REDDIT_MODE: str = os.getenv("REDDIT_MODE", "api")
 
     # X.com (Twitter)
     TWITTER_BEARER_TOKEN: str = os.getenv("TWITTER_BEARER_TOKEN", "")
@@ -62,8 +65,16 @@ class Settings:
 
     # New platforms
     PRINTFUL_API_KEY: str = os.getenv("PRINTFUL_API_KEY", "")
+    PRINTFUL_STORE_ID: str = os.getenv("PRINTFUL_STORE_ID", "")
     ETSY_KEYSTRING: str = os.getenv("ETSY_KEYSTRING", "")
     ETSY_SHARED_SECRET: str = os.getenv("ETSY_SHARED_SECRET", "")
+    ETSY_EMAIL: str = os.getenv("ETSY_EMAIL", "")
+    ETSY_PASSWORD: str = os.getenv("ETSY_PASSWORD", "")
+    ETSY_SHOP_ID: str = os.getenv("ETSY_SHOP_ID", "")
+    ETSY_OAUTH_ACCESS_TOKEN: str = os.getenv("ETSY_OAUTH_ACCESS_TOKEN", "")
+    ETSY_OAUTH_REFRESH_TOKEN: str = os.getenv("ETSY_OAUTH_REFRESH_TOKEN", "")
+    ETSY_OAUTH_REDIRECT_URI: str = os.getenv("ETSY_OAUTH_REDIRECT_URI", "http://localhost:9876/etsy/callback")
+    ETSY_STORAGE_STATE_FILE: str = os.getenv("ETSY_STORAGE_STATE_FILE", "runtime/etsy_storage_state.json")
     GUMROAD_APP_ID: str = os.getenv("GUMROAD_APP_ID", "")
     GUMROAD_APP_SECRET: str = os.getenv("GUMROAD_APP_SECRET", "")
     KOFI_PAGE_ID: str = os.getenv("KOFI_PAGE_ID", "")
@@ -80,6 +91,17 @@ class Settings:
     THREADS_ACCESS_TOKEN: str = os.getenv("THREADS_ACCESS_TOKEN", "")
     THREADS_USER_ID: str = os.getenv("THREADS_USER_ID", "")
     TIKTOK_ACCESS_TOKEN: str = os.getenv("TIKTOK_ACCESS_TOKEN", "")
+    YOUTUBE_CLIENT_ID: str = os.getenv("YOUTUBE_CLIENT_ID", "")
+    YOUTUBE_CLIENT_SECRET: str = os.getenv("YOUTUBE_CLIENT_SECRET", "")
+    YOUTUBE_REFRESH_TOKEN: str = os.getenv("YOUTUBE_REFRESH_TOKEN", "")
+    KDP_EMAIL: str = os.getenv("KDP_EMAIL", "")
+    KDP_PASSWORD: str = os.getenv("KDP_PASSWORD", "")
+    KDP_STORAGE_STATE_FILE: str = os.getenv("KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json")
+    KDP_WATCHDOG_ENABLED: bool = os.getenv("KDP_WATCHDOG_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+    KDP_WATCHDOG_BASE_HOURS: int = int(os.getenv("KDP_WATCHDOG_BASE_HOURS", "8") or 8)
+    KDP_WATCHDOG_JITTER_MINUTES: int = int(os.getenv("KDP_WATCHDOG_JITTER_MINUTES", "30") or 30)
+    KDP_WATCHDOG_STOP_ON_FAIL: bool = os.getenv("KDP_WATCHDOG_STOP_ON_FAIL", "true").lower() in ("1", "true", "yes", "on")
+    KDP_WATCHDOG_STATE_PATH: str = os.getenv("KDP_WATCHDOG_STATE_PATH", "runtime/kdp_watchdog_state.json")
 
     # Financial limits (USD)
     # Hierarchy: OPERATION_MAX < OPERATION_NOTIFY < DAILY_LIMIT < OPERATION_APPROVE
@@ -87,6 +109,15 @@ class Settings:
     OPERATION_NOTIFY_USD: float = float(os.getenv("OPERATION_NOTIFY_USD", "1"))
     OPERATION_APPROVE_USD: float = float(os.getenv("OPERATION_APPROVE_USD", "20"))
     OPERATION_MAX_USD: float = float(os.getenv("OPERATION_MAX_USD", "2"))
+
+    # Autonomy profile (relaxed mode for owner-controlled environment)
+    AUTONOMY_MAX_MODE: bool = os.getenv("AUTONOMY_MAX_MODE", "false").lower() in ("1", "true", "yes", "on")
+    AUTONOMY_REQUIRE_PUBLISH_APPROVAL: bool = os.getenv("AUTONOMY_REQUIRE_PUBLISH_APPROVAL", "true").lower() in ("1", "true", "yes", "on")
+    AUTONOMY_ECOMMERCE_APPROVAL_REQUIRED: bool = os.getenv("AUTONOMY_ECOMMERCE_APPROVAL_REQUIRED", "true").lower() in ("1", "true", "yes", "on")
+    AUTONOMY_DISABLE_PUBLISH_COOLDOWNS: bool = os.getenv("AUTONOMY_DISABLE_PUBLISH_COOLDOWNS", "false").lower() in ("1", "true", "yes", "on")
+    AUTONOMY_DISABLE_PUBLISH_DUPLICATE_BLOCK: bool = os.getenv("AUTONOMY_DISABLE_PUBLISH_DUPLICATE_BLOCK", "false").lower() in ("1", "true", "yes", "on")
+    AUTONOMY_ALLOW_EXISTING_PRODUCT_UPDATE: bool = os.getenv("AUTONOMY_ALLOW_EXISTING_PRODUCT_UPDATE", "false").lower() in ("1", "true", "yes", "on")
+    AUTONOMY_ACCEPT_INTERMEDIATE_PUBLISH_STATUSES: bool = os.getenv("AUTONOMY_ACCEPT_INTERMEDIATE_PUBLISH_STATUSES", "false").lower() in ("1", "true", "yes", "on")
 
     # Autonomy toggles
     PROACTIVE_ENABLED: bool = os.getenv("PROACTIVE_ENABLED", "true").lower() in ("1", "true", "yes", "on")
@@ -98,25 +129,31 @@ class Settings:
     LLM_ENABLED_MODELS: str = os.getenv("LLM_ENABLED_MODELS", "")
     LLM_FORCE_GEMINI_FREE: bool = os.getenv("LLM_FORCE_GEMINI_FREE", "false").lower() in ("1", "true", "yes", "on")
     LLM_FORCE_GEMINI_MODEL: str = os.getenv("LLM_FORCE_GEMINI_MODEL", "gemini-2.5-flash")
+    GEMINI_FREE_MAX_RPM: int = int(os.getenv("GEMINI_FREE_MAX_RPM", "15") or 15)
+    GEMINI_FREE_TEXT_RPD: int = int(os.getenv("GEMINI_FREE_TEXT_RPD", "1000") or 1000)
+    GEMINI_FREE_SEARCH_RPD: int = int(os.getenv("GEMINI_FREE_SEARCH_RPD", "1500") or 1500)
+    GEMINI_ENABLE_GROUNDING_SEARCH: bool = os.getenv("GEMINI_ENABLE_GROUNDING_SEARCH", "true").lower() in ("1", "true", "yes", "on")
+    GEMINI_ENABLE_URL_CONTEXT: bool = os.getenv("GEMINI_ENABLE_URL_CONTEXT", "true").lower() in ("1", "true", "yes", "on")
     MODEL_ACTIVE_PROFILE: str = os.getenv("MODEL_ACTIVE_PROFILE", "balanced")
 
     # Notifications
     NOTIFY_MODE: str = os.getenv("NOTIFY_MODE", "minimal")  # minimal|all
     TELEGRAM_CRON_ENABLED: bool = os.getenv("TELEGRAM_CRON_ENABLED", "false").lower() in ("1", "true", "yes", "on")
     TELEGRAM_STRICT_COMMANDS: bool = os.getenv("TELEGRAM_STRICT_COMMANDS", "true").lower() in ("1", "true", "yes", "on")
+    OWNER_AUTO_APPROVE_GOALS: bool = os.getenv("OWNER_AUTO_APPROVE_GOALS", "true").lower() in ("1", "true", "yes", "on")
 
     # Browser behavior
     BROWSER_DEFAULT_ON_URL: bool = os.getenv("BROWSER_DEFAULT_ON_URL", "true").lower() in ("1", "true", "yes", "on")
 
     # Owner inbox (file-based comms)
     OWNER_INBOX_ENABLED: bool = os.getenv("OWNER_INBOX_ENABLED", "true").lower() in ("1", "true", "yes", "on")
-    CONVERSATION_HISTORY_PATH: str = os.getenv("CONVERSATION_HISTORY_PATH", "/home/vito/vito-agent/runtime/conversation_history.json")
-    CANCEL_STATE_PATH: str = os.getenv("CANCEL_STATE_PATH", "/home/vito/vito-agent/runtime/cancel_state.json")
-    OWNER_TASK_STATE_PATH: str = os.getenv("OWNER_TASK_STATE_PATH", "/home/vito/vito-agent/runtime/owner_task_state.json")
-    CONVERSATION_CONTEXT_TURNS: int = int(os.getenv("CONVERSATION_CONTEXT_TURNS", "10") or 10)
+    CONVERSATION_HISTORY_PATH: str = os.getenv("CONVERSATION_HISTORY_PATH", root_path("runtime", "conversation_history.json"))
+    CANCEL_STATE_PATH: str = os.getenv("CANCEL_STATE_PATH", root_path("runtime", "cancel_state.json"))
+    OWNER_TASK_STATE_PATH: str = os.getenv("OWNER_TASK_STATE_PATH", root_path("runtime", "owner_task_state.json"))
+    CONVERSATION_CONTEXT_TURNS: int = int(os.getenv("CONVERSATION_CONTEXT_TURNS", "20") or 20)
     REVENUE_ENGINE_ENABLED: bool = os.getenv("REVENUE_ENGINE_ENABLED", "false").lower() in ("1", "true", "yes", "on")
     REVENUE_ENGINE_DRY_RUN: bool = os.getenv("REVENUE_ENGINE_DRY_RUN", "true").lower() in ("1", "true", "yes", "on")
-    REVENUE_ENGINE_REQUIRE_APPROVAL: bool = os.getenv("REVENUE_ENGINE_REQUIRE_APPROVAL", "true").lower() in ("1", "true", "yes", "on")
+    REVENUE_ENGINE_REQUIRE_APPROVAL: bool = os.getenv("REVENUE_ENGINE_REQUIRE_APPROVAL", "false").lower() in ("1", "true", "yes", "on")
     REVENUE_ENGINE_DAILY_HOUR_UTC: int = int(os.getenv("REVENUE_ENGINE_DAILY_HOUR_UTC", "15") or 15)
     REVENUE_ENGINE_LIVE_REQUIRE_AUTH: bool = os.getenv("REVENUE_ENGINE_LIVE_REQUIRE_AUTH", "true").lower() in ("1", "true", "yes", "on")
     REVENUE_ENGINE_LIVE_CHECK_ADAPTER_AUTH: bool = os.getenv("REVENUE_ENGINE_LIVE_CHECK_ADAPTER_AUTH", "true").lower() in ("1", "true", "yes", "on")
@@ -138,9 +175,9 @@ class Settings:
     REVENUE_ENGINE_REPORT_DIR: str = os.getenv("REVENUE_ENGINE_REPORT_DIR", "runtime/reports/revenue")
     SELF_HEALER_QUARANTINE_SEC: int = int(os.getenv("SELF_HEALER_QUARANTINE_SEC", "600") or 600)
     SELF_HEALER_QUARANTINE_MAX_MULT: int = int(os.getenv("SELF_HEALER_QUARANTINE_MAX_MULT", "3") or 3)
-    SELF_HEALER_MAX_CHANGED_FILES: int = int(os.getenv("SELF_HEALER_MAX_CHANGED_FILES", "3") or 3)
-    SELF_HEALER_MAX_CHANGED_LINES: int = int(os.getenv("SELF_HEALER_MAX_CHANGED_LINES", "180") or 180)
-    SELF_HEALER_POLICY_MODE: str = os.getenv("SELF_HEALER_POLICY_MODE", "strict")
+    SELF_HEALER_MAX_CHANGED_FILES: int = int(os.getenv("SELF_HEALER_MAX_CHANGED_FILES", "12") or 12)
+    SELF_HEALER_MAX_CHANGED_LINES: int = int(os.getenv("SELF_HEALER_MAX_CHANGED_LINES", "1200") or 1200)
+    SELF_HEALER_POLICY_MODE: str = os.getenv("SELF_HEALER_POLICY_MODE", "balanced")
     SELF_HEALER_BALANCED_ALLOW_SERVICE_RESTART: bool = os.getenv("SELF_HEALER_BALANCED_ALLOW_SERVICE_RESTART", "false").lower() in ("1", "true", "yes", "on")
     SELF_HEALER_CANARY_ENABLED: bool = os.getenv("SELF_HEALER_CANARY_ENABLED", "false").lower() in ("1", "true", "yes", "on")
     SELF_HEALER_CANARY_COMMAND: str = os.getenv("SELF_HEALER_CANARY_COMMAND", "systemctl is-active vito")
@@ -168,8 +205,8 @@ class Settings:
 
     # Workflow resume
     RESUME_FROM_CHECKPOINT: bool = os.getenv("RESUME_FROM_CHECKPOINT", "false").lower() in ("1", "true", "yes", "on")
-    AUTO_RESUME_MAX_PER_INTERRUPT: int = int(os.getenv("AUTO_RESUME_MAX_PER_INTERRUPT", "2") or 2)
-    AUTO_RESUME_COOLDOWN_SEC: int = int(os.getenv("AUTO_RESUME_COOLDOWN_SEC", "120") or 120)
+    AUTO_RESUME_MAX_PER_INTERRUPT: int = int(os.getenv("AUTO_RESUME_MAX_PER_INTERRUPT", "6") or 6)
+    AUTO_RESUME_COOLDOWN_SEC: int = int(os.getenv("AUTO_RESUME_COOLDOWN_SEC", "10") or 10)
     MEMORY_WEEKLY_REPORT_ENABLED: bool = os.getenv("MEMORY_WEEKLY_REPORT_ENABLED", "true").lower() in ("1", "true", "yes", "on")
     MEMORY_WEEKLY_REPORT_ALERTS_ENABLED: bool = os.getenv("MEMORY_WEEKLY_REPORT_ALERTS_ENABLED", "false").lower() in ("1", "true", "yes", "on")
     MEMORY_WEEKLY_REPORT_INTERVAL_TICKS: int = int(os.getenv("MEMORY_WEEKLY_REPORT_INTERVAL_TICKS", "2016") or 2016)

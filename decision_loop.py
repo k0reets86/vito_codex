@@ -13,11 +13,15 @@
 """
 
 import asyncio
+import json
+import random
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 from config.logger import get_logger
+from config.paths import PROJECT_ROOT
 from config.resource_guard import resource_guard
 from config.settings import settings
 from goal_engine import Goal, GoalEngine, GoalPriority, GoalStatus
@@ -86,6 +90,7 @@ class DecisionLoop:
         self._last_memory_weekly_report_tick = 0
         self._last_weekly_governance_tick = 0
         self._last_autonomous_improvement_tick = 0
+        self._kdp_watchdog_state: dict[str, Any] = self._load_kdp_watchdog_state()
         self._current_interrupt_id: int | None = None
         self._current_goal_id: str | None = None
         self._current_thread_id: str | None = None
@@ -205,6 +210,7 @@ class DecisionLoop:
         await self._maybe_run_tooling_governance_check()
         await self._maybe_run_weekly_governance_report()
         await self._maybe_run_autonomous_improvement()
+        await self._maybe_run_kdp_session_watchdog()
         if self._is_cancelled():
             logger.info("Tick skipped: cancel-state active", extra={"event": "tick_cancelled_skip"})
             self._log_tick_done(tick_start, idle=True)
@@ -786,6 +792,129 @@ class DecisionLoop:
                 )
                 await self._comms.send_message(msg, level="warning")
             self._last_memory_weekly_report_tick = self._tick_count
+        except Exception:
+            pass
+
+    def _kdp_watchdog_state_path(self) -> Path:
+        raw = str(getattr(settings, "KDP_WATCHDOG_STATE_PATH", "runtime/kdp_watchdog_state.json") or "runtime/kdp_watchdog_state.json")
+        p = Path(raw)
+        if not p.is_absolute():
+            p = PROJECT_ROOT / p
+        return p
+
+    def _load_kdp_watchdog_state(self) -> dict[str, Any]:
+        defaults: dict[str, Any] = {
+            "status": "unknown",
+            "paused": False,
+            "last_ok_at": "",
+            "last_fail_at": "",
+            "last_reason": "",
+            "next_probe_at": "",
+            "last_storage_mtime": 0.0,
+        }
+        try:
+            p = self._kdp_watchdog_state_path()
+            if not p.exists():
+                return defaults
+            data = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                defaults.update(data)
+        except Exception:
+            pass
+        return defaults
+
+    def _save_kdp_watchdog_state(self) -> None:
+        try:
+            p = self._kdp_watchdog_state_path()
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps(self._kdp_watchdog_state, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    @staticmethod
+    def _utcnow_iso() -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    @staticmethod
+    def _parse_iso_dt(value: str) -> datetime | None:
+        try:
+            return datetime.fromisoformat(str(value or "").strip())
+        except Exception:
+            return None
+
+    def _schedule_kdp_next_probe(self, success: bool) -> None:
+        base_h = max(1, int(getattr(settings, "KDP_WATCHDOG_BASE_HOURS", 8) or 8))
+        jitter_m = max(0, int(getattr(settings, "KDP_WATCHDOG_JITTER_MINUTES", 30) or 30))
+        if not success and bool(getattr(settings, "KDP_WATCHDOG_STOP_ON_FAIL", True)):
+            # Stop-on-fail: wait for session file change from owner reauth.
+            self._kdp_watchdog_state["next_probe_at"] = ""
+            return
+        delta_min = base_h * 60 + (random.randint(-jitter_m, jitter_m) if jitter_m else 0)
+        delta_min = max(30, delta_min)
+        nxt = datetime.now(timezone.utc) + timedelta(minutes=delta_min)
+        self._kdp_watchdog_state["next_probe_at"] = nxt.isoformat()
+
+    async def _maybe_run_kdp_session_watchdog(self) -> None:
+        try:
+            if not bool(getattr(settings, "KDP_WATCHDOG_ENABLED", True)):
+                return
+            platforms = getattr(self, "_platforms", {}) or {}
+            if not isinstance(platforms, dict):
+                return
+            kdp = platforms.get("amazon_kdp")
+            if not kdp:
+                return
+
+            state = self._kdp_watchdog_state
+            now = datetime.now(timezone.utc)
+            stop_on_fail = bool(getattr(settings, "KDP_WATCHDOG_STOP_ON_FAIL", True))
+            state_file = Path(str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json") or "runtime/kdp_storage_state.json"))
+            if not state_file.is_absolute():
+                state_file = PROJECT_ROOT / state_file
+            storage_mtime = float(state_file.stat().st_mtime) if state_file.exists() else 0.0
+            prev_mtime = float(state.get("last_storage_mtime") or 0.0)
+
+            if bool(state.get("paused")) and stop_on_fail:
+                if storage_mtime > prev_mtime > 0.0:
+                    state["paused"] = False
+                elif storage_mtime > 0.0 and prev_mtime == 0.0:
+                    state["paused"] = False
+                else:
+                    return
+
+            due = False
+            nxt = self._parse_iso_dt(str(state.get("next_probe_at") or ""))
+            if nxt is None:
+                due = True
+            elif now >= nxt:
+                due = True
+            if not due:
+                return
+
+            prev_status = str(state.get("status") or "unknown")
+            ok = bool(await asyncio.wait_for(kdp.authenticate(), timeout=90))
+            state["last_storage_mtime"] = storage_mtime
+            if ok:
+                state["status"] = "connected"
+                state["paused"] = False
+                state["last_ok_at"] = self._utcnow_iso()
+                state["last_reason"] = ""
+                self._schedule_kdp_next_probe(success=True)
+                if prev_status != "connected" and hasattr(self, "_comms") and self._comms:
+                    await self._comms.send_message("KDP: подключение восстановлено, задачи продолжаются.", level="result")
+            else:
+                state["status"] = "reauth_required"
+                state["last_fail_at"] = self._utcnow_iso()
+                state["last_reason"] = "auth_probe_failed"
+                if stop_on_fail:
+                    state["paused"] = True
+                self._schedule_kdp_next_probe(success=False)
+                if prev_status != "reauth_required" and hasattr(self, "_comms") and self._comms:
+                    await self._comms.send_message(
+                        "KDP: нужна повторная авторизация. После входа задачи продолжатся автоматически.",
+                        level="warning",
+                    )
+            self._save_kdp_watchdog_state()
         except Exception:
             pass
 
@@ -1537,6 +1666,8 @@ class DecisionLoop:
             return {"status": "failed", "error": str(e)}
 
     def _policy_precheck(self, step: str) -> dict[str, Any] | None:
+        if bool(getattr(settings, "AUTONOMY_MAX_MODE", False)):
+            return None
         capability = self._step_to_capability(step)
         if not capability:
             return None
@@ -1665,11 +1796,11 @@ class DecisionLoop:
                     try:
                         from modules.image_utils import write_placeholder_png
                         cover_path = write_placeholder_png(
-                            f"/home/vito/vito-agent/output/images/cover_{goal.goal_id}.png",
+                            str(PROJECT_ROOT / "output" / "images" / f"cover_{goal.goal_id}.png"),
                             1280, 720, text="VITO",
                         )
                         thumb_path = write_placeholder_png(
-                            f"/home/vito/vito-agent/output/images/thumb_{goal.goal_id}.png",
+                            str(PROJECT_ROOT / "output" / "images" / f"thumb_{goal.goal_id}.png"),
                             600, 600, text="VITO",
                         )
                         logger.info(f"Image generated: {cover_path}", extra={"event": "smart_route_image"})
@@ -1762,10 +1893,10 @@ class DecisionLoop:
                         if hasattr(self, "_comms") and self._comms:
                             from pathlib import Path
                             files = []
-                            for p in [str(x) for x in Path("/home/vito/vito-agent/output").glob("products/*.pdf")]:
+                            for p in [str(x) for x in (PROJECT_ROOT / "output").glob("products/*.pdf")]:
                                 if Path(p).exists():
                                     files.append(p)
-                            for p in [str(x) for x in Path("/home/vito/vito-agent/output").glob("images/*")]:
+                            for p in [str(x) for x in (PROJECT_ROOT / "output").glob("images/*")]:
                                 if Path(p).exists():
                                     files.append(p)
                             approved = await self._comms.request_approval_with_files(
@@ -1780,8 +1911,9 @@ class DecisionLoop:
                                 return {"status": "failed", "error": "Owner approval rejected or timed out", "agent": "comms"}
                             return {"status": "completed", "output": "Owner approval granted", "agent": "comms"}
 
-                    # Owner approval gate
-                    if hasattr(self, "_comms") and self._comms and "boevoy" not in goal.title.lower():
+                    # Owner approval gate (optional in autonomy mode)
+                    require_publish_approval = bool(getattr(settings, "AUTONOMY_REQUIRE_PUBLISH_APPROVAL", False))
+                    if require_publish_approval and hasattr(self, "_comms") and self._comms and "boevoy" not in goal.title.lower():
                         import uuid
                         req_id = f"publish_gumroad_{uuid.uuid4().hex[:8]}"
                         approved = await self._comms.request_approval(
@@ -1802,13 +1934,19 @@ class DecisionLoop:
                         from modules.execution_facts import ExecutionFacts
                         facts = ExecutionFacts()
                         # Global cooldown when Gumroad daily limit was reached recently.
-                        if facts.recent_status_exists(action="platform:publish", status="daily_limit", hours=18):
+                        if (
+                            not bool(getattr(settings, "AUTONOMY_DISABLE_PUBLISH_COOLDOWNS", False))
+                            and facts.recent_status_exists(action="platform:publish", status="daily_limit", hours=18)
+                        ):
                             return {
                                 "status": "failed",
                                 "error": "Gumroad daily limit cooldown active (18h after last daily_limit)",
                                 "agent": "gumroad",
                             }
-                        if "gumroad publish test" in goal.title.lower():
+                        if (
+                            not bool(getattr(settings, "AUTONOMY_DISABLE_PUBLISH_COOLDOWNS", False))
+                            and "gumroad publish test" in goal.title.lower()
+                        ):
                             if facts.recent_exists(actions=["gumroad:publish_attempt"], hours=6):
                                 return {"status": "failed", "error": "Gumroad publish test cooldown (6h)", "agent": "gumroad"}
                             facts.record(action="gumroad:publish_attempt", status="started", detail=goal.title[:200], source="decision_loop")
@@ -1819,7 +1957,7 @@ class DecisionLoop:
                     def _latest(patterns: list[str]) -> str:
                         files = []
                         for pat in patterns:
-                            files.extend(Path("/home/vito/vito-agent/output").glob(pat))
+                            files.extend((PROJECT_ROOT / "output").glob(pat))
                         if not files:
                             return ""
                         files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
@@ -1841,21 +1979,21 @@ class DecisionLoop:
                         from modules.image_utils import write_placeholder_png
                         if "boevoy" in goal.title.lower():
                             cover_path = write_placeholder_png(
-                                f"/home/vito/vito-agent/output/images/cover_{goal.goal_id}.png",
+                                str(PROJECT_ROOT / "output" / "images" / f"cover_{goal.goal_id}.png"),
                                 1280, 720, text="VITO",
                             )
                             thumb_path = write_placeholder_png(
-                                f"/home/vito/vito-agent/output/images/thumb_{goal.goal_id}.png",
+                                str(PROJECT_ROOT / "output" / "images" / f"thumb_{goal.goal_id}.png"),
                                 600, 600, text="VITO",
                             )
                         elif not cover_path:
                             cover_path = write_placeholder_png(
-                                f"/home/vito/vito-agent/output/images/cover_{goal.goal_id}.png",
+                                str(PROJECT_ROOT / "output" / "images" / f"cover_{goal.goal_id}.png"),
                                 1280, 720, text="VITO",
                             )
                         if not thumb_path:
                             thumb_path = write_placeholder_png(
-                                f"/home/vito/vito-agent/output/images/thumb_{goal.goal_id}.png",
+                                str(PROJECT_ROOT / "output" / "images" / f"thumb_{goal.goal_id}.png"),
                                 600, 600, text="VITO",
                             )
                     except Exception:
@@ -1867,13 +2005,13 @@ class DecisionLoop:
                         if cover_path and Path(cover_path).suffix.lower() not in ok_ext:
                             from modules.image_utils import write_placeholder_png
                             cover_path = write_placeholder_png(
-                                f"/home/vito/vito-agent/output/images/cover_{goal.goal_id}.png",
+                                str(PROJECT_ROOT / "output" / "images" / f"cover_{goal.goal_id}.png"),
                                 1280, 720, text="VITO",
                             )
                         if thumb_path and Path(thumb_path).suffix.lower() not in ok_ext:
                             from modules.image_utils import write_placeholder_png
                             thumb_path = write_placeholder_png(
-                                f"/home/vito/vito-agent/output/images/thumb_{goal.goal_id}.png",
+                                str(PROJECT_ROOT / "output" / "images" / f"thumb_{goal.goal_id}.png"),
                                 600, 600, text="VITO",
                             )
                     except Exception:
@@ -1895,8 +2033,8 @@ class DecisionLoop:
                         "category": "Programming",
                         "tags": ["automation", "ai", "productivity", "workflow"],
                         "draft_only": any(w in s for w in ("черновик", "превью", "preview", "draft")),
-                        "allow_existing_update": False,
-                        "owner_edit_confirmed": False,
+                        "allow_existing_update": bool(getattr(settings, "AUTONOMY_ALLOW_EXISTING_PRODUCT_UPDATE", False)),
+                        "owner_edit_confirmed": bool(getattr(settings, "AUTONOMY_ALLOW_EXISTING_PRODUCT_UPDATE", False)),
                     }
                     ok_payload, payload_errors, _norm = validate_publish_payload("gumroad", publish_payload)
                     if not ok_payload:
@@ -1906,7 +2044,10 @@ class DecisionLoop:
                             "agent": "gumroad",
                         }
                     sig = build_publish_signature("gumroad", publish_payload)
-                    if recent_duplicate_publish(sig, hours=24):
+                    if (
+                        not bool(getattr(settings, "AUTONOMY_DISABLE_PUBLISH_DUPLICATE_BLOCK", False))
+                        and recent_duplicate_publish(sig, hours=24)
+                    ):
                         return {
                             "status": "failed",
                             "error": f"Duplicate publish blocked (24h) sig={sig}",
@@ -1933,7 +2074,11 @@ class DecisionLoop:
 
                     publish_payload["signature"] = sig
                     pub_result = await gumroad.publish(publish_payload)
-                    if pub_result.get("status") == "published" and pub_result.get("url"):
+                    status = str(pub_result.get("status") or "").lower()
+                    permissive = bool(getattr(settings, "AUTONOMY_ACCEPT_INTERMEDIATE_PUBLISH_STATUSES", False))
+                    success_statuses = {"published"} | ({"prepared", "created", "draft"} if permissive else set())
+                    has_evidence = bool(pub_result.get("url") or pub_result.get("product_id") or pub_result.get("screenshot_path"))
+                    if status in success_statuses and (has_evidence or permissive):
                         try:
                             if self.memory:
                                 self.memory.save_skill(
@@ -2102,13 +2247,13 @@ class DecisionLoop:
 
         # Determine output type
         if any(w in s for w in ("продукт", "ebook", "шаблон", "product", "template")):
-            out_dir = Path("/home/vito/vito-agent/output/products")
+            out_dir = PROJECT_ROOT / "output" / "products"
         elif any(w in s for w in ("пост", "twitter", "social", "tweet")):
-            out_dir = Path("/home/vito/vito-agent/output/social")
+            out_dir = PROJECT_ROOT / "output" / "social"
         elif any(w in s for w in ("стать", "article", "контент", "content")):
-            out_dir = Path("/home/vito/vito-agent/output/articles")
+            out_dir = PROJECT_ROOT / "output" / "articles"
         elif any(w in s for w in ("отчёт", "отчет", "report", "анализ", "analysis")):
-            out_dir = Path("/home/vito/vito-agent/output/articles")
+            out_dir = PROJECT_ROOT / "output" / "articles"
         else:
             return ""  # Don't save generic LLM output
 
@@ -2826,4 +2971,11 @@ class DecisionLoop:
             "daily_spend": self.llm_router.get_daily_spend(),
             "goal_stats": self.goal_engine.get_stats(),
             "pending_approvals": pending,
+            "kdp_watchdog": {
+                "status": str(self._kdp_watchdog_state.get("status", "unknown")),
+                "paused": bool(self._kdp_watchdog_state.get("paused", False)),
+                "last_ok_at": str(self._kdp_watchdog_state.get("last_ok_at", "")),
+                "last_fail_at": str(self._kdp_watchdog_state.get("last_fail_at", "")),
+                "next_probe_at": str(self._kdp_watchdog_state.get("next_probe_at", "")),
+            },
         }

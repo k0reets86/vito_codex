@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Iterable
+from config.paths import root_path
 
 
 class ConversationMemory:
     def __init__(self, path: Path | str | None = None, limit: int = 50) -> None:
-        self.path = Path(path or "/home/vito/vito-agent/runtime/conversation_history.json")
+        self.path = Path(path or root_path("runtime", "conversation_history.json"))
         self.limit = limit
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if not self.path.exists():

@@ -127,3 +127,66 @@ Use these as defaults unless Gumroad UI indicates different requirements.
 ---
 
 Next platforms queued: Amazon Seller Central, Etsy, eBay (full), Shopify GraphQL Admin details, Gumroad, Ko‑fi, Payhip, Lemon Squeezy, Pinterest, TikTok, Instagram, Threads, YouTube, Reddit, Substack, Medium, Discord, LinkedIn, WooCommerce.
+
+## 2026-03-03 Verified Update (Official Sources)
+
+This block supersedes older notes where they conflict.
+
+### Etsy
+- Open API v3 authentication uses OAuth 2.0 Authorization Code with PKCE; apps request explicit scopes (for example `listings_w`, `shops_r`).
+- Commercial API access is reviewed and can be limited/revoked on policy violations.
+- For digital listings, Etsy Help confirms upload/asset limits and supported file types for instant downloads.
+- Sources:
+  - https://developer.etsy.com/documentation/
+  - https://developer.etsy.com/documentation/essentials/authentication/
+  - https://help.etsy.com/hc/en-us/articles/115015628347-How-to-Manage-Your-Digital-Listings
+
+### Printful
+- Printful API is token-based/OAuth-based; store access and status are checked via `/stores`.
+- Production operations should always validate store binding before product creation.
+- Sources:
+  - https://developers.printful.com/
+  - https://developers.printful.com/docs/
+
+### X (Twitter)
+- Posting and account reads in this project are done through X API v2 with OAuth 1.0a credentials for user context.
+- `GET /2/users/me` remains the practical auth probe for token/key validity in runtime.
+- Sources:
+  - https://developer.x.com/en/docs
+  - https://developer.x.com/en/docs/tutorials/authenticating-with-twitter-api-for-enterprise/oauth1-0a-and-user-access-tokens
+
+### Gumroad
+- Gumroad API access is OAuth app based; product and account operations require valid token + account state.
+- Content/payout restrictions are enforced via Terms and compliance review; operational flows must assume policy checks can block publish/payout.
+- Sources:
+  - https://gumroad.com/api
+  - https://gumroad.com/help/article/289-api
+  - https://gumroad.com/help/article/44-content-guidelines
+  - https://gumroad.com/terms
+
+### Amazon KDP
+- KDP publishing and reporting in VITO should stay browser-based until official API access is available.
+- 2FA or account-challenge flows are mandatory account-security controls and must be handled interactively by owner.
+- Cover and manuscript requirements should follow current KDP help pages.
+- Sources:
+  - https://kdp.amazon.com/en_US/help
+  - https://kdp.amazon.com/en_US/help/topic/G201113520
+
+### YouTube
+- YouTube Data API must be enabled in Google Cloud project; otherwise calls return 403 even with key present.
+- Upload/publish operations require OAuth scopes (for example `youtube.upload`), not just API key.
+- Sources:
+  - https://developers.google.com/youtube/v3
+  - https://developers.google.com/youtube/v3/guides/uploading_a_video
+
+### Reddit
+- Reddit API in this environment is intentionally disabled (`browser_only`) due owner request and current API constraints.
+- Discovery/trend ingestion should use RSS/web/browser paths, not API credentials.
+- Sources:
+  - https://www.reddit.com/dev/api/
+  - https://support.reddithelp.com/hc/en-us/articles/14945211791892-Developer-Platform-Overview
+
+### Operational Rules for VITO
+- Always run auth probe before live publish (`authenticate` + lightweight read endpoint).
+- Prefer dry-run for new integrations; require explicit owner approval for first live action on each platform.
+- Treat browser automation as fallback for unavailable/blocked APIs, not as a method to bypass platform security controls.

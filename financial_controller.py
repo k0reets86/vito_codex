@@ -17,11 +17,12 @@ from enum import Enum
 from typing import Any, Optional
 
 from config.logger import get_logger
+from config.paths import root_path
 from config.settings import settings
 
 logger = get_logger("financial_controller", agent="financial_controller")
 
-FINANCIAL_LOG = "/home/vito/vito-agent/logs/financial.log"
+FINANCIAL_LOG = root_path("logs", "financial.log")
 
 
 class TransactionType(Enum):

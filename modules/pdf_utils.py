@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from config.paths import PROJECT_ROOT
 
 
 def write_minimal_pdf(text: str, out_path: str) -> str:
@@ -57,7 +58,7 @@ startxref
 
 def make_minimal_pdf(title: str, lines: list[str]) -> str:
     """Create a minimal PDF in output/products and return path."""
-    out_dir = Path("/home/vito/vito-agent/output/products")
+    out_dir = PROJECT_ROOT / "output" / "products"
     out_dir.mkdir(parents=True, exist_ok=True)
     safe = "".join(c for c in title if c.isalnum() or c in ("-", "_"))[:60] or "product"
     out_path = out_dir / f"{safe}_minimal.pdf"

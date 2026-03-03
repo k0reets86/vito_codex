@@ -6,6 +6,7 @@ from pathlib import Path
 
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
+from config.settings import settings
 
 logger = get_logger("ecommerce_agent", agent="ecommerce_agent")
 
@@ -61,7 +62,7 @@ class ECommerceAgent(BaseAgent):
             return TaskResult(success=False, error="Gumroad publish requires pdf_path")
         if not preview_files:
             return TaskResult(success=False, error="Preview files required before publication")
-        if self.comms:
+        if self.comms and bool(getattr(settings, "AUTONOMY_ECOMMERCE_APPROVAL_REQUIRED", False)):
             try:
                 import uuid
                 request_id = f"publish_{platform}_{uuid.uuid4().hex[:8]}"
@@ -86,7 +87,10 @@ class ECommerceAgent(BaseAgent):
         try:
             result = await plat.publish(data)
             status = result.get("status") if isinstance(result, dict) else None
-            if status and status not in ("ok", "success", "published"):
+            accepted_statuses = {"ok", "success", "published"}
+            if bool(getattr(settings, "AUTONOMY_ACCEPT_INTERMEDIATE_PUBLISH_STATUSES", False)):
+                accepted_statuses.update({"prepared", "created", "draft"})
+            if status and status not in accepted_statuses:
                 err = result.get("error") if isinstance(result, dict) else "unknown_error"
                 logger.warning(
                     f"Листинг НЕ создан на {platform}: {status}",

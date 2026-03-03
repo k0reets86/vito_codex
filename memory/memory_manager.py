@@ -174,7 +174,9 @@ class MemoryManager:
             elif isinstance(v, (list, tuple)):
                 # Allow list of scalars; otherwise JSON-stringify
                 if all(isinstance(i, (str, int, float, bool)) or i is None for i in v):
-                    safe[k] = list(v)
+                    cleaned = [i for i in list(v) if i is not None and str(i).strip() != ""]
+                    if cleaned:
+                        safe[k] = cleaned
                 else:
                     try:
                         safe[k] = json.dumps(v, ensure_ascii=False)[:1000]
@@ -185,7 +187,39 @@ class MemoryManager:
                     safe[k] = json.dumps(v, ensure_ascii=False)[:1000]
                 except Exception:
                     safe[k] = str(v)[:1000]
+        if "priority" in safe:
+            safe["priority"] = MemoryManager._coerce_priority_value(safe.get("priority"))
+        if "importance_score" in safe:
+            safe["importance_score"] = MemoryManager._coerce_score_value(safe.get("importance_score"), default=0.5)
         return safe
+
+    @staticmethod
+    def _coerce_score_value(value: Any, default: float = 0.5) -> float:
+        try:
+            return float(value)
+        except Exception:
+            return float(default)
+
+    @staticmethod
+    def _coerce_priority_value(value: Any) -> float:
+        if isinstance(value, (int, float)):
+            return float(value)
+        norm = str(value or "").strip().lower()
+        if not norm:
+            return 0.5
+        mapped = {
+            "critical": 1.0,
+            "high": 0.85,
+            "medium": 0.6,
+            "low": 0.35,
+            "background": 0.15,
+        }
+        if norm in mapped:
+            return mapped[norm]
+        try:
+            return float(norm)
+        except Exception:
+            return 0.5
 
     @staticmethod
     def _retention_stage(retention_class: str | None) -> str:
@@ -241,7 +275,9 @@ class MemoryManager:
         collection = self._get_chroma()
         start = time.monotonic()
         try:
-            results = collection.query(query_texts=[query], n_results=n_results)
+            # Ask more candidates from vector DB, then re-rank with recency+importance.
+            raw_limit = max(n_results * 3, n_results + 5)
+            results = collection.query(query_texts=[query], n_results=raw_limit)
             duration_ms = int((time.monotonic() - start) * 1000)
             logger.info(
                 f"Поиск знаний: '{query[:50]}...' → {len(results['ids'][0])} результатов",
@@ -253,16 +289,46 @@ class MemoryManager:
             )
             docs = []
             for i, doc_id in enumerate(results["ids"][0]):
+                metadata = results["metadatas"][0][i] if results["metadatas"] else {}
+                distance = results["distances"][0][i] if results["distances"] else None
+                similarity = 1.0 - float(distance) if distance is not None else 0.5
+                similarity = max(0.0, min(1.0, similarity))
+                created_at = self._metadata_timestamp(metadata)
+                importance = float(metadata.get("importance_score", 0.5) or 0.5)
+                importance = max(0.0, min(1.0, importance))
+                relevance = self.calculate_relevance(
+                    semantic_similarity=similarity,
+                    created_at=created_at,
+                    importance=importance,
+                )
                 docs.append({
                     "id": doc_id,
                     "text": results["documents"][0][i],
-                    "metadata": results["metadatas"][0][i] if results["metadatas"] else {},
-                    "distance": results["distances"][0][i] if results["distances"] else None,
+                    "metadata": metadata,
+                    "distance": distance,
+                    "relevance": round(relevance, 6),
                 })
-            return docs
+            docs.sort(key=lambda x: float(x.get("relevance", 0.0)), reverse=True)
+            return docs[:n_results]
         except Exception as e:
             logger.error(f"Ошибка поиска: {e}", extra={"event": "knowledge_search_failed"}, exc_info=True)
             return []
+
+    @staticmethod
+    def _metadata_timestamp(metadata: dict[str, Any] | None) -> datetime:
+        md = metadata or {}
+        for key in ("stored_at", "created_at", "updated_at"):
+            value = md.get(key)
+            if not value:
+                continue
+            try:
+                dt = datetime.fromisoformat(str(value))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt
+            except Exception:
+                continue
+        return datetime.now(timezone.utc)
 
     def consolidate_short_term_memory(self, min_age_days: int = 5, limit: int = 25) -> int:
         """Периодически переводит short-тренировочные блоки в long-term."""

@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 from datetime import datetime, timezone
+from config.paths import PROJECT_ROOT
 
 
-INBOX_DIR = Path("/home/vito/vito-agent/input/owner_inbox")
-PROCESSED_DIR = Path("/home/vito/vito-agent/input/owner_inbox_processed")
-OUTBOX_DIR = Path("/home/vito/vito-agent/output/owner_outbox")
+INBOX_DIR = PROJECT_ROOT / "input" / "owner_inbox"
+PROCESSED_DIR = PROJECT_ROOT / "input" / "owner_inbox_processed"
+OUTBOX_DIR = PROJECT_ROOT / "output" / "owner_outbox"
 
 
 def ensure_dirs() -> None:

@@ -29,6 +29,9 @@ class RedditPlatform(BasePlatform):
         return self._session
 
     async def authenticate(self) -> bool:
+        if bool(getattr(settings, "REDDIT_API_DISABLED", False)) or str(getattr(settings, "REDDIT_MODE", "api")).lower() == "browser_only":
+            self._authenticated = False
+            return False
         if not (self._client_id and self._client_secret and self._username and self._password):
             self._authenticated = False
             return False

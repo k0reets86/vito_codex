@@ -207,7 +207,8 @@ async def test_execute_step_failure(dl):
 
 
 @pytest.mark.asyncio
-async def test_execute_step_policy_blocked(dl):
+async def test_execute_step_policy_blocked(dl, monkeypatch):
+    monkeypatch.setattr("decision_loop.settings.AUTONOMY_MAX_MODE", False, raising=False)
     dl.operator_policy = MagicMock()
     dl.operator_policy.is_tool_allowed.return_value = (False, "owner_block")
     dl.operator_policy.check_actor_budget.return_value = {"allowed": True}

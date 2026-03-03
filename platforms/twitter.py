@@ -14,6 +14,7 @@ import aiohttp
 
 from config.logger import get_logger
 from config.settings import settings
+from config.paths import PROJECT_ROOT
 from platforms.base_platform import BasePlatform
 from modules.execution_facts import ExecutionFacts
 
@@ -243,7 +244,7 @@ class TwitterPlatform(BasePlatform):
         from pathlib import Path
         import time as _time
 
-        out = Path("/home/vito/vito-agent/output/tweets")
+        out = PROJECT_ROOT / "output" / "tweets"
         out.mkdir(parents=True, exist_ok=True)
         fp = out / f"tweet_{int(_time.time())}.txt"
         fp.write_text(text, encoding="utf-8")

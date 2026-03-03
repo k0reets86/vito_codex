@@ -4,11 +4,12 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from config.paths import root_path
 
 
 class OwnerTaskState:
     def __init__(self, path: Path | str | None = None) -> None:
-        self.path = Path(path or "/home/vito/vito-agent/runtime/owner_task_state.json")
+        self.path = Path(path or root_path("runtime", "owner_task_state.json"))
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if not self.path.exists():
             self._write({"active": None, "history": []})

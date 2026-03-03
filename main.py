@@ -18,6 +18,7 @@ import sys
 import time
 from pathlib import Path
 from datetime import datetime, timezone
+from config.paths import PROJECT_ROOT
 
 # ── Защита от дублирования процессов ──
 PIDFILE = "/tmp/vito_agent.pid"
@@ -858,7 +859,7 @@ class VITO:
                     lines.append(
                         f"- {p.get('pref_key')}: {p.get('value')} (conf={float(p.get('confidence',0)):.2f}, status={p.get('status')})"
                     )
-            report_path = Path("/home/vito/vito-agent/reports") / f"OWNER_PREFS_{today}.md"
+            report_path = PROJECT_ROOT / "reports" / f"OWNER_PREFS_{today}.md"
             report_path.write_text("\n".join(lines), encoding="utf-8")
         except Exception:
             pass
@@ -907,7 +908,7 @@ class VITO:
         # 4.2 Write capability pack report
         try:
             import json
-            root = Path("/home/vito/vito-agent/capability_packs")
+            root = PROJECT_ROOT / "capability_packs"
             rows = []
             for spec in root.glob("*/spec.json"):
                 try:
@@ -922,7 +923,7 @@ class VITO:
                     "risk": data.get("risk_score", 0),
                 })
             rows.sort(key=lambda r: r["name"])
-            out = Path("/home/vito/vito-agent/reports") / f"CAPABILITY_PACK_REPORT_{today}.md"
+            out = PROJECT_ROOT / "reports" / f"CAPABILITY_PACK_REPORT_{today}.md"
             lines = [f"# Capability Pack Report ({today})", "", "| Name | Category | Status | Version | Risk |", "|---|---|---|---|---|"]
             for r in rows:
                 lines.append(f"| {r['name']} | {r['category']} | {r['status']} | {r['version']} | {r['risk']} |")

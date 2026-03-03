@@ -17,6 +17,7 @@ class PrintfulPlatform(BasePlatform):
     def __init__(self, **kwargs):
         super().__init__(name="printful", **kwargs)
         self._api_key = getattr(settings, "PRINTFUL_API_KEY", "")
+        self._store_id = str(getattr(settings, "PRINTFUL_STORE_ID", "") or "")
         self._session: aiohttp.ClientSession | None = None
 
     def _headers(self) -> dict[str, str]:
@@ -31,17 +32,29 @@ class PrintfulPlatform(BasePlatform):
         return self._session
 
     async def authenticate(self) -> bool:
-        """GET /store — проверка авторизации."""
+        """GET /stores — проверка токена и доступных stores."""
         if not self._api_key:
             self._authenticated = False
             return False
         try:
             session = await self._get_session()
-            async with session.get(f"{API_BASE}/store") as resp:
-                self._authenticated = resp.status == 200
-                if self._authenticated:
-                    logger.info("Printful авторизация успешна", extra={"event": "printful_auth_ok"})
-                return self._authenticated
+            async with session.get(f"{API_BASE}/stores") as resp:
+                if resp.status != 200:
+                    self._authenticated = False
+                    return False
+                data = await resp.json()
+                stores = list((data or {}).get("result", []) or [])
+                if not self._store_id and stores:
+                    first = stores[0] if isinstance(stores[0], dict) else {}
+                    sid = first.get("id")
+                    if sid is not None:
+                        self._store_id = str(sid)
+                self._authenticated = True
+                logger.info(
+                    "Printful авторизация успешна",
+                    extra={"event": "printful_auth_ok", "context": {"stores": len(stores), "store_id": self._store_id}},
+                )
+                return True
         except Exception as e:
             logger.error(f"Printful auth error: {e}", extra={"event": "printful_auth_error"})
             self._authenticated = False
@@ -71,9 +84,11 @@ class PrintfulPlatform(BasePlatform):
 
         if not self._authenticated:
             return {"platform": "printful", "status": "not_authenticated"}
+        if not self._store_id:
+            return {"platform": "printful", "status": "error", "error": "no_store_connected"}
         try:
             session = await self._get_session()
-            async with session.post(f"{API_BASE}/store/products", json=content) as resp:
+            async with session.post(f"{API_BASE}/store/products", params={"store_id": self._store_id}, json=content) as resp:
                 data = await resp.json()
                 logger.info(
                     f"Printful продукт создан: {content.get('sync_product', {}).get('name', 'unknown')}",
@@ -119,9 +134,11 @@ class PrintfulPlatform(BasePlatform):
         """GET /store/products — список продуктов."""
         if not self._authenticated:
             return []
+        if not self._store_id:
+            return []
         try:
             session = await self._get_session()
-            async with session.get(f"{API_BASE}/store/products") as resp:
+            async with session.get(f"{API_BASE}/store/products", params={"store_id": self._store_id}) as resp:
                 data = await resp.json()
                 return data.get("result", [])
         except Exception as e:

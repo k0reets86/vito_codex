@@ -18,7 +18,9 @@
 """
 
 import asyncio
+import difflib
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -114,6 +116,7 @@ class ConversationEngine:
     async def process_message(self, text: str) -> dict[str, Any]:
         """Обрабатывает сообщение от владельца."""
         owner_task_preserved = False
+        self._remember_owner_profile_fact(text)
         if self.cancel_state and self.cancel_state.is_cancelled():
             return {
                 "intent": Intent.CONVERSATION.value,
@@ -132,7 +135,7 @@ class ConversationEngine:
                     if result and result.success:
                         return {
                             "response": f"Открыл страницу. Скриншот готов.\n📎 {result.output.get('path') if isinstance(result.output, dict) and result.output.get('path') else path}",
-                            "intent": Intent.QUESTION,
+                            "intent": Intent.QUESTION.value,
                         }
                 if any(k in lower for k in ("текст", "прочитай", "extract", "вытащи", "что написано")):
                     task_type = "web_scrape"
@@ -140,7 +143,7 @@ class ConversationEngine:
                     if result and result.success:
                         return {
                             "response": f"Текст со страницы:\n{str(result.output)[:3500]}",
-                            "intent": Intent.QUESTION,
+                            "intent": Intent.QUESTION.value,
                         }
                 # default: quick browse (title + status)
                 result = await self.agent_registry.dispatch("browse", url=url)
@@ -148,7 +151,7 @@ class ConversationEngine:
                     out = result.output or {}
                     title = out.get("title", "")
                     status = out.get("status", "")
-                    return {"response": f"Страница открыта. {title} (HTTP {status})", "intent": Intent.QUESTION}
+                    return {"response": f"Страница открыта. {title} (HTTP {status})", "intent": Intent.QUESTION.value}
             except Exception:
                 pass
 
@@ -157,15 +160,26 @@ class ConversationEngine:
             try:
                 import re
                 from modules.web_fetch import fetch_url
-                m = re.search(r"https?://\\S+", text)
+                m = re.search(r"https?://\S+", text)
                 if m:
                     url = m.group(0).rstrip(".,)")
                     data = fetch_url(url)
                     response = f"URL: {url}\nTitle: {data.get('title','')}\n\n{data.get('text','')}"
-                    return {"response": response, "intent": Intent.QUESTION}
+                    return {"response": response, "intent": Intent.QUESTION.value}
             except Exception:
                 pass
-        # 1. Detect intent
+        deterministic = await self._deterministic_owner_route(text)
+        if deterministic is not None:
+            try:
+                self._add_turn("user", text, Intent.SYSTEM_ACTION if deterministic.get("intent") == Intent.SYSTEM_ACTION.value else Intent.QUESTION)
+                if deterministic.get("response"):
+                    self._add_turn("assistant", deterministic["response"])
+            except Exception:
+                pass
+            deterministic["nlu_tones"] = self._detect_tone(text)
+            return deterministic
+        # 1. Detect intent + tone
+        tones = self._detect_tone(text)
         intent = self._detect_intent_rules(text)
         if intent is None:
             intent = await self._detect_intent_llm(text)
@@ -186,7 +200,7 @@ class ConversationEngine:
                 self.memory.store_knowledge(
                     doc_id=f"user_msg_{int(time.time())}",
                     text=f"Владелец: {text}",
-                    metadata={"type": "user_request", "intent": intent.value},
+                    metadata={"type": "user_request", "intent": intent.value, "tones": tones},
                 )
             except Exception:
                 pass
@@ -211,7 +225,148 @@ class ConversationEngine:
                 )
             self._add_turn("assistant", result["response"])
 
+        result["nlu_tones"] = tones
         return result
+
+    async def _deterministic_owner_route(self, text: str) -> dict[str, Any] | None:
+        """Deterministic command routing for high-priority owner intents.
+
+        This path avoids LLM ambiguity for operational requests and returns
+        verifiable execution summaries when possible.
+        """
+        if str(text or "").strip().startswith("/"):
+            return None
+        normalized = self._normalize_for_nlu(text)
+
+        status_kw = ("статус", "status", "как дела", "что по задач", "активные задач", "progress", "прогресс")
+        if self._has_keywords(normalized, status_kw, fuzzy=True):
+            return {"intent": Intent.QUESTION.value, "response": self._quick_status()}
+
+        net_kw = ("интернет", "network", "сеть", "доступ к интернет", "online")
+        check_kw = ("проверь", "check", "есть ли", "доступ")
+        if self._has_keywords(normalized, net_kw, fuzzy=True) and self._has_keywords(normalized, check_kw, fuzzy=True):
+            try:
+                from modules.network_utils import basic_net_report
+                rep = basic_net_report(["api.telegram.org", "gumroad.com", "api.gumroad.com", "google.com"])
+                dns = rep.get("dns", {})
+                lines = ["Проверка сети:"]
+                for host, ok in dns.items():
+                    lines.append(f"- {host}: {'ok' if ok else 'fail'}")
+                lines.append(f"- общий статус: {'online' if rep.get('ok') else 'offline'}")
+                if rep.get("seccomp"):
+                    lines.append(f"- причина блокировки: {rep.get('seccomp')}")
+                return {"intent": Intent.QUESTION.value, "response": "\n".join(lines)}
+            except Exception:
+                return None
+
+        trend_request = self._has_keywords(normalized, ("тренд", "trends", "trend", "ниш", "niche"), fuzzy=True)
+        trend_verb = self._has_keywords(normalized, ("найд", "скан", "проскан", "проанализ", "подбери", "research"), fuzzy=True)
+        if trend_request and trend_verb and self.agent_registry:
+            actions = [{"action": "scan_trends", "params": {}}]
+            out = await self._execute_actions(actions)
+            return {
+                "intent": Intent.SYSTEM_ACTION.value,
+                "response": f"Сканирование трендов запущено.\n{out or 'Запуск принят, формирую результат.'}",
+                "actions": actions,
+                "needs_confirmation": False,
+            }
+
+        analytics_kw = ("аналит", "analytics", "отчет", "отчёт", "report", "dashboard")
+        if self._has_keywords(normalized, analytics_kw, fuzzy=True) and self.agent_registry:
+            try:
+                result = await self.agent_registry.dispatch("analytics", objective=text)
+                if result and result.success:
+                    return {
+                        "intent": Intent.SYSTEM_ACTION.value,
+                        "response": f"Команда выполнена: аналитика готова.\n[evidence] analytics output: {str(result.output)[:1200]}",
+                    }
+            except Exception:
+                pass
+
+        etsy_kw = ("etsy", "етси", "этси")
+        oauth_kw = ("oauth", "pkce", "подключ", "авториз", "логин", "token", "токен")
+        if self._has_keywords(normalized, etsy_kw, fuzzy=True) and self._has_keywords(normalized, oauth_kw, fuzzy=True):
+            try:
+                from platforms.etsy import EtsyPlatform
+                etsy = EtsyPlatform()
+                start = await etsy.start_oauth2_pkce()
+                await etsy.close()
+                auth_url = start.get("auth_url", "")
+                redir = start.get("redirect_uri", "")
+                if auth_url:
+                    return {
+                        "intent": Intent.SYSTEM_ACTION.value,
+                        "response": (
+                            "Etsy OAuth подготовлен.\n"
+                            f"- auth_url: {auth_url}\n"
+                            f"- redirect_uri: {redir}\n"
+                            "После авторизации пришли мне code из callback."
+                        ),
+                    }
+            except Exception:
+                pass
+
+        gumroad_kw = ("gumroad", "гумроад", "гамроад")
+        sales_kw = ("стат", "statistics", "analytics", "продаж", "revenue", "выручк", "доход")
+        if self._has_keywords(normalized, gumroad_kw, fuzzy=True) and self._has_keywords(normalized, sales_kw, fuzzy=True):
+            live = await self._quick_gumroad_analytics()
+            if live:
+                return {"intent": Intent.QUESTION.value, "response": live}
+
+        priority_kw = ("приоритет", "priority")
+        goal_kw = ("цели", "goal")
+        if self._has_keywords(normalized, priority_kw, fuzzy=True) and self._has_keywords(normalized, goal_kw, fuzzy=True):
+            m = re.search(r"\b([a-z0-9]{6,40})\b", normalized)
+            p = re.search(r"\b(low|medium|high|critical|низк\w*|средн\w*|высок\w*|критич\w*)\b", normalized)
+            goal_id = m.group(1) if m else ""
+            raw_priority = p.group(1).lower() if p else "high"
+            if raw_priority.startswith("low") or raw_priority.startswith("низк"):
+                priority = "LOW"
+            elif raw_priority.startswith("med") or raw_priority.startswith("сред"):
+                priority = "MEDIUM"
+            elif raw_priority.startswith("crit") or raw_priority.startswith("крит"):
+                priority = "CRITICAL"
+            else:
+                priority = "HIGH"
+            if goal_id:
+                out = await self._execute_actions([{"action": "change_priority", "params": {"goal_id": goal_id, "priority": priority}}])
+                return {
+                    "intent": Intent.SYSTEM_ACTION.value,
+                    "response": f"Изменение приоритета отправлено.\n{out or 'Запрос принят в работу.'}",
+                    "actions": [{"action": "change_priority", "params": {"goal_id": goal_id, "priority": priority}}],
+                    "needs_confirmation": False,
+                }
+
+        err_kw = ("ошибк", "error", "exceptions", "исключен")
+        check_kw = ("проверь", "check", "статус", "summary", "сводк")
+        system_kw = ("систем", "system")
+        if self._has_keywords(normalized, err_kw, fuzzy=True) and (
+            self._has_keywords(normalized, check_kw, fuzzy=True)
+            or self._has_keywords(normalized, system_kw, fuzzy=True)
+        ):
+            if self.self_healer and hasattr(self.self_healer, "get_error_stats"):
+                try:
+                    stats = self.self_healer.get_error_stats()
+                    total = int(stats.get("total", 0) or 0)
+                    resolved = int(stats.get("resolved", 0) or 0)
+                    unresolved = int(stats.get("unresolved", 0) or 0)
+                    return {
+                        "intent": Intent.QUESTION.value,
+                        "response": (
+                            "Ошибки системы:\n"
+                            f"- total: {total}\n"
+                            f"- resolved: {resolved}\n"
+                            f"- unresolved: {unresolved}"
+                        ),
+                    }
+                except Exception:
+                    pass
+            return {
+                "intent": Intent.QUESTION.value,
+                "response": "Ошибки системы: модуль self_healer недоступен.",
+            }
+
+        return None
 
     def _detect_intent_rules(self, text: str) -> Optional[Intent]:
         """Rule-based intent detection (быстрый первый фильтр)."""
@@ -221,6 +376,7 @@ class ConversationEngine:
             return Intent.COMMAND
 
         lower = stripped.lower()
+        normalized = self._normalize_for_nlu(stripped)
         # Explicit question markers override goal detection
         if "?" in stripped:
             return Intent.QUESTION
@@ -229,21 +385,30 @@ class ConversationEngine:
 
         # Time queries — no LLM needed
         time_words = ("время", "час", "дата", "time", "what time", "date", "сколько время")
-        if any(w in lower for w in time_words) and len(lower) < 40:
+        if self._has_keywords(normalized, time_words, fuzzy=True) and len(lower) < 40:
             return Intent.QUESTION
         approval_words = {"да", "нет", "ок", "ok", "yes", "no", "approve", "reject",
                           "отмена", "одобряю", "отклоняю"}
         if lower in approval_words:
             return Intent.APPROVAL
 
+        info_verbs = ("дай", "покажи", "расскажи", "найди", "найти", "проанализируй", "собери")
+        info_targets = ("новост", "тренд", "статист", "аналит", "обзор", "отчет", "отчёт", "сводк", "ниши")
+        create_targets = ("создай", "опубликуй", "запусти", "загрузи", "сделай продукт", "сделай товар")
+        if self._has_keywords(normalized, info_verbs, fuzzy=True) and self._has_keywords(normalized, info_targets, fuzzy=True):
+            if not self._has_keywords(normalized, create_targets, fuzzy=True):
+                return Intent.QUESTION
+
         # Goal request keywords (product creation, tasks, publishing)
         goal_keywords = [
             "создай", "сделай", "опубликуй", "напиши", "разработай",
             "запусти продукт", "запусти товар", "продукт", "ebook",
-            "create", "make", "publish", "build", "launch",
+            "найди", "найти", "подбери", "собери", "сформируй",
+            "отчет", "отчёт", "тренд", "тренды",
+            "create", "make", "publish", "build", "launch", "find", "research",
             "write an", "write a", "design", "generate",
         ]
-        if any(kw in lower for kw in goal_keywords):
+        if self._has_keywords(normalized, goal_keywords, fuzzy=True):
             return Intent.GOAL_REQUEST
 
         # System action keywords (internal operations)
@@ -261,24 +426,73 @@ class ConversationEngine:
             "изучи сервис", "изучи платформ", "найди требования", "добавь знания",
             "документац", "официальные требования",
         ]
-        if any(kw in lower for kw in self_improve_keywords):
+        if self._has_keywords(normalized, self_improve_keywords, fuzzy=True):
             return Intent.SYSTEM_ACTION
-        if any(kw in lower for kw in learn_service_keywords):
+        if self._has_keywords(normalized, learn_service_keywords, fuzzy=True):
             return Intent.SYSTEM_ACTION
-        if any(kw in lower for kw in action_keywords):
+        if self._has_keywords(normalized, action_keywords, fuzzy=True):
             return Intent.SYSTEM_ACTION
 
         return None
 
     @staticmethod
+    def _normalize_for_nlu(text: str) -> str:
+        text = (text or "").lower().replace("ё", "е")
+        text = re.sub(r"[^a-zа-я0-9\s]", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
+
+    def _has_keywords(self, normalized_text: str, keywords: list[str] | tuple[str, ...], fuzzy: bool = False) -> bool:
+        if not normalized_text:
+            return False
+        tokens = normalized_text.split()
+        for raw_kw in keywords:
+            kw = self._normalize_for_nlu(str(raw_kw or ""))
+            if not kw:
+                continue
+            if kw in normalized_text:
+                return True
+            if not fuzzy:
+                continue
+            if " " in kw:
+                continue
+            if len(kw) < 4:
+                continue
+            for token in tokens:
+                if len(token) < 4:
+                    continue
+                if abs(len(token) - len(kw)) > 2:
+                    continue
+                if difflib.SequenceMatcher(None, token, kw).ratio() >= 0.78:
+                    return True
+        return False
+
+    def _detect_tone(self, text: str) -> list[str]:
+        normalized = self._normalize_for_nlu(text)
+        tones: list[str] = []
+        frustrated_markers = (
+            "не работает", "бесит", "достало", "тупой", "ошибка", "сломал",
+            "не можешь", "не делает", "плохо", "ужас", "wtf",
+        )
+        urgent_markers = ("срочно", "asap", "немедленно", "прямо сейчас", "горит")
+        positive_markers = ("спасибо", "отлично", "супер", "класс", "good", "great")
+        if self._has_keywords(normalized, frustrated_markers, fuzzy=True):
+            tones.append("frustrated")
+        if self._has_keywords(normalized, urgent_markers, fuzzy=True):
+            tones.append("urgent")
+        if self._has_keywords(normalized, positive_markers, fuzzy=True):
+            tones.append("positive")
+        return tones
+
+    @staticmethod
     def _extract_url(text: str) -> Optional[str]:
         import re
         # Full URL
-        m = re.search(r"https?://\\S+", text)
+        m = re.search(r"https?://\S+", text)
         if m:
             return m.group(0).rstrip(".,)")
         # Bare domain (avoid emails)
-        m = re.search(r"\\b([a-z0-9.-]+\\.[a-z]{2,})(/[^\\s]*)?\\b", text, re.IGNORECASE)
+        m = re.search(r"\b([a-z0-9.-]+\.[a-z]{2,})(/[^\s]*)?\b", text, re.IGNORECASE)
         if m and "@" not in m.group(0):
             return "https://" + m.group(0)
         return None
@@ -349,12 +563,33 @@ class ConversationEngine:
     async def _handle_question(self, text: str) -> dict[str, Any]:
         """Отвечает на вопрос с полным доступом к системе."""
         lower = text.strip().lower()
+        normalized = self._normalize_for_nlu(text)
+        if self._has_keywords(normalized, ("как меня зовут", "мое имя", "моё имя", "забыл мое имя", "my name"), fuzzy=True):
+            owner_name = self._resolve_owner_name()
+            if owner_name:
+                return {
+                    "intent": Intent.QUESTION.value,
+                    "response": f"Тебя зовут {owner_name}.",
+                }
+            return {
+                "intent": Intent.QUESTION.value,
+                "response": "Пока не вижу в памяти твоего имени. Напиши: 'меня зовут ...', и я запомню.",
+            }
         # Direct answer for "source of claim" questions to avoid hallucinations
         if any(w in lower for w in ("откуда", "почему ты", "почему вы", "ты писал", "ты написал", "ты сказала", "ты говорил")):
             return {
                 "intent": Intent.QUESTION.value,
                 "response": "У меня нет подтверждённых данных о публикации/создании. Это было ошибочное сообщение. Исправляю: без факта выполнения больше так не пишу.",
             }
+        gumroad_kw = ("gumroad", "гумроад", "гамроад")
+        analytics_kw = ("стат", "statistics", "analytics", "продаж", "revenue", "выручк", "доход")
+        if self._has_keywords(normalized, gumroad_kw, fuzzy=True) and self._has_keywords(normalized, analytics_kw, fuzzy=True):
+            live = await self._quick_gumroad_analytics()
+            if live:
+                return {
+                    "intent": Intent.QUESTION.value,
+                    "response": live,
+                }
         if self._is_time_query(lower):
             return {
                 "intent": Intent.QUESTION.value,
@@ -417,6 +652,107 @@ class ConversationEngine:
             "response": self._guard_response(response) if response else "Не удалось получить ответ. Попробуй переформулировать.",
         }
 
+    def _remember_owner_profile_fact(self, text: str) -> None:
+        """Best-effort extraction of stable owner profile facts from natural speech."""
+        source_text = self._extract_owner_raw_text(text)
+        owner_name = self._extract_owner_name(source_text)
+        if not owner_name and self._is_probable_name_reply(source_text):
+            owner_name = source_text.title()
+        if not owner_name:
+            return
+        try:
+            OwnerPreferenceModel().set_preference(
+                key="owner_name",
+                value={"name": owner_name},
+                source="owner",
+                confidence=1.0,
+                notes="extracted_from_chat",
+            )
+        except Exception:
+            pass
+
+    @staticmethod
+    def _extract_owner_raw_text(text: str) -> str:
+        raw = str(text or "").strip()
+        if "[REPLY_CONTEXT]" not in raw:
+            return raw
+        m = re.search(r"owner_reply=(.*)", raw)
+        if m:
+            return str(m.group(1) or "").strip()
+        return raw
+
+    def _is_probable_name_reply(self, text: str) -> bool:
+        raw = str(text or "").strip()
+        if not re.fullmatch(r"[A-Za-zА-Яа-яЁё\\-]{2,40}", raw):
+            return False
+        if raw.lower() in {"да", "нет", "ок", "yes", "no", "approve", "reject"}:
+            return False
+        prompts = ("как тебя зовут", "как вас зовут", "твое имя", "твоё имя", "ваше имя", "your name")
+        for turn in reversed(self._context[-6:]):
+            if turn.role != "assistant":
+                continue
+            if self._has_keywords(self._normalize_for_nlu(turn.text), prompts, fuzzy=True):
+                return True
+        return False
+
+    def _resolve_owner_name(self) -> str:
+        try:
+            pref = OwnerPreferenceModel().get_preference("owner_name")
+            if pref and isinstance(pref.get("value"), dict):
+                name = str(pref["value"].get("name", "")).strip()
+                if name:
+                    return name
+        except Exception:
+            pass
+        for turn in reversed(self._context):
+            if turn.role != "user":
+                continue
+            guessed = self._extract_owner_name(turn.text)
+            if guessed:
+                return guessed
+        return ""
+
+    @staticmethod
+    def _extract_owner_name(text: str) -> str:
+        raw = ConversationEngine._extract_owner_raw_text(text)
+        if not raw:
+            return ""
+        patterns = [
+            r"\bменя\s+зовут\s+([A-Za-zА-Яа-яЁё\-]{2,40})",
+            r"\bmy\s+name\s+is\s+([A-Za-zА-Яа-яЁё\-]{2,40})",
+            r"\bi\s*am\s+([A-Za-zА-Яа-яЁё\-]{2,40})",
+        ]
+        for pat in patterns:
+            m = re.search(pat, raw, flags=re.IGNORECASE)
+            if m:
+                return m.group(1).strip().title()
+        return ""
+
+    async def _quick_gumroad_analytics(self) -> str:
+        if not self.agent_registry:
+            return ""
+        try:
+            result = await self.agent_registry.dispatch("sales_check", platform="gumroad")
+        except Exception:
+            return ""
+        if not result or not getattr(result, "success", False):
+            return ""
+        data = getattr(result, "output", {}) or {}
+        gm = data.get("gumroad", data)
+        if not isinstance(gm, dict):
+            return ""
+        if gm.get("error"):
+            return f"Gumroad: доступ есть, но аналитика вернула ошибку: {gm.get('error')}"
+        sales = int(gm.get("sales", 0) or 0)
+        revenue = float(gm.get("revenue", 0.0) or 0.0)
+        products = int(gm.get("products_count", 0) or 0)
+        return (
+            "Gumroad (live):\n"
+            f"- Продажи: {sales}\n"
+            f"- Выручка: ${revenue:.2f}\n"
+            f"- Продуктов: {products}"
+        )
+
     async def _handle_system_action(self, text: str) -> dict[str, Any]:
         """Выполняет системное действие по запросу владельца."""
         system_context = self._format_system_context()
@@ -432,11 +768,27 @@ class ConversationEngine:
             "добавь поддержку", "добавь навык",
         ]
         if any(kw in lower for kw in self_improve_keywords):
+            require_confirm = not bool(getattr(settings, "AUTONOMY_MAX_MODE", False))
             return {
                 "intent": Intent.SYSTEM_ACTION.value,
-                "response": "Подтверждаешь запуск self-improve пайплайна (анализ → код → тесты)? Ответь: да/нет.",
+                "response": (
+                    "Запускаю self-improve пайплайн (анализ -> код -> тесты)."
+                    if not require_confirm
+                    else "Подтверждаешь запуск self-improve пайплайна (анализ -> код -> тесты)? Ответь: да/нет."
+                ),
                 "actions": [{"action": "self_improve", "params": {"request": text}}],
-                "needs_confirmation": True,
+                "needs_confirmation": require_confirm,
+            }
+        trend_request = any(kw in lower for kw in ("тренд", "trends", "trend", "ниш", "niche"))
+        trend_verb = any(kw in lower for kw in ("найд", "скан", "проскан", "проанализ", "подбери", "research"))
+        if trend_request and trend_verb:
+            actions = [{"action": "scan_trends", "params": {}}]
+            out = await self._execute_actions(actions)
+            return {
+                "intent": Intent.SYSTEM_ACTION.value,
+                "response": f"Запустил скан трендов.\n{out or 'Результат формируется, скоро пришлю сводку.'}",
+                "actions": actions,
+                "needs_confirmation": False,
             }
         if any(kw in lower for kw in ["изучи сервис", "изучи платформ", "добавь знания", "найди требования"]):
             # crude extraction of service name from text
@@ -484,15 +836,22 @@ class ConversationEngine:
             if action_list:
                 reply = (
                     f"{reply}\n\n"
-                    f"План действий: {action_list}.\n"
-                    f"Подтверди выполнение: да/нет."
+                    f"План действий: {action_list}."
                 )
+        risky_actions = {"apply_code_change"}
+        needs_confirmation = any(
+            str(a.get("action", "")).strip() in risky_actions
+            for a in actions
+            if isinstance(a, dict)
+        )
+        if actions and needs_confirmation:
+            reply = f"{reply}\nПодтверди выполнение: да/нет."
 
         return {
             "intent": Intent.SYSTEM_ACTION.value,
             "response": reply,
             "actions": actions,
-            "needs_confirmation": bool(actions),
+            "needs_confirmation": needs_confirmation,
         }
 
     async def _handle_goal_request(self, text: str) -> dict[str, Any]:
@@ -559,6 +918,12 @@ class ConversationEngine:
             except Exception:
                 pass
 
+        auto_approve = bool(getattr(settings, "OWNER_AUTO_APPROVE_GOALS", True))
+        approval_hint = (
+            "2. Можно начинать сразу и выдать первый результат без дополнительного подтверждения\n"
+            if auto_approve
+            else "2. НЕ начинай сразу. Сформируй план и предложи на одобрение\n"
+        )
         prompt = (
             f"{VITO_PERSONALITY}\n\n"
             f"=== СОСТОЯНИЕ СИСТЕМЫ ===\n{system_context}\n=== КОНЕЦ ===\n\n"
@@ -568,7 +933,7 @@ class ConversationEngine:
             f"Владелец просит: \"{wrap_untrusted_text(text)}\"\n\n"
             f"ПРАВИЛА:\n"
             f"1. Все продукты/контент — на АНГЛИЙСКОМ (US/CA/EU market)\n"
-            f"2. НЕ начинай сразу. Сформируй план и предложи на одобрение\n"
+            f"{approval_hint}"
             f"3. Если что-то неясно — задай вопрос владельцу (на русском)\n"
             f"4. План должен завершаться конкретным результатом: файл, ссылка, публикация\n\n"
             f"Доступные инструменты:\n"
@@ -581,7 +946,7 @@ class ConversationEngine:
             f'{{"goal_title": "краткое название (English)", '
             f'"goal_description": "план 5-7 шагов (English content, but plan itself in Russian for owner)", '
             f'"confirmation": "предложение владельцу на русском: вот план, что думаешь?", '
-            f'"needs_approval": true, '
+            f'"needs_approval": {str(not auto_approve).lower()}, '
             f'"estimated_cost_usd": 0.05, '
             f'"priority": "HIGH"}}'
         )
@@ -594,9 +959,13 @@ class ConversationEngine:
 
         goal_title = text[:100]
         goal_description = text
-        confirmation = f"Принял задачу: \"{goal_title}\"\n\nГотовлю план. Отправлю на одобрение."
+        confirmation = (
+            f"Принял задачу: \"{goal_title}\"\n\nНачинаю выполнение и отправлю полный отчёт."
+            if auto_approve
+            else f"Принял задачу: \"{goal_title}\"\n\nГотовлю план. Отправлю на одобрение."
+        )
         priority = "HIGH"
-        needs_approval = True
+        needs_approval = not auto_approve
         estimated_cost = 0.05
 
         if response:
@@ -607,7 +976,7 @@ class ConversationEngine:
                     goal_description = data.get("goal_description", text)
                     confirmation = data.get("confirmation", confirmation)
                     priority = data.get("priority", "HIGH")
-                    needs_approval = data.get("needs_approval", True)
+                    needs_approval = data.get("needs_approval", not auto_approve)
                     estimated_cost = data.get("estimated_cost_usd", 0.05)
             except Exception:
                 pass
@@ -700,9 +1069,9 @@ class ConversationEngine:
                     actions=["publisher_agent:publish", "browser_agent:form_fill", "ecommerce_agent:listing_create", "platform:publish"],
                     hours=24,
                 ):
-                    return "Это было предложение, а не факт выполнения. Подтвердить запуск?"
+                    return "Это было предложение, а не факт выполнения. Если хочешь, запущу это сейчас."
             except Exception:
-                return "Это было предложение, а не факт выполнения. Подтвердить запуск?"
+                return "Это было предложение, а не факт выполнения. Если хочешь, запущу это сейчас."
         return response
 
     # ── Исполнение действий ──
@@ -716,11 +1085,11 @@ class ConversationEngine:
             params = act.get("params", {})
             try:
                 if action_name not in allowed:
-                    results.append(f"[{action_name}] Действие запрещено allowlist")
+                    results.append(f"Действие '{action_name}' недоступно по политике безопасности.")
                     continue
                 if action_name == "apply_code_change":
                     if not self.comms:
-                        results.append("[apply_code_change] Approval channel unavailable")
+                        results.append("Не могу изменить код: канал подтверждения недоступен.")
                         continue
                     target = params.get("file", "")
                     instruction = params.get("instruction", "")
@@ -735,13 +1104,15 @@ class ConversationEngine:
                         timeout_seconds=3600,
                     )
                     if approved is not True:
-                        results.append("[apply_code_change] Owner approval rejected or timed out")
+                        results.append("Изменение кода отменено: подтверждение не получено.")
                         continue
                 result = await self._dispatch_action(action_name, params)
                 if result:
-                    results.append(f"[{action_name}] {result}")
+                    results.append(str(result))
+                else:
+                    results.append(f"Действие '{action_name}' выполнено.")
             except Exception as e:
-                results.append(f"[{action_name}] Ошибка: {e}")
+                results.append(f"Ошибка при выполнении '{action_name}': {e}")
                 logger.warning(f"Action error {action_name}: {e}", extra={"event": "action_error"})
         return "\n".join(results) if results else ""
 

@@ -31,6 +31,7 @@ def mock_update():
     update.message = MagicMock()
     update.message.reply_text = AsyncMock()
     update.message.text = ""
+    update.message.reply_to_message = None
     return update
 
 
@@ -259,6 +260,29 @@ async def test_cmd_packs(comms, mock_update, tmp_path: Path, monkeypatch):
     assert "Capability packs" in text
 
 
+def test_apply_llm_mode_free_sets_expected_values(comms):
+    comms._set_env_values = MagicMock(return_value=True)
+    ok, msg = comms._apply_llm_mode("free")
+    assert ok is True
+    assert "FREE" in msg
+    comms._set_env_values.assert_called_once()
+    payload = comms._set_env_values.call_args[0][0]
+    assert payload["LLM_FORCE_GEMINI_FREE"] == "true"
+    assert payload["LLM_FORCE_GEMINI_MODEL"] == "gemini-2.5-flash"
+    assert payload["LLM_ENABLED_MODELS"] == "gemini-2.5-flash"
+
+
+@pytest.mark.asyncio
+async def test_cmd_llm_mode_status(comms, mock_update):
+    comms._apply_llm_mode = MagicMock(return_value=(True, "LLM mode status"))
+    ctx = MagicMock()
+    ctx.args = ["status"]
+    await comms._cmd_llm_mode(mock_update, ctx)
+    comms._apply_llm_mode.assert_called_once_with("status")
+    text = mock_update.message.reply_text.call_args[0][0]
+    assert "LLM mode status" in text
+
+
 # ── Одобрение ──
 
 @pytest.mark.asyncio
@@ -423,6 +447,23 @@ async def test_on_message_reject_text(comms, mock_update):
 
 
 @pytest.mark.asyncio
+async def test_on_message_owner_confirmation_has_priority_over_pending_approvals(comms, mock_update):
+    future = asyncio.get_event_loop().create_future()
+    comms._pending_approvals["req"] = future
+    ge = MagicMock()
+    ge.clear_all_goals.return_value = 3
+    comms.set_modules(goal_engine=ge)
+    comms._pending_owner_confirmation = {"kind": "clear_goals"}
+    mock_update.message.text = "да"
+
+    await comms._on_message(mock_update, MagicMock())
+
+    ge.clear_all_goals.assert_called_once()
+    assert future.done() is False
+    assert comms._pending_owner_confirmation is None
+
+
+@pytest.mark.asyncio
 async def test_on_message_sets_pending_system_action_without_auto_execute(comms, mock_update):
     conv = MagicMock()
     conv.process_message = AsyncMock(return_value={
@@ -457,6 +498,44 @@ async def test_on_message_approves_pending_system_action_and_executes(comms, moc
 
 
 @pytest.mark.asyncio
+async def test_on_message_numeric_selects_pending_system_action_variant(comms, mock_update):
+    conv = MagicMock()
+    conv.process_message = AsyncMock(return_value={"intent": "conversation", "response": "ok"})
+    conv._execute_actions = AsyncMock(return_value="[do_b] done")
+    comms.set_modules(conversation_engine=conv)
+    comms._pending_system_action = {
+        "actions": [
+            {"action": "do_a", "params": {}},
+            {"action": "do_b", "params": {}},
+        ]
+    }
+    mock_update.message.text = "2"
+    with patch("comms_agent.settings.TELEGRAM_STRICT_COMMANDS", False):
+        await comms._on_message(mock_update, MagicMock())
+
+    conv._execute_actions.assert_called_once()
+    args = conv._execute_actions.call_args[0][0]
+    assert len(args) == 1
+    assert args[0]["action"] == "do_b"
+    assert comms._pending_system_action is None
+
+
+@pytest.mark.asyncio
+async def test_on_message_numeric_choice_expands_with_context(comms, mock_update):
+    conv = MagicMock()
+    conv.process_message = AsyncMock(return_value={"intent": "conversation", "response": "Принял."})
+    comms.set_modules(conversation_engine=conv)
+    comms._pending_choice_context = {"saved_at": "now"}
+    mock_update.message.text = "5"
+    with patch("comms_agent.settings.TELEGRAM_STRICT_COMMANDS", False):
+        await comms._on_message(mock_update, MagicMock())
+
+    sent = conv.process_message.call_args[0][0]
+    assert "вариант 5" in sent.lower()
+    assert comms._pending_choice_context is None
+
+
+@pytest.mark.asyncio
 async def test_on_message_strict_mode_skips_natural_schedule(comms, mock_update):
     conv = MagicMock()
     conv.process_message = AsyncMock(return_value={"intent": "conversation", "response": "ok"})
@@ -486,6 +565,34 @@ async def test_on_message_regular(comms, mock_update):
     await comms._on_message(mock_update, MagicMock())
     text = mock_update.message.reply_text.call_args[0][0]
     assert "Не понял" in text
+
+
+@pytest.mark.asyncio
+async def test_on_message_kdp_login_shortcut(comms, mock_update):
+    mock_update.message.text = "зайди на амазон"
+    comms._handle_kdp_login_flow = AsyncMock(return_value=True)
+    await comms._on_message(mock_update, MagicMock())
+    comms._handle_kdp_login_flow.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_on_message_reply_context_passed_to_conversation_engine(comms, mock_update):
+    conv = MagicMock()
+    conv.process_message = AsyncMock(return_value={"intent": "conversation", "response": "ok"})
+    comms.set_modules(conversation_engine=conv)
+    parent = MagicMock()
+    parent.message_id = 321
+    parent.text = "Старое сообщение VITO про план публикации"
+    mock_update.message.reply_to_message = parent
+    mock_update.message.text = "делай вариант 2"
+
+    await comms._on_message(mock_update, MagicMock())
+
+    sent = conv.process_message.call_args[0][0]
+    assert "[REPLY_CONTEXT]" in sent
+    assert "reply_to_message_id=321" in sent
+    assert "Старое сообщение VITO" in sent
+    assert "owner_reply=делай вариант 2" in sent
 
 
 @pytest.mark.asyncio

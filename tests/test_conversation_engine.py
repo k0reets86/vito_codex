@@ -33,6 +33,12 @@ class TestIntentDetection:
         # "Сделай" is a goal request keyword
         assert engine._detect_intent_rules("Сделай отчёт") == Intent.GOAL_REQUEST
 
+    def test_goal_request_intent_with_typos(self, engine):
+        assert engine._detect_intent_rules("сдлай атчот по трендам") == Intent.GOAL_REQUEST
+
+    def test_goal_request_intent_mixed_language(self, engine):
+        assert engine._detect_intent_rules("pls найди trends for gumroad") == Intent.GOAL_REQUEST
+
     @pytest.mark.asyncio
     async def test_llm_intent_question(self, engine):
         engine.llm_router.call_llm = AsyncMock(return_value="QUESTION")
@@ -103,6 +109,76 @@ class TestProcessMessage:
         assert result["response"] is not None
 
     @pytest.mark.asyncio
+    async def test_process_message_returns_nlu_tones(self, engine):
+        engine.llm_router.call_llm = AsyncMock(side_effect=[
+            "CONVERSATION",
+            "Понял, исправляю.",
+        ])
+        result = await engine.process_message("это не работает, срочно почини")
+        assert result["intent"] == "system_action"
+        assert "frustrated" in result.get("nlu_tones", [])
+        assert "urgent" in result.get("nlu_tones", [])
+
+    @pytest.mark.asyncio
+    async def test_question_gumroad_stats_uses_live_sales_check(self, mock_llm_router, mock_memory):
+        registry = MagicMock()
+        sales = {"gumroad": {"platform": "gumroad", "sales": 7, "revenue": 123.45, "products_count": 3}}
+        registry.dispatch = AsyncMock(return_value=type("R", (), {"success": True, "output": sales})())
+        engine = ConversationEngine(llm_router=mock_llm_router, memory=mock_memory, agent_registry=registry)
+        result = await engine._handle_question("какая сейчас статистика на гумроад?")
+        assert result["intent"] == "question"
+        assert "Gumroad (live)" in result["response"]
+        assert "Продажи: 7" in result["response"]
+
+    @pytest.mark.asyncio
+    async def test_owner_name_is_remembered_and_returned(self, mock_llm_router, mock_memory):
+        engine = ConversationEngine(llm_router=mock_llm_router, memory=mock_memory)
+        engine.llm_router.call_llm = AsyncMock(return_value="ok")
+        await engine.process_message("меня зовут Тарас")
+        result = await engine._handle_question("как меня зовут?")
+        assert result["intent"] == "question"
+        assert "Тарас" in result["response"]
+
+    @pytest.mark.asyncio
+    async def test_owner_name_single_word_reply_is_remembered(self, mock_llm_router, mock_memory):
+        engine = ConversationEngine(llm_router=mock_llm_router, memory=mock_memory)
+        engine.llm_router.call_llm = AsyncMock(return_value="ok")
+        engine._add_turn("assistant", "Как тебя зовут?")
+        await engine.process_message("Виталий")
+        result = await engine._handle_question("как меня зовут?")
+        assert result["intent"] == "question"
+        assert "Виталий" in result["response"]
+
+    @pytest.mark.asyncio
+    async def test_deterministic_trend_route_executes_without_llm(self, mock_llm_router, mock_memory):
+        registry = MagicMock()
+        engine = ConversationEngine(llm_router=mock_llm_router, memory=mock_memory, agent_registry=registry)
+        engine._execute_actions = AsyncMock(return_value="[scan_trends][status=completed] done")
+        result = await engine.process_message("срочно найди тренды цифровых продуктов")
+        assert result["intent"] == "system_action"
+        assert "сканирование трендов" in result["response"].lower()
+        engine._execute_actions.assert_called_once()
+        engine.llm_router.call_llm.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_deterministic_network_check_route(self, engine):
+        result = await engine.process_message("проверь доступ к интернету")
+        assert result["intent"] == "question"
+        assert "Проверка сети" in result["response"]
+
+    @pytest.mark.asyncio
+    async def test_deterministic_etsy_oauth_route(self, engine, monkeypatch):
+        from platforms import etsy as etsy_mod
+        monkeypatch.setattr(
+            etsy_mod.EtsyPlatform,
+            "start_oauth2_pkce",
+            AsyncMock(return_value={"auth_url": "https://www.etsy.com/oauth/connect?x=1", "redirect_uri": "http://localhost/cb"}),
+        )
+        result = await engine.process_message("подключи etsy oauth")
+        assert result["intent"] == "system_action"
+        assert "Etsy OAuth подготовлен" in result["response"]
+
+    @pytest.mark.asyncio
     async def test_goal_request_creates_goal(self, engine):
         engine.llm_router.call_llm = AsyncMock(side_effect=[
             "GOAL_REQUEST",
@@ -134,7 +210,8 @@ class TestProcessMessage:
         assert result["response"] is not None
 
     @pytest.mark.asyncio
-    async def test_system_action_requires_confirmation_and_no_auto_execute(self, engine):
+    async def test_system_action_requires_confirmation_and_no_auto_execute(self, engine, monkeypatch):
+        monkeypatch.setattr("conversation_engine.settings.AUTONOMY_MAX_MODE", False, raising=False)
         engine._execute_actions = AsyncMock(return_value="done")
         result = await engine.process_message("исправь интеграцию")
         assert result["intent"] == "system_action"
@@ -146,10 +223,18 @@ class TestProcessMessage:
     async def test_system_action_llm_actions_marked_for_confirmation(self, engine):
         engine.llm_router.call_llm = AsyncMock(return_value='{"response":"Ок","actions":[{"action":"scan_trends","params":{}}]}')
         engine._execute_actions = AsyncMock(return_value="done")
-        result = await engine.process_message("запусти агент и проверь тренды")
+        result = await engine.process_message("запусти агент и проверь логи")
         assert result["intent"] == "system_action"
-        assert result.get("needs_confirmation") is True
-        engine._execute_actions.assert_not_called()
+        assert result.get("needs_confirmation") is False
+        engine._execute_actions.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_system_action_trend_scan_executes_without_confirmation(self, engine):
+        engine._execute_actions = AsyncMock(return_value="[scan_trends] done")
+        result = await engine._handle_system_action("найди тренды цифровых продуктов")
+        assert result["intent"] == "system_action"
+        assert result.get("needs_confirmation") is False
+        engine._execute_actions.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_owner_task_state_persists_after_goal_then_question(self, mock_llm_router, mock_memory, tmp_path):
@@ -306,6 +391,16 @@ async def test_handle_goal_request_includes_history_and_owner_focus(mock_llm_rou
 
 
 @pytest.mark.asyncio
+async def test_handle_goal_request_auto_approve_enabled(monkeypatch, mock_llm_router, mock_memory):
+    monkeypatch.setattr("conversation_engine.settings.OWNER_AUTO_APPROVE_GOALS", True, raising=False)
+    engine = ConversationEngine(llm_router=mock_llm_router, memory=mock_memory)
+    mock_llm_router.call_llm = AsyncMock(return_value='{"goal_title":"t","goal_description":"d","confirmation":"c"}')
+    result = await engine._handle_goal_request("сделай лендинг")
+    assert result["create_goal"] is True
+    assert result["needs_approval"] is False
+
+
+@pytest.mark.asyncio
 async def test_execute_actions_blocks_unknown_action_without_auto_self_improve(mock_llm_router, mock_memory):
     registry = MagicMock()
     registry.dispatch = AsyncMock()
@@ -315,5 +410,5 @@ async def test_execute_actions_blocks_unknown_action_without_auto_self_improve(m
         agent_registry=registry,
     )
     out = await engine._execute_actions([{"action": "totally_unknown_action", "params": {}}])
-    assert "запрещено allowlist" in out
+    assert "недоступно по политике безопасности" in out
     registry.dispatch.assert_not_called()

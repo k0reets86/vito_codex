@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from config.paths import root_path
 
 
 class CancelState:
     def __init__(self, path: Path | str | None = None) -> None:
-        self.path = Path(path or "/home/vito/vito-agent/runtime/cancel_state.json")
+        self.path = Path(path or root_path("runtime", "cancel_state.json"))
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if not self.path.exists():
             self._write({"cancelled": False})

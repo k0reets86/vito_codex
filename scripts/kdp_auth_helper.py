@@ -1,0 +1,387 @@
+#!/usr/bin/env python3
+"""Amazon KDP auth helper (browser session capture + probe).
+
+Safe flow:
+1) Open KDP login in Chromium.
+2) Complete login and 2FA manually.
+3) Save storage state for reuse by automation.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from config.settings import settings
+
+
+def _is_logged_in_url(url: str) -> bool:
+    u = (url or "").lower()
+    if "signin" in u or "ap/signin" in u:
+        return False
+    return any(x in u for x in ("/bookshelf", "/en_us/", "/reports"))
+
+
+async def browser_capture(timeout_sec: int, storage_path: str, headless: bool) -> int:
+    from playwright.async_api import async_playwright
+
+    email = str(getattr(settings, "KDP_EMAIL", "") or "")
+    password = str(getattr(settings, "KDP_PASSWORD", "") or "")
+    out = Path(storage_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    print("\n=== Amazon KDP Browser Session Capture ===")
+    print("1) Откроется страница логина KDP")
+    print("2) Войдите вручную и пройдите 2FA")
+    print("3) Скрипт сохранит сессию после входа в Bookshelf")
+    print(f"Storage state: {out}")
+    if not email or not password:
+        print("WARNING: KDP_EMAIL/KDP_PASSWORD не заданы, логин будет полностью вручную.")
+    if headless:
+        print("WARNING: headless=True может ухудшить прохождение защиты Amazon.")
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=headless, args=["--no-sandbox", "--disable-dev-shm-usage"])
+        context = await browser.new_context(viewport={"width": 1366, "height": 900})
+        page = await context.new_page()
+        await page.goto("https://kdp.amazon.com", wait_until="domcontentloaded", timeout=120000)
+        await page.wait_for_timeout(2000)
+
+        # Best-effort prefill only
+        if email:
+            for sel in ("input[type='email']", "input[name='email']", "input[name='ap_email']"):
+                try:
+                    await page.fill(sel, email)
+                    break
+                except Exception:
+                    continue
+        if password:
+            for sel in ("input[type='password']", "input[name='password']", "input[name='ap_password']"):
+                try:
+                    await page.fill(sel, password)
+                    break
+                except Exception:
+                    continue
+
+        print("Ожидаю успешный вход (bookshelf/reports)...")
+        end_ts = asyncio.get_event_loop().time() + max(120, int(timeout_sec))
+        ok = False
+        while asyncio.get_event_loop().time() < end_ts:
+            await page.wait_for_timeout(1500)
+            if _is_logged_in_url(page.url):
+                ok = True
+                break
+
+        if not ok:
+            shot = out.with_suffix(".failed.png")
+            try:
+                await page.screenshot(path=str(shot), full_page=True)
+            except Exception:
+                pass
+            await context.close()
+            await browser.close()
+            print("ERROR: логин не подтвержден до таймаута.")
+            print(f"Debug screenshot: {shot}")
+            return 1
+
+        await context.storage_state(path=str(out))
+        cookies = await context.cookies()
+        cookie_path = out.with_suffix(".cookies.json")
+        cookie_path.write_text(json.dumps(cookies, ensure_ascii=False, indent=2), encoding="utf-8")
+        await context.close()
+        await browser.close()
+        print("OK: KDP сессия сохранена")
+        print(f"- storage_state: {out}")
+        print(f"- cookies: {cookie_path}")
+        return 0
+
+
+async def auto_login(timeout_sec: int, storage_path: str, otp_code: str = "") -> int:
+    """Headless-friendly login with optional OTP from stdin/chat relay."""
+    from playwright.async_api import async_playwright
+
+    email = str(getattr(settings, "KDP_EMAIL", "") or "")
+    password = str(getattr(settings, "KDP_PASSWORD", "") or "")
+    out = Path(storage_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    if not email or not password:
+        print("ERROR: KDP_EMAIL/KDP_PASSWORD missing in .env")
+        return 1
+
+    last_url = ""
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+            context = await browser.new_context(viewport={"width": 1366, "height": 900})
+            page = await context.new_page()
+            await page.goto("https://kdp.amazon.com", wait_until="domcontentloaded", timeout=120000)
+            await page.wait_for_timeout(1000)
+            last_url = page.url
+            print(f"STEP: opened {page.url}")
+
+        # Landing page often has no form fields. Follow Sign in entrypoint first.
+            if await page.locator("input[name='ap_email'], input[type='email'], input[name='email']").count() == 0:
+                moved = False
+                for sel in ("a[href='/bookshelf']", "a:has-text('Sign in')"):
+                    try:
+                        if await page.locator(sel).count() > 0:
+                            await page.click(sel, timeout=3000)
+                            moved = True
+                            break
+                    except Exception:
+                        continue
+                if not moved:
+                    try:
+                        await page.goto("https://kdp.amazon.com/bookshelf", wait_until="domcontentloaded", timeout=120000)
+                        moved = True
+                    except Exception:
+                        moved = False
+                await page.wait_for_timeout(1500)
+                last_url = page.url
+                print(f"STEP: moved_to_signin {page.url}")
+
+        # Step 1: Email
+            email_filled = False
+            for sel in ("input[name='email']", "input[name='ap_email']", "input[type='email']"):
+                try:
+                    if await page.locator(sel).count() > 0:
+                        await page.fill(sel, email, timeout=3000)
+                        email_filled = True
+                        break
+                except Exception:
+                    continue
+            if not email_filled:
+                await context.close()
+                await browser.close()
+                print(f"ERROR: email input not found. current_url={page.url}")
+                return 5
+            for btn in ("input#continue", "input[name='continue']", "button:has-text('Continue')"):
+                try:
+                    if await page.locator(btn).count() > 0:
+                        await page.click(btn, timeout=2000)
+                        break
+                except Exception:
+                    continue
+            await page.wait_for_timeout(1200)
+            last_url = page.url
+            print(f"STEP: email_submitted {page.url}")
+
+        # Step 2: Password
+            pwd_filled = False
+            for sel in ("input[name='password']", "input[name='ap_password']", "input[type='password']"):
+                try:
+                    if await page.locator(sel).count() > 0:
+                        await page.fill(sel, password, timeout=3000)
+                        pwd_filled = True
+                        break
+                except Exception:
+                    continue
+            if not pwd_filled:
+                await context.close()
+                await browser.close()
+                print(f"ERROR: password input not found. current_url={page.url}")
+                return 6
+            for btn in ("input#signInSubmit", "input[name='signInSubmit']", "button:has-text('Sign in')"):
+                try:
+                    if await page.locator(btn).count() > 0:
+                        await page.click(btn, timeout=2500)
+                        break
+                except Exception:
+                    continue
+            await page.wait_for_timeout(1500)
+            last_url = page.url
+            print(f"STEP: password_submitted {page.url}")
+
+        # Step 3: OTP/MFA (if present)
+            otp_selectors = ("input[name='otpCode']", "input[name='code']", "input[type='tel']", "input[type='number']")
+            otp_found = False
+            for sel in otp_selectors:
+                try:
+                    if await page.locator(sel).count() > 0:
+                        otp_found = True
+                        break
+                except Exception:
+                    continue
+
+            if otp_found:
+                if not otp_code:
+                    print("OTP_REQUIRED: send code now")
+                    try:
+                        otp_code = input().strip()
+                    except Exception:
+                        otp_code = ""
+                if not otp_code:
+                    await context.close()
+                    await browser.close()
+                    print("ERROR: OTP code not provided")
+                    return 2
+                filled = False
+                for sel in otp_selectors:
+                    try:
+                        if await page.locator(sel).count() > 0:
+                            await page.fill(sel, otp_code)
+                            filled = True
+                            break
+                    except Exception:
+                        continue
+                if not filled:
+                    await context.close()
+                    await browser.close()
+                    print("ERROR: OTP input not found")
+                    return 3
+                for btn in ("input#auth-signin-button", "input[name='mfaSubmit']", "button:has-text('Sign in')", "button:has-text('Verify')"):
+                    try:
+                        await page.click(btn, timeout=2500)
+                        break
+                    except Exception:
+                        continue
+                await page.wait_for_timeout(2000)
+
+        # Wait for post-login URL
+            end_ts = asyncio.get_event_loop().time() + max(60, int(timeout_sec))
+            ok = False
+            ticks = 0
+            while asyncio.get_event_loop().time() < end_ts:
+                u = page.url.lower()
+                last_url = page.url
+                if _is_logged_in_url(u):
+                    ok = True
+                    break
+            # OTP can appear later (after additional checks/challenges)
+                otp_late = False
+                for sel in otp_selectors:
+                    try:
+                        if await page.locator(sel).count() > 0:
+                            otp_late = True
+                            break
+                    except Exception:
+                        continue
+                if otp_late:
+                    if not otp_code:
+                        print("OTP_REQUIRED: send code now")
+                        try:
+                            otp_code = input().strip()
+                        except Exception:
+                            otp_code = ""
+                    if otp_code:
+                        for sel in otp_selectors:
+                            try:
+                                if await page.locator(sel).count() > 0:
+                                    await page.fill(sel, otp_code, timeout=3000)
+                                    break
+                            except Exception:
+                                continue
+                        for btn in ("input#auth-signin-button", "input[name='mfaSubmit']", "button:has-text('Sign in')", "button:has-text('Verify')"):
+                            try:
+                                if await page.locator(btn).count() > 0:
+                                    await page.click(btn, timeout=2500)
+                                    break
+                            except Exception:
+                                continue
+                        await page.wait_for_timeout(1500)
+            # Handle intermediate continue/challenge buttons if visible
+                for btn in (
+                    "input#auth-signin-button",
+                    "button:has-text('Continue')",
+                    "input[name='continue']",
+                    "input[type='submit']",
+                    "button[type='submit']",
+                ):
+                    try:
+                        if await page.locator(btn).count() > 0:
+                            await page.click(btn, timeout=800)
+                    except Exception:
+                        pass
+                ticks += 1
+                if ticks % 5 == 0:
+                    print(f"WAIT: url={page.url}")
+                if ticks % 15 == 0:
+                    try:
+                        dbg = out.with_suffix(".wait.png")
+                        await page.screenshot(path=str(dbg), full_page=True)
+                        print(f"DEBUG_SCREENSHOT: {dbg}")
+                    except Exception:
+                        pass
+                await page.wait_for_timeout(1200)
+
+            if not ok:
+                shot = out.with_suffix(".auto.failed.png")
+                try:
+                    await page.screenshot(path=str(shot), full_page=True)
+                except Exception:
+                    pass
+                await context.close()
+                await browser.close()
+                print(f"ERROR: login not confirmed. debug={shot}")
+                return 4
+
+            await context.storage_state(path=str(out))
+            await context.close()
+            await browser.close()
+            print(f'{{"ok": true, "storage_state": "{out}"}}')
+            return 0
+    except Exception as e:
+        print(f"ERROR: auto_login_exception={e} url={last_url}")
+        return 9
+
+
+async def probe_session(storage_path: str, headless: bool) -> int:
+    from playwright.async_api import async_playwright
+
+    state = Path(storage_path)
+    if not state.exists():
+        print(f"ERROR: storage_state not found: {state}")
+        return 1
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=headless, args=["--no-sandbox", "--disable-dev-shm-usage"])
+        context = await browser.new_context(storage_state=str(state), viewport={"width": 1280, "height": 720})
+        page = await context.new_page()
+        await page.goto("https://kdp.amazon.com/bookshelf", wait_until="domcontentloaded", timeout=120000)
+        await page.wait_for_timeout(1500)
+        ok = _is_logged_in_url(page.url)
+        title = await page.title()
+        await context.close()
+        await browser.close()
+        print(json.dumps({"ok": ok, "url": page.url, "title": title}, ensure_ascii=False))
+        return 0 if ok else 2
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Amazon KDP auth helper")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_capture = sub.add_parser("browser-capture", help="Manual login + 2FA + save storage state")
+    p_capture.add_argument("--timeout-sec", type=int, default=600)
+    p_capture.add_argument("--storage-path", default=str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json")))
+    p_capture.add_argument("--headless", action="store_true")
+
+    p_probe = sub.add_parser("probe", help="Check saved KDP session")
+    p_probe.add_argument("--storage-path", default=str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json")))
+    p_probe.add_argument("--headless", action="store_true")
+
+    p_auto = sub.add_parser("auto-login", help="Headless login using env creds and optional OTP code")
+    p_auto.add_argument("--timeout-sec", type=int, default=300)
+    p_auto.add_argument("--storage-path", default=str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json")))
+    p_auto.add_argument("--otp-code", default="")
+
+    args = parser.parse_args()
+    if args.cmd == "browser-capture":
+        return asyncio.run(browser_capture(int(args.timeout_sec), str(args.storage_path), bool(args.headless)))
+    if args.cmd == "probe":
+        return asyncio.run(probe_session(str(args.storage_path), bool(args.headless)))
+    if args.cmd == "auto-login":
+        return asyncio.run(auto_login(int(args.timeout_sec), str(args.storage_path), str(args.otp_code or "")))
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

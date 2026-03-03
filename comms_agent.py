@@ -41,6 +41,7 @@ from telegram.ext import (
 )
 
 from config.logger import get_logger
+from config.paths import PROJECT_ROOT, root_path
 from config.settings import settings
 from modules.owner_preference_model import OwnerPreferenceModel
 from modules.owner_pref_metrics import OwnerPreferenceMetrics
@@ -62,6 +63,12 @@ class CommsAgent:
         self._pending_schedule_update: dict | None = None
         # Ожидаем подтверждение системного действия (из свободного текста)
         self._pending_system_action: dict | None = None
+        # Локальное подтверждение владельца для конкретного действия (приоритетнее общей очереди)
+        self._pending_owner_confirmation: dict | None = None
+        # Контекст выбора вариантов (когда бот прислал список "1., 2., 3.")
+        self._pending_choice_context: dict | None = None
+        # Ожидаем OTP-код для KDP auto-login
+        self._pending_kdp_otp: dict | None = None
         self._telegram_conflict_mode: bool = False
 
         # Обратные ссылки на модули — устанавливаются через set_modules()
@@ -104,11 +111,65 @@ class CommsAgent:
         token = str(args[0] or "").strip().lower()
         return token in {"yes", "y", "да", "confirm", "ok"}
 
-    def _try_set_env_from_text(self, text: str) -> bool:
-        """Parse KEY=VALUE messages and save to .env (owner only)."""
+    @staticmethod
+    def _parse_bool_env(value: str) -> bool:
+        return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _is_yes_token(text: str) -> bool:
+        return str(text or "").strip().lower() in {"да", "yes", "ок", "ok", "approve", "✅", "👍"}
+
+    @staticmethod
+    def _is_no_token(text: str) -> bool:
+        return str(text or "").strip().lower() in {"нет", "no", "reject", "отмена", "❌", "👎"}
+
+    def _set_env_values(self, updates: dict[str, str]) -> bool:
+        """Persist multiple env keys to .env and update runtime settings."""
         import os
         import re
         from pathlib import Path
+
+        if not updates:
+            return False
+        env_path = Path(root_path(".env"))
+        text_env = env_path.read_text() if env_path.exists() else ""
+        for key, value in updates.items():
+            k = str(key or "").strip().upper()
+            v = str(value or "").strip()
+            if not k:
+                continue
+            if re.search(rf"^{re.escape(k)}=.*$", text_env, flags=re.M):
+                text_env = re.sub(rf"^{re.escape(k)}=.*$", f"{k}={v}", text_env, flags=re.M)
+            else:
+                if text_env and not text_env.endswith("\n"):
+                    text_env += "\n"
+                text_env += f"{k}={v}\n"
+            os.environ[k] = v
+            try:
+                if hasattr(settings, k):
+                    cur = getattr(settings, k)
+                    if isinstance(cur, bool):
+                        setattr(settings, k, self._parse_bool_env(v))
+                    elif isinstance(cur, int):
+                        try:
+                            setattr(settings, k, int(v))
+                        except Exception:
+                            setattr(settings, k, v)
+                    elif isinstance(cur, float):
+                        try:
+                            setattr(settings, k, float(v))
+                        except Exception:
+                            setattr(settings, k, v)
+                    else:
+                        setattr(settings, k, v)
+            except Exception:
+                pass
+        env_path.write_text(text_env)
+        return True
+
+    def _try_set_env_from_text(self, text: str) -> bool:
+        """Parse KEY=VALUE messages and save to .env (owner only)."""
+        import re
 
         # Accept formats: KEY=VALUE or "set KEY=VALUE"
         m = re.search(r"(?:^|\\bset\\s+)([A-Z0-9_]{3,})\\s*=\\s*([^\\s]+)", text, re.IGNORECASE)
@@ -122,7 +183,7 @@ class CommsAgent:
             "PERPLEXITY_API_KEY", "OPENROUTER_API_KEY",
             "TELEGRAM_BOT_TOKEN", "TELEGRAM_OWNER_CHAT_ID",
             "GUMROAD_API_KEY", "GUMROAD_OAUTH_TOKEN", "GUMROAD_APP_ID", "GUMROAD_APP_SECRET",
-            "ETSY_KEYSTRING", "ETSY_SHARED_SECRET", "KOFI_API_KEY", "KOFI_PAGE_ID",
+            "ETSY_KEYSTRING", "ETSY_SHARED_SECRET", "ETSY_EMAIL", "ETSY_PASSWORD", "KOFI_API_KEY", "KOFI_PAGE_ID",
             "REPLICATE_API_TOKEN", "ANTICAPTCHA_KEY",
             "TWITTER_BEARER_TOKEN", "TWITTER_CONSUMER_KEY", "TWITTER_CONSUMER_SECRET",
             "TWITTER_ACCESS_TOKEN", "TWITTER_ACCESS_SECRET",
@@ -132,26 +193,144 @@ class CommsAgent:
         }
         if key not in allowed:
             return False
-
-        env_path = Path("/home/vito/vito-agent/.env")
-        text_env = env_path.read_text() if env_path.exists() else ""
-        if re.search(rf"^{key}=.*$", text_env, flags=re.M):
-            text_env = re.sub(rf"^{key}=.*$", f"{key}={value}", text_env, flags=re.M)
-        else:
-            if text_env and not text_env.endswith("\n"):
-                text_env += "\n"
-            text_env += f"{key}={value}\n"
-        env_path.write_text(text_env)
-
-        # Update process env + settings if present
-        os.environ[key] = value
-        try:
-            from config.settings import settings
-            if hasattr(settings, key):
-                setattr(settings, key, value)
-        except Exception:
-            pass
+        self._set_env_values({key: value})
         logger.info("Env key set via Telegram", extra={"event": "env_set", "context": {"key": key}})
+        return True
+
+    def _apply_llm_mode(self, mode: str) -> tuple[bool, str]:
+        """Switch LLM routing profile quickly: free|prod."""
+        m = str(mode or "").strip().lower()
+        if m in {"free", "test", "gemini", "flash"}:
+            self._set_env_values(
+                {
+                    "LLM_FORCE_GEMINI_FREE": "true",
+                    "LLM_FORCE_GEMINI_MODEL": "gemini-2.5-flash",
+                    "LLM_ENABLED_MODELS": "gemini-2.5-flash",
+                    "LLM_DISABLED_MODELS": "claude-haiku-4-5-20251001,gpt-4o-mini,claude-sonnet-4-6,o3,gpt-5,claude-opus-4-6,sonar-pro",
+                    "GEMINI_ENABLE_GROUNDING_SEARCH": "true",
+                    "GEMINI_ENABLE_URL_CONTEXT": "true",
+                    "GEMINI_FREE_MAX_RPM": "15",
+                    "GEMINI_FREE_TEXT_RPD": "1000",
+                    "GEMINI_FREE_SEARCH_RPD": "1500",
+                }
+            )
+            return True, (
+                "LLM режим: FREE (тест)\n"
+                "- Все задачи идут через Gemini 2.5 Flash\n"
+                "- Платные модели отключены\n"
+                "- Grounding Search + URL Context включены\n"
+                "- Перезапуск не обязателен, но желателен для чистого цикла"
+            )
+        if m in {"prod", "production", "battle", "боевой"}:
+            self._set_env_values(
+                {
+                    "LLM_FORCE_GEMINI_FREE": "false",
+                    "LLM_FORCE_GEMINI_MODEL": "gemini-2.5-flash",
+                    "LLM_ENABLED_MODELS": "",
+                    "LLM_DISABLED_MODELS": "",
+                }
+            )
+            return True, (
+                "LLM режим: PROD (боевой)\n"
+                "- ROUTINE: Gemini -> 4o-mini -> Haiku\n"
+                "- CONTENT: Sonnet -> Haiku -> Gemini\n"
+                "- CODE/SELF_HEAL: o3 -> Sonnet -> GPT-5\n"
+                "- RESEARCH: Perplexity -> Gemini -> Sonnet\n"
+                "- STRATEGY: Opus -> GPT-5 -> Sonnet"
+            )
+        if m in {"status", "show", "current", "текущий"}:
+            free = bool(getattr(settings, "LLM_FORCE_GEMINI_FREE", False))
+            enabled = str(getattr(settings, "LLM_ENABLED_MODELS", "") or "")
+            disabled = str(getattr(settings, "LLM_DISABLED_MODELS", "") or "")
+            model = str(getattr(settings, "LLM_FORCE_GEMINI_MODEL", "gemini-2.5-flash") or "gemini-2.5-flash")
+            mode_name = "FREE (Gemini-only)" if free else "PROD (task-based)"
+            return True, (
+                f"LLM режим сейчас: {mode_name}\n"
+                f"LLM_FORCE_GEMINI_MODEL={model}\n"
+                f"LLM_ENABLED_MODELS={enabled or '(empty)'}\n"
+                f"LLM_DISABLED_MODELS={disabled or '(empty)'}"
+            )
+        return False, "Использование: /llm_mode free | /llm_mode prod | /llm_mode status"
+
+    @staticmethod
+    def _is_kdp_login_request(text: str) -> bool:
+        s = (text or "").strip().lower()
+        if not s:
+            return False
+        has_target = any(x in s for x in ("amazon", "амазон", "kdp", "кдп"))
+        has_action = any(x in s for x in ("зайди", "вход", "логин", "login", "auth", "авториза"))
+        return has_target and has_action
+
+    @staticmethod
+    def _extract_otp_code(text: str) -> str:
+        import re
+        s = str(text or "").strip()
+        m = re.search(r"\b(\d{6,8})\b", s)
+        return m.group(1) if m else ""
+
+    async def _run_kdp_auto_login(self, otp_code: str = "") -> tuple[int, str]:
+        storage = str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json") or "runtime/kdp_storage_state.json")
+        cmd = [
+            "python3",
+            "scripts/kdp_auth_helper.py",
+            "auto-login",
+            "--timeout-sec",
+            "180",
+            "--storage-path",
+            storage,
+        ]
+        if otp_code:
+            cmd.extend(["--otp-code", otp_code])
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=220)
+        output = (out_b or b"").decode("utf-8", errors="ignore")
+        return int(proc.returncode or 0), output
+
+    async def _handle_kdp_login_flow(self, text: str, send_reply, with_button: bool = False) -> bool:
+        maybe_otp = self._extract_otp_code(text)
+        if self._pending_kdp_otp and maybe_otp:
+            await send_reply("Код получен. Подтверждаю вход в Amazon KDP...")
+            rc, out = await self._run_kdp_auto_login(otp_code=maybe_otp)
+            if rc == 0:
+                self._pending_kdp_otp = None
+                await send_reply("Готово: вход в KDP подтвержден, сессия сохранена.")
+                return True
+            self._pending_kdp_otp = None
+            await send_reply("Не удалось завершить вход по коду. Повтори команду: /kdp_login")
+            logger.warning("KDP OTP login failed", extra={"event": "kdp_login_otp_failed", "context": {"output": out[-1200:]}})
+            return True
+
+        if not self._is_kdp_login_request(text):
+            return False
+
+        await send_reply("Запускаю вход в Amazon KDP через браузерный flow...")
+        rc, out = await self._run_kdp_auto_login()
+        tail = out[-3000:]
+        if rc == 0:
+            await send_reply("Готово: VITO вошел в Amazon KDP и сохранил сессию.")
+            return True
+
+        if "OTP_REQUIRED" in out:
+            self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat()}
+            await send_reply("Нужен код из аутентификатора Amazon. Пришли только 6 цифр одним сообщением.")
+            return True
+
+        wait_lines = [ln for ln in out.splitlines() if ln.startswith("WAIT: url=")]
+        auth_url = ""
+        if wait_lines:
+            auth_url = wait_lines[-1].split("WAIT: url=", 1)[-1].strip()
+        if auth_url and with_button:
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton("Открыть авторизацию Amazon", url=auth_url)]])
+            await send_reply("Amazon требует ручную проверку. Открой кнопку и подтверди вход.", kb)
+        elif auth_url:
+            await send_reply(f"Amazon требует ручную проверку. Ссылка для авторизации: {auth_url}")
+        else:
+            await send_reply("Amazon запросил дополнительную проверку (captcha/challenge). После прохождения повтори: /kdp_login")
+        logger.warning("KDP login requires challenge", extra={"event": "kdp_login_challenge", "context": {"output": tail}})
         return True
 
     def _log_owner_request(self, text: str, source: str = "text") -> None:
@@ -159,7 +338,7 @@ class CommsAgent:
         try:
             from datetime import datetime, timezone
             ts = datetime.now(timezone.utc).isoformat()
-            log_path = Path("/home/vito/vito-agent/docs/OWNER_REQUIREMENTS_LOG.md")
+            log_path = PROJECT_ROOT / "docs" / "OWNER_REQUIREMENTS_LOG.md"
             entry = f"- [{ts}] ({source}) {text.strip()}\n"
             if not log_path.exists():
                 log_path.write_text("# Owner Requests & Requirements Log\n\n", encoding="utf-8")
@@ -348,6 +527,8 @@ class CommsAgent:
         self._app.add_handler(CommandHandler("clear_goals", self._cmd_clear_goals))
         self._app.add_handler(CommandHandler("nettest", self._cmd_nettest))
         self._app.add_handler(CommandHandler("smoke", self._cmd_smoke))
+        self._app.add_handler(CommandHandler("llm_mode", self._cmd_llm_mode))
+        self._app.add_handler(CommandHandler("kdp_login", self._cmd_kdp_login))
         self._app.add_handler(
             MessageHandler(
                 filters.Document.ALL | filters.PHOTO | filters.VIDEO,
@@ -382,6 +563,8 @@ class CommsAgent:
             BotCommand("task_current", "Текущая задача владельца"),
             BotCommand("task_done", "Закрыть текущую задачу"),
             BotCommand("balances", "Балансы сервисов"),
+            BotCommand("llm_mode", "Режим LLM: free/prod"),
+            BotCommand("kdp_login", "Вход в Amazon KDP"),
             BotCommand("health", "Проверка здоровья системы"),
             BotCommand("logs", "Последние логи"),
         ])
@@ -427,6 +610,13 @@ class CommsAgent:
             return
         self._log_owner_request(text, source=source)
 
+        async def _owner_reply(msg: str, markup=None) -> None:
+            # owner_inbox path does not support inline markup; send plain text
+            await self.send_message(msg)
+
+        if await self._handle_kdp_login_flow(text, _owner_reply, with_button=False):
+            return
+
         # Accept secrets/key updates via text
         if self._try_set_env_from_text(text):
             await self.send_message("Ключ принят и сохранён. Если нужен перезапуск сервиса — скажи 'перезапусти'.")
@@ -444,32 +634,67 @@ class CommsAgent:
             return
 
         lower = text.lower()
+        if self._pending_owner_confirmation and (self._is_yes_token(lower) or self._is_no_token(lower)):
+            payload = self._pending_owner_confirmation or {}
+            self._pending_owner_confirmation = None
+            kind = str(payload.get("kind") or "")
+            if self._is_yes_token(lower):
+                if kind == "clear_goals" and self._goal_engine:
+                    removed = int(self._goal_engine.clear_all_goals() or 0)
+                    await self.send_message(f"Готово. Очередь целей очищена ({removed}).", level="result")
+                else:
+                    await self.send_message("Принял. Выполняю.", level="result")
+            else:
+                await self.send_message("Ок, отменил.", level="result")
+            return
         strict_cmds = bool(getattr(settings, "TELEGRAM_STRICT_COMMANDS", True))
         if self._pending_system_action:
-            if lower in ("да", "yes", "ок", "ok", "approve", "✅", "👍"):
+            if (not strict_cmds) and text.isdigit():
+                actions = list((self._pending_system_action or {}).get("actions") or [])
+                idx = int(text)
+                if 1 <= idx <= len(actions):
+                    self._pending_system_action = {"actions": [actions[idx - 1]], "origin_text": f"choice:{idx}"}
+                    await self.send_message(f"Принял вариант {idx}. Запускаю.", level="result")
+                    await self._execute_pending_system_action()
+                    return
+            if self._is_yes_token(lower):
                 await self._execute_pending_system_action()
                 return
-            if lower in ("нет", "no", "reject", "отмена", "❌", "👎"):
+            if self._is_no_token(lower):
                 self._pending_system_action = None
                 await self.send_message("Ок, системное действие отменено.", level="result")
                 return
         # Approvals
         if self._pending_approvals:
-            if lower in ("да", "yes", "ок", "ok", "approve", "✅", "👍"):
+            if self._is_yes_token(lower):
                 # approve first pending
                 request_id = next(iter(self._pending_approvals))
                 future = self._pending_approvals.pop(request_id)
                 if not future.done():
                     future.set_result(True)
-                await self.send_message(f"Одобрено: {request_id}", level="approval")
+                await self.send_message("Одобрено.", level="approval")
                 return
-            if lower in ("нет", "no", "reject", "отмена", "❌", "👎"):
+            if self._is_no_token(lower):
                 request_id = next(iter(self._pending_approvals))
                 future = self._pending_approvals.pop(request_id)
                 if not future.done():
                     future.set_result(False)
-                await self.send_message(f"Отклонено: {request_id}", level="approval")
+                await self.send_message("Отклонено.", level="approval")
                 return
+
+        if (not strict_cmds) and any(x in lower for x in ("llm_mode ", "режим llm", "режим lmm", "llm режим")):
+            mode = "status"
+            if any(x in lower for x in (" free", " тест", " gemini", " flash")):
+                mode = "free"
+            elif any(x in lower for x in (" prod", " боев", " production")):
+                mode = "prod"
+            ok, msg = self._apply_llm_mode(mode)
+            await self.send_message(msg if ok else "Используй: /llm_mode free|prod|status", level="result")
+            return
+
+        if not strict_cmds:
+            text = self._expand_short_choice(text)
+            lower = text.lower()
 
         # Simple shortcuts
         if lower.strip() in ("/help", "help"):
@@ -638,10 +863,14 @@ class CommsAgent:
                         self._goal_engine._persist_goal(goal)
                     response = result.get("response", f"Цель создана: {goal.title}")
                     if result.get("needs_approval"):
-                        response += "\n\nОтветь ✅ чтобы одобрить или ❌ чтобы отклонить."
+                        response += "\n\nПодтверди запуск: да/нет."
+                    response = self._decorate_with_numeric_hint(response, result.get("actions", []))
+                    self._remember_choice_context(response)
                     await self.send_message(response, level="result")
                 elif result.get("response"):
-                    await self.send_message(result["response"], level="result")
+                    response = self._decorate_with_numeric_hint(result["response"], result.get("actions", []))
+                    self._remember_choice_context(response)
+                    await self.send_message(response, level="result")
                     if result.get("actions") and result.get("needs_confirmation"):
                         self._pending_system_action = {
                             "actions": result.get("actions", []),
@@ -722,7 +951,8 @@ class CommsAgent:
         text = self._guard_outgoing(text)
 
         # 1) Send binary/image files separately (no raw paths in text)
-        bin_pattern = re.compile(r"(/(?:home/vito/vito-agent|tmp)/\S+\.(?:png|jpg|jpeg|webp|gif|pdf))")
+        root_rx = re.escape(str(PROJECT_ROOT))
+        bin_pattern = re.compile(rf"(/(?:{root_rx}|tmp)/\S+\.(?:png|jpg|jpeg|webp|gif|pdf))")
         found_bins = bin_pattern.findall(text)
         clean_text = text
         for fp in found_bins:
@@ -735,7 +965,7 @@ class CommsAgent:
             clean_text = clean_text.replace(f"\U0001f4ce {fp}", "")
             clean_text = clean_text.replace(fp, "")
 
-        file_pattern = re.compile(r"(/home/vito/vito-agent/\S+\.(?:txt|md|json|py|csv|log))")
+        file_pattern = re.compile(rf"({root_rx}/\S+\.(?:txt|md|json|py|csv|log))")
         found_files = file_pattern.findall(clean_text)
 
         # Replace file paths with inline content in message
@@ -746,7 +976,7 @@ class CommsAgent:
                 try:
                     content = path.read_text(encoding="utf-8").strip()
                     if content:
-                        rel_path = fp.replace("/home/vito/vito-agent/", "")
+                        rel_path = fp.replace(str(PROJECT_ROOT) + "/", "")
                         if len(content) <= 500:
                             replacement = f"\n{content}\n"
                         else:
@@ -805,6 +1035,7 @@ class CommsAgent:
                 ("handoffs", "Трассировка handoff событий"),
                 ("prefs", "Предпочтения владельца"),
                 ("packs", "Capability packs"),
+                ("llm_mode free|prod|status", "Переключить профиль LLM"),
             ],
             "system": [
                 ("cancel", "Пауза/отмена текущих задач"),
@@ -833,6 +1064,7 @@ class CommsAgent:
                 "backup": ("Делает резервную копию.", "Перед рискованными изменениями."),
                 "rollback": ("Откат к последнему бэкапу.", "Если последняя доработка сломала поведение."),
                 "clear_goals": ("Удаляет все цели.", "Использовать только осознанно."),
+                "llm_mode": ("Меняет профиль маршрутизации LLM.", "free для тестов на Gemini, prod для боевого распределения."),
             },
         }
 
@@ -920,9 +1152,14 @@ class CommsAgent:
 
         if self._goal_engine:
             gs = self._goal_engine.get_stats()
+            waiting_approval = 0
+            try:
+                waiting_approval = len(self._goal_engine.get_waiting_approvals())
+            except Exception:
+                waiting_approval = 0
             parts.append(
                 f"Цели: {gs['total']} всего, {gs['completed']} выполнено, "
-                f"{gs['executing']} в работе, {gs['pending']} ожидают"
+                f"{gs['executing']} в работе, {gs['pending']} ожидают, {waiting_approval} ждут одобрения"
             )
 
         if self._pending_approvals:
@@ -1007,7 +1244,7 @@ class CommsAgent:
         future = self._pending_approvals.pop(request_id)
         if not future.done():
             future.set_result(True)
-        await update.message.reply_text(f"Одобрено: {request_id}", reply_markup=self._main_keyboard())
+        await update.message.reply_text("Одобрено.", reply_markup=self._main_keyboard())
         logger.info(
             f"Запрос одобрен: {request_id}",
             extra={"event": "approval_granted", "context": {"request_id": request_id}},
@@ -1024,7 +1261,7 @@ class CommsAgent:
         future = self._pending_approvals.pop(request_id)
         if not future.done():
             future.set_result(False)
-        await update.message.reply_text(f"Отклонено: {request_id}", reply_markup=self._main_keyboard())
+        await update.message.reply_text("Отклонено.", reply_markup=self._main_keyboard())
         logger.info(
             f"Запрос отклонён: {request_id}",
             extra={"event": "approval_rejected", "context": {"request_id": request_id}},
@@ -1057,8 +1294,7 @@ class CommsAgent:
             except Exception:
                 pass
         await update.message.reply_text(
-            f"Цель создана: [{goal.goal_id}] {goal.title}\n"
-            f"Приоритет: HIGH (от владельца)",
+            f"Цель создана: {goal.title}\nПриоритет: HIGH.",
             reply_markup=self._main_keyboard(),
         )
         logger.info(
@@ -1512,6 +1748,19 @@ class CommsAgent:
         except Exception as e:
             await update.message.reply_text(f"Smoke error: {e}", reply_markup=self._main_keyboard())
 
+    async def _cmd_llm_mode(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Switch LLM routing mode quickly: free/prod/status."""
+        if await self._reject_stranger(update):
+            return
+        args = list(getattr(context, "args", None) or [])
+        mode = (args[0] if args else "status").strip().lower()
+        ok, msg = self._apply_llm_mode(mode)
+        if not ok:
+            await update.message.reply_text(msg, reply_markup=self._main_keyboard())
+            return
+        await update.message.reply_text(msg, reply_markup=self._main_keyboard())
+        logger.info("LLM mode switched", extra={"event": "llm_mode_set", "context": {"mode": mode}})
+
     async def _on_attachment(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Приём файлов/фото/видео от владельца и запуск document_agent."""
         if await self._reject_stranger(update):
@@ -1522,7 +1771,7 @@ class CommsAgent:
             await update.message.reply_text("AgentRegistry не подключён.", reply_markup=self._main_keyboard())
             return
 
-        attachment_dir = Path("/home/vito/vito-agent/input/attachments")
+        attachment_dir = PROJECT_ROOT / "input" / "attachments"
         attachment_dir.mkdir(parents=True, exist_ok=True)
 
         file_path = None
@@ -1588,14 +1837,14 @@ class CommsAgent:
             self._log_owner_request(extracted[:2000], source=f"attachment:{file_path.name}")
 
             # Сохраним полный текст рядом
-            out_dir = Path("/home/vito/vito-agent/output/attachments")
+            out_dir = PROJECT_ROOT / "output" / "attachments"
             out_dir.mkdir(parents=True, exist_ok=True)
             out_path = out_dir / f"{Path(file_path).stem}_extracted.txt"
             out_path.write_text(extracted, encoding="utf-8", errors="ignore")
 
             preview = extracted[:3000]
             if len(extracted) > 3000:
-                preview += f"\n\n(Полный текст сохранён в {out_path.relative_to(Path('/home/vito/vito-agent'))})"
+                preview += f"\n\n(Полный текст сохранён в {out_path.relative_to(PROJECT_ROOT)})"
             await update.message.reply_text(preview, reply_markup=self._main_keyboard())
 
             # Brainstorm from extracted text if applicable
@@ -1630,15 +1879,55 @@ class CommsAgent:
         if not text:
             return
 
-        self._log_owner_request(text, source="text")
+        reply_meta = self._extract_reply_context(update)
+        if reply_meta:
+            source = "text_reply"
+        else:
+            source = "text"
+
+        self._log_owner_request(text, source=source)
         strict_cmds = bool(getattr(settings, "TELEGRAM_STRICT_COMMANDS", True))
 
+        async def _tg_reply(msg: str, markup=None) -> None:
+            kwargs = {"reply_markup": markup} if markup is not None else {"reply_markup": self._main_keyboard()}
+            await update.message.reply_text(msg, **kwargs)
+
+        if await self._handle_kdp_login_flow(text, _tg_reply, with_button=True):
+            return
+
         lower = text.lower()
+        if self._pending_owner_confirmation and (self._is_yes_token(lower) or self._is_no_token(lower)):
+            payload = self._pending_owner_confirmation or {}
+            self._pending_owner_confirmation = None
+            kind = str(payload.get("kind") or "")
+            if self._is_yes_token(lower):
+                if kind == "clear_goals" and self._goal_engine:
+                    removed = int(self._goal_engine.clear_all_goals() or 0)
+                    await update.message.reply_text(
+                        f"Готово. Очередь целей очищена ({removed}).",
+                        reply_markup=self._main_keyboard(),
+                    )
+                else:
+                    await update.message.reply_text("Принял. Выполняю.", reply_markup=self._main_keyboard())
+            else:
+                await update.message.reply_text("Ок, отменил.", reply_markup=self._main_keyboard())
+            return
         if self._pending_system_action:
-            if lower in ("да", "yes", "ок", "ok", "approve", "✅", "👍"):
+            if (not strict_cmds) and text.isdigit():
+                actions = list((self._pending_system_action or {}).get("actions") or [])
+                idx = int(text)
+                if 1 <= idx <= len(actions):
+                    self._pending_system_action = {"actions": [actions[idx - 1]], "origin_text": f"choice:{idx}"}
+                    await update.message.reply_text(
+                        f"Принял вариант {idx}. Запускаю.",
+                        reply_markup=self._main_keyboard(),
+                    )
+                    await self._execute_pending_system_action(update)
+                    return
+            if self._is_yes_token(lower):
                 await self._execute_pending_system_action(update)
                 return
-            if lower in ("нет", "no", "reject", "отмена", "❌", "👎"):
+            if self._is_no_token(lower):
                 self._pending_system_action = None
                 await update.message.reply_text(
                     "Ок, системное действие отменено.",
@@ -1683,6 +1972,10 @@ class CommsAgent:
                     return
             # If not a valid selection, continue normal flow
 
+        if not strict_cmds:
+            text = self._expand_short_choice(text)
+            lower = text.lower()
+
         if (not strict_cmds) and any(kw in lower for kw in [
             "очисти очередь",
             "очисти очередь целей",
@@ -1693,7 +1986,11 @@ class CommsAgent:
             "убери все цели",
             "delete all goals",
         ]):
-            await self._cmd_clear_goals(update, context)
+            self._pending_owner_confirmation = {"kind": "clear_goals", "created_at": datetime.now(timezone.utc).isoformat()}
+            await update.message.reply_text(
+                "Подтверди очистку всех целей: да/нет",
+                reply_markup=self._main_keyboard(),
+            )
             return
 
         # Schedule from plain text (no command required)
@@ -1745,21 +2042,33 @@ class CommsAgent:
 
         # 1.5. Natural language shortcuts (balance check, etc.)
         lower = text.strip().lower()
+        if (not strict_cmds) and any(x in lower for x in ("llm_mode ", "режим llm", "режим lmm", "llm режим")):
+            mode = "status"
+            if any(x in lower for x in (" free", " тест", " gemini", " flash")):
+                mode = "free"
+            elif any(x in lower for x in (" prod", " боев", " production")):
+                mode = "prod"
+            ok, msg = self._apply_llm_mode(mode)
+            await update.message.reply_text(
+                msg if ok else "Используй: /llm_mode free|prod|status",
+                reply_markup=self._main_keyboard(),
+            )
+            return
         if (not strict_cmds) and any(kw in lower for kw in ["баланс", "balance", "balances", "остатки", "сколько на счетах", "сколько осталось"]):
             await self._cmd_balances(update, context)
             return
 
         # 2. Pending approvals — да/нет/✅/❌
         if self._pending_approvals:
-            if lower in ("да", "yes", "ок", "ok", "approve", "✅", "👍"):
+            if self._is_yes_token(lower):
                 await self._cmd_approve(update, context)
                 return
-            elif lower in ("нет", "no", "reject", "отмена", "❌", "👎"):
+            elif self._is_no_token(lower):
                 await self._cmd_reject(update, context)
                 return
 
         # 2.5. Goal approval — approve goals in WAITING_APPROVAL status
-        if lower in ("да", "yes", "ок", "ok", "approve", "✅", "👍") and self._goal_engine:
+        if self._is_yes_token(lower) and self._goal_engine:
             from goal_engine import GoalStatus
             waiting = [g for g in self._goal_engine.get_all_goals()
                        if g.status == GoalStatus.WAITING_APPROVAL]
@@ -1772,7 +2081,7 @@ class CommsAgent:
                     reply_markup=self._main_keyboard(),
                 )
                 return
-        elif lower in ("нет", "no", "reject", "отмена", "❌", "👎") and self._goal_engine:
+        elif self._is_no_token(lower) and self._goal_engine:
             from goal_engine import GoalStatus
             waiting = [g for g in self._goal_engine.get_all_goals()
                        if g.status == GoalStatus.WAITING_APPROVAL]
@@ -1785,13 +2094,23 @@ class CommsAgent:
                 )
                 return
 
+        text_for_engine = text
+        if reply_meta:
+            text_for_engine = (
+                f"[REPLY_CONTEXT]\n"
+                f"reply_to_message_id={reply_meta.get('message_id','')}\n"
+                f"reply_to_text={reply_meta.get('text','')}\n"
+                f"owner_reply={text}\n"
+                f"[/REPLY_CONTEXT]"
+            )
+
         # 3. ConversationEngine — живой разговор
         if self._conversation_engine:
             try:
                 if hasattr(self._conversation_engine, "set_session"):
                     sid = str(update.effective_chat.id) if update and update.effective_chat else "telegram_owner"
                     self._conversation_engine.set_session(sid)
-                result = await self._conversation_engine.process_message(text)
+                result = await self._conversation_engine.process_message(text_for_engine)
 
                 # Pass-through для команд и одобрений (обработаны выше)
                 if result.get("pass_through"):
@@ -1813,14 +2132,18 @@ class CommsAgent:
                         self._goal_engine._persist_goal(goal)
                     response = result.get("response", f"Цель создана: {goal.title}")
                     if result.get("needs_approval"):
-                        response += "\n\nОтветь ✅ чтобы одобрить или ❌ чтобы отклонить."
+                        response += "\n\nПодтверди запуск: да/нет."
+                    response = self._decorate_with_numeric_hint(response, result.get("actions", []))
+                    self._remember_choice_context(response)
                     await update.message.reply_text(response, reply_markup=self._main_keyboard())
                 elif result.get("response"):
-                    await self._send_response(update, result["response"])
+                    response = self._decorate_with_numeric_hint(result["response"], result.get("actions", []))
+                    self._remember_choice_context(response)
+                    await self._send_response(update, response)
                     if result.get("actions") and result.get("needs_confirmation"):
                         self._pending_system_action = {
                             "actions": result.get("actions", []),
-                            "origin_text": text,
+                            "origin_text": text_for_engine,
                         }
                 else:
                     await update.message.reply_text(
@@ -1844,6 +2167,57 @@ class CommsAgent:
             f"Сообщение от владельца: {text[:100]}",
             extra={"event": "owner_message"},
         )
+
+    @staticmethod
+    def _extract_reply_context(update: Update) -> dict[str, str]:
+        """Extract replied message payload from Telegram swipe-reply."""
+        try:
+            msg = getattr(update, "message", None)
+            if msg is None:
+                return {}
+            parent = getattr(msg, "reply_to_message", None)
+            if parent is None:
+                return {}
+            parent_text = getattr(parent, "text", None) or getattr(parent, "caption", None) or ""
+            if not isinstance(parent_text, str):
+                return {}
+            parent_text = parent_text.strip()
+            if not parent_text:
+                return {}
+            message_id = getattr(parent, "message_id", "")
+            return {"message_id": str(message_id or ""), "text": parent_text[:1200]}
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _has_numbered_options(text: str) -> bool:
+        import re
+
+        lines = re.findall(r"(?m)^\s*(\d{1,2})[\.\)]\s+\S+", str(text or ""))
+        return len(lines) >= 2
+
+    def _remember_choice_context(self, response_text: str) -> None:
+        if self._has_numbered_options(response_text):
+            self._pending_choice_context = {"saved_at": datetime.now(timezone.utc).isoformat()}
+
+    def _expand_short_choice(self, raw_text: str) -> str:
+        text = str(raw_text or "").strip()
+        if not text.isdigit():
+            return text
+        if not self._pending_choice_context:
+            return text
+        idx = int(text)
+        if idx <= 0:
+            return text
+        self._pending_choice_context = None
+        return (
+            f"Выбираю вариант {idx}. Продолжай выполнять задачу автономно, "
+            f"без дополнительных подтверждений, если нет критического риска."
+        )
+
+    def _decorate_with_numeric_hint(self, response: str, actions: list[dict] | None) -> str:
+        text = str(response or "").strip()
+        return text
 
     # ── Новые команды v0.3.0 ──
 
@@ -1901,6 +2275,8 @@ class CommsAgent:
                 pass
         self._pending_approvals.clear()
         self._pending_schedule_update = None
+        self._pending_owner_confirmation = None
+        self._pending_choice_context = None
         if self._decision_loop:
             self._decision_loop.stop()
         await update.message.reply_text(
@@ -1984,13 +2360,22 @@ class CommsAgent:
             await update.message.reply_text("GoalEngine не подключён.", reply_markup=self._main_keyboard())
             return
         from goal_engine import GoalStatus
-        executing = self._goal_engine.get_all_goals(status=GoalStatus.EXECUTING)
-        if not executing:
-            await update.message.reply_text("Нет задач в работе.", reply_markup=self._main_keyboard())
+        active_statuses = [GoalStatus.EXECUTING, GoalStatus.PENDING, GoalStatus.WAITING_APPROVAL, GoalStatus.PLANNING]
+        active = []
+        for status in active_statuses:
+            active.extend(self._goal_engine.get_all_goals(status=status))
+        if not active:
+            await update.message.reply_text("Нет активных задач.", reply_markup=self._main_keyboard())
             return
-        lines = ["Задачи в работе:"]
-        for g in executing[:10]:
-            lines.append(f"  [{g.goal_id}] {g.title} (${g.estimated_cost_usd:.2f})")
+        icon = {
+            GoalStatus.EXECUTING: ">>",
+            GoalStatus.PENDING: "..",
+            GoalStatus.WAITING_APPROVAL: "??",
+            GoalStatus.PLANNING: "~~",
+        }
+        lines = ["Активные задачи (все статусы):"]
+        for g in active[:12]:
+            lines.append(f"  [{icon.get(g.status, g.status.value)} {g.goal_id}] {g.title} (${g.estimated_cost_usd:.2f})")
         await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
         logger.info("Команда /tasks выполнена", extra={"event": "cmd_tasks"})
 
@@ -2128,6 +2513,24 @@ class CommsAgent:
             except Exception as e:
                 await update.message.reply_text(f"Ошибка анализа: {e}", reply_markup=self._main_keyboard())
         logger.info(f"Команда /deep выполнена: {text[:50]}", extra={"event": "cmd_deep"})
+
+    async def _cmd_kdp_login(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Запуск browser-auth для Amazon KDP; при MFA ждёт код в следующем сообщении."""
+        if await self._reject_stranger(update):
+            return
+
+        async def _reply(msg: str, markup=None) -> None:
+            kwargs = {"reply_markup": markup} if markup is not None else {"reply_markup": self._main_keyboard()}
+            await update.message.reply_text(msg, **kwargs)
+
+        otp = ""
+        if context and getattr(context, "args", None):
+            otp = self._extract_otp_code(" ".join(context.args))
+        if otp:
+            self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat()}
+            await self._handle_kdp_login_flow(otp, _reply, with_button=True)
+            return
+        await self._handle_kdp_login_flow("зайди на amazon kdp", _reply, with_button=True)
 
     async def _cmd_brainstorm(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Мультимодельный брейншторм: /brainstorm <тема>."""
@@ -2509,7 +2912,8 @@ class CommsAgent:
         """
         import re
 
-        file_pattern = re.compile(r"(/home/vito/vito-agent/\S+\.(?:txt|md|json|py|csv|log))")
+        root_rx = re.escape(str(PROJECT_ROOT))
+        file_pattern = re.compile(rf"({root_rx}/\S+\.(?:txt|md|json|py|csv|log))")
         found = file_pattern.findall(text)
         if not found:
             return text
@@ -2522,7 +2926,7 @@ class CommsAgent:
                 try:
                     content = path.read_text(encoding="utf-8").strip()
                     if content:
-                        rel_path = fp.replace("/home/vito/vito-agent/", "")
+                        rel_path = fp.replace(str(PROJECT_ROOT) + "/", "")
                         if len(content) <= 500:
                             replacement = f"\n{content}\n"
                         else:

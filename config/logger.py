@@ -3,8 +3,9 @@ import logging.handlers
 import json
 import os
 from datetime import datetime, timezone
+from config.paths import root_path
 
-LOG_DIR = "/home/vito/vito-agent/logs"
+LOG_DIR = root_path("logs")
 MAIN_LOG = os.path.join(LOG_DIR, "vito.log")
 ERROR_LOG = os.path.join(LOG_DIR, "errors.log")
 MAX_BYTES = 10 * 1024 * 1024  # 10MB

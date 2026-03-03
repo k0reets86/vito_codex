@@ -4,9 +4,15 @@ __pycache__/
 *.pyc
 *.db
 *.sqlite
+*.sqlite3
+memory/*.db
+memory/*.sqlite*
 *.log
 chroma_db/
 output/
+output/**/*.png
+output/**/*.jpg
+output/**/*.jpeg
 .claude/
 backups/
 input/

@@ -169,6 +169,23 @@ def test_store_knowledge_policy_force_save(memory, tmp_path):
     assert results[0]["id"] == "owner_pref_tone"
 
 
+def test_store_knowledge_normalizes_priority_and_empty_lists(memory, tmp_path):
+    with patch("memory.memory_manager.settings") as s:
+        s.CHROMA_PATH = str(tmp_path / "chroma")
+        s.SQLITE_PATH = str(tmp_path / "test.db")
+        stored = memory.store_knowledge(
+            "meta_fix_1",
+            "owner asked for trend report",
+            {"type": "owner_preference", "priority": "HIGH", "tones": [], "force_save": True},
+        )
+    assert stored is True
+    results = memory.search_knowledge("trend report", n_results=1)
+    assert results
+    md = results[0].get("metadata", {})
+    assert float(md.get("priority", 0.0)) > 0.0
+    assert "tones" not in md
+
+
 def test_memory_policy_summary(memory, tmp_path):
     with patch("memory.memory_manager.settings") as s:
         s.CHROMA_PATH = str(tmp_path / "chroma")

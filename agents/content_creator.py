@@ -1,7 +1,4 @@
-"""ContentCreator — Agent 02: создание контента (статьи, ebook, описания).
-
-Saves all output to /home/vito/vito-agent/output/ directory.
-"""
+"""ContentCreator — Agent 02: создание контента (статьи, ebook, описания)."""
 
 import re
 import time
@@ -10,11 +7,12 @@ from typing import Any, Optional
 
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
+from config.paths import PROJECT_ROOT
 from llm_router import TaskType
 
 logger = get_logger("content_creator", agent="content_creator")
 
-OUTPUT_BASE = Path("/home/vito/vito-agent/output")
+OUTPUT_BASE = PROJECT_ROOT / "output"
 ARTICLES_DIR = OUTPUT_BASE / "articles"
 EBOOKS_DIR = OUTPUT_BASE / "ebooks"
 PRODUCTS_DIR = OUTPUT_BASE / "products"

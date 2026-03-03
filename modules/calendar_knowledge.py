@@ -6,9 +6,10 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+from config.paths import PROJECT_ROOT
 
 
-CALENDAR_PATH = Path("/home/vito/vito-agent/docs/commerce_calendar.md")
+CALENDAR_PATH = PROJECT_ROOT / "docs" / "commerce_calendar.md"
 
 MONTHS_RU = {
     "январ": 1,
@@ -148,4 +149,3 @@ def format_calendar_results(results: list[CalendarEntry]) -> str:
         note = f\" — {e.notes}\" if e.notes else \"\"
         lines.append(f\"  {e.date} | {e.region} | {e.name}{note}\")
     return \"\\n\".join(lines)
-
