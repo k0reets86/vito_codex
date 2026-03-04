@@ -796,7 +796,14 @@ class CommsAgent:
             return explicit
         if any(x in s for x in ("vito", "вито", "система", "system")):
             return ""
-        return self._last_service_context if self._has_fresh_service_context() else ""
+        if self._has_fresh_service_context():
+            return self._last_service_context
+        if self._pending_service_auth:
+            try:
+                return next(reversed(self._pending_service_auth))
+            except Exception:
+                return ""
+        return ""
 
     def _detect_contextual_service_inventory_request(self, text: str) -> str:
         s = str(text or "").strip().lower()
@@ -807,7 +814,14 @@ class CommsAgent:
             return explicit
         if any(x in s for x in ("vito", "вито", "система", "system")):
             return ""
-        return self._last_service_context if self._has_fresh_service_context() else ""
+        if self._has_fresh_service_context():
+            return self._last_service_context
+        if self._pending_service_auth:
+            try:
+                return next(reversed(self._pending_service_auth))
+            except Exception:
+                return ""
+        return ""
 
     @staticmethod
     def _is_auth_issue_prompt(text: str) -> bool:

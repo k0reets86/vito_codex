@@ -1348,6 +1348,13 @@ async def test_on_message_contextual_service_status_plain_status(comms, mock_upd
     conv.process_message.assert_not_called()
 
 
+def test_detect_contextual_service_status_uses_pending_auth_when_no_fresh_context(comms):
+    comms._last_service_context = ""
+    comms._last_service_context_at = ""
+    comms._pending_service_auth["amazon_kdp"] = {"service": "amazon_kdp"}
+    assert comms._detect_contextual_service_status_request("статус аккаунта") == "amazon_kdp"
+
+
 @pytest.mark.asyncio
 async def test_format_service_auth_status_live_amazon_probe_fail_with_cached_confirmed(comms):
     comms._service_auth_confirmed["amazon_kdp"] = "2026-03-04T01:00:00+00:00"
@@ -1393,6 +1400,13 @@ async def test_on_message_contextual_service_inventory_amazon_requires_live_sess
 
     sent = mock_update.message.reply_text.call_args[0][0]
     assert "не вижу активной сессии" in sent.lower()
+
+
+def test_detect_contextual_service_inventory_uses_pending_auth_when_no_fresh_context(comms):
+    comms._last_service_context = ""
+    comms._last_service_context_at = ""
+    comms._pending_service_auth["etsy"] = {"service": "etsy"}
+    assert comms._detect_contextual_service_inventory_request("проверь товары там") == "etsy"
 
 
 @pytest.mark.asyncio
