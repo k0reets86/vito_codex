@@ -18,6 +18,10 @@ from modules.owner_preference_model import OwnerPreferenceModel
 def comms():
     """CommsAgent с мок-ботом."""
     agent = CommsAgent()
+    # Test isolation: ignore persisted runtime auth/context state.
+    agent._service_auth_confirmed = {}
+    agent._last_service_context = ""
+    agent._last_service_context_at = ""
     agent._bot = AsyncMock()
     agent._bot.send_message = AsyncMock()
     agent._bot.send_document = AsyncMock()

@@ -5,6 +5,7 @@ OAuth 1.0a для постинга. Все ключи уже в .env.
 
 import hashlib
 import hmac
+import os
 import time
 import urllib.parse
 import uuid
@@ -21,6 +22,7 @@ from modules.execution_facts import ExecutionFacts
 logger = get_logger("twitter", agent="twitter")
 
 API_V2 = "https://api.twitter.com/2"
+UPLOAD_API_V1 = "https://upload.twitter.com/1.1/media/upload.json"
 
 
 class TwitterPlatform(BasePlatform):
@@ -155,11 +157,23 @@ class TwitterPlatform(BasePlatform):
             session = await self._get_session()
             url = f"{API_V2}/tweets"
             payload: dict[str, Any] = {"text": text}
+            media_ids = list(content.get("media_ids") or [])
+            image_path = str(content.get("image_path") or "").strip()
+            if image_path and not media_ids:
+                uploaded = await self._upload_media(image_path)
+                media_id = str(uploaded.get("media_id") or "")
+                if not media_id:
+                    return {
+                        "platform": "twitter",
+                        "status": "error",
+                        "error": f"media_upload_failed: {uploaded.get('error', 'unknown')}",
+                    }
+                media_ids = [media_id]
 
             if content.get("reply_to"):
                 payload["reply"] = {"in_reply_to_tweet_id": content["reply_to"]}
-            if content.get("media_ids"):
-                payload["media"] = {"media_ids": content["media_ids"]}
+            if media_ids:
+                payload["media"] = {"media_ids": media_ids}
 
             headers = {
                 "Authorization": self._oauth1_header("POST", url),
@@ -207,6 +221,36 @@ class TwitterPlatform(BasePlatform):
         except Exception as e:
             logger.error(f"Twitter publish error: {e}", exc_info=True)
             return {"platform": "twitter", "status": "error", "error": str(e)}
+
+    async def _upload_media(self, image_path: str) -> dict:
+        if not image_path:
+            return {"ok": False, "error": "image_path_required"}
+        if not os.path.isfile(image_path):
+            return {"ok": False, "error": "image_not_found"}
+        if not self._authenticated:
+            auth_ok = await self.authenticate()
+            if not auth_ok:
+                return {"ok": False, "error": "not_authenticated"}
+        try:
+            session = await self._get_session()
+            headers = {"Authorization": self._oauth1_header("POST", UPLOAD_API_V1)}
+            form = aiohttp.FormData()
+            with open(image_path, "rb") as fh:
+                form.add_field("media", fh, filename=os.path.basename(image_path), content_type="application/octet-stream")
+                async with session.post(
+                    UPLOAD_API_V1,
+                    headers=headers,
+                    data=form,
+                    timeout=aiohttp.ClientTimeout(total=30),
+                ) as resp:
+                    data = await resp.json(content_type=None)
+                    if resp.status in (200, 201):
+                        media_id = str(data.get("media_id_string") or data.get("media_id") or "")
+                        if media_id:
+                            return {"ok": True, "media_id": media_id}
+                    return {"ok": False, "error": str(data)[:300]}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
     async def delete_tweet(self, tweet_id: str) -> dict:
         """DELETE /2/tweets/{id} — cleanup helper for live probes/tests."""

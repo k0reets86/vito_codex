@@ -187,6 +187,11 @@ class CommsAgent:
         # Last discussed external service for contextual follow-ups.
         self._last_service_context: str = ""
         self._last_service_context_at: str = ""
+        # Persistent auth/context state across restarts.
+        self._auth_state_path = Path(
+            str(getattr(settings, "TELEGRAM_AUTH_STATE_FILE", "runtime/service_auth_state.json") or "runtime/service_auth_state.json")
+        )
+        self._load_auth_state()
         self._telegram_conflict_mode: bool = False
 
         # Обратные ссылки на модули — устанавливаются через set_modules()
@@ -575,6 +580,7 @@ class CommsAgent:
             return
         self._last_service_context = svc
         self._last_service_context_at = datetime.now(timezone.utc).isoformat()
+        self._save_auth_state()
         self._record_context_learning(
             skill_name="service_context_tracking",
             description=(
@@ -638,6 +644,45 @@ class CommsAgent:
             )
         except Exception:
             pass
+
+    def _load_auth_state(self) -> None:
+        path = self._auth_state_path
+        try:
+            if not path.exists():
+                return
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            confirmed = payload.get("service_auth_confirmed", {})
+            if isinstance(confirmed, dict):
+                self._service_auth_confirmed = {
+                    str(k).strip().lower(): str(v)
+                    for k, v in confirmed.items()
+                    if str(k).strip()
+                }
+            self._last_service_context = str(payload.get("last_service_context", "") or "").strip().lower()
+            self._last_service_context_at = str(payload.get("last_service_context_at", "") or "").strip()
+        except Exception:
+            pass
+
+    def _save_auth_state(self) -> None:
+        path = self._auth_state_path
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "service_auth_confirmed": self._service_auth_confirmed,
+                "last_service_context": self._last_service_context,
+                "last_service_context_at": self._last_service_context_at,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    def _mark_service_auth_confirmed(self, service: str) -> None:
+        svc = str(service or "").strip().lower()
+        if not svc:
+            return
+        self._service_auth_confirmed[svc] = datetime.now(timezone.utc).isoformat()
+        self._save_auth_state()
 
     @staticmethod
     def _is_status_prompt(text: str) -> bool:
@@ -753,7 +798,7 @@ class CommsAgent:
             try:
                 probe_rc, _ = await self._run_kdp_probe()
                 if probe_rc == 0:
-                    self._service_auth_confirmed[svc] = datetime.now(timezone.utc).isoformat()
+                    self._mark_service_auth_confirmed(svc)
                     return f"{title}: подключение активно (live-check OK). Повторный логин не требуется."
                 if self._service_auth_confirmed.get(svc):
                     return (
@@ -1034,7 +1079,7 @@ class CommsAgent:
             rc, out = await self._run_kdp_auto_login(otp_code=maybe_otp)
             if rc == 0:
                 self._pending_kdp_otp = None
-                self._service_auth_confirmed["amazon_kdp"] = datetime.now(timezone.utc).isoformat()
+                self._mark_service_auth_confirmed("amazon_kdp")
                 self._pending_service_auth.pop("amazon_kdp", None)
                 await send_reply("Готово: вход в KDP подтвержден, сессия сохранена.")
                 return True
@@ -1064,7 +1109,7 @@ class CommsAgent:
         rc, out = await self._run_kdp_auto_login()
         tail = out[-3000:]
         if rc == 0:
-            self._service_auth_confirmed["amazon_kdp"] = datetime.now(timezone.utc).isoformat()
+            self._mark_service_auth_confirmed("amazon_kdp")
             self._pending_service_auth.pop("amazon_kdp", None)
             await send_reply("Готово: VITO вошел в Amazon KDP и сохранил сессию.")
             return True
@@ -1454,12 +1499,12 @@ class CommsAgent:
             title, _ = self._service_auth_meta(service)
             self._touch_service_context(service)
             if ok:
-                self._service_auth_confirmed[service] = datetime.now(timezone.utc).isoformat()
+                self._mark_service_auth_confirmed(service)
                 await self.send_message(f"Вход подтверждён: {title}.")
                 logger.info("Inline auth_done via text", extra={"event": "inline_auth_done", "context": {"service": service, "mode": "text"}})
             else:
                 if self._is_manual_auth_service(service):
-                    self._service_auth_confirmed[service] = datetime.now(timezone.utc).isoformat()
+                    self._mark_service_auth_confirmed(service)
                     await self.send_message(f"Вход зафиксирован вручную: {title}. Проверка: {detail}")
                     logger.info("Inline auth_done via text", extra={"event": "inline_auth_done", "context": {"service": service, "mode": "text_manual"}})
                 else:
@@ -2946,12 +2991,12 @@ class CommsAgent:
             title, _ = self._service_auth_meta(service)
             self._touch_service_context(service)
             if ok:
-                self._service_auth_confirmed[service] = datetime.now(timezone.utc).isoformat()
+                self._mark_service_auth_confirmed(service)
                 await update.message.reply_text(f"Вход подтверждён: {title}.", reply_markup=self._main_keyboard())
                 logger.info("Inline auth_done via text", extra={"event": "inline_auth_done", "context": {"service": service, "mode": "text"}})
             else:
                 if self._is_manual_auth_service(service):
-                    self._service_auth_confirmed[service] = datetime.now(timezone.utc).isoformat()
+                    self._mark_service_auth_confirmed(service)
                     await update.message.reply_text(
                         f"Вход зафиксирован вручную: {title}. Проверка: {detail}",
                         reply_markup=self._main_keyboard(),
@@ -4030,6 +4075,7 @@ class CommsAgent:
             if ok:
                 stamp = datetime.now(timezone.utc).isoformat()
                 self._service_auth_confirmed[service] = stamp
+                self._save_auth_state()
                 label = f"Вход подтверждён: {title}"
                 await query.answer("Вход подтверждён")
                 await self._safe_edit_callback_message(query, f"{query.message.text}\n\n— {label}")
@@ -4044,6 +4090,7 @@ class CommsAgent:
             if self._is_manual_auth_service(service):
                 stamp = datetime.now(timezone.utc).isoformat()
                 self._service_auth_confirmed[service] = stamp
+                self._save_auth_state()
                 label = f"Вход зафиксирован вручную: {title}"
                 await query.answer("Принято")
                 await self._safe_edit_callback_message(query, f"{query.message.text}\n\n— {label}\n(Проверка: {detail})")

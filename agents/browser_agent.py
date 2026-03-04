@@ -14,6 +14,7 @@ OOM Protection:
 import asyncio
 import os
 import platform
+import random
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -101,6 +102,28 @@ def _chromium_launch_args() -> list[str]:
     return base
 
 
+def _browser_user_agent() -> str:
+    explicit = str(getattr(settings, "BROWSER_USER_AGENT", "") or "").strip()
+    if explicit:
+        return explicit
+    pool = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
+    ]
+    return random.choice(pool)
+
+
+def _stealth_init_script() -> str:
+    return """
+Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
+Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
+window.chrome = window.chrome || { runtime: {} };
+"""
+
+
 class BrowserAgent(BaseAgent):
     _instance: Optional["BrowserAgent"] = None
     _browser = None
@@ -160,10 +183,17 @@ class BrowserAgent(BaseAgent):
                             headless=True,
                             args=_chromium_launch_args(),
                         )
+                        context_kwargs: dict[str, Any] = {
+                            "viewport": {"width": 1280, "height": 720},
+                            "user_agent": _browser_user_agent(),
+                            "locale": str(getattr(settings, "BROWSER_LOCALE", "en-US") or "en-US"),
+                            "timezone_id": str(getattr(settings, "BROWSER_TIMEZONE_ID", "America/New_York") or "America/New_York"),
+                        }
                         self._context = await BrowserAgent._browser.new_context(
-                            viewport={"width": 1280, "height": 720},
-                            user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+                            **context_kwargs,
                         )
+                        if bool(getattr(settings, "BROWSER_STEALTH_ENABLED", True)):
+                            await self._context.add_init_script(_stealth_init_script())
                         logger.info(
                             f"Playwright Chromium запущен (attempt={attempt})",
                             extra={"event": "browser_started", "context": {"attempt": attempt}},
@@ -246,12 +276,18 @@ class BrowserAgent(BaseAgent):
         async with sem:
             await self._ensure_browser()
             try:
-                return await self._context.new_page()
+                page = await self._context.new_page()
+                if bool(getattr(settings, "BROWSER_HUMANIZE_ENABLED", True)):
+                    await page.wait_for_timeout(random.randint(120, 420))
+                return page
             except Exception:
                 await self._force_cleanup()
                 await self.start()
                 await self._ensure_browser()
-                return await self._context.new_page()
+                page = await self._context.new_page()
+                if bool(getattr(settings, "BROWSER_HUMANIZE_ENABLED", True)):
+                    await page.wait_for_timeout(random.randint(120, 420))
+                return page
 
     async def _capture_failure_artifacts(self, page, prefix: str = "browser") -> dict[str, str]:
         ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -275,6 +311,8 @@ class BrowserAgent(BaseAgent):
     async def navigate(self, url: str) -> TaskResult:
         page = await self._new_page()
         try:
+            if bool(getattr(settings, "BROWSER_HUMANIZE_ENABLED", True)):
+                await page.wait_for_timeout(random.randint(180, 700))
             response = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
             await page.wait_for_timeout(400)
             title = await page.title()
@@ -331,6 +369,8 @@ class BrowserAgent(BaseAgent):
             for sel, val in data.items():
                 try:
                     await page.fill(sel, val)
+                    if bool(getattr(settings, "BROWSER_HUMANIZE_ENABLED", True)):
+                        await page.wait_for_timeout(random.randint(60, 220))
                     filled += 1
                 except Exception:
                     pass

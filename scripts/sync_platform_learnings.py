@@ -68,6 +68,12 @@ def main() -> int:
         data = _load_json(auth_path) or {}
         docs.extend(list(data.get("results") or []))
 
+    # 4) Ingest latest live publish matrix (API/browser mixed probe)
+    live_matrix_path = _latest_report("VITO_PUBLISH_MATRIX_LIVE")
+    if live_matrix_path:
+        data = _load_json(live_matrix_path) or {}
+        docs.extend(list(data.get("results") or []))
+
     for row in docs:
         platform = str(row.get("platform") or "").strip().lower()
         if not platform:
@@ -150,7 +156,7 @@ def main() -> int:
         json.dumps(
             {
                 "ok": True,
-                "source_reports": [p.name for p in [matrix_path, auth_path] if p],
+                "source_reports": [p.name for p in [matrix_path, auth_path, live_matrix_path] if p],
                 "synced": synced,
                 "failed_records": failed,
             },
@@ -162,4 +168,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -82,13 +82,24 @@ class RedditPlatform(BasePlatform):
         subreddit = str(content.get("subreddit", "")).strip()
         title = str(content.get("title", "")).strip()
         body = str(content.get("text", "")).strip()
+        link_url = str(content.get("url", "") or content.get("image_url", "")).strip()
+        image_path = str(content.get("image_path", "")).strip()
         if not subreddit or not title:
             return {"platform": "reddit", "status": "error", "error": "subreddit/title required"}
+        if image_path and not link_url:
+            return {
+                "platform": "reddit",
+                "status": "error",
+                "error": "image_path_not_supported_without_url; provide image_url/url for link post",
+            }
 
         try:
             session = await self._get_session()
             headers = {"Authorization": f"Bearer {self._token}", "User-Agent": self._user_agent}
-            data = {"sr": subreddit, "title": title, "kind": "self", "text": body, "resubmit": "true", "api_type": "json"}
+            if link_url:
+                data = {"sr": subreddit, "title": title, "kind": "link", "url": link_url, "resubmit": "true", "api_type": "json"}
+            else:
+                data = {"sr": subreddit, "title": title, "kind": "self", "text": body, "resubmit": "true", "api_type": "json"}
             async with session.post(
                 "https://oauth.reddit.com/api/submit",
                 data=data,
