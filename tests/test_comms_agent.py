@@ -178,6 +178,38 @@ async def test_cmd_clear_goals_with_confirmation(comms, mock_update):
 
 
 @pytest.mark.asyncio
+async def test_cmd_rollback_requires_confirmation(comms, mock_update):
+    su = MagicMock()
+    su.get_update_history.return_value = [{"backup_path": "/tmp/backup_a"}]
+    su.rollback = MagicMock(return_value=True)
+    comms.set_modules(self_updater=su)
+    ctx = MagicMock()
+    ctx.args = []
+
+    await comms._cmd_rollback(mock_update, ctx)
+
+    su.rollback.assert_not_called()
+    assert comms._pending_owner_confirmation is not None
+    assert comms._pending_owner_confirmation.get("kind") == "rollback"
+    text = mock_update.message.reply_text.call_args[0][0]
+    assert "/rollback yes" in text
+
+
+@pytest.mark.asyncio
+async def test_cmd_rollback_with_confirmation(comms, mock_update):
+    su = MagicMock()
+    su.get_update_history.return_value = [{"backup_path": "/tmp/backup_a"}]
+    su.rollback = MagicMock(return_value=True)
+    comms.set_modules(self_updater=su)
+    ctx = MagicMock()
+    ctx.args = ["yes"]
+
+    await comms._cmd_rollback(mock_update, ctx)
+
+    su.rollback.assert_called_once_with("/tmp/backup_a")
+
+
+@pytest.mark.asyncio
 async def test_cmd_goal_empty(comms, mock_update):
     ge = MagicMock()
     comms.set_modules(goal_engine=ge)

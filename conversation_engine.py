@@ -980,6 +980,9 @@ class ConversationEngine:
                     estimated_cost = data.get("estimated_cost_usd", 0.05)
             except Exception:
                 pass
+        # Owner policy has priority: with auto-approve enabled, LLM cannot force extra approval round.
+        if auto_approve:
+            needs_approval = False
 
         # If needs_approval — create goal in WAITING_APPROVAL state
         # The goal will wait for owner's ✅ before execution

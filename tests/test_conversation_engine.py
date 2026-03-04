@@ -401,6 +401,18 @@ async def test_handle_goal_request_auto_approve_enabled(monkeypatch, mock_llm_ro
 
 
 @pytest.mark.asyncio
+async def test_handle_goal_request_auto_approve_cannot_be_overridden_by_llm(monkeypatch, mock_llm_router, mock_memory):
+    monkeypatch.setattr("conversation_engine.settings.OWNER_AUTO_APPROVE_GOALS", True, raising=False)
+    engine = ConversationEngine(llm_router=mock_llm_router, memory=mock_memory)
+    mock_llm_router.call_llm = AsyncMock(
+        return_value='{"goal_title":"t","goal_description":"d","confirmation":"c","needs_approval":true}'
+    )
+    result = await engine._handle_goal_request("сделай лендинг")
+    assert result["create_goal"] is True
+    assert result["needs_approval"] is False
+
+
+@pytest.mark.asyncio
 async def test_execute_actions_blocks_unknown_action_without_auto_self_improve(mock_llm_router, mock_memory):
     registry = MagicMock()
     registry.dispatch = AsyncMock()

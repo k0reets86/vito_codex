@@ -642,6 +642,14 @@ class CommsAgent:
                 if kind == "clear_goals" and self._goal_engine:
                     removed = int(self._goal_engine.clear_all_goals() or 0)
                     await self.send_message(f"Готово. Очередь целей очищена ({removed}).", level="result")
+                elif kind == "rollback" and self._self_updater:
+                    backup_path = str(payload.get("backup_path") or "")
+                    if not backup_path:
+                        await self.send_message("Нет пути к бэкапу для отката.", level="result")
+                    else:
+                        success = self._self_updater.rollback(backup_path)
+                        status = "Откат выполнен" if success else "Ошибка отката"
+                        await self.send_message(f"{status}: {backup_path}", level="result")
                 else:
                     await self.send_message("Принял. Выполняю.", level="result")
             else:
@@ -1907,6 +1915,20 @@ class CommsAgent:
                         f"Готово. Очередь целей очищена ({removed}).",
                         reply_markup=self._main_keyboard(),
                     )
+                elif kind == "rollback" and self._self_updater:
+                    backup_path = str(payload.get("backup_path") or "")
+                    if not backup_path:
+                        await update.message.reply_text(
+                            "Нет пути к бэкапу для отката.",
+                            reply_markup=self._main_keyboard(),
+                        )
+                    else:
+                        success = self._self_updater.rollback(backup_path)
+                        status = "Откат выполнен" if success else "Ошибка отката"
+                        await update.message.reply_text(
+                            f"{status}: {backup_path}",
+                            reply_markup=self._main_keyboard(),
+                        )
                 else:
                     await update.message.reply_text("Принял. Выполняю.", reply_markup=self._main_keyboard())
             else:
@@ -2783,6 +2805,18 @@ class CommsAgent:
         backup_path = last.get("backup_path", "")
         if not backup_path:
             await update.message.reply_text("Нет бэкапа для отката.", reply_markup=self._main_keyboard())
+            return
+        if not self._is_confirmed(getattr(context, "args", None)):
+            self._pending_owner_confirmation = {
+                "kind": "rollback",
+                "backup_path": backup_path,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            await update.message.reply_text(
+                "Откат меняет код и может удалить последние доработки.\n"
+                "Подтверди: `/rollback yes` или ответь `да` на это сообщение.",
+                reply_markup=self._main_keyboard(),
+            )
             return
         success = self._self_updater.rollback(backup_path)
         status = "Откат выполнен" if success else "Ошибка отката"
