@@ -705,6 +705,22 @@ class CommsAgent:
             self._save_auth_state()
 
     @staticmethod
+    def _is_challenge_detail(detail: str) -> bool:
+        s = str(detail or "").strip().lower()
+        return any(x in s for x in ("challenge", "captcha", "datadome", "2fa", "otp_required"))
+
+    @staticmethod
+    def _manual_capture_hint(service: str) -> str:
+        svc = str(service or "").strip().lower()
+        if svc == "etsy":
+            return (
+                "Etsy заблокировал серверный вход (challenge/captcha). "
+                "Нужен ручной server-capture сессии: "
+                "`python3 scripts/etsy_auth_helper.py browser-capture --storage-path runtime/etsy_storage_state.json`"
+            )
+        return "Нужен ручной вход в серверной browser-сессии и сохранение storage_state."
+
+    @staticmethod
     def _is_status_prompt(text: str) -> bool:
         s = str(text or "").strip().lower()
         return any(
@@ -1053,8 +1069,9 @@ class CommsAgent:
                     rc, out = await self._run_etsy_auto_login()
                     if rc == 0:
                         return True, "Etsy browser-сессия захвачена автоматически."
-                    if "OTP_REQUIRED" in out:
-                        return False, "Etsy требует дополнительную проверку (challenge/2FA). Нужен ручной вход на серверной сессии."
+                    low = str(out or "").lower()
+                    if "otp_required" in low or "challenge" in low or "captcha" in low or "datadome" in low:
+                        return False, "Etsy challenge/captcha: нужен ручной server-capture сессии."
                     return False, "Etsy browser-сессия не подтверждена. Авто-вход не прошёл."
                 return False, "Etsy API не подтвердил вход. Зафиксировал ручную авторизацию."
             except Exception:
@@ -1591,7 +1608,8 @@ class CommsAgent:
             else:
                 if self._requires_strict_auth_verification(service):
                     self._clear_service_auth_confirmed(service)
-                    await self.send_message(f"Вход не подтверждён: {title}. {detail}")
+                    extra = f" {self._manual_capture_hint(service)}" if self._is_challenge_detail(detail) else ""
+                    await self.send_message(f"Вход не подтверждён: {title}. {detail}{extra}")
                 elif self._is_manual_auth_service(service):
                     self._mark_service_auth_confirmed(service)
                     await self.send_message(f"Вход зафиксирован вручную: {title}. Проверка: {detail}")
@@ -3086,8 +3104,9 @@ class CommsAgent:
             else:
                 if self._requires_strict_auth_verification(service):
                     self._clear_service_auth_confirmed(service)
+                    extra = f" {self._manual_capture_hint(service)}" if self._is_challenge_detail(detail) else ""
                     await update.message.reply_text(
-                        f"Вход не подтверждён: {title}. {detail}",
+                        f"Вход не подтверждён: {title}. {detail}{extra}",
                         reply_markup=self._main_keyboard(),
                     )
                 elif self._is_manual_auth_service(service):
@@ -4184,9 +4203,10 @@ class CommsAgent:
             # but clearly mark that technical probe failed.
             if self._requires_strict_auth_verification(service):
                 self._clear_service_auth_confirmed(service)
+                extra = f" {self._manual_capture_hint(service)}" if self._is_challenge_detail(detail) else ""
                 await query.answer("Не подтверждено", show_alert=True)
-                await self._safe_edit_callback_message(query, f"{query.message.text}\n\n— Вход не подтверждён.\n{detail}")
-                await self.send_message(f"Не удалось подтвердить вход: {title}. Деталь: {detail}", level="warning")
+                await self._safe_edit_callback_message(query, f"{query.message.text}\n\n— Вход не подтверждён.\n{detail}{extra}")
+                await self.send_message(f"Не удалось подтвердить вход: {title}. Деталь: {detail}{extra}", level="warning")
                 return
             if self._is_manual_auth_service(service):
                 stamp = datetime.now(timezone.utc).isoformat()
