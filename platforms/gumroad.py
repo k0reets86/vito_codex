@@ -377,9 +377,14 @@ class GumroadPlatform(BasePlatform):
         tags_cfg = content.get("tags", ["automation", "ai", "productivity", "workflow"]) or ["automation", "ai", "productivity", "workflow"]
         if not isinstance(tags_cfg, list):
             tags_cfg = [str(tags_cfg)]
-        tags_cfg = [str(t).strip().lower()[:32] for t in tags_cfg if str(t).strip()][:12]
+        tags_cfg = [str(t).strip().lower()[:32] for t in tags_cfg if str(t).strip()][:5]
         if not tags_cfg:
             tags_cfg = ["automation", "ai", "productivity", "workflow"]
+        keep_unpublished = bool(content.get("keep_unpublished")) or bool(content.get("draft_only"))
+        gallery_paths_cfg = content.get("gallery_paths", []) or []
+        if not isinstance(gallery_paths_cfg, list):
+            gallery_paths_cfg = [str(gallery_paths_cfg)]
+        gallery_paths = [str(p) for p in gallery_paths_cfg if str(p).strip() and Path(str(p)).exists()]
         before_ids: set[str] = set()
         if not allow_existing_update:
             try:
@@ -408,6 +413,14 @@ class GumroadPlatform(BasePlatform):
                 }])
                 page = await ctx.new_page()
                 page.set_default_timeout(20000)
+                if keep_unpublished:
+                    try:
+                        btn_unpub = page.get_by_role("button", name="Unpublish")
+                        if await btn_unpub.count() > 0 and await btn_unpub.first.is_visible(timeout=1500):
+                            await btn_unpub.first.click(timeout=2500)
+                            await asyncio.sleep(1200)
+                    except Exception:
+                        pass
 
                 # Prefer editing an explicitly targeted existing product only when explicitly allowed.
                 slug_from_api = ""
@@ -677,7 +690,6 @@ class GumroadPlatform(BasePlatform):
                     await name_el.fill(name)
                     logger.info("Gumroad: name filled", extra={"event": "gumroad_name_filled"})
                     try:
-                        from pathlib import Path
                         Path("/tmp/gumroad_new.html").write_text(await page.content())
                         await page.screenshot(path="/tmp/gumroad_new.png", full_page=True)
                         logger.info("Gumroad: debug snapshot saved", extra={"event": "gumroad_debug_saved"})
@@ -796,7 +808,6 @@ class GumroadPlatform(BasePlatform):
                     pass
                 try:
                     if "/products/" in page.url:
-                        from pathlib import Path
                         Path("/tmp/gumroad_edit.html").write_text(await page.content())
                         await page.screenshot(path="/tmp/gumroad_edit.png", full_page=True)
                         logger.info("Gumroad: edit snapshot saved", extra={"event": "gumroad_edit_saved"})
@@ -960,7 +971,6 @@ class GumroadPlatform(BasePlatform):
                         }));
                         return {labels, inputs};
                     }""")
-                    from pathlib import Path
                     Path("/tmp/gumroad_ui_dump.json").write_text(str(ui_dump)[:10000])
                     logger.info("Gumroad: UI dump saved", extra={"event": "gumroad_ui_dump"})
                 except Exception:
@@ -988,29 +998,46 @@ class GumroadPlatform(BasePlatform):
                             }));
                             return {labels, inputs};
                         }""")
-                        from pathlib import Path
                         Path("/tmp/gumroad_ui_dump_share.json").write_text(str(ui_dump2)[:10000])
                         logger.info("Gumroad: UI dump (share) saved", extra={"event": "gumroad_ui_dump_share"})
-                        # Set category/tags via Share tab comboboxes
+                        # Set category/tags via Share tab comboboxes with option selection from suggestions.
+                        async def _select_combobox_option(combo, query: str) -> bool:
+                            try:
+                                await combo.click()
+                                await asyncio.sleep(0.15)
+                                await combo.fill(query)
+                                await asyncio.sleep(0.8)
+                                options = page.locator('[role="option"]')
+                                if await options.count() > 0:
+                                    preferred = page.get_by_role("option", name=query)
+                                    if await preferred.count() > 0:
+                                        await preferred.first.click(timeout=1800)
+                                    else:
+                                        await options.first.click(timeout=1800)
+                                    await asyncio.sleep(0.25)
+                                    return True
+                                await page.keyboard.press("Enter")
+                                return True
+                            except Exception:
+                                return False
                         try:
                             combos = page.locator('input[role="combobox"]')
                             if await combos.count() >= 1:
-                                cat_cb = combos.nth(0)
-                                await cat_cb.click()
-                                await page.keyboard.type("Programming", delay=10)
-                                await page.keyboard.press("Enter")
-                                logger.info("Gumroad: category set (share)", extra={"event": "gumroad_category_share"})
+                                cat_ok = await _select_combobox_option(combos.nth(0), "Programming")
+                                if cat_ok:
+                                    logger.info("Gumroad: category set (share)", extra={"event": "gumroad_category_share"})
                         except Exception:
                             pass
                         try:
                             combos = page.locator('input[role="combobox"]')
                             if await combos.count() >= 2:
                                 tag_cb = combos.nth(1)
-                                for tag in tags_cfg[:8]:
-                                    await tag_cb.fill(tag)
-                                    await page.keyboard.press("Enter")
-                                    await asyncio.sleep(0.1)
-                                logger.info("Gumroad: tags set (share)", extra={"event": "gumroad_tags_share"})
+                                added = 0
+                                for tag in tags_cfg[:5]:
+                                    if await _select_combobox_option(tag_cb, tag):
+                                        added += 1
+                                if added:
+                                    logger.info("Gumroad: tags set (share)", extra={"event": "gumroad_tags_share", "context": {"count": added}})
                         except Exception:
                             pass
                         # Save after share updates
@@ -1185,7 +1212,6 @@ class GumroadPlatform(BasePlatform):
                           }));
                         return uploads;
                     }""")
-                    from pathlib import Path
                     Path("/tmp/gumroad_upload_elements.json").write_text(str(upload_dump)[:12000])
                     inputs_dump = await page.evaluate("""() => {
                         return Array.from(document.querySelectorAll('input[type=\"file\"]')).map(el => ({
@@ -1211,7 +1237,6 @@ class GumroadPlatform(BasePlatform):
                             # Try by text within cover section (button may be a div)
                             cover_section = page.locator('text=Cover').first.locator('xpath=ancestor::div[1]')
                             try:
-                                from pathlib import Path
                                 html = await cover_section.evaluate("el => el.outerHTML")
                                 Path("/tmp/gumroad_cover_section.html").write_text(html[:8000])
                             except Exception:
@@ -1254,7 +1279,6 @@ class GumroadPlatform(BasePlatform):
                                     pass
                                 thumb_section = thumb_label.first.locator('xpath=ancestor::div[1]')
                                 try:
-                                    from pathlib import Path
                                     html = await thumb_section.evaluate("el => el.outerHTML")
                                     Path("/tmp/gumroad_thumb_section.html").write_text(html[:8000])
                                 except Exception:
@@ -1295,7 +1319,7 @@ class GumroadPlatform(BasePlatform):
                     except Exception:
                         pass
 
-                # Upload PDF early (Content tab) to avoid navigation away
+                # Upload digital file + preview screenshots in Content tab.
                 try:
                     if pdf_path and Path(pdf_path).exists():
                         content_tab = page.locator('button:has-text("Content"), a:has-text("Content")').first
@@ -1304,14 +1328,92 @@ class GumroadPlatform(BasePlatform):
                             await asyncio.sleep(2)
                         except Exception:
                             pass
-                        upload_btn = page.locator('button:has-text("Upload your files")').first
-                        if await upload_btn.is_visible(timeout=5000):
-                            async with page.expect_file_chooser(timeout=5000) as fc:
-                                await upload_btn.click()
-                            chooser = await fc.value
-                            await chooser.set_files(pdf_path)
-                            await asyncio.sleep(5)
-                            logger.info("Gumroad: pdf uploaded", extra={"event": "gumroad_pdf_uploaded"})
+                        files_for_upload = [str(pdf_path)] + gallery_paths[:2]
+                        upload_done = False
+
+                        async def _existing_files_live() -> set[str]:
+                            out: set[str] = set()
+                            try:
+                                state_tmp = await page.evaluate("""() => {
+                                    const el = document.querySelector('script[data-component-name="ProductEditPage"]');
+                                    if (!el) return null;
+                                    try { return JSON.parse(el.textContent); } catch(e) { return null; }
+                                }""")
+                                if isinstance(state_tmp, dict):
+                                    files = state_tmp.get("existing_files") or []
+                                    if isinstance(files, list):
+                                        for f in files:
+                                            if isinstance(f, dict):
+                                                name = str(f.get("file_name") or "").strip().lower()
+                                                if name:
+                                                    out.add(name)
+                            except Exception:
+                                pass
+                            return out
+
+                        before_files = await _existing_files_live()
+
+                        # Path 1: editor menu Insert -> Computer files.
+                        try:
+                            insert_btn = page.locator('button:has-text("Insert")').first
+                            if await insert_btn.is_visible(timeout=2000):
+                                async with page.expect_file_chooser(timeout=7000) as fc:
+                                    await insert_btn.click()
+                                    computer_item = page.locator('[role="menuitem"]:has-text("Computer files"), button:has-text("Computer files"), label:has-text("Computer files")').first
+                                    if await computer_item.is_visible(timeout=3000):
+                                        await computer_item.click()
+                                chooser = await fc.value
+                                await chooser.set_files(files_for_upload)
+                                await asyncio.sleep(5)
+                        except Exception:
+                            pass
+
+                        # Path 2: direct file inputs in Content tab.
+                        if not upload_done:
+                            try:
+                                all_inputs = page.locator('input[type="file"]')
+                                c = await all_inputs.count()
+                                for i in range(c):
+                                    fi = all_inputs.nth(i)
+                                    try:
+                                        accept = (await fi.get_attribute("accept") or "").lower()
+                                    except Exception:
+                                        accept = ""
+                                    # Prefer broad inputs (accept empty) and file-capable inputs.
+                                    if (not accept) or ("pdf" in accept) or ("image" in accept) or ("*" in accept):
+                                        try:
+                                            await fi.set_input_files(files_for_upload)
+                                            await asyncio.sleep(2)
+                                        except Exception:
+                                            continue
+                            except Exception:
+                                pass
+
+                        # Path 3: Upload button chooser.
+                        if not upload_done:
+                            upload_btn = page.locator('button:has-text("Upload your files"), button:has-text("Upload files")').first
+                            if await upload_btn.is_visible(timeout=5000):
+                                try:
+                                    async with page.expect_file_chooser(timeout=7000) as fc:
+                                        await upload_btn.click()
+                                    chooser = await fc.value
+                                    await chooser.set_files(files_for_upload)
+                                    await asyncio.sleep(5)
+                                except Exception:
+                                    pass
+
+                        after_files = await _existing_files_live()
+                        upload_done = bool(after_files and len(after_files) >= len(before_files))
+                        if upload_done:
+                            logger.info("Gumroad: content files uploaded", extra={"event": "gumroad_content_files_uploaded", "context": {"count": len(files_for_upload)}})
+                            # Save directly on Content tab.
+                            try:
+                                bsave = page.get_by_role("button", name="Save changes")
+                                if await bsave.count() > 0:
+                                    await bsave.first.click()
+                                    await asyncio.sleep(2)
+                            except Exception:
+                                pass
                         # Back to Product tab
                         try:
                             product_tab = page.locator('button:has-text("Product"), a:has-text("Product")').first
@@ -1340,21 +1442,111 @@ class GumroadPlatform(BasePlatform):
                     await asyncio.sleep(2)
                 except Exception:
                     pass
+                # Gumroad may redirect to products list after save; return to the exact edit page for validation.
                 try:
-                    product_state = await page.evaluate("""() => {
+                    if slug and ("/products/" not in page.url or "/edit" not in page.url):
+                        await page.goto(f"https://gumroad.com/products/{slug}/edit", wait_until="networkidle")
+                        await asyncio.sleep(2)
+                except Exception:
+                    pass
+                product_state: dict[str, Any] | None = None
+                existing_files_after: list[str] = []
+                product_pdf_count = 0
+                product_image_count = 0
+                try:
+                    state_raw = await page.evaluate("""() => {
                         const el = document.querySelector('script[data-component-name="ProductEditPage"]');
                         if (!el) return null;
-                        try { return JSON.parse(el.textContent).product; } catch(e) { return null; }
+                        try { return JSON.parse(el.textContent); } catch(e) { return null; }
                     }""")
-                    if product_state:
-                        logger.info(
-                            "Gumroad: product state",
-                            extra={"event": "gumroad_product_state", "context": {
-                                "taxonomy_id": product_state.get("taxonomy_id"),
-                                "tags": product_state.get("tags"),
-                                "is_published": product_state.get("is_published"),
-                            }},
+                    if isinstance(state_raw, dict):
+                        if isinstance(state_raw.get("product"), dict):
+                            product_state = state_raw.get("product")
+                        files = state_raw.get("existing_files") or []
+                        if isinstance(files, list):
+                            for f in files:
+                                if not isinstance(f, dict):
+                                    continue
+                                fname = str(f.get("file_name") or "").strip()
+                                if fname:
+                                    existing_files_after.append(fname.lower())
+                                attached_name = str(f.get("attached_product_name") or "").strip().lower()
+                                current_name = str((product_state or {}).get("name") or "").strip().lower()
+                                if current_name and attached_name and attached_name != current_name:
+                                    continue
+                                ext = str(f.get("extension") or "").strip().lower()
+                                if ext == "pdf":
+                                    product_pdf_count += 1
+                                if ext in {"png", "jpg", "jpeg", "webp", "gif", "svg"}:
+                                    product_image_count += 1
+                        if product_state:
+                            logger.info(
+                                "Gumroad: product state",
+                                extra={"event": "gumroad_product_state", "context": {
+                                    "taxonomy_id": product_state.get("taxonomy_id"),
+                                    "tags": product_state.get("tags"),
+                                    "is_published": product_state.get("is_published"),
+                                    "existing_files_count": len(existing_files_after),
+                                }},
+                            )
+                except Exception:
+                    pass
+
+                # Validate that expected files are really attached in product state.
+                upload_validation_error = ""
+                try:
+                    need_pdf = bool(pdf_path and Path(pdf_path).exists())
+                    need_images = len([gp for gp in gallery_paths[:2] if Path(gp).exists()])
+                    # Fallback check in Content tab if current state did not include files.
+                    if (need_pdf or need_images) and not existing_files_after and slug:
+                        await page.goto(f"https://gumroad.com/products/{slug}/edit/content", wait_until="networkidle")
+                        await asyncio.sleep(2)
+                        state_raw2 = await page.evaluate("""() => {
+                            const el = document.querySelector('script[data-component-name="ProductEditPage"]');
+                            if (!el) return null;
+                            try { return JSON.parse(el.textContent); } catch(e) { return null; }
+                        }""")
+                        if isinstance(state_raw2, dict):
+                            files2 = state_raw2.get("existing_files") or []
+                            if isinstance(files2, list):
+                                current_name2 = str(((state_raw2.get("product") or {}).get("name") or "")).strip().lower()
+                                for f in files2:
+                                    if isinstance(f, dict):
+                                        fname = str(f.get("file_name") or "").strip().lower()
+                                        if fname:
+                                            existing_files_after.append(fname)
+                                        attached_name = str(f.get("attached_product_name") or "").strip().lower()
+                                        if current_name2 and attached_name and attached_name != current_name2:
+                                            continue
+                                        ext = str(f.get("extension") or "").strip().lower()
+                                        if ext == "pdf":
+                                            product_pdf_count += 1
+                                        if ext in {"png", "jpg", "jpeg", "webp", "gif", "svg"}:
+                                            product_image_count += 1
+                    missing_flags: list[str] = []
+                    if need_pdf and product_pdf_count < 1:
+                        missing_flags.append("pdf")
+                    if need_images and product_image_count < need_images:
+                        missing_flags.append("gallery")
+                    if missing_flags:
+                        upload_validation_error = f"missing_attached_types:{','.join(missing_flags)}"
+                        logger.warning(
+                            "Gumroad: expected attachment types missing",
+                            extra={"event": "gumroad_upload_validate_fail", "context": {"missing": missing_flags, "pdf": product_pdf_count, "images": product_image_count}},
                         )
+                except Exception:
+                    pass
+
+                # Validate discovery metadata after save.
+                meta_validation_error = ""
+                try:
+                    if product_state:
+                        tax = str(product_state.get("taxonomy_id") or "").strip()
+                        tags_live = product_state.get("tags") or []
+                        if not tax:
+                            meta_validation_error = "taxonomy_not_set"
+                        elif not isinstance(tags_live, list) or len(tags_live) < 1:
+                            meta_validation_error = "tags_not_set"
                 except Exception:
                     pass
 
@@ -1362,6 +1554,57 @@ class GumroadPlatform(BasePlatform):
                     logger.info(f"Gumroad: page url {page.url}", extra={"event": "gumroad_page_url"})
                 except Exception:
                     pass
+                # Stay unpublished while configuring, if requested.
+                if keep_unpublished:
+                    # Prefer true draft state while profile is still being configured.
+                    try:
+                        unpublish_btn = page.locator('button:has-text("Unpublish")').first
+                        if await unpublish_btn.is_visible(timeout=2000):
+                            await unpublish_btn.click()
+                            await asyncio.sleep(2)
+                    except Exception:
+                        pass
+                    # API fallback (some pages don't expose unpublish button).
+                    disable_result: dict[str, Any] = {}
+                    try:
+                        if product_id:
+                            disable_result = await self.disable_product(product_id)
+                    except Exception:
+                        pass
+                    # Re-check publication state after unpublish attempt.
+                    draft_confirmed = False
+                    try:
+                        product_state2 = await page.evaluate("""() => {
+                            const el = document.querySelector('script[data-component-name="ProductEditPage"]');
+                            if (!el) return null;
+                            try { return JSON.parse(el.textContent).product; } catch(e) { return null; }
+                        }""")
+                        if isinstance(product_state2, dict):
+                            draft_confirmed = not bool(product_state2.get("is_published"))
+                    except Exception:
+                        pass
+                    if not draft_confirmed and disable_result.get("status") == "draft":
+                        draft_confirmed = True
+                    public_url = f"https://gumroad.com/l/{slug}" if slug else ""
+                    if not public_url and product_id:
+                        try:
+                            products = await self.get_products()
+                            for prod in products:
+                                if str(prod.get("id") or "") == str(product_id):
+                                    public_url = str(prod.get("short_url") or "")
+                                    break
+                        except Exception:
+                            pass
+                    return {
+                        "platform": "gumroad",
+                        "status": "draft",
+                        "product_id": product_id,
+                        "url": public_url,
+                        "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
+                        "draft_confirmed": draft_confirmed,
+                        "files_attached": existing_files_after,
+                        "error": upload_validation_error or meta_validation_error,
+                    }
                 # Guard: if still on /products/new, do not claim success
                 try:
                     if "/products/new" in page.url:
@@ -1633,6 +1876,46 @@ class GumroadPlatform(BasePlatform):
                 return {"platform": "gumroad", "status": "error", "error": error}
         except Exception as e:
             logger.error(f"Gumroad enable error: {e}", extra={"event": "gumroad_enable_error"}, exc_info=True)
+            return {"platform": "gumroad", "status": "error", "error": str(e)}
+
+    async def disable_product(self, product_id: str) -> dict:
+        """PUT /v2/products/{id}/disable — unpublish product back to draft."""
+        if not self._authenticated:
+            auth_ok = await self.authenticate()
+            if not auth_ok:
+                return {"platform": "gumroad", "status": "not_authenticated"}
+
+        try:
+            session = await self._get_session()
+            async with session.put(
+                f"{API_BASE}/products/{product_id}/disable",
+                params=self._params(),
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                if resp.content_type and "json" in resp.content_type:
+                    data = await resp.json()
+                else:
+                    text = await resp.text()
+                    logger.warning(f"Gumroad disable unexpected: {resp.status} {text[:200]}")
+                    return {"platform": "gumroad", "status": "error", "error": f"HTTP {resp.status}"}
+
+                if resp.status == 200 and data.get("success"):
+                    product = data.get("product", {})
+                    logger.info(
+                        "Gumroad product unpublished",
+                        extra={"event": "gumroad_disable_ok", "context": {"product_id": product_id}},
+                    )
+                    return {
+                        "platform": "gumroad",
+                        "status": "draft",
+                        "product_id": product_id,
+                        "url": product.get("short_url", ""),
+                    }
+                error = data.get("message", str(resp.status))
+                logger.warning(f"Gumroad disable failed: {error}", extra={"event": "gumroad_disable_fail"})
+                return {"platform": "gumroad", "status": "error", "error": error}
+        except Exception as e:
+            logger.error(f"Gumroad disable error: {e}", extra={"event": "gumroad_disable_error"}, exc_info=True)
             return {"platform": "gumroad", "status": "error", "error": str(e)}
 
     async def get_analytics(self) -> dict:

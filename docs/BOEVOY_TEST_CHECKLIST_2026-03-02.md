@@ -2,7 +2,7 @@
 
 Progress formula: `completed / total * 100`
 
-Current progress: `6 / 41 = 14.6%`
+Current progress: `7 / 41 = 17.1%`
 
 ## Phase 1 — Runtime Baseline & Safety Gates
 - [x] T01 Configure Gemini-only mode and disable risky/high-cost modules for initial test wave.
@@ -40,7 +40,7 @@ Current progress: `6 / 41 = 14.6%`
 
 ## Phase 6 — Publishing/Platform Dry-Run Flows
 - [x] T25 Test posting dry-run flow end-to-end (prepare -> queue -> inspect).
-- [ ] T26 Test manual queue run (`/pubrun`) with evidence capture.
+- [x] T26 Test manual queue run (`/pubrun`) with evidence capture.
 - [ ] T27 Test web operator listing and one safe scenario run.
 - [ ] T28 Test platform registration flow on sandbox/test account (site #1).
 - [ ] T29 Test platform registration flow on sandbox/test account (site #2).
@@ -75,3 +75,4 @@ Current progress: `6 / 41 = 14.6%`
 - 2026-03-04: Gumroad hard safety policy: no fallback to old listings without explicit target id/slug and owner confirmation (`platforms/gumroad.py`, `agents/ecommerce_agent.py`).
 - 2026-03-04: Controlled single-product Gumroad cycle (`python3 scripts/gumroad_test_cycle.py ...`) -> `reports/VITO_GUMROAD_TEST_CYCLE_2026-03-04_1218UTC.json`, result: `daily_limit` (no modifications to existing listing).
 - 2026-03-04: Gumroad target-only update cycle (single listing `yupwt`, `target_product_id=PKIVW0rjiJ_L_6ugL_5q7w==`) successfully published with updated fields and assets -> `reports/VITO_GUMROAD_TEST_CYCLE_2026-03-04_1248UTC.json`.
+- 2026-03-04: Full-cycle verified on single target listing (`draft profile -> publish -> back to draft`) with browser+API proof and checks = PASS -> `reports/VITO_GUMROAD_FULL_CYCLE_2026-03-04_1333UTC.json`.

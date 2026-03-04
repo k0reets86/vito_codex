@@ -41,3 +41,35 @@ From the Product tab UI (verified in-app):
 ## Notes
 - Product state must be read after save via embedded JSON to verify tags/taxonomy.
 - Publish confirmation should be based on public URL availability and screenshot evidence.
+
+## Verified Working Flow (2026-03-04, target slug `yupwt`)
+Use this exact order for stable execution on an existing test listing:
+1. Open `/products/<slug>/edit` (target-only mode, no fallback to other listings).
+2. Fill Product tab fields:
+   - Title (`name`)
+   - Short summary (`custom_summary`)
+   - Long description (`description`)
+   - Price (`price_cents`)
+3. Upload cover/thumbnail on Product tab.
+4. Open Share tab and set:
+   - Category via first `input[role="combobox"]` (pick from suggestions)
+   - Up to 5 tags via second `input[role="combobox"]` (pick from suggestions)
+5. Open Content tab and ensure product has at least:
+   - 1 PDF file
+   - 2 image files (preview/gallery)
+6. Save and re-read `ProductEditPage` JSON for validation:
+   - `product.taxonomy_id` is present
+   - `len(product.tags) >= 5`
+   - `custom_summary` + `description` are non-empty
+   - `existing_files` includes required file types for this product
+7. For profile work mode, keep listing in draft:
+   - click `Unpublish` (UI) and/or call API disable fallback
+8. For live publish test:
+   - publish (enable) -> verify public URL + `is_published=true`
+   - return to draft (disable) after test if requested
+
+### Important
+- Category/tags are editable in draft mode (published state is not required).
+- Final proof should include both:
+  - browser state (`ProductEditPage` JSON),
+  - API state (`/v2/products`) for cross-check.

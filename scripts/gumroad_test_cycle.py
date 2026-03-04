@@ -55,6 +55,8 @@ async def run(args) -> dict:
         "thumb_path": args.thumb_path,
         "taxonomy_id": str(args.taxonomy_id),
         "tags": [t.strip() for t in (args.tags or "").split(",") if t.strip()],
+        "keep_unpublished": bool(args.keep_unpublished),
+        "gallery_paths": [p.strip() for p in (args.gallery_paths or "").split(",") if p.strip()],
     }
 
     if state.get("product_id") and state.get("slug"):
@@ -108,6 +110,8 @@ def main() -> int:
     parser.add_argument("--price", type=int, default=1)
     parser.add_argument("--taxonomy-id", default="66")
     parser.add_argument("--tags", default="ai,automation,productivity,digital-products,side-hustle")
+    parser.add_argument("--gallery-paths", default="")
+    parser.add_argument("--keep-unpublished", action="store_true")
     parser.add_argument("--pdf-path", required=True)
     parser.add_argument("--cover-path", required=True)
     parser.add_argument("--thumb-path", required=True)
