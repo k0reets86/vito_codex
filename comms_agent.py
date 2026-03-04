@@ -462,6 +462,16 @@ class CommsAgent:
         return m.group(1) if m else ""
 
     @staticmethod
+    def _is_auth_done_text(text: str) -> bool:
+        s = str(text or "").strip().lower()
+        if not s:
+            return False
+        return any(
+            token in s
+            for token in ("я вошел", "я вошёл", "вошел", "вошёл", "готово", "ok", "ок", "done", "авторизовался", "авторизовалась")
+        )
+
+    @staticmethod
     def _detect_service_login_request(text: str) -> str:
         s = str(text or "").strip().lower()
         if not s:
@@ -869,7 +879,7 @@ class CommsAgent:
         # Для Amazon делаем только probe (без авто-логина), чтобы статус не триггерил новый вход.
         if svc == "amazon_kdp":
             try:
-                probe_rc, _ = await self._run_kdp_probe()
+                probe_rc, _ = await self._run_kdp_probe_stable()
                 if probe_rc == 0:
                     self._mark_service_auth_confirmed(svc)
                     return f"{title}: подключение активно (live-check OK). Повторный логин не требуется."
@@ -919,7 +929,7 @@ class CommsAgent:
 
         if svc == "amazon_kdp":
             try:
-                probe_rc, _ = await self._run_kdp_probe()
+                probe_rc, _ = await self._run_kdp_probe_stable()
                 if probe_rc != 0:
                     return (
                         f"{title}: не вижу активной сессии аккаунта (live-check не пройден). "
@@ -1013,6 +1023,13 @@ class CommsAgent:
         out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
         output = (out_b or b"").decode("utf-8", errors="ignore")
         return int(proc.returncode or 0), output
+
+    async def _run_kdp_probe_stable(self) -> tuple[int, str]:
+        rc, out = await self._run_kdp_probe()
+        if rc == 0:
+            return rc, out
+        await asyncio.sleep(0.8)
+        return await self._run_kdp_probe()
 
     async def _run_kdp_inventory_probe(self) -> tuple[int, str]:
         storage = str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json") or "runtime/kdp_storage_state.json")
@@ -1141,7 +1158,7 @@ class CommsAgent:
         if not svc:
             return False, "service_missing"
         if svc == "amazon_kdp":
-            probe_rc, probe_out = await self._run_kdp_probe()
+            probe_rc, probe_out = await self._run_kdp_probe_stable()
             if probe_rc == 0:
                 return True, "Amazon KDP сессия подтверждена."
             has_storage, _ = self._has_cookie_storage_state("amazon_kdp")
@@ -1249,7 +1266,7 @@ class CommsAgent:
                 # Amazon must be validated by real live-check probe only.
                 # Cookie/storage presence alone is not enough to claim active session.
                 if svc == "amazon_kdp":
-                    probe_rc, _ = await self._run_kdp_probe()
+                    probe_rc, _ = await self._run_kdp_probe_stable()
                     ok = probe_rc == 0
                 else:
                     ok, _ = await self._verify_service_auth(svc)
@@ -1377,7 +1394,7 @@ class CommsAgent:
 
         # 1) Быстрая проверка: возможно сессия уже валидна.
         try:
-            probe_rc, _ = await self._run_kdp_probe()
+            probe_rc, _ = await self._run_kdp_probe_stable()
             if probe_rc == 0:
                 self._mark_service_auth_confirmed("amazon_kdp")
                 await send_reply("Amazon KDP: активная сессия уже подтверждена, повторный логин не требуется.")
@@ -1429,7 +1446,7 @@ class CommsAgent:
         summary = ""
         try:
             tail = str(out or "").strip().splitlines()[-1][:180]
-            if tail:
+            if tail and tail.strip().lower() not in {"url=", "reason: url=", "причина: url="}:
                 summary = f" Причина: {tail}"
         except Exception:
             summary = ""
@@ -1753,6 +1770,34 @@ class CommsAgent:
             if await self._start_service_auth_flow(svc, _owner_reply, with_button=False):
                 return
 
+        lower = text.lower()
+        if self._pending_service_auth and self._is_auth_done_text(lower):
+            service = next(reversed(self._pending_service_auth))
+            pending = self._pending_service_auth.pop(service, None) or {}
+            ok, detail = await self._verify_service_auth(service)
+            title, _ = self._service_auth_meta(service)
+            self._touch_service_context(service)
+            if ok:
+                self._mark_service_auth_confirmed(service)
+                await self.send_message(f"Вход подтверждён: {title}.")
+            else:
+                if self._requires_strict_auth_verification(service):
+                    since = str(pending.get("requested_at") or "")
+                    has_storage, storage_detail = self._has_cookie_storage_state(service, since_iso=since)
+                    if bool(pending.get("mode") == "remote") and has_storage:
+                        self._mark_service_auth_confirmed(service)
+                        await self.send_message(f"Вход подтверждён: {title} (server storage захвачен, detail={storage_detail}).")
+                        return
+                    self._clear_service_auth_confirmed(service)
+                    extra = f" {self._manual_capture_hint(service)}" if self._is_challenge_detail(detail) else ""
+                    await self.send_message(self._service_needs_session_refresh_text(service, title, detail) + extra)
+                elif self._is_manual_auth_service(service):
+                    self._mark_service_auth_confirmed(service)
+                    await self.send_message(f"Вход зафиксирован вручную: {title}. Проверка: {detail}")
+                else:
+                    await self.send_message(f"Не удалось подтвердить вход: {detail}")
+            return
+
         service_inventory = self._detect_contextual_service_inventory_request(text)
         if service_inventory:
             await self.send_message(await self._format_service_inventory_snapshot(service_inventory), level="result")
@@ -1780,7 +1825,7 @@ class CommsAgent:
             return
 
         lower = text.lower()
-        if self._pending_service_auth and lower in ("я вошел", "вошел", "вошёл", "готово", "ok", "ок", "done"):
+        if self._pending_service_auth and self._is_auth_done_text(lower):
             service = next(reversed(self._pending_service_auth))
             pending = self._pending_service_auth.pop(service, None) or {}
             ok, detail = await self._verify_service_auth(service)
@@ -3240,6 +3285,45 @@ class CommsAgent:
             if await self._start_service_auth_flow(svc, _tg_reply, with_button=True):
                 return
 
+        lower = text.lower()
+        if self._pending_service_auth and self._is_auth_done_text(lower):
+            service = next(reversed(self._pending_service_auth))
+            pending = self._pending_service_auth.pop(service, None) or {}
+            ok, detail = await self._verify_service_auth(service)
+            title, _ = self._service_auth_meta(service)
+            self._touch_service_context(service)
+            if ok:
+                self._mark_service_auth_confirmed(service)
+                await update.message.reply_text(f"Вход подтверждён: {title}.", reply_markup=self._main_keyboard())
+                logger.info("Inline auth_done via text", extra={"event": "inline_auth_done", "context": {"service": service, "mode": "text"}})
+            else:
+                if self._requires_strict_auth_verification(service):
+                    since = str(pending.get("requested_at") or "")
+                    has_storage, storage_detail = self._has_cookie_storage_state(service, since_iso=since)
+                    if bool(pending.get("mode") == "remote") and has_storage:
+                        self._mark_service_auth_confirmed(service)
+                        await update.message.reply_text(
+                            f"Вход подтверждён: {title} (server storage захвачен, detail={storage_detail}).",
+                            reply_markup=self._main_keyboard(),
+                        )
+                        return
+                    self._clear_service_auth_confirmed(service)
+                    extra = f" {self._manual_capture_hint(service)}" if self._is_challenge_detail(detail) else ""
+                    await update.message.reply_text(
+                        self._service_needs_session_refresh_text(service, title, detail) + extra,
+                        reply_markup=self._main_keyboard(),
+                    )
+                elif self._is_manual_auth_service(service):
+                    self._mark_service_auth_confirmed(service)
+                    await update.message.reply_text(
+                        f"Вход зафиксирован вручную: {title}. Проверка: {detail}",
+                        reply_markup=self._main_keyboard(),
+                    )
+                    logger.info("Inline auth_done via text", extra={"event": "inline_auth_done", "context": {"service": service, "mode": "text_manual"}})
+                else:
+                    await update.message.reply_text(f"Не удалось подтвердить вход: {detail}", reply_markup=self._main_keyboard())
+            return
+
         # Highest-priority contextual routing: account inventory/status/auth issue.
         service_inventory = self._detect_contextual_service_inventory_request(text)
         if service_inventory:
@@ -3288,7 +3372,7 @@ class CommsAgent:
                 return
 
         lower = text.lower()
-        if self._pending_service_auth and lower in ("я вошел", "вошел", "вошёл", "готово", "ok", "ок", "done"):
+        if self._pending_service_auth and self._is_auth_done_text(lower):
             service = next(reversed(self._pending_service_auth))
             pending = self._pending_service_auth.pop(service, None) or {}
             ok, detail = await self._verify_service_auth(service)
