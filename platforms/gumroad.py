@@ -583,12 +583,29 @@ class GumroadPlatform(BasePlatform):
                     await page.wait_for_url("**/products/**", timeout=10000)
                 except Exception:
                     pass
-                # Ensure we're on a specific product edit page, not products list
+                # Ensure we're on a specific product edit page, not products list.
+                # Never fallback to existing listings unless owner explicitly allowed update.
                 try:
                     if page.url.rstrip("/").endswith("/products"):
-                        slug_from_api = await _open_product_from_products_page(name) or await _open_existing_product(name, allow_update=True)
+                        if allow_existing_update:
+                            slug_from_api = await _open_product_from_products_page(name) or await _open_existing_product(name, allow_update=True)
+                        else:
+                            return {
+                                "platform": "gumroad",
+                                "status": "daily_limit",
+                                "error": "new_draft_not_created_no_existing_update_allowed",
+                                "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
+                            }
                     elif "/products/" not in page.url:
-                        slug_from_api = await _open_existing_product(name, allow_update=True)
+                        if allow_existing_update:
+                            slug_from_api = await _open_existing_product(name, allow_update=True)
+                        else:
+                            return {
+                                "platform": "gumroad",
+                                "status": "error",
+                                "error": "new_draft_not_created",
+                                "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
+                            }
                     logger.info(f"Gumroad: page url {page.url}", extra={"event": "gumroad_page_url"})
                 except Exception:
                     pass

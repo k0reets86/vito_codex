@@ -292,6 +292,7 @@ async def run() -> dict[str, Any]:
                 "draft",
                 "needs_oauth",
                 "needs_browser_login",
+                "daily_limit",
                 "not_authenticated",
                 "not_configured",
             }:
