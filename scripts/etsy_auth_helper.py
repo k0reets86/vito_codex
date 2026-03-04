@@ -85,7 +85,7 @@ async def oauth_complete(raw_code_or_url: str) -> int:
     return 0
 
 
-async def browser_capture(timeout_sec: int, storage_path: str, headless: bool) -> int:
+async def browser_capture(timeout_sec: int, storage_path: str, headless: bool, auto_submit: bool) -> int:
     # Lazy import so OAuth-only mode does not require playwright runtime
     from playwright.async_api import async_playwright
 
@@ -123,6 +123,16 @@ async def browser_capture(timeout_sec: int, storage_path: str, headless: bool) -
                 try:
                     await page.fill(sel, password)
                     break
+                except Exception:
+                    continue
+        if auto_submit:
+            for sel in ("button[type='submit']", "button[name='submit_attempt']", "button:has-text('Sign in')", "button:has-text('Войти')"):
+                try:
+                    btn = page.locator(sel).first
+                    if await btn.is_visible(timeout=1500):
+                        await btn.click()
+                        await page.wait_for_timeout(1200)
+                        break
                 except Exception:
                     continue
 
@@ -173,6 +183,7 @@ def main() -> int:
     p_browser.add_argument("--timeout-sec", type=int, default=420)
     p_browser.add_argument("--storage-path", default="runtime/etsy_storage_state.json")
     p_browser.add_argument("--headless", action="store_true", help="Run headless (not recommended for Etsy login)")
+    p_browser.add_argument("--auto-submit", action="store_true", help="Try clicking sign-in button automatically")
 
     args = parser.parse_args()
     if args.cmd == "oauth-start":
@@ -185,6 +196,7 @@ def main() -> int:
                 timeout_sec=int(args.timeout_sec),
                 storage_path=str(args.storage_path),
                 headless=bool(args.headless),
+                auto_submit=bool(args.auto_submit),
             )
         )
     return 1

@@ -76,3 +76,4 @@ Current progress: `7 / 41 = 17.1%`
 - 2026-03-04: Controlled single-product Gumroad cycle (`python3 scripts/gumroad_test_cycle.py ...`) -> `reports/VITO_GUMROAD_TEST_CYCLE_2026-03-04_1218UTC.json`, result: `daily_limit` (no modifications to existing listing).
 - 2026-03-04: Gumroad target-only update cycle (single listing `yupwt`, `target_product_id=PKIVW0rjiJ_L_6ugL_5q7w==`) successfully published with updated fields and assets -> `reports/VITO_GUMROAD_TEST_CYCLE_2026-03-04_1248UTC.json`.
 - 2026-03-04: Full-cycle verified on single target listing (`draft profile -> publish -> back to draft`) with browser+API proof and checks = PASS -> `reports/VITO_GUMROAD_FULL_CYCLE_2026-03-04_1333UTC.json`.
+- 2026-03-04: Etsy+Ko-fi combined full-cycle probe executed -> `reports/VITO_ETSY_KOFI_FULL_CYCLE_2026-03-04_1352UTC.json`; blockers are auth-session only (`etsy_session_missing`, `kofi_session_missing`), code path returns deterministic `needs_browser_login`.

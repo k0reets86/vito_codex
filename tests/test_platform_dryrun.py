@@ -26,3 +26,12 @@ async def test_platform_publish_dryrun_paths():
     assert r3.get("status") == "prepared"
     assert r4.get("status") == "prepared"
     assert r5.get("status") == "prepared"
+
+
+@pytest.mark.asyncio
+async def test_kofi_browser_mode_requires_storage_state(tmp_path, monkeypatch):
+    monkeypatch.setenv("KOFI_MODE", "browser_only")
+    monkeypatch.setenv("KOFI_STORAGE_STATE_FILE", str(tmp_path / "missing_kofi_state.json"))
+    p = KofiPlatform()
+    result = await p.publish({"title": "x", "description": "y", "price": 1})
+    assert result.get("status") == "needs_browser_login"
