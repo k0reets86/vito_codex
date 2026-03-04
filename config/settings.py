@@ -156,6 +156,18 @@ class Settings:
     # Browser behavior
     BROWSER_DEFAULT_ON_URL: bool = os.getenv("BROWSER_DEFAULT_ON_URL", "true").lower() in ("1", "true", "yes", "on")
     BROWSER_CONSTRAINED_MODE: bool = os.getenv("BROWSER_CONSTRAINED_MODE", "true").lower() in ("1", "true", "yes", "on")
+    BROWSER_SAFE_MODE_ENABLED: bool = os.getenv("BROWSER_SAFE_MODE_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+    BROWSER_MIN_ACTION_DELAY_MS: int = int(os.getenv("BROWSER_MIN_ACTION_DELAY_MS", "180") or 180)
+    BROWSER_MAX_ACTION_DELAY_MS: int = int(os.getenv("BROWSER_MAX_ACTION_DELAY_MS", "700") or 700)
+    BROWSER_DOMAIN_COOLDOWN_MS: int = int(os.getenv("BROWSER_DOMAIN_COOLDOWN_MS", "1200") or 1200)
+    BROWSER_NAV_RETRY_MAX: int = int(os.getenv("BROWSER_NAV_RETRY_MAX", "2") or 2)
+    BROWSER_NAV_RETRY_BACKOFF_MS: int = int(os.getenv("BROWSER_NAV_RETRY_BACKOFF_MS", "900") or 900)
+    BROWSER_CHALLENGE_DETECT_ENABLED: bool = os.getenv("BROWSER_CHALLENGE_DETECT_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+    BROWSER_CHALLENGE_BLOCK_MODE: bool = os.getenv("BROWSER_CHALLENGE_BLOCK_MODE", "true").lower() in ("1", "true", "yes", "on")
+    BROWSER_CHALLENGE_KEYWORDS: str = os.getenv(
+        "BROWSER_CHALLENGE_KEYWORDS",
+        "captcha,challenge,verify you are human,robot check,access denied,temporarily blocked,unusual traffic",
+    )
 
     # Owner inbox (file-based comms)
     OWNER_INBOX_ENABLED: bool = os.getenv("OWNER_INBOX_ENABLED", "true").lower() in ("1", "true", "yes", "on")

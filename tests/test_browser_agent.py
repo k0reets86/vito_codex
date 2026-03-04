@@ -283,3 +283,35 @@ class TestOOMProtection:
             await agent.start()
             mock_watchdog.assert_called_once()
             mock_memlimit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_detect_challenge_by_url(mock_llm_router, mock_memory, mock_finance, mock_comms):
+    from agents.browser_agent import BrowserAgent
+    BrowserAgent._instance = None
+    BrowserAgent._browser = None
+    BrowserAgent._playwright_inst = None
+    BrowserAgent._lock = None
+    agent = BrowserAgent(llm_router=mock_llm_router, memory=mock_memory, finance=mock_finance, comms=mock_comms)
+    page = AsyncMock()
+    page.url = "https://example.com/captcha/challenge"
+    page.inner_text = AsyncMock(return_value="")
+    blocked, reason = await agent._detect_challenge(page, page.url)
+    assert blocked is True
+    assert "url=" in reason
+
+
+@pytest.mark.asyncio
+async def test_detect_challenge_by_body_text(mock_llm_router, mock_memory, mock_finance, mock_comms):
+    from agents.browser_agent import BrowserAgent
+    BrowserAgent._instance = None
+    BrowserAgent._browser = None
+    BrowserAgent._playwright_inst = None
+    BrowserAgent._lock = None
+    agent = BrowserAgent(llm_router=mock_llm_router, memory=mock_memory, finance=mock_finance, comms=mock_comms)
+    page = AsyncMock()
+    page.url = "https://example.com/login"
+    page.inner_text = AsyncMock(return_value="Please verify you are human before continue")
+    blocked, reason = await agent._detect_challenge(page, page.url)
+    assert blocked is True
+    assert "keyword=" in reason

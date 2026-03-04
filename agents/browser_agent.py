@@ -19,6 +19,7 @@ import subprocess
 import time
 from datetime import datetime, timezone
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
@@ -147,6 +148,8 @@ class BrowserAgent(BaseAgent):
             BrowserAgent._lock = asyncio.Lock()
         if BrowserAgent._page_sem is None:
             BrowserAgent._page_sem = asyncio.Semaphore(2)
+        self._domain_last_action: dict[str, float] = {}
+        self._domain_lock = asyncio.Lock()
 
     @property
     def capabilities(self) -> list[str]:
@@ -289,6 +292,92 @@ class BrowserAgent(BaseAgent):
                     await page.wait_for_timeout(random.randint(120, 420))
                 return page
 
+    @staticmethod
+    def _random_delay_ms(lo: int, hi: int) -> int:
+        lo2 = int(min(lo, hi))
+        hi2 = int(max(lo, hi))
+        return random.randint(lo2, hi2)
+
+    @staticmethod
+    def _extract_domain(url: str) -> str:
+        try:
+            return (urlparse(str(url or "")).netloc or "").lower().strip()
+        except Exception:
+            return ""
+
+    async def _apply_safe_domain_cooldown(self, url: str) -> None:
+        if not bool(getattr(settings, "BROWSER_SAFE_MODE_ENABLED", True)):
+            return
+        domain = self._extract_domain(url)
+        if not domain:
+            return
+        cooldown_ms = max(0, int(getattr(settings, "BROWSER_DOMAIN_COOLDOWN_MS", 1200) or 1200))
+        now = time.monotonic()
+        async with self._domain_lock:
+            prev = float(self._domain_last_action.get(domain, 0.0) or 0.0)
+            wait_sec = max(0.0, (cooldown_ms / 1000.0) - (now - prev))
+            if wait_sec > 0:
+                await asyncio.sleep(wait_sec)
+            self._domain_last_action[domain] = time.monotonic()
+
+    def _challenge_keywords(self) -> list[str]:
+        raw = str(
+            getattr(
+                settings,
+                "BROWSER_CHALLENGE_KEYWORDS",
+                "captcha,challenge,verify you are human,robot check,access denied,temporarily blocked,unusual traffic",
+            )
+            or ""
+        )
+        return [x.strip().lower() for x in raw.split(",") if x.strip()]
+
+    async def _detect_challenge(self, page, url_hint: str = "") -> tuple[bool, str]:
+        if not bool(getattr(settings, "BROWSER_CHALLENGE_DETECT_ENABLED", True)):
+            return False, ""
+        try:
+            cur_url = str(getattr(page, "url", "") or url_hint or "")
+            low_url = cur_url.lower()
+            if any(k in low_url for k in ("captcha", "challenge", "blocked", "robot")):
+                return True, f"url={cur_url}"
+            body = ""
+            try:
+                body = (await page.inner_text("body") or "")[:4000].lower()
+            except Exception:
+                body = ""
+            for kw in self._challenge_keywords():
+                if kw and kw in body:
+                    return True, f"keyword={kw}"
+            return False, ""
+        except Exception:
+            return False, ""
+
+    async def _goto_with_policy(self, page, url: str, timeout_ms: int = 30000):
+        if bool(getattr(settings, "BROWSER_SAFE_MODE_ENABLED", True)):
+            await self._apply_safe_domain_cooldown(url)
+            min_d = int(getattr(settings, "BROWSER_MIN_ACTION_DELAY_MS", 180) or 180)
+            max_d = int(getattr(settings, "BROWSER_MAX_ACTION_DELAY_MS", 700) or 700)
+            await page.wait_for_timeout(self._random_delay_ms(min_d, max_d))
+
+        max_attempts = max(1, int(getattr(settings, "BROWSER_NAV_RETRY_MAX", 2) or 2))
+        backoff_ms = max(0, int(getattr(settings, "BROWSER_NAV_RETRY_BACKOFF_MS", 900) or 900))
+        last_exc: Exception | None = None
+        response = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                await page.wait_for_timeout(400)
+                return response
+            except Exception as e:
+                last_exc = e
+                msg = str(e).lower()
+                transient = any(x in msg for x in ("timeout", "net::", "connection", "temporar"))
+                if attempt >= max_attempts or not transient:
+                    raise
+                await page.wait_for_timeout(backoff_ms * attempt)
+        if last_exc is not None:
+            raise last_exc
+        return response
+
     async def _capture_failure_artifacts(self, page, prefix: str = "browser") -> dict[str, str]:
         ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         shot = f"/tmp/{prefix}_{ts}.png"
@@ -311,10 +400,15 @@ class BrowserAgent(BaseAgent):
     async def navigate(self, url: str) -> TaskResult:
         page = await self._new_page()
         try:
-            if bool(getattr(settings, "BROWSER_HUMANIZE_ENABLED", True)):
-                await page.wait_for_timeout(random.randint(180, 700))
-            response = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            await page.wait_for_timeout(400)
+            response = await self._goto_with_policy(page, url, timeout_ms=30000)
+            blocked, reason = await self._detect_challenge(page, url)
+            if blocked and bool(getattr(settings, "BROWSER_CHALLENGE_BLOCK_MODE", True)):
+                artifacts = await self._capture_failure_artifacts(page, "challenge_detected")
+                return TaskResult(
+                    success=False,
+                    error="challenge_detected",
+                    output={"url": str(getattr(page, "url", url)), "reason": reason, "needs_manual_auth": True, **artifacts},
+                )
             title = await page.title()
             return TaskResult(success=True, output={"url": url, "title": title, "status": response.status if response else 0})
         except Exception as e:
@@ -331,8 +425,15 @@ class BrowserAgent(BaseAgent):
             path = f"/tmp/vito_screenshot_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.png"
         page = await self._new_page()
         try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            await page.wait_for_timeout(400)
+            await self._goto_with_policy(page, url, timeout_ms=30000)
+            blocked, reason = await self._detect_challenge(page, url)
+            if blocked and bool(getattr(settings, "BROWSER_CHALLENGE_BLOCK_MODE", True)):
+                artifacts = await self._capture_failure_artifacts(page, "challenge_detected")
+                return TaskResult(
+                    success=False,
+                    error="challenge_detected",
+                    output={"url": str(getattr(page, "url", url)), "reason": reason, "needs_manual_auth": True, **artifacts},
+                )
             await page.screenshot(path=path, full_page=True)
             return TaskResult(success=True, output={"url": url, "path": path, "size_bytes": os.path.getsize(path)})
         except Exception as e:
@@ -347,8 +448,15 @@ class BrowserAgent(BaseAgent):
     async def extract_text(self, url: str, selector: str = "body") -> TaskResult:
         page = await self._new_page()
         try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            await page.wait_for_timeout(400)
+            await self._goto_with_policy(page, url, timeout_ms=30000)
+            blocked, reason = await self._detect_challenge(page, url)
+            if blocked and bool(getattr(settings, "BROWSER_CHALLENGE_BLOCK_MODE", True)):
+                artifacts = await self._capture_failure_artifacts(page, "challenge_detected")
+                return TaskResult(
+                    success=False,
+                    error="challenge_detected",
+                    output={"url": str(getattr(page, "url", url)), "reason": reason, "needs_manual_auth": True, **artifacts},
+                )
             text = await page.inner_text(selector)
             return TaskResult(success=True, output="\n".join(l.strip() for l in text.splitlines() if l.strip())[:10000])
         except Exception as e:
@@ -363,14 +471,21 @@ class BrowserAgent(BaseAgent):
     async def fill_form(self, url: str, data: dict[str, str], screenshot_path: str = "") -> TaskResult:
         page = await self._new_page()
         try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            await page.wait_for_timeout(400)
+            await self._goto_with_policy(page, url, timeout_ms=30000)
+            blocked, reason = await self._detect_challenge(page, url)
+            if blocked and bool(getattr(settings, "BROWSER_CHALLENGE_BLOCK_MODE", True)):
+                artifacts = await self._capture_failure_artifacts(page, "challenge_detected")
+                return TaskResult(
+                    success=False,
+                    error="challenge_detected",
+                    output={"url": str(getattr(page, "url", url)), "reason": reason, "needs_manual_auth": True, **artifacts},
+                )
             filled = 0
             for sel, val in data.items():
                 try:
                     await page.fill(sel, val)
                     if bool(getattr(settings, "BROWSER_HUMANIZE_ENABLED", True)):
-                        await page.wait_for_timeout(random.randint(60, 220))
+                        await page.wait_for_timeout(self._random_delay_ms(60, 220))
                     filled += 1
                 except Exception:
                     pass
@@ -396,8 +511,15 @@ class BrowserAgent(BaseAgent):
             return TaskResult(success=False, error=f"Файл не найден: {file_path}")
         page = await self._new_page()
         try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            await page.wait_for_timeout(400)
+            await self._goto_with_policy(page, url, timeout_ms=30000)
+            blocked, reason = await self._detect_challenge(page, url)
+            if blocked and bool(getattr(settings, "BROWSER_CHALLENGE_BLOCK_MODE", True)):
+                artifacts = await self._capture_failure_artifacts(page, "challenge_detected")
+                return TaskResult(
+                    success=False,
+                    error="challenge_detected",
+                    output={"url": str(getattr(page, "url", url)), "reason": reason, "needs_manual_auth": True, **artifacts},
+                )
             fi = await page.query_selector(selector)
             if fi:
                 await fi.set_input_files(file_path)
@@ -438,7 +560,15 @@ class BrowserAgent(BaseAgent):
         """Generic registration flow: fill form, submit, fetch email code/link, submit."""
         page = await self._new_page()
         try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            await self._goto_with_policy(page, url, timeout_ms=30000)
+            blocked, reason = await self._detect_challenge(page, url)
+            if blocked and bool(getattr(settings, "BROWSER_CHALLENGE_BLOCK_MODE", True)):
+                artifacts = await self._capture_failure_artifacts(page, "challenge_detected")
+                return TaskResult(
+                    success=False,
+                    error="challenge_detected",
+                    output={"url": str(getattr(page, "url", url)), "reason": reason, "needs_manual_auth": True, **artifacts},
+                )
             # Fill fields
             filled = 0
             for sel, val in (form or {}).items():
