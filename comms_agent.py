@@ -468,7 +468,22 @@ class CommsAgent:
             return ""
         has_action = any(
             x in s
-            for x in ("зайди", "зайти", "вход", "логин", "login", "auth", "авториза", "войти", "открой")
+            for x in (
+                "зайди",
+                "зайти",
+                "вход",
+                "логин",
+                "login",
+                "auth",
+                "авториза",
+                "войти",
+                "открой",
+                "обнови сес",
+                "обновить сес",
+                "refresh session",
+                "перелогин",
+                "перевойти",
+            )
         )
         if not has_action:
             return ""
@@ -714,11 +729,18 @@ class CommsAgent:
         svc = str(service or "").strip().lower()
         if svc == "etsy":
             return (
-                "Etsy заблокировал серверный вход (challenge/captcha). "
-                "Нужен ручной server-capture сессии: "
+                "Требуется обновление серверной сессии Etsy: "
                 "`python3 scripts/etsy_auth_helper.py browser-capture --storage-path runtime/etsy_storage_state.json`"
             )
         return "Нужен ручной вход в серверной browser-сессии и сохранение storage_state."
+
+    @staticmethod
+    def _service_needs_session_refresh_text(service: str, title: str, detail: str) -> str:
+        base = f"{title}: нужно обновить серверную сессию."
+        d = str(detail or "").strip()
+        if d:
+            return f"{base}\nДеталь: {d}"
+        return base
 
     @staticmethod
     def _is_status_prompt(text: str) -> bool:
@@ -1609,7 +1631,7 @@ class CommsAgent:
                 if self._requires_strict_auth_verification(service):
                     self._clear_service_auth_confirmed(service)
                     extra = f" {self._manual_capture_hint(service)}" if self._is_challenge_detail(detail) else ""
-                    await self.send_message(f"Вход не подтверждён: {title}. {detail}{extra}")
+                    await self.send_message(self._service_needs_session_refresh_text(service, title, detail) + extra)
                 elif self._is_manual_auth_service(service):
                     self._mark_service_auth_confirmed(service)
                     await self.send_message(f"Вход зафиксирован вручную: {title}. Проверка: {detail}")
@@ -3106,7 +3128,7 @@ class CommsAgent:
                     self._clear_service_auth_confirmed(service)
                     extra = f" {self._manual_capture_hint(service)}" if self._is_challenge_detail(detail) else ""
                     await update.message.reply_text(
-                        f"Вход не подтверждён: {title}. {detail}{extra}",
+                        self._service_needs_session_refresh_text(service, title, detail) + extra,
                         reply_markup=self._main_keyboard(),
                     )
                 elif self._is_manual_auth_service(service):
@@ -4204,9 +4226,9 @@ class CommsAgent:
             if self._requires_strict_auth_verification(service):
                 self._clear_service_auth_confirmed(service)
                 extra = f" {self._manual_capture_hint(service)}" if self._is_challenge_detail(detail) else ""
-                await query.answer("Не подтверждено", show_alert=True)
-                await self._safe_edit_callback_message(query, f"{query.message.text}\n\n— Вход не подтверждён.\n{detail}{extra}")
-                await self.send_message(f"Не удалось подтвердить вход: {title}. Деталь: {detail}{extra}", level="warning")
+                await query.answer("Нужно обновить сессию", show_alert=False)
+                await self._safe_edit_callback_message(query, f"{query.message.text}\n\n— Нужно обновить сессию.\n{detail}{extra}")
+                await self.send_message(self._service_needs_session_refresh_text(service, title, detail) + extra, level="warning")
                 return
             if self._is_manual_auth_service(service):
                 stamp = datetime.now(timezone.utc).isoformat()

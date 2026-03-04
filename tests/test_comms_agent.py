@@ -1132,8 +1132,8 @@ async def test_handle_callback_auth_done_strict_verification_amazon(comms, mock_
 
     await comms._handle_callback(update, MagicMock())
 
-    mock_callback_query.answer.assert_called_once_with("Не подтверждено", show_alert=True)
-    assert "Вход не подтверждён" in mock_callback_query.edit_message_text.call_args[1]["text"]
+    mock_callback_query.answer.assert_called_once_with("Нужно обновить сессию", show_alert=False)
+    assert "Нужно обновить сессию" in mock_callback_query.edit_message_text.call_args[1]["text"]
     assert "amazon_kdp" not in comms._service_auth_confirmed
 
 

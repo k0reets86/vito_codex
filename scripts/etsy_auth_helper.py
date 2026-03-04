@@ -52,6 +52,17 @@ def _extract_code(raw: str) -> str:
         return m.group(1).strip() if m else ""
 
 
+async def _is_etsy_challenge_page(page) -> bool:
+    try:
+        url = (page.url or "").lower()
+        if any(x in url for x in ("captcha", "challenge", "datadome", "geo.captcha-delivery.com")):
+            return True
+        html = (await page.content()).lower()
+        return any(x in html for x in ("datadome", "captcha-delivery.com", "captcha"))
+    except Exception:
+        return False
+
+
 async def oauth_start() -> int:
     etsy = EtsyPlatform()
     data = await etsy.start_oauth2_pkce()
@@ -106,9 +117,21 @@ async def browser_capture(timeout_sec: int, storage_path: str, headless: bool, a
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=headless, args=_chromium_launch_args())
         context = await browser.new_context(viewport={"width": 1366, "height": 900})
+        await context.add_init_script(
+            """
+Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
+"""
+        )
         page = await context.new_page()
         await page.goto("https://www.etsy.com/signin", wait_until="domcontentloaded", timeout=120000)
         await page.wait_for_timeout(2000)
+        if await _is_etsy_challenge_page(page):
+            print("OTP_REQUIRED: Etsy challenge/captcha detected")
+            await context.close()
+            await browser.close()
+            return 3
 
         # Best effort prefill only; submit remains manual.
         if email:
@@ -186,11 +209,25 @@ async def auto_login(timeout_sec: int, storage_path: str) -> int:
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True, args=_chromium_launch_args())
-        context = await browser.new_context(viewport={"width": 1366, "height": 900})
+        context = await browser.new_context(
+            viewport={"width": 1366, "height": 900},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
+            locale="en-US",
+        )
+        await context.add_init_script(
+            """
+Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
+"""
+        )
         page = await context.new_page()
         try:
             await page.goto("https://www.etsy.com/signin", wait_until="domcontentloaded", timeout=120000)
             await page.wait_for_timeout(1200)
+            if await _is_etsy_challenge_page(page):
+                print("OTP_REQUIRED: Etsy challenge/captcha detected")
+                return 3
 
             filled_email = False
             for sel in ("input[type='email']", "input[name='email']", "#join_neu_email_field"):
