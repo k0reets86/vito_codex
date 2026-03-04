@@ -29,6 +29,7 @@ from openai import AsyncOpenAI
 from config.logger import get_logger
 from config.settings import settings
 from modules.llm_guardrails import LLMGuardrails
+from modules.research_url_context import ResearchURLContextPipeline
 
 logger = get_logger("llm_router", agent="llm_router")
 
@@ -164,6 +165,7 @@ class LLMRouter:
         self._finance = finance  # FinancialController — set via set_finance()
         self._comms = comms
         self._guardrails = LLMGuardrails(sqlite_path=self._sqlite_path)
+        self._research_url_context = ResearchURLContextPipeline()
         self._init_spend_table()
         logger.info("LLMRouter инициализирован", extra={"event": "init"})
 
@@ -355,6 +357,10 @@ class LLMRouter:
         return True
 
     def _candidate_model_keys(self, task_type: TaskType) -> list[str]:
+        # Sync Gemini model id dynamically (mode can change at runtime via Telegram).
+        MODEL_REGISTRY["gemini-flash"].model_id = str(
+            getattr(settings, "LLM_FORCE_GEMINI_MODEL", "gemini-2.5-flash") or "gemini-2.5-flash"
+        )
         # Temporary cost-safe mode: force all tasks through free Gemini 2.5 Flash Lite.
         if bool(getattr(settings, "LLM_FORCE_GEMINI_FREE", False)):
             return ["gemini-flash"]
@@ -448,15 +454,23 @@ class LLMRouter:
             except Exception:
                 pass
 
+        prompt_to_use = prompt
+        source_trace = []
+        if task_type == TaskType.RESEARCH and bool(getattr(settings, "RESEARCH_URL_CONTEXT_ENABLED", True)):
+            try:
+                prompt_to_use, source_trace = await self._research_url_context.enrich_prompt(prompt)
+            except Exception as e:
+                logger.debug(f"Research URL-context skipped: {e}")
+
         route = self.select_model(task_type, estimated_tokens)
         model = route.model
-        cached = self._cache_get(task_type, model, prompt, system_prompt)
+        cached = self._cache_get(task_type, model, prompt_to_use, system_prompt)
         if cached is not None:
             logger.info(
                 f"LLM cache hit: {model.display_name}",
                 extra={"event": "llm_cache_hit", "context": {"model": model.display_name, "task_type": task_type.value}},
             )
-            return cached
+            return self._research_url_context.append_sources(cached, source_trace) if source_trace else cached
 
         # ── Budget enforcement: блокируем если лимит исчерпан ──
         if not self.check_daily_limit():
@@ -541,10 +555,10 @@ class LLMRouter:
                             cost_per_1k_output=model.cost_per_1k_output,
                             max_tokens=model.max_tokens,
                         )
-                        text, real_cost = await self._call_provider(or_model, prompt, system_prompt)
+                        text, real_cost = await self._call_provider(or_model, prompt_to_use, system_prompt)
                         model = or_model
                     else:
-                        text, real_cost = await self._call_provider(model, prompt, system_prompt)
+                        text, real_cost = await self._call_provider(model, prompt_to_use, system_prompt)
                     duration_ms = int((time.monotonic() - start) * 1000)
                     self._record_spend(
                         model_name=model.display_name,
@@ -581,8 +595,8 @@ class LLMRouter:
                             },
                         },
                     )
-                    self._cache_set(task_type, model, prompt, system_prompt, text)
-                    return text
+                    self._cache_set(task_type, model, prompt_to_use, system_prompt, text)
+                    return self._research_url_context.append_sources(text, source_trace) if source_trace else text
 
                 except Exception as e:
                     error_str = str(e)
@@ -597,7 +611,7 @@ class LLMRouter:
                                 cost_per_1k_output=model.cost_per_1k_output,
                                 max_tokens=model.max_tokens,
                             )
-                            text, real_cost = await self._call_provider(or_model, prompt, system_prompt)
+                            text, real_cost = await self._call_provider(or_model, prompt_to_use, system_prompt)
                             duration_ms = int((time.monotonic() - start) * 1000)
                             self._record_spend(
                                 model_name=or_model.display_name,
@@ -631,8 +645,8 @@ class LLMRouter:
                                     },
                                 },
                             )
-                            self._cache_set(task_type, or_model, prompt, system_prompt, text)
-                            return text
+                            self._cache_set(task_type, or_model, prompt_to_use, system_prompt, text)
+                            return self._research_url_context.append_sources(text, source_trace) if source_trace else text
                         except Exception:
                             pass
                     # Retry on 529 (overloaded) and 500 (server error)

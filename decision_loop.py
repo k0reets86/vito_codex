@@ -2849,10 +2849,10 @@ class DecisionLoop:
                     f"Goal completed: {goal.title}\n"
                     f"Description: {goal.description[:200]}\n\n"
                     f"Step outputs:\n{combined_output[:3000]}\n\n"
-                    f"Write a SHORT Telegram message (max 500 chars) for the owner:\n"
+                    f"Write a Telegram update for the owner:\n"
                     f"1. One sentence: what was done\n"
-                    f"2. 2-3 key findings (bullet points)\n"
-                    f"3. 1-2 concrete proposals: 'I suggest we do X. Reply 1 or 2 to choose.'\n"
+                    f"2. 3-5 key findings (bullet points)\n"
+                    f"3. 2-3 concrete next steps in plain language (no forced 1/2 choice).\n"
                     f"Write in Russian (owner prefers Russian for communication).\n"
                     f"Be conversational, like a business partner reporting results."
                 )

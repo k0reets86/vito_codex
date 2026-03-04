@@ -69,6 +69,14 @@ class ImageGenerator:
         if settings.OPENAI_API_KEY:
             services["dalle"] = {"available": True, "models": ["dall-e-3"]}
 
+        if bool(getattr(settings, "GEMINI_ENABLE_IMAGEN", False)) and (
+            settings.GEMINI_API_KEY or settings.GOOGLE_API_KEY
+        ):
+            services["gemini_imagen"] = {
+                "available": True,
+                "models": [str(getattr(settings, "GEMINI_IMAGEN_MODEL", "imagen-3.0-generate-002"))],
+            }
+
         self._service_status = services
         return services
 
@@ -82,6 +90,8 @@ class ImageGenerator:
         available = {k: v for k, v in self._service_status.items() if v.get("available")}
         if not available:
             return ""
+        if bool(getattr(settings, "IMAGE_ROUTER_PREFER_GEMINI", False)) and "gemini_imagen" in available:
+            return "gemini_imagen"
 
         # Priority logic (no LLM needed — pure code)
         if cheap and "wavespeed" in available:
@@ -94,8 +104,12 @@ class ImageGenerator:
             return "bfl"
         if style == "logo" and "dalle" in available:
             return "dalle"
+        if style in ("art", "illustration", "product") and "gemini_imagen" in available:
+            return "gemini_imagen"
         if "replicate" in available:
             return "replicate"
+        if "gemini_imagen" in available:
+            return "gemini_imagen"
         if "bfl" in available:
             return "bfl"
         if "wavespeed" in available:
@@ -138,6 +152,8 @@ class ImageGenerator:
                 return await self._generate_wavespeed(prompt, width, height, filename)
             elif service == "dalle":
                 return await self._generate_dalle(prompt, width, height, filename)
+            elif service == "gemini_imagen":
+                return await self._generate_gemini_imagen(prompt, width, height, filename)
             else:
                 return {"error": f"Unknown service: {service}", "path": "", "url": ""}
         except Exception as e:
@@ -396,6 +412,67 @@ class ImageGenerator:
         except Exception as e:
             logger.error(f"Cloudinary upload error: {e}", exc_info=True)
         return ""
+
+    async def _generate_gemini_imagen(self, prompt: str, width: int, height: int, filename: str) -> dict:
+        """Gemini Imagen generation (best-effort, guarded fallback)."""
+        api_key = str(settings.GEMINI_API_KEY or settings.GOOGLE_API_KEY or "").strip()
+        if not api_key:
+            return {"error": "Gemini API key missing", "path": "", "url": ""}
+        try:
+            from google import genai
+        except Exception:
+            return {"error": "google-genai not installed", "path": "", "url": ""}
+
+        model = str(getattr(settings, "GEMINI_IMAGEN_MODEL", "imagen-3.0-generate-002") or "imagen-3.0-generate-002")
+        client = genai.Client(api_key=api_key)
+        image_bytes: bytes | None = None
+        image_url: str = ""
+
+        # API shape can vary between SDK versions; keep graceful fallbacks.
+        try:
+            resp = await asyncio.to_thread(
+                client.models.generate_images,
+                model=model,
+                prompt=prompt,
+                config={"number_of_images": 1},
+            )
+            generated = list(getattr(resp, "generated_images", []) or [])
+            if generated:
+                image_obj = getattr(generated[0], "image", None)
+                image_bytes = getattr(image_obj, "image_bytes", None)
+                image_url = str(getattr(image_obj, "uri", "") or "")
+        except Exception:
+            try:
+                resp = await asyncio.to_thread(
+                    client.models.generate_images,
+                    model=model,
+                    contents=prompt,
+                )
+                generated = list(getattr(resp, "images", []) or [])
+                if generated:
+                    image_bytes = getattr(generated[0], "image_bytes", None)
+                    image_url = str(getattr(generated[0], "uri", "") or "")
+            except Exception as e:
+                return {"error": f"Gemini Imagen error: {e}", "path": "", "url": ""}
+
+        path: Optional[Path] = None
+        if image_bytes:
+            name = filename or f"gemini_imagen_{int(time.time())}.png"
+            path = OUTPUT_DIR / name
+            path.write_bytes(image_bytes)
+        elif image_url:
+            path = await self._download_image(image_url, filename or f"gemini_imagen_{int(time.time())}.png")
+        else:
+            return {"error": "Gemini Imagen returned no image", "path": "", "url": ""}
+
+        cdn_url = await self._upload_cloudinary(path) if path else ""
+        return {
+            "path": str(path) if path else "",
+            "url": cdn_url or image_url,
+            "service": "gemini_imagen",
+            "model": model,
+            "cost_usd": 0.0,
+        }
 
     async def close(self) -> None:
         if self._session and not self._session.closed:

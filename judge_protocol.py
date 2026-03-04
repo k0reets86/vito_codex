@@ -372,7 +372,11 @@ class JudgeProtocol:
         lines = [f"Brainstorm: {result['topic']}", ""]
         for r in result["rounds"]:
             name = role_names.get(r["role"], r["role"])
-            content = r["content"][:500] if r["content"] else "[пусто]"
+            content = (r.get("content") or "").strip()
+            if not content:
+                content = "[пусто]"
+            if len(content) > 1600:
+                content = content[:1600] + "\n...[сокращено]"
             lines.append(f"--- {name} ({r['model']}) ---")
             lines.append(content)
             lines.append("")
@@ -460,7 +464,7 @@ class JudgeProtocol:
             f"Средний балл: {verdict.avg_score:.1f}/100",
             f"Решение: {'ОДОБРЕНА' if verdict.approved else 'ОТКЛОНЕНА'}",
             "",
-            "Голоса моделей:",
+            "Голоса моделей и критерии:",
         ]
         for vote in verdict.votes:
             if vote.error:
@@ -473,8 +477,12 @@ class JudgeProtocol:
                     f" S:{vote.score.scaling:.0f})"
                 )
                 if vote.reasoning:
-                    lines.append(f"    → {vote.reasoning[:100]}")
+                    reason = vote.reasoning.strip()
+                    if len(reason) > 420:
+                        reason = reason[:420] + "..."
+                    lines.append(f"    Обоснование: {reason}")
 
         lines.append("")
-        lines.append(verdict.recommendation)
+        lines.append(f"Вывод: {verdict.recommendation}")
+        lines.append("Шкала: >80 сильная ниша | 65-80 рабочая | 50-65 спорная | <50 слабая.")
         return "\n".join(lines)

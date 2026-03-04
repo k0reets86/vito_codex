@@ -265,7 +265,7 @@ class TestProcessMessage:
         )
         result = await engine.process_message("исправь интеграцию")
         assert result["intent"] == "system_action"
-        assert "/task_replace" in result.get("response", "")
+        assert "/task_replace" not in result.get("response", "")
         active = owner_state.get_active()
         assert active is not None
         assert "первая задача" in active.get("text", "")

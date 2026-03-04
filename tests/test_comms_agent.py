@@ -98,12 +98,26 @@ async def test_cmd_status(comms, mock_update):
     dl_mock.get_status.return_value = {"running": True, "tick_count": 5, "daily_spend": 1.23}
     ge_mock = MagicMock()
     ge_mock.get_stats.return_value = {"total": 3, "completed": 1, "executing": 1, "pending": 1}
+    ge_mock.get_all_goals.return_value = []
     comms.set_modules(goal_engine=ge_mock, decision_loop=dl_mock)
 
     await comms._cmd_status(mock_update, MagicMock())
     text = mock_update.message.reply_text.call_args[0][0]
     assert "VITO Status" in text
     assert "работает" in text
+
+
+@pytest.mark.asyncio
+async def test_cmd_status_reload_goals_called(comms, mock_update):
+    dl_mock = MagicMock()
+    dl_mock.get_status.return_value = {"running": False, "tick_count": 0, "daily_spend": 0.0}
+    ge_mock = MagicMock()
+    ge_mock.get_all_goals.return_value = []
+    comms.set_modules(goal_engine=ge_mock, decision_loop=dl_mock)
+
+    await comms._cmd_status(mock_update, MagicMock())
+
+    ge_mock.reload_goals.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -299,9 +313,11 @@ def test_apply_llm_mode_free_sets_expected_values(comms):
     assert "FREE" in msg
     comms._set_env_values.assert_called_once()
     payload = comms._set_env_values.call_args[0][0]
+    assert payload["LLM_ROUTER_MODE"] == "free"
     assert payload["LLM_FORCE_GEMINI_FREE"] == "true"
     assert payload["LLM_FORCE_GEMINI_MODEL"] == "gemini-2.5-flash"
     assert payload["LLM_ENABLED_MODELS"] == "gemini-2.5-flash"
+    assert payload["IMAGE_ROUTER_PREFER_GEMINI"] == "true"
 
 
 @pytest.mark.asyncio
@@ -735,19 +751,15 @@ def test_main_keyboard():
     kb = agent._main_keyboard()
     from telegram import ReplyKeyboardMarkup
     assert isinstance(kb, ReplyKeyboardMarkup)
-    # Основные действия + секции справки
-    assert len(kb.keyboard) == 5
+    # Компактное главное меню: 6 кнопок
+    assert len(kb.keyboard) == 3
     texts = [btn.text for row in kb.keyboard for btn in row]
     assert "Статус" in texts
-    assert "Цели" in texts
-    assert "Помощь" in texts
-    assert "Ежедневные" in texts
-    assert "Редкие" in texts
-    assert "Системные" in texts
-    assert "Расходы" in texts
-    assert "Одобрить" in texts
-    assert "Отклонить" in texts
-    assert "Новая цель" in texts
+    assert "Задачи" in texts
+    assert "Создать" in texts
+    assert "Входы" in texts
+    assert "Отчёт" in texts
+    assert "Еще" in texts
 
 
 @pytest.mark.asyncio
@@ -766,7 +778,9 @@ async def test_button_status(comms, mock_update):
     """Нажатие кнопки 'Статус' вызывает _cmd_status."""
     dl_mock = MagicMock()
     dl_mock.get_status.return_value = {"running": True, "tick_count": 0, "daily_spend": 0.0}
-    comms.set_modules(decision_loop=dl_mock)
+    ge_mock = MagicMock()
+    ge_mock.get_all_goals.return_value = []
+    comms.set_modules(decision_loop=dl_mock, goal_engine=ge_mock)
     mock_update.message.text = "Статус"
     await comms._on_message(mock_update, MagicMock())
     text = mock_update.message.reply_text.call_args[0][0]
@@ -796,7 +810,9 @@ async def test_button_legacy_main_alias(comms, mock_update):
 async def test_button_with_emoji_status_alias(comms, mock_update):
     dl_mock = MagicMock()
     dl_mock.get_status.return_value = {"running": True, "tick_count": 0, "daily_spend": 0.0}
-    comms.set_modules(decision_loop=dl_mock)
+    ge_mock = MagicMock()
+    ge_mock.get_all_goals.return_value = []
+    comms.set_modules(decision_loop=dl_mock, goal_engine=ge_mock)
     mock_update.message.text = "📊 Статус"
     await comms._on_message(mock_update, MagicMock())
     text = mock_update.message.reply_text.call_args[0][0]
@@ -1036,6 +1052,46 @@ async def test_on_message_login_request_starts_generic_service_auth(comms, mock_
     await comms._on_message(mock_update, MagicMock())
 
     comms._start_service_auth_flow.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_on_message_twitter_login_request_starts_generic_service_auth(comms, mock_update):
+    mock_update.message.text = "зайди на твиттер"
+    comms._start_service_auth_flow = AsyncMock(return_value=True)
+    comms._handle_kdp_login_flow = AsyncMock(return_value=False)
+
+    await comms._on_message(mock_update, MagicMock())
+
+    assert comms._start_service_auth_flow.await_args.args[0] == "twitter"
+
+
+@pytest.mark.asyncio
+async def test_on_message_contextual_service_status(comms, mock_update):
+    comms._last_service_context = "twitter"
+    mock_update.message.text = "покажи статус"
+    conv = MagicMock()
+    conv.process_message = AsyncMock(return_value={"response": "SHOULD_NOT_BE_USED"})
+    comms.set_modules(conversation_engine=conv)
+
+    await comms._on_message(mock_update, MagicMock())
+
+    sent = mock_update.message.reply_text.call_args[0][0]
+    assert "Twitter" in sent
+    conv.process_message.assert_not_called()
+
+
+def test_humanize_owner_text_strips_technical_noise(comms):
+    src = (
+        "Принято.\n"
+        "active task fixed\n"
+        "task_id=abc123\n"
+        "{\"goal_id\":\"g1\"}\n"
+        "Дам результат."
+    )
+    out = comms._humanize_owner_text(src)
+    assert "task_id" not in out.lower()
+    assert "goal_id" not in out.lower()
+    assert "Дам результат" in out
 
 
 # ── request_approval с inline кнопками ──

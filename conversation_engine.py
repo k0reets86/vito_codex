@@ -40,15 +40,16 @@ logger = get_logger("conversation_engine", agent="conversation_engine")
 
 VITO_PERSONALITY = (
     "Ты VITO — автономный AI-агент, бизнес-партнёр владельца. "
-    "Отвечай на русском, коротко и по делу.\n\n"
+    "Отвечай на русском, по делу и человеческим языком.\n\n"
     "СТРОГИЕ ПРАВИЛА КОММУНИКАЦИИ:\n"
-    "1. Максимум 5-7 строк. Ни слова лишнего.\n"
+    "1. По умолчанию отвечай компактно. "
+    "Если это запрос на исследование/анализ — давай развернутый ответ со структурой, выводами, оценкой и идеями.\n"
     "2. ТОЛЬКО по теме разговора. Обсуждаем контент → ни слова про финансы/ошибки/агентов. "
     "Обсуждаем расходы → ни слова про тренды/контент.\n"
     "3. НИКОГДА не кидай файловые пути (/home/...). Покажи текст прямо в сообщении.\n"
     "4. Если создал контент — покажи его текст целиком, не ссылайся на файл.\n"
     "5. Не сбрасывай JSON, логи, сырые данные, ID задач.\n"
-    "6. Предлагай варианты: 'A или B? Что выбираешь?'\n"
+    "6. Не требуй искусственно выбирать 'вариант 1/2', если владелец уже дал прямую задачу.\n"
     "7. Продукты/контент — ТОЛЬКО на английском (US/EU рынок).\n"
     "8. Если неуверен (>40%) → спроси перед действием.\n"
     "9. Общайся как человек-партнёр, не как робот с отчётами.\n"
@@ -212,21 +213,26 @@ class ConversationEngine:
         if result.get("actions") and not result.get("needs_confirmation", False):
             action_results = await self._execute_actions(result["actions"])
             if action_results:
-                result["response"] = (result.get("response") or "") + "\n\n" + action_results
+                friendly = self._owner_friendly_action_results(action_results)
+                result["response"] = (result.get("response") or "") + "\n\n" + friendly
 
         # 5. Save assistant turn
         if result.get("response"):
-            if owner_task_preserved and intent in (Intent.GOAL_REQUEST, Intent.SYSTEM_ACTION):
-                result["response"] = (
-                    (result.get("response") or "")
-                    + "\n\n"
-                    + "Активная задача уже зафиксирована и не заменена. "
-                      "Если нужно заменить её: /task_replace <новая задача>."
-                )
             self._add_turn("assistant", result["response"])
 
         result["nlu_tones"] = tones
         return result
+
+    @staticmethod
+    def _owner_friendly_action_results(text: str) -> str:
+        s = str(text or "").strip()
+        if not s:
+            return "Принял задачу в работу. Дам краткий прогресс и вернусь с результатом."
+        low = s.lower()
+        noisy = ("task_id", "goal_id", "trace_id", "session_id", "{", "}", "[", "]")
+        if any(tok in low for tok in noisy):
+            return "Принял задачу в работу. Иду выполнять, вернусь с прогрессом и итогом."
+        return s
 
     async def _deterministic_owner_route(self, text: str) -> dict[str, Any] | None:
         """Deterministic command routing for high-priority owner intents.

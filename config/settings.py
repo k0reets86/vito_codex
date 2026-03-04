@@ -127,6 +127,7 @@ class Settings:
     LLM_CACHE_TTL_HOURS: int = int(os.getenv("LLM_CACHE_TTL_HOURS", "24"))
     LLM_DISABLED_MODELS: str = os.getenv("LLM_DISABLED_MODELS", "")
     LLM_ENABLED_MODELS: str = os.getenv("LLM_ENABLED_MODELS", "")
+    LLM_ROUTER_MODE: str = os.getenv("LLM_ROUTER_MODE", "prod")
     LLM_FORCE_GEMINI_FREE: bool = os.getenv("LLM_FORCE_GEMINI_FREE", "false").lower() in ("1", "true", "yes", "on")
     LLM_FORCE_GEMINI_MODEL: str = os.getenv("LLM_FORCE_GEMINI_MODEL", "gemini-2.5-flash")
     GEMINI_FREE_MAX_RPM: int = int(os.getenv("GEMINI_FREE_MAX_RPM", "15") or 15)
@@ -134,6 +135,15 @@ class Settings:
     GEMINI_FREE_SEARCH_RPD: int = int(os.getenv("GEMINI_FREE_SEARCH_RPD", "1500") or 1500)
     GEMINI_ENABLE_GROUNDING_SEARCH: bool = os.getenv("GEMINI_ENABLE_GROUNDING_SEARCH", "true").lower() in ("1", "true", "yes", "on")
     GEMINI_ENABLE_URL_CONTEXT: bool = os.getenv("GEMINI_ENABLE_URL_CONTEXT", "true").lower() in ("1", "true", "yes", "on")
+    GEMINI_EMBEDDINGS_ENABLED: bool = os.getenv("GEMINI_EMBEDDINGS_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+    GEMINI_EMBED_MODEL: str = os.getenv("GEMINI_EMBED_MODEL", "gemini-embedding-001")
+    GEMINI_ENABLE_IMAGEN: bool = os.getenv("GEMINI_ENABLE_IMAGEN", "false").lower() in ("1", "true", "yes", "on")
+    GEMINI_IMAGEN_MODEL: str = os.getenv("GEMINI_IMAGEN_MODEL", "imagen-3.0-generate-002")
+    GEMINI_LIVE_API_ENABLED: bool = os.getenv("GEMINI_LIVE_API_ENABLED", "false").lower() in ("1", "true", "yes", "on")
+    IMAGE_ROUTER_PREFER_GEMINI: bool = os.getenv("IMAGE_ROUTER_PREFER_GEMINI", "false").lower() in ("1", "true", "yes", "on")
+    RESEARCH_URL_CONTEXT_ENABLED: bool = os.getenv("RESEARCH_URL_CONTEXT_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+    RESEARCH_URL_CONTEXT_MAX_URLS: int = int(os.getenv("RESEARCH_URL_CONTEXT_MAX_URLS", "4") or 4)
+    RESEARCH_URL_CONTEXT_MAX_CHARS_PER_URL: int = int(os.getenv("RESEARCH_URL_CONTEXT_MAX_CHARS_PER_URL", "2500") or 2500)
     MODEL_ACTIVE_PROFILE: str = os.getenv("MODEL_ACTIVE_PROFILE", "balanced")
 
     # Notifications

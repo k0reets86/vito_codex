@@ -25,6 +25,9 @@ from typing import Any, Optional
 from telegram import (
     Bot,
     BotCommand,
+    BotCommandScopeAllPrivateChats,
+    BotCommandScopeChat,
+    BotCommandScopeDefault,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
@@ -74,6 +77,9 @@ class CommsAgent:
         self._pending_service_auth: dict[str, dict] = {}
         # Last confirmed auth timestamps (runtime-memory).
         self._service_auth_confirmed: dict[str, str] = {}
+        # Last discussed external service for contextual follow-ups.
+        self._last_service_context: str = ""
+        self._last_service_context_at: str = ""
         self._telegram_conflict_mode: bool = False
 
         # Обратные ссылки на модули — устанавливаются через set_modules()
@@ -95,7 +101,13 @@ class CommsAgent:
 
         # Маппинг текста кнопок → имена команд
         self._button_map: dict[str, str] = {
+            "Главная": "start",
             "Статус": "status",
+            "Задачи": "tasks",
+            "Создать": "goal",
+            "Входы": "auth_hub",
+            "Отчёт": "report",
+            "Еще": "more",
             "Цели": "goals",
             "Расходы": "spend",
             "Одобрить": "approve",
@@ -123,6 +135,13 @@ class CommsAgent:
             "цели": "goals",
             "расходы": "spend",
             "новая цель": "goal",
+            "задачи": "tasks",
+            "создать": "goal",
+            "входы": "auth_hub",
+            "отчёт": "report",
+            "отчет": "report",
+            "еще": "more",
+            "ещё": "more",
             "помощь": "help",
             "ежедневные": "help_daily",
             "редкие": "help_rare",
@@ -238,15 +257,22 @@ class CommsAgent:
         if m in {"free", "test", "gemini", "flash"}:
             self._set_env_values(
                 {
+                    "LLM_ROUTER_MODE": "free",
                     "LLM_FORCE_GEMINI_FREE": "true",
                     "LLM_FORCE_GEMINI_MODEL": "gemini-2.5-flash",
                     "LLM_ENABLED_MODELS": "gemini-2.5-flash",
                     "LLM_DISABLED_MODELS": "claude-haiku-4-5-20251001,gpt-4o-mini,claude-sonnet-4-6,o3,gpt-5,claude-opus-4-6,sonar-pro",
                     "GEMINI_ENABLE_GROUNDING_SEARCH": "true",
                     "GEMINI_ENABLE_URL_CONTEXT": "true",
+                    "GEMINI_EMBEDDINGS_ENABLED": "true",
+                    "GEMINI_EMBED_MODEL": "gemini-embedding-001",
+                    "GEMINI_ENABLE_IMAGEN": "true",
+                    "GEMINI_LIVE_API_ENABLED": "true",
+                    "IMAGE_ROUTER_PREFER_GEMINI": "true",
                     "GEMINI_FREE_MAX_RPM": "15",
                     "GEMINI_FREE_TEXT_RPD": "1000",
                     "GEMINI_FREE_SEARCH_RPD": "1500",
+                    "MODEL_ACTIVE_PROFILE": "gemini_free",
                 }
             )
             return True, (
@@ -254,15 +280,19 @@ class CommsAgent:
                 "- Все задачи идут через Gemini 2.5 Flash\n"
                 "- Платные модели отключены\n"
                 "- Grounding Search + URL Context включены\n"
+                "- Embeddings + Imagen + Live API включены (если есть доступ)\n"
                 "- Перезапуск не обязателен, но желателен для чистого цикла"
             )
         if m in {"prod", "production", "battle", "боевой"}:
             self._set_env_values(
                 {
+                    "LLM_ROUTER_MODE": "prod",
                     "LLM_FORCE_GEMINI_FREE": "false",
                     "LLM_FORCE_GEMINI_MODEL": "gemini-2.5-flash",
                     "LLM_ENABLED_MODELS": "",
                     "LLM_DISABLED_MODELS": "",
+                    "IMAGE_ROUTER_PREFER_GEMINI": "false",
+                    "MODEL_ACTIVE_PROFILE": "balanced",
                 }
             )
             return True, (
@@ -278,10 +308,16 @@ class CommsAgent:
             enabled = str(getattr(settings, "LLM_ENABLED_MODELS", "") or "")
             disabled = str(getattr(settings, "LLM_DISABLED_MODELS", "") or "")
             model = str(getattr(settings, "LLM_FORCE_GEMINI_MODEL", "gemini-2.5-flash") or "gemini-2.5-flash")
+            mode = str(getattr(settings, "LLM_ROUTER_MODE", "prod") or "prod")
+            embed = bool(getattr(settings, "GEMINI_EMBEDDINGS_ENABLED", False))
+            img = bool(getattr(settings, "GEMINI_ENABLE_IMAGEN", False))
+            live = bool(getattr(settings, "GEMINI_LIVE_API_ENABLED", False))
             mode_name = "FREE (Gemini-only)" if free else "PROD (task-based)"
             return True, (
                 f"LLM режим сейчас: {mode_name}\n"
+                f"LLM_ROUTER_MODE={mode}\n"
                 f"LLM_FORCE_GEMINI_MODEL={model}\n"
+                f"GEMINI_EMBEDDINGS_ENABLED={str(embed).lower()} | GEMINI_ENABLE_IMAGEN={str(img).lower()} | GEMINI_LIVE_API_ENABLED={str(live).lower()}\n"
                 f"LLM_ENABLED_MODELS={enabled or '(empty)'}\n"
                 f"LLM_DISABLED_MODELS={disabled or '(empty)'}"
             )
@@ -308,7 +344,10 @@ class CommsAgent:
         s = str(text or "").strip().lower()
         if not s:
             return ""
-        has_action = any(x in s for x in ("зайди", "вход", "логин", "login", "auth", "авториза", "войти"))
+        has_action = any(
+            x in s
+            for x in ("зайди", "зайти", "вход", "логин", "login", "auth", "авториза", "войти", "открой")
+        )
         if not has_action:
             return ""
         aliases: dict[str, tuple[str, ...]] = {
@@ -316,6 +355,24 @@ class CommsAgent:
             "etsy": ("etsy", "етси", "этси"),
             "gumroad": ("gumroad", "гумроад", "гамроад"),
             "twitter": ("twitter", "x.com", "x ", "твиттер", "твитер"),
+            "reddit": ("reddit", "реддит"),
+            "printful": ("printful", "принтфул"),
+        }
+        for service, keys in aliases.items():
+            if any(k in s for k in keys):
+                return service
+        return ""
+
+    @staticmethod
+    def _detect_service_from_text(text: str) -> str:
+        s = str(text or "").strip().lower()
+        if not s:
+            return ""
+        aliases: dict[str, tuple[str, ...]] = {
+            "amazon_kdp": ("amazon", "амазон", "kdp", "кдп", "amazon kdp", "amazon books"),
+            "etsy": ("etsy", "етси", "этси"),
+            "gumroad": ("gumroad", "гумроад", "гамроад"),
+            "twitter": ("twitter", "x.com", " x ", "твиттер", "твитер"),
             "reddit": ("reddit", "реддит"),
             "printful": ("printful", "принтфул"),
         }
@@ -335,6 +392,57 @@ class CommsAgent:
             "printful": ("Printful", "https://www.printful.com/dashboard"),
         }
         return meta.get(service, (service, ""))
+
+    def _touch_service_context(self, service: str) -> None:
+        svc = str(service or "").strip().lower()
+        if not svc:
+            return
+        self._last_service_context = svc
+        self._last_service_context_at = datetime.now(timezone.utc).isoformat()
+
+    @staticmethod
+    def _is_status_prompt(text: str) -> bool:
+        s = str(text or "").strip().lower()
+        return any(
+            token in s
+            for token in (
+                "статус",
+                "status",
+                "проверь аккаунт",
+                "покажи аккаунт",
+                "проверка входа",
+                "авториз",
+                "логин",
+            )
+        )
+
+    def _detect_contextual_service_status_request(self, text: str) -> str:
+        s = str(text or "").strip().lower()
+        if not s or not self._is_status_prompt(s):
+            return ""
+        if s in {"/status", "status", "статус"}:
+            return ""
+        explicit = self._detect_service_from_text(s)
+        if explicit:
+            return explicit
+        if any(x in s for x in ("vito", "вито", "система", "system")):
+            return ""
+        return self._last_service_context
+
+    def _format_service_auth_status(self, service: str) -> str:
+        svc = str(service or "").strip().lower()
+        if not svc:
+            return "Не понял, по какому сервису показать статус."
+        title, auth_url = self._service_auth_meta(svc)
+        if svc in self._pending_service_auth:
+            return (
+                f"{title}: ожидается подтверждение входа.\n"
+                f"Ссылка: {auth_url}\n"
+                "После входа нажми «Я вошел» или напиши «готово»."
+            )
+        if self._service_auth_confirmed.get(svc):
+            return f"{title}: вход подтверждён. Повторный логин сейчас не требуется."
+        return f"{title}: вход пока не подтверждён. Напиши «зайди на {title}» для авторизации."
 
     async def _run_kdp_probe(self) -> tuple[int, str]:
         storage = str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json") or "runtime/kdp_storage_state.json")
@@ -421,6 +529,7 @@ class CommsAgent:
         svc = str(service or "").strip().lower()
         if not svc:
             return False
+        self._touch_service_context(svc)
         title, auth_url = self._service_auth_meta(svc)
         if not auth_url:
             return False
@@ -608,14 +717,12 @@ class CommsAgent:
             )
 
     def _main_keyboard(self) -> ReplyKeyboardMarkup:
-        """Persistent-клавиатура: частые действия + быстрый вход в справку."""
+        """Компактная persistent-клавиатура (6 кнопок на главном экране)."""
         return ReplyKeyboardMarkup(
             [
-                [KeyboardButton("Статус"), KeyboardButton("Цели")],
-                [KeyboardButton("Новая цель"), KeyboardButton("Помощь")],
-                [KeyboardButton("Ежедневные"), KeyboardButton("Редкие")],
-                [KeyboardButton("Расходы"), KeyboardButton("Одобрить")],
-                [KeyboardButton("Отклонить"), KeyboardButton("Системные")],
+                [KeyboardButton("Статус"), KeyboardButton("Задачи")],
+                [KeyboardButton("Создать"), KeyboardButton("Входы")],
+                [KeyboardButton("Отчёт"), KeyboardButton("Еще")],
             ],
             resize_keyboard=True,
             is_persistent=True,
@@ -757,7 +864,7 @@ class CommsAgent:
             pass
 
         # Keep Telegram menu concise; full command catalog is available via /help.
-        await self._bot.set_my_commands([
+        command_catalog = [
             BotCommand("help", "Справка по командам и сценариям"),
             BotCommand("help_daily", "Ежедневные команды"),
             BotCommand("help_rare", "Редкие команды"),
@@ -778,7 +885,11 @@ class CommsAgent:
             BotCommand("kdp_login", "Вход в Amazon KDP"),
             BotCommand("health", "Проверка здоровья системы"),
             BotCommand("logs", "Последние логи"),
-        ])
+        ]
+        # Set commands in all relevant scopes to avoid stale Telegram menu cache.
+        await self._bot.set_my_commands(command_catalog, scope=BotCommandScopeDefault())
+        await self._bot.set_my_commands(command_catalog, scope=BotCommandScopeAllPrivateChats())
+        await self._bot.set_my_commands(command_catalog, scope=BotCommandScopeChat(chat_id=self._owner_id))
 
         await self._app.start()
         await self._app.updater.start_polling(drop_pending_updates=True)
@@ -826,6 +937,7 @@ class CommsAgent:
             await self.send_message(msg)
 
         if await self._handle_kdp_login_flow(text, _owner_reply, with_button=False):
+            self._touch_service_context("amazon_kdp")
             return
         svc = self._detect_service_login_request(text)
         if svc and svc != "amazon_kdp":
@@ -854,6 +966,7 @@ class CommsAgent:
             self._pending_service_auth.pop(service, None)
             ok, detail = await self._verify_service_auth(service)
             title, _ = self._service_auth_meta(service)
+            self._touch_service_context(service)
             if ok:
                 self._service_auth_confirmed[service] = datetime.now(timezone.utc).isoformat()
                 await self.send_message(f"Вход подтверждён: {title}.")
@@ -932,6 +1045,11 @@ class CommsAgent:
             await self.send_message(msg if ok else "Используй: /llm_mode free|prod|status", level="result")
             return
 
+        service_status = self._detect_contextual_service_status_request(text)
+        if service_status:
+            await self.send_message(self._format_service_auth_status(service_status), level="result")
+            return
+
         if not strict_cmds:
             text = self._expand_short_choice(text)
             lower = text.lower()
@@ -940,13 +1058,13 @@ class CommsAgent:
         if lower.strip() in ("/help", "help"):
             await self.send_message(self._render_help())
             return
-        if lower.strip() in ("/help daily", "help daily", "/help daily_commands"):
+        if lower.strip() in ("/help_daily", "help_daily", "/help daily", "help daily", "/help daily_commands"):
             await self.send_message(self._render_help("daily"))
             return
-        if lower.strip() in ("/help rare", "help rare"):
+        if lower.strip() in ("/help_rare", "help_rare", "/help rare", "help rare"):
             await self.send_message(self._render_help("rare"))
             return
-        if lower.strip() in ("/help system", "help system"):
+        if lower.strip() in ("/help_system", "help_system", "/help system", "help system"):
             await self.send_message(self._render_help("system"))
             return
         if (not strict_cmds and any(kw in lower for kw in ["статус", "/status"])) or lower.strip() in ("/status", "status"):
@@ -1190,6 +1308,17 @@ class CommsAgent:
         # Guard against unverified completion claims
         text = self._guard_outgoing(text)
 
+        # Owner-facing chat should stay conversational by default.
+        inline_paths = bool(getattr(settings, "TELEGRAM_INLINE_FILE_CONTENT", False))
+        if not inline_paths:
+            clean_text = self._humanize_owner_text(self._strip_technical_paths(text))
+            clean_text = "\n".join(line for line in clean_text.split("\n") if line.strip())
+            if clean_text:
+                if len(clean_text) > 4000:
+                    clean_text = clean_text[:4000] + "..."
+                await update.message.reply_text(clean_text, reply_markup=self._main_keyboard())
+            return
+
         # 1) Send binary/image files separately (no raw paths in text)
         root_rx = re.escape(str(PROJECT_ROOT))
         bin_pattern = re.compile(rf"(/(?:{root_rx}|tmp)/\S+\.(?:png|jpg|jpeg|webp|gif|pdf))")
@@ -1235,6 +1364,45 @@ class CommsAgent:
             if len(clean_text) > 4000:
                 clean_text = clean_text[:4000] + "..."
             await update.message.reply_text(clean_text, reply_markup=self._main_keyboard())
+
+    def _strip_technical_paths(self, text: str) -> str:
+        s = str(text or "")
+        if not s:
+            return s
+        root_rx = re.escape(str(PROJECT_ROOT))
+        s = re.sub(rf"{root_rx}/\S+", "[внутренний файл]", s)
+        s = re.sub(r"/tmp/\S+", "[временный файл]", s)
+        return s
+
+    def _humanize_owner_text(self, text: str) -> str:
+        s = str(text or "").strip()
+        if not s:
+            return s
+        skip_tokens = (
+            "request_id",
+            "task_id",
+            "goal_id",
+            "trace_id",
+            "session_id",
+            "active task fixed",
+            "активная задача зафиксирована",
+            "workflow_session",
+            "pending_approvals",
+        )
+        cleaned: list[str] = []
+        for line in s.splitlines():
+            ln = line.strip()
+            low = ln.lower()
+            if any(tok in low for tok in skip_tokens):
+                continue
+            if low.startswith("{") or low.startswith("[{") or low.startswith('"id"'):
+                continue
+            cleaned.append(line)
+        out = "\n".join(cleaned).strip()
+        out = re.sub(r"\n{3,}", "\n\n", out)
+        if not out:
+            return "Принял задачу в работу. Дам краткий прогресс и вернусь с результатом."
+        return out
 
     async def _reject_stranger(self, update: Update) -> bool:
         """Отклоняет сообщения от не-владельцев."""
@@ -1339,9 +1507,9 @@ class CommsAgent:
         return (
             "Справка по командам VITO\n\n"
             "Разделы:\n"
-            "/help daily — ежедневные команды\n"
-            "/help rare — редкие команды\n"
-            "/help system — системные/осторожные\n\n"
+            "/help_daily — ежедневные команды\n"
+            "/help_rare — редкие команды\n"
+            "/help_system — системные/осторожные\n\n"
             "Точечно по команде:\n"
             "/help status\n"
             "/help goal\n"
@@ -1360,9 +1528,9 @@ class CommsAgent:
             "VITO на связи.\n\n"
             "Чтобы не путаться в командах:\n"
             "/help — обзор\n"
-            "/help daily — ежедневные\n"
-            "/help rare — редкие\n"
-            "/help system — системные\n\n"
+            "/help_daily — ежедневные\n"
+            "/help_rare — редкие\n"
+            "/help_system — системные\n\n"
             "Быстрый старт:\n"
             "/status, /goals, /goal <текст>",
             reply_markup=self._main_keyboard(),
@@ -1391,6 +1559,28 @@ class CommsAgent:
             return
         await update.message.reply_text(self._render_help("system"), reply_markup=self._main_keyboard())
 
+    @staticmethod
+    def _render_auth_hub() -> str:
+        return (
+            "Входы в сервисы\n"
+            "- Напиши: зайди на амазон\n"
+            "- Напиши: зайди на твиттер\n"
+            "- Напиши: зайди в реддит\n"
+            "- Напиши: зайди на этси / гумроад / принтфул\n\n"
+            "После входа нажми «Я вошел» или напиши «готово»."
+        )
+
+    @staticmethod
+    def _render_more_menu() -> str:
+        return (
+            "Дополнительно\n"
+            "- /spend — расходы\n"
+            "- /help — справка\n"
+            "- /logs — логи\n"
+            "- /health — здоровье\n"
+            "- /balances — балансы"
+        )
+
     async def _cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self._reject_stranger(update):
             return
@@ -1406,16 +1596,26 @@ class CommsAgent:
             )
 
         if self._goal_engine:
-            gs = self._goal_engine.get_stats()
-            waiting_approval = 0
             try:
-                waiting_approval = len(self._goal_engine.get_waiting_approvals())
+                self._goal_engine.reload_goals()
             except Exception:
-                waiting_approval = 0
+                pass
+            goals = self._goal_engine.get_all_goals()
+            st_map: dict[str, int] = {}
+            for g in goals:
+                key = str(getattr(getattr(g, "status", None), "value", "") or "")
+                if key:
+                    st_map[key] = st_map.get(key, 0) + 1
             parts.append(
-                f"Цели: {gs['total']} всего, {gs['completed']} выполнено, "
-                f"{gs['executing']} в работе, {gs['pending']} ожидают, {waiting_approval} ждут одобрения"
+                f"Цели: {len(goals)} всего, {st_map.get('completed', 0)} выполнено, "
+                f"{st_map.get('executing', 0)} в работе, {st_map.get('pending', 0)} ожидают, "
+                f"{st_map.get('waiting_approval', 0)} ждут одобрения"
             )
+
+        llm_spend = float(self._llm_router.get_daily_spend() if self._llm_router else 0.0)
+        fin_spend = float(self._finance.get_daily_spent() if self._finance else 0.0)
+        if llm_spend > 0 or fin_spend > 0:
+            parts.append(f"Траты сегодня: LLM ${llm_spend:.2f}; Финконтроль ${fin_spend:.2f}")
 
         if self._pending_approvals:
             parts.append(f"Ожидают одобрения: {len(self._pending_approvals)}")
@@ -1479,13 +1679,16 @@ class CommsAgent:
     async def _cmd_spend(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self._reject_stranger(update):
             return
-        spend = self._llm_router.get_daily_spend() if self._llm_router else 0
+        spend = float(self._llm_router.get_daily_spend() if self._llm_router else 0.0)
+        fin_spend = float(self._finance.get_daily_spent() if self._finance else 0.0)
         limit = settings.DAILY_LIMIT_USD
-        await update.message.reply_text(
-            f"Расходы сегодня: ${spend:.2f} / ${limit:.2f}\n"
-            f"Осталось: ${max(limit - spend, 0):.2f}",
-            reply_markup=self._main_keyboard(),
-        )
+        lines = [
+            f"Расходы сегодня (LLM): ${spend:.2f} / ${limit:.2f}",
+            f"Осталось по лимиту LLM: ${max(limit - spend, 0):.2f}",
+        ]
+        if fin_spend > 0:
+            lines.append(f"Финконтроль (все типы расходов): ${fin_spend:.2f}")
+        await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
         logger.info("Команда /spend выполнена", extra={"event": "cmd_spend"})
 
     async def _cmd_approve(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2148,6 +2351,7 @@ class CommsAgent:
             await update.message.reply_text(msg, **kwargs)
 
         if await self._handle_kdp_login_flow(text, _tg_reply, with_button=True):
+            self._touch_service_context("amazon_kdp")
             return
         svc = self._detect_service_login_request(text)
         if svc and svc != "amazon_kdp":
@@ -2160,6 +2364,7 @@ class CommsAgent:
             self._pending_service_auth.pop(service, None)
             ok, detail = await self._verify_service_auth(service)
             title, _ = self._service_auth_meta(service)
+            self._touch_service_context(service)
             if ok:
                 self._service_auth_confirmed[service] = datetime.now(timezone.utc).isoformat()
                 await update.message.reply_text(f"Вход подтверждён: {title}.", reply_markup=self._main_keyboard())
@@ -2317,10 +2522,18 @@ class CommsAgent:
             if cmd == "help_system":
                 await update.message.reply_text(self._render_help("system"), reply_markup=self._main_keyboard())
                 return
+            if cmd == "auth_hub":
+                await update.message.reply_text(self._render_auth_hub(), reply_markup=self._main_keyboard())
+                return
+            if cmd == "more":
+                await update.message.reply_text(self._render_more_menu(), reply_markup=self._main_keyboard())
+                return
             handler = {
                 "start": self._cmd_start,
                 "status": self._cmd_status,
                 "goals": self._cmd_goals,
+                "tasks": self._cmd_tasks,
+                "report": self._cmd_report,
                 "spend": self._cmd_spend,
                 "approve": self._cmd_approve,
                 "reject": self._cmd_reject,
@@ -2336,6 +2549,13 @@ class CommsAgent:
 
         # 1.5. Natural language shortcuts (balance check, etc.)
         lower = text.strip().lower()
+        service_status = self._detect_contextual_service_status_request(text)
+        if service_status:
+            await update.message.reply_text(
+                self._format_service_auth_status(service_status),
+                reply_markup=self._main_keyboard(),
+            )
+            return
         if (not strict_cmds) and any(x in lower for x in ("llm_mode ", "режим llm", "режим lmm", "llm режим")):
             mode = "status"
             if any(x in lower for x in (" free", " тест", " gemini", " flash")):
@@ -2428,6 +2648,7 @@ class CommsAgent:
                     if result.get("needs_approval"):
                         response += "\n\nПодтверди запуск: да/нет."
                     response = self._decorate_with_numeric_hint(response, result.get("actions", []))
+                    response = self._humanize_owner_text(response)
                     self._remember_choice_context(response)
                     await update.message.reply_text(response, reply_markup=self._main_keyboard())
                 elif result.get("response"):
@@ -2802,8 +3023,29 @@ class CommsAgent:
             await update.message.reply_text(f"Анализирую нишу: {text}...", reply_markup=self._main_keyboard())
             try:
                 verdict = await self._judge_protocol.evaluate_niche(text)
-                formatted = self._judge_protocol.format_verdict_for_telegram(verdict)
-                await update.message.reply_text(formatted, reply_markup=self._main_keyboard())
+                blocks: list[str] = [self._judge_protocol.format_verdict_for_telegram(verdict)]
+                # Attach richer research report if research agent is available.
+                if self._agent_registry:
+                    try:
+                        deep_result = await self._agent_registry.dispatch(
+                            "research",
+                            step=text,
+                            goal_title=f"Deep research: {text[:80]}",
+                            content=text,
+                        )
+                        if deep_result and deep_result.success and deep_result.output:
+                            report = str(deep_result.output).strip()
+                            if report:
+                                blocks.append("Детальное исследование:\n" + report)
+                    except Exception as e:
+                        blocks.append(f"Доп. исследование недоступно: {e}")
+                formatted = "\n\n".join(blocks)
+                if len(formatted) > 4000:
+                    parts = [formatted[i:i+4000] for i in range(0, len(formatted), 4000)]
+                    for part in parts:
+                        await update.message.reply_text(part, reply_markup=self._main_keyboard())
+                else:
+                    await update.message.reply_text(formatted, reply_markup=self._main_keyboard())
             except Exception as e:
                 await update.message.reply_text(f"Ошибка анализа: {e}", reply_markup=self._main_keyboard())
         logger.info(f"Команда /deep выполнена: {text[:50]}", extra={"event": "cmd_deep"})
@@ -3197,6 +3439,7 @@ class CommsAgent:
         if action == "auth_done":
             service = str(request_id or "").strip().lower()
             self._pending_service_auth.pop(service, None)
+            self._touch_service_context(service)
             ok, detail = await self._verify_service_auth(service)
             title, _ = self._service_auth_meta(service)
             if ok:
@@ -3439,7 +3682,8 @@ class CommsAgent:
                 logger.debug("Сообщение подавлено политикой уведомлений", extra={"event": "message_suppressed"})
                 return True
             guarded = self._guard_outgoing(text)
-            clean = self._inline_file_paths(guarded)
+            inline_paths = bool(getattr(settings, "TELEGRAM_INLINE_FILE_CONTENT", False))
+            clean = self._inline_file_paths(guarded) if inline_paths else self._humanize_owner_text(self._strip_technical_paths(guarded))
             if len(clean) > 4000:
                 clean = clean[:4000] + "..."
             await self._bot.send_message(chat_id=self._owner_id, text=clean)

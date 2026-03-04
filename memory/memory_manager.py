@@ -13,6 +13,7 @@ import json
 import math
 import sqlite3
 import time
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -35,6 +36,8 @@ class MemoryManager:
         self._sqlite_conn: Optional[sqlite3.Connection] = None
         self._pg_pool: Optional[asyncpg.Pool] = None
         self._memory_blocks = MemoryBlocks()
+        self._gemini_embed_client = None
+        self._gemini_embed_lock = threading.Lock()
         logger.info("MemoryManager инициализирован", extra={"event": "init"})
 
     @property
@@ -65,6 +68,60 @@ class MemoryManager:
                 extra={"event": "chroma_connected"},
             )
         return self._chroma_collection
+
+    def _get_gemini_embed_client(self):
+        if not bool(getattr(settings, "GEMINI_EMBEDDINGS_ENABLED", True)):
+            return None
+        api_key = str(getattr(settings, "GEMINI_API_KEY", "") or getattr(settings, "GOOGLE_API_KEY", "")).strip()
+        if not api_key:
+            return None
+        if self._gemini_embed_client is not None:
+            return self._gemini_embed_client
+        with self._gemini_embed_lock:
+            if self._gemini_embed_client is not None:
+                return self._gemini_embed_client
+            try:
+                from google import genai
+            except Exception:
+                logger.debug("google-genai недоступен для embeddings")
+                return None
+            try:
+                self._gemini_embed_client = genai.Client(api_key=api_key)
+            except Exception as e:
+                logger.debug(f"Не удалось создать Gemini embed client: {e}")
+                self._gemini_embed_client = None
+        return self._gemini_embed_client
+
+    def _embed_texts(self, texts: list[str]) -> list[list[float]] | None:
+        client = self._get_gemini_embed_client()
+        if client is None:
+            return None
+        model = str(getattr(settings, "GEMINI_EMBED_MODEL", "text-embedding-004") or "text-embedding-004")
+        try:
+            # google-genai generally supports embed_content with list[str] via contents.
+            resp = client.models.embed_content(model=model, contents=texts)
+            vectors: list[list[float]] = []
+            for item in getattr(resp, "embeddings", []) or []:
+                vals = list(getattr(item, "values", []) or [])
+                if vals:
+                    vectors.append([float(x) for x in vals])
+            if len(vectors) == len(texts):
+                return vectors
+        except Exception:
+            try:
+                vectors = []
+                for t in texts:
+                    resp = client.models.embed_content(model=model, contents=t)
+                    emb = getattr(resp, "embedding", None)
+                    vals = list(getattr(emb, "values", []) or [])
+                    if not vals:
+                        return None
+                    vectors.append([float(x) for x in vals])
+                return vectors if len(vectors) == len(texts) else None
+            except Exception as e:
+                logger.debug(f"Gemini embeddings fallback error: {e}")
+                return None
+        return None
 
     def store_knowledge(
         self,
@@ -106,7 +163,11 @@ class MemoryManager:
             pass
         meta["policy_reason"] = decision.reason
         try:
-            collection.upsert(ids=[doc_id], documents=[text], metadatas=[meta])
+            embed = self._embed_texts([text])
+            if embed:
+                collection.upsert(ids=[doc_id], documents=[text], metadatas=[meta], embeddings=embed)
+            else:
+                collection.upsert(ids=[doc_id], documents=[text], metadatas=[meta])
             self._chroma_doc_count += 1
             logger.info(
                 f"Знание сохранено: {doc_id}",
@@ -277,7 +338,11 @@ class MemoryManager:
         try:
             # Ask more candidates from vector DB, then re-rank with recency+importance.
             raw_limit = max(n_results * 3, n_results + 5)
-            results = collection.query(query_texts=[query], n_results=raw_limit)
+            embed = self._embed_texts([query])
+            if embed:
+                results = collection.query(query_embeddings=embed, n_results=raw_limit)
+            else:
+                results = collection.query(query_texts=[query], n_results=raw_limit)
             duration_ms = int((time.monotonic() - start) * 1000)
             logger.info(
                 f"Поиск знаний: '{query[:50]}...' → {len(results['ids'][0])} результатов",
@@ -791,13 +856,27 @@ class MemoryManager:
             # Дублируем в ChromaDB для семантического поиска
             try:
                 collection = self._get_chroma()
-                collection.upsert(
-                    ids=[f"skill_{name}"],
-                    documents=[f"Навык: {name}. {description}"],
-                    metadatas=[{"type": "skill", "skill_name": name,
-                                "agent": agent,
-                                "stored_at": datetime.now(timezone.utc).isoformat()}],
-                )
+                skill_doc = f"Навык: {name}. {description}"
+                skill_meta = {
+                    "type": "skill",
+                    "skill_name": name,
+                    "agent": agent,
+                    "stored_at": datetime.now(timezone.utc).isoformat(),
+                }
+                skill_embed = self._embed_texts([skill_doc])
+                if skill_embed:
+                    collection.upsert(
+                        ids=[f"skill_{name}"],
+                        documents=[skill_doc],
+                        metadatas=[skill_meta],
+                        embeddings=skill_embed,
+                    )
+                else:
+                    collection.upsert(
+                        ids=[f"skill_{name}"],
+                        documents=[skill_doc],
+                        metadatas=[skill_meta],
+                    )
             except Exception as e:
                 logger.debug(f"Не удалось сохранить навык в ChromaDB: {e}")
             logger.info(f"Навык сохранён: {name}", extra={"event": "skill_saved", "context": {"agent": agent, "task_type": task_type}})
@@ -857,11 +936,19 @@ class MemoryManager:
         # 1. Семантический поиск через ChromaDB
         try:
             collection = self._get_chroma()
-            chroma_results = collection.query(
-                query_texts=[query],
-                n_results=limit,
-                where={"type": "skill"},
-            )
+            embed = self._embed_texts([query])
+            if embed:
+                chroma_results = collection.query(
+                    query_embeddings=embed,
+                    n_results=limit,
+                    where={"type": "skill"},
+                )
+            else:
+                chroma_results = collection.query(
+                    query_texts=[query],
+                    n_results=limit,
+                    where={"type": "skill"},
+                )
             if chroma_results and chroma_results["ids"] and chroma_results["ids"][0]:
                 conn = self._get_sqlite()
                 for i, doc_id in enumerate(chroma_results["ids"][0]):
