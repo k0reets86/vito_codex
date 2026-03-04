@@ -1483,6 +1483,7 @@ def test_detect_contextual_inventory_without_fresh_context_returns_empty(comms):
 
 def test_humanize_owner_text_strips_technical_noise(comms):
     src = (
+        "Вот план, что думаешь?\n"
         "Принято.\n"
         "active task fixed\n"
         "task_id=abc123\n"
@@ -1490,6 +1491,7 @@ def test_humanize_owner_text_strips_technical_noise(comms):
         "Дам результат."
     )
     out = comms._humanize_owner_text(src)
+    assert "вот план" not in out.lower()
     assert "task_id" not in out.lower()
     assert "goal_id" not in out.lower()
     assert "Дам результат" in out

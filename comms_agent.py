@@ -2170,6 +2170,10 @@ class CommsAgent:
             low = ln.lower()
             if low.startswith("план действий:"):
                 continue
+            if low.startswith("вот план, что думаешь"):
+                continue
+            if low.startswith("план:"):
+                continue
             if any(tok in low for tok in skip_tokens):
                 continue
             if low.startswith("{") or low.startswith("[{") or low.startswith('"id"'):
