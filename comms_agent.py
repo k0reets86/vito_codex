@@ -1469,12 +1469,16 @@ class CommsAgent:
                 await send_reply("Готово: вход в KDP подтвержден (live-check OK).")
                 return True
             prepared_mode = bool((self._pending_kdp_otp or {}).get("prepared", False)) or self._kdp_preauth_ready()
-            attempts: list[tuple[str, tuple[int, str]]] = []
+            # Avoid stale/challenged session artifacts before OTP submission.
+            self._reset_kdp_auth_state_files()
+            # Primary Telegram path: use full auto-login with OTP first (most stable in production).
+            attempts: list[tuple[str, tuple[int, str]]] = [
+                ("auto_login", await self._run_kdp_auto_login(otp_code=maybe_otp)),
+                ("auto_login_retry", await self._run_kdp_auto_login(otp_code=maybe_otp)),
+            ]
+            # Optional fallback to preauth submit if such state exists.
             if prepared_mode:
-                attempts.append(("submit_otp", await self._run_kdp_submit_otp(maybe_otp)))
-            attempts.append(("auto_login", await self._run_kdp_auto_login(otp_code=maybe_otp)))
-            if prepared_mode:
-                attempts.append(("submit_otp_retry", await self._run_kdp_submit_otp(maybe_otp)))
+                attempts.append(("submit_otp_fallback", await self._run_kdp_submit_otp(maybe_otp)))
 
             for _mode, (rc_try, _out_try) in attempts:
                 if rc_try == 0:
