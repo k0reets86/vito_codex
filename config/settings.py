@@ -168,6 +168,7 @@ class Settings:
         "BROWSER_CHALLENGE_KEYWORDS",
         "captcha,challenge,verify you are human,robot check,access denied,temporarily blocked,unusual traffic",
     )
+    PUBLISH_CREATE_GUARD_ENABLED: bool = os.getenv("PUBLISH_CREATE_GUARD_ENABLED", "true").lower() in ("1", "true", "yes", "on")
 
     # Owner inbox (file-based comms)
     OWNER_INBOX_ENABLED: bool = os.getenv("OWNER_INBOX_ENABLED", "true").lower() in ("1", "true", "yes", "on")

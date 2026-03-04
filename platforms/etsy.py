@@ -128,8 +128,23 @@ class EtsyPlatform(BasePlatform):
         return False
 
     async def _publish_via_browser(self, content: dict) -> dict:
+        operation = str(content.get("operation") or "create").strip().lower()
         allow_existing_update = bool(content.get("allow_existing_update"))
+        owner_edit_confirmed = bool(content.get("owner_edit_confirmed"))
         target_listing_id = str(content.get("target_listing_id") or "").strip()
+        if bool(getattr(settings, "PUBLISH_CREATE_GUARD_ENABLED", True)):
+            if operation in {"create", "new"} and allow_existing_update:
+                return {
+                    "platform": "etsy",
+                    "status": "blocked",
+                    "error": "create_mode_forbids_existing_update",
+                }
+            if allow_existing_update and not owner_edit_confirmed:
+                return {
+                    "platform": "etsy",
+                    "status": "blocked",
+                    "error": "existing_update_requires_explicit_owner_request",
+                }
         if allow_existing_update and not target_listing_id:
             return {
                 "platform": "etsy",

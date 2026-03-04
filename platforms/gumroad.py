@@ -207,7 +207,15 @@ class GumroadPlatform(BasePlatform):
 
         # Safety policy: editing existing live products must be explicitly confirmed,
         # unless autonomy mode explicitly allows controlled updates.
+        operation = str(content.get("operation") or "create").strip().lower()
         autonomy_allow_existing = bool(getattr(settings, "AUTONOMY_ALLOW_EXISTING_PRODUCT_UPDATE", False))
+        if bool(getattr(settings, "PUBLISH_CREATE_GUARD_ENABLED", True)):
+            if operation in {"create", "new"} and bool(content.get("allow_existing_update")):
+                return {
+                    "platform": "gumroad",
+                    "status": "blocked",
+                    "error": "create_mode_forbids_existing_update",
+                }
         if content.get("allow_existing_update") and not (content.get("owner_edit_confirmed") or autonomy_allow_existing):
             return {
                 "platform": "gumroad",

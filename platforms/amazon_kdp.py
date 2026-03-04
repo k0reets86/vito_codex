@@ -83,6 +83,29 @@ class AmazonKDPPlatform(BasePlatform):
 
     async def publish(self, content: dict) -> dict:
         """Публикация через BrowserAgent — заполнение форм KDP."""
+        operation = str(content.get("operation") or "create").strip().lower()
+        allow_existing_update = bool(content.get("allow_existing_update"))
+        owner_edit_confirmed = bool(content.get("owner_edit_confirmed"))
+        target_document_id = str(content.get("target_document_id") or content.get("target_book_id") or "").strip()
+        if bool(getattr(settings, "PUBLISH_CREATE_GUARD_ENABLED", True)):
+            if operation in {"create", "new"} and allow_existing_update:
+                return {
+                    "platform": "amazon_kdp",
+                    "status": "blocked",
+                    "error": "create_mode_forbids_existing_update",
+                }
+            if allow_existing_update and not owner_edit_confirmed:
+                return {
+                    "platform": "amazon_kdp",
+                    "status": "blocked",
+                    "error": "existing_update_requires_explicit_owner_request",
+                }
+            if allow_existing_update and not target_document_id:
+                return {
+                    "platform": "amazon_kdp",
+                    "status": "blocked",
+                    "error": "existing_update_requires_target_document_id",
+                }
         if not self.browser_agent:
             return {"platform": "amazon_kdp", "status": "no_browser"}
         try:
