@@ -1003,6 +1003,7 @@ class CommsAgent:
             "probe",
             "--storage-path",
             storage,
+            "--headless",
         ]
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -1021,6 +1022,7 @@ class CommsAgent:
             "inventory",
             "--storage-path",
             storage,
+            "--headless",
         ]
         proc = await asyncio.create_subprocess_exec(
             *cmd,
