@@ -1,0 +1,45 @@
+{
+  "timestamp": "2026-03-04T10:14:36.532609+00:00",
+  "results": [
+    {
+      "platform": "gumroad",
+      "auth_ok": true,
+      "error": ""
+    },
+    {
+      "platform": "etsy",
+      "auth_ok": false,
+      "error": ""
+    },
+    {
+      "platform": "printful",
+      "auth_ok": true,
+      "error": ""
+    },
+    {
+      "platform": "kofi",
+      "auth_ok": true,
+      "error": ""
+    },
+    {
+      "platform": "youtube",
+      "auth_ok": false,
+      "error": ""
+    },
+    {
+      "platform": "twitter",
+      "auth_ok": false,
+      "error": ""
+    },
+    {
+      "platform": "reddit",
+      "auth_ok": false,
+      "error": ""
+    },
+    {
+      "platform": "amazon_kdp",
+      "auth_ok": false,
+      "error": ""
+    }
+  ]
+}

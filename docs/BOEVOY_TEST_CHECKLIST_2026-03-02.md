@@ -2,7 +2,7 @@
 
 Progress formula: `completed / total * 100`
 
-Current progress: `5 / 41 = 12.2%`
+Current progress: `6 / 41 = 14.6%`
 
 ## Phase 1 — Runtime Baseline & Safety Gates
 - [x] T01 Configure Gemini-only mode and disable risky/high-cost modules for initial test wave.
@@ -39,7 +39,7 @@ Current progress: `5 / 41 = 12.2%`
 - [ ] T24 Validate governance report generation without auto-remediation side effects.
 
 ## Phase 6 — Publishing/Platform Dry-Run Flows
-- [ ] T25 Test posting dry-run flow end-to-end (prepare -> queue -> inspect).
+- [x] T25 Test posting dry-run flow end-to-end (prepare -> queue -> inspect).
 - [ ] T26 Test manual queue run (`/pubrun`) with evidence capture.
 - [ ] T27 Test web operator listing and one safe scenario run.
 - [ ] T28 Test platform registration flow on sandbox/test account (site #1).

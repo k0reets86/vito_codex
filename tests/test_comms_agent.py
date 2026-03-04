@@ -1,10 +1,12 @@
 """Тесты comms_agent.py."""
 
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from telegram.error import BadRequest as TgBadRequest
 
 from comms_agent import CommsAgent
 from config.settings import settings
@@ -1114,6 +1116,23 @@ async def test_handle_callback_auth_done_manual_fallback_amazon(comms, mock_call
 
 
 @pytest.mark.asyncio
+async def test_handle_callback_auth_done_survives_noneditable_message(comms, mock_callback_query):
+    update = MagicMock()
+    update.callback_query = mock_callback_query
+    mock_callback_query.data = "auth_done:amazon_kdp"
+    comms._pending_service_auth["amazon_kdp"] = {"service": "amazon_kdp", "url": "https://kdp.amazon.com"}
+    comms._verify_service_auth = AsyncMock(return_value=(True, "ok"))
+    mock_callback_query.edit_message_text = AsyncMock(side_effect=TgBadRequest("Message is not modified"))
+    comms.send_message = AsyncMock()
+
+    await comms._handle_callback(update, MagicMock())
+
+    mock_callback_query.answer.assert_called_once_with("Вход подтверждён")
+    comms.send_message.assert_awaited()
+    assert "amazon_kdp" in comms._service_auth_confirmed
+
+
+@pytest.mark.asyncio
 async def test_handle_kdp_login_flow_skips_relogin_when_recently_confirmed(comms):
     comms._service_auth_confirmed["amazon_kdp"] = "2026-03-04T10:00:00+00:00"
     send_reply = AsyncMock()
@@ -1223,7 +1242,7 @@ async def test_on_message_contextual_service_status(comms, mock_update):
 @pytest.mark.asyncio
 async def test_on_message_contextual_service_status_plain_status(comms, mock_update):
     comms._last_service_context = "amazon_kdp"
-    comms._last_service_context_at = "2026-03-04T01:00:00+00:00"
+    comms._last_service_context_at = datetime.now(timezone.utc).isoformat()
     comms._run_kdp_probe = AsyncMock(return_value=(0, "ok"))
     conv = MagicMock()
     conv.process_message = AsyncMock(return_value={"response": "SHOULD_NOT_BE_USED"})
@@ -1248,7 +1267,7 @@ async def test_format_service_auth_status_live_amazon_probe_fail_with_cached_con
 @pytest.mark.asyncio
 async def test_on_message_contextual_service_inventory_uses_service_context(comms, mock_update):
     comms._last_service_context = "twitter"
-    comms._last_service_context_at = "2026-03-04T01:00:00+00:00"
+    comms._last_service_context_at = datetime.now(timezone.utc).isoformat()
     conv = MagicMock()
     conv.process_message = AsyncMock(return_value={"response": "SHOULD_NOT_BE_USED"})
     comms.set_modules(conversation_engine=conv)
@@ -1268,7 +1287,7 @@ async def test_on_message_contextual_service_inventory_uses_service_context(comm
 @pytest.mark.asyncio
 async def test_on_message_contextual_service_inventory_amazon_requires_live_session(comms, mock_update):
     comms._last_service_context = "amazon_kdp"
-    comms._last_service_context_at = "2026-03-04T01:00:00+00:00"
+    comms._last_service_context_at = datetime.now(timezone.utc).isoformat()
     comms._run_kdp_probe = AsyncMock(return_value=(1, "fail"))
     conv = MagicMock()
     conv.process_message = AsyncMock(return_value={"response": "SHOULD_NOT_BE_USED"})
@@ -1289,7 +1308,7 @@ async def test_on_message_contextual_service_inventory_amazon_requires_live_sess
 @pytest.mark.asyncio
 async def test_on_message_contextual_inventory_has_priority_over_brainstorm(comms, mock_update):
     comms._last_service_context = "amazon_kdp"
-    comms._last_service_context_at = "2026-03-04T01:00:00+00:00"
+    comms._last_service_context_at = datetime.now(timezone.utc).isoformat()
     comms._run_kdp_probe = AsyncMock(return_value=(1, "fail"))
     comms._maybe_brainstorm_from_text = AsyncMock(return_value=True)
     conv = MagicMock()

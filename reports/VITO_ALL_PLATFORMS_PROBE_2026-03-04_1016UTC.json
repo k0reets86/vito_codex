@@ -1,0 +1,161 @@
+{
+  "timestamp": "2026-03-04T10:16:20.493243+00:00",
+  "results": [
+    {
+      "platform": "amazon_kdp",
+      "auth_ok": false,
+      "publish": {
+        "platform": "amazon_kdp",
+        "status": "no_browser"
+      }
+    },
+    {
+      "platform": "creative_fabrica",
+      "auth_ok": false,
+      "publish": {
+        "platform": "creative_fabrica",
+        "status": "no_browser"
+      }
+    },
+    {
+      "platform": "etsy",
+      "auth_ok": false,
+      "publish": {
+        "platform": "etsy",
+        "status": "prepared",
+        "dry_run": true,
+        "title": "VITO DryRun Etsy"
+      }
+    },
+    {
+      "platform": "gumroad",
+      "auth_ok": true,
+      "publish": {
+        "platform": "gumroad",
+        "status": "prepared",
+        "url": "dryrun://gumroad/VITO_DryRun_Gumroad",
+        "evidence": {
+          "name": "VITO DryRun Gumroad",
+          "price": 3,
+          "pdf_path": "",
+          "cover_path": "",
+          "thumb_path": ""
+        }
+      }
+    },
+    {
+      "platform": "instagram",
+      "instantiation_error": "Can't instantiate abstract class InstagramPlatform without an implementation for abstract methods 'get_analytics', 'health_check'"
+    },
+    {
+      "platform": "kofi",
+      "auth_ok": true,
+      "publish": {
+        "platform": "kofi",
+        "status": "prepared",
+        "dry_run": true,
+        "title": "VITO DryRun Ko-fi"
+      }
+    },
+    {
+      "platform": "linkedin",
+      "instantiation_error": "Can't instantiate abstract class LinkedInPlatform without an implementation for abstract methods 'get_analytics', 'health_check'"
+    },
+    {
+      "platform": "medium",
+      "auth_ok": false,
+      "publish": {
+        "platform": "medium",
+        "status": "not_configured",
+        "error": "Set MEDIUM_TOKEN in .env (get from medium.com/me/settings)"
+      }
+    },
+    {
+      "platform": "pinterest",
+      "instantiation_error": "Can't instantiate abstract class PinterestPlatform without an implementation for abstract methods 'get_analytics', 'health_check'"
+    },
+    {
+      "platform": "printful",
+      "auth_ok": true,
+      "publish": {
+        "platform": "printful",
+        "status": "prepared",
+        "dry_run": true,
+        "name": "printful_dryrun"
+      }
+    },
+    {
+      "platform": "reddit",
+      "auth_ok": false,
+      "publish": {
+        "platform": "reddit",
+        "status": "prepared",
+        "dry_run": true,
+        "subreddit": "test"
+      }
+    },
+    {
+      "platform": "shopify",
+      "instantiation_error": "Can't instantiate abstract class ShopifyPlatform without an implementation for abstract methods 'get_analytics', 'health_check'"
+    },
+    {
+      "platform": "substack",
+      "auth_ok": false,
+      "publish": {
+        "platform": "substack",
+        "status": "no_browser"
+      }
+    },
+    {
+      "platform": "threads",
+      "auth_ok": false,
+      "publish": {
+        "platform": "threads",
+        "status": "prepared",
+        "dry_run": true
+      }
+    },
+    {
+      "platform": "tiktok",
+      "auth_ok": false,
+      "publish": {
+        "platform": "tiktok",
+        "status": "prepared",
+        "dry_run": true
+      }
+    },
+    {
+      "platform": "twitter",
+      "auth_ok": false,
+      "publish": {
+        "platform": "twitter",
+        "status": "prepared",
+        "dry_run": true,
+        "text_preview": "VITO dry run"
+      },
+      "delete_probe": {
+        "platform": "twitter",
+        "status": "not_authenticated"
+      }
+    },
+    {
+      "platform": "wordpress",
+      "auth_ok": false,
+      "publish": {
+        "platform": "wordpress",
+        "status": "prepared",
+        "dry_run": true,
+        "title": "VITO DryRun WP"
+      }
+    },
+    {
+      "platform": "youtube",
+      "auth_ok": false,
+      "publish": {
+        "platform": "youtube",
+        "status": "prepared",
+        "dry_run": true
+      }
+    }
+  ]
+}

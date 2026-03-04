@@ -1,0 +1,22 @@
+{
+  "timestamp": "2026-03-04T10:14:59.166586+00:00",
+  "steps": [
+    {
+      "platform": "threads",
+      "auth_ok": false
+    },
+    {
+      "platform": "reddit",
+      "auth_ok": false
+    },
+    {
+      "platform": "tiktok",
+      "auth_ok": false
+    },
+    {
+      "platform": "twitter",
+      "skipped": true,
+      "reason": "not_configured_or_not_allowed"
+    }
+  ]
+}

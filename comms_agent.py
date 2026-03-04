@@ -35,6 +35,7 @@ from telegram import (
     ReplyKeyboardMarkup,
     Update,
 )
+from telegram.error import BadRequest as TgBadRequest
 from telegram.error import Conflict as TgConflict
 from telegram.ext import (
     Application,
@@ -1389,10 +1390,6 @@ class CommsAgent:
         if self._try_deactivate_preference_from_text(text):
             await self.send_message("Предпочтение деактивировано.")
             return
-        if self._try_set_preference_from_text(text):
-            await self.send_message("Предпочтение сохранено. Могу учитывать в будущих задачах.")
-            return
-        # Explicit owner preference update (opt-in command)
         if self._try_set_preference_from_text(text):
             await self.send_message("Предпочтение сохранено. Могу учитывать в будущих задачах.")
             return
@@ -3931,9 +3928,7 @@ class CommsAgent:
         if action == "auth_cancel":
             self._pending_service_auth.pop(request_id, None)
             await query.answer("Отменено")
-            await query.edit_message_text(
-                text=f"{query.message.text}\n\n— Отменено",
-            )
+            await self._safe_edit_callback_message(query, f"{query.message.text}\n\n— Отменено")
             return
 
         if action == "auth_done":
@@ -3950,7 +3945,7 @@ class CommsAgent:
                 self._service_auth_confirmed[service] = stamp
                 label = f"Вход подтверждён: {title}"
                 await query.answer("Вход подтверждён")
-                await query.edit_message_text(text=f"{query.message.text}\n\n— {label}")
+                await self._safe_edit_callback_message(query, f"{query.message.text}\n\n— {label}")
                 logger.info(
                     f"Inline auth_done: {service}",
                     extra={"event": "inline_auth_done", "context": {"service": service, "mode": "verified"}},
@@ -3964,7 +3959,7 @@ class CommsAgent:
                 self._service_auth_confirmed[service] = stamp
                 label = f"Вход зафиксирован вручную: {title}"
                 await query.answer("Принято")
-                await query.edit_message_text(text=f"{query.message.text}\n\n— {label}\n(Проверка: {detail})")
+                await self._safe_edit_callback_message(query, f"{query.message.text}\n\n— {label}\n(Проверка: {detail})")
                 logger.info(
                     f"Inline auth_done: {service}",
                     extra={"event": "inline_auth_done", "context": {"service": service, "mode": "manual_fallback", "detail": detail[:200]}},
@@ -3972,7 +3967,7 @@ class CommsAgent:
                 await self.send_message(f"{label}. Можно продолжать работу.", level="result")
                 return
             await query.answer("Не подтверждено", show_alert=True)
-            await query.edit_message_text(text=f"{query.message.text}\n\n— Вход не подтверждён.\n{detail}")
+            await self._safe_edit_callback_message(query, f"{query.message.text}\n\n— Вход не подтверждён.\n{detail}")
             await self.send_message(f"Не удалось подтвердить вход: {title}. Деталь: {detail}", level="warning")
             return
 
@@ -3988,15 +3983,29 @@ class CommsAgent:
 
         label = "Одобрено" if approved else "Отклонено"
         await query.answer(label)
-        await query.edit_message_text(
-            text=f"{query.message.text}\n\n— {label}",
-        )
+        await self._safe_edit_callback_message(query, f"{query.message.text}\n\n— {label}")
 
         logger.info(
             f"Inline {label.lower()}: {request_id}",
             extra={"event": f"inline_{'approved' if approved else 'rejected'}",
                    "context": {"request_id": request_id}},
         )
+
+    async def _safe_edit_callback_message(self, query, text: str) -> None:
+        """Best-effort callback message edit; do not interrupt flow if edit is rejected."""
+        try:
+            await query.edit_message_text(text=text)
+        except TgBadRequest:
+            logger.info(
+                "Callback message edit skipped (non-editable or unchanged).",
+                extra={"event": "callback_edit_skipped"},
+            )
+        except Exception:
+            logger.warning(
+                "Callback message edit failed unexpectedly.",
+                extra={"event": "callback_edit_failed"},
+                exc_info=True,
+            )
 
     # ── API для других модулей ──
 
