@@ -84,7 +84,11 @@ class TrendScout(BaseAgent):
         try:
             from pytrends.request import TrendReq
         except ImportError:
-            return TaskResult(success=False, error="pytrends не установлен; LLM fallback отключён")
+            return await self._trend_fallback_report(
+                keywords=keywords,
+                geo=geo,
+                reason="pytrends_not_installed",
+            )
 
         try:
             pytrends = TrendReq(hl="en-US", tz=360)
@@ -130,7 +134,73 @@ class TrendScout(BaseAgent):
             return TaskResult(success=True, output=output, cost_usd=0.0)
         except Exception as e:
             logger.warning(f"pytrends error: {e}", extra={"event": "pytrends_error"})
-            return TaskResult(success=False, error=str(e))
+            return await self._trend_fallback_report(
+                keywords=keywords,
+                geo=geo,
+                reason=f"pytrends_error:{str(e)[:160]}",
+            )
+
+    async def _trend_fallback_report(self, keywords: list[str], geo: str, reason: str) -> TaskResult:
+        """Fallback, когда pytrends недоступен/режет лимитами.
+
+        Сначала берём RSS/Reddit-данные, затем делаем краткую сводку через LLM.
+        """
+        search_terms = [k for k in (keywords or []) if str(k).strip()][:5] or ["digital products"]
+        feeds = DEFAULT_RSS_FEEDS + _get_reddit_rss_feeds()
+        rss_result = await self.scan_rss_feeds(feeds)
+        rss_context = ""
+        if rss_result.success and rss_result.output:
+            rss_context = str(rss_result.output)[:2400]
+
+        if self.llm_router:
+            prompt = (
+                f"Тренд-фоллбек для рынка {geo}. Ключевые запросы: {', '.join(search_terms)}.\n"
+                f"Причина fallback: {reason}\n\n"
+                f"<external_data>{rss_context}</external_data>\n\n"
+                "Сделай короткий практичный отчет:\n"
+                "1) Топ-3 тренда сейчас\n"
+                "2) Что запускать первым (конкретный формат цифрового продукта)\n"
+                "3) Почему (с опорой на данные из external_data)\n"
+                "4) Риск/ограничение данных\n"
+                "Пиши без воды."
+            )
+            response = await self._call_llm(
+                task_type=TaskType.RESEARCH,
+                prompt=prompt,
+                system_prompt=(
+                    "Ты исследователь трендов. Опирайся на данные из external_data. "
+                    "Если данных мало, явно это укажи. Не выдумывай точные цифры."
+                ),
+                estimated_tokens=1400,
+            )
+            if response:
+                payload = json.dumps(
+                    {
+                        "mode": "fallback",
+                        "reason": reason,
+                        "geo": geo,
+                        "keywords": search_terms,
+                        "report": response[:6000],
+                    },
+                    ensure_ascii=False,
+                )
+                return TaskResult(success=True, output=payload, cost_usd=0.0)
+
+        # Последний fallback без LLM — хотя бы возвращаем RSS-данные
+        if rss_context:
+            payload = json.dumps(
+                {
+                    "mode": "fallback_raw",
+                    "reason": reason,
+                    "geo": geo,
+                    "keywords": search_terms,
+                    "rss_excerpt": rss_context[:3000],
+                },
+                ensure_ascii=False,
+            )
+            return TaskResult(success=True, output=payload, cost_usd=0.0)
+
+        return TaskResult(success=False, error=f"trend_fallback_failed:{reason}")
 
     async def scan_reddit(self, subreddits: list[str] | None = None) -> TaskResult:
         """Сканирование Reddit: сначала RSS из .env, потом LLM-анализ."""

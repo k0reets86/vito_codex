@@ -21,6 +21,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 from telegram import (
     Bot,
@@ -55,6 +56,98 @@ logger = get_logger("comms_agent", agent="comms_agent")
 
 
 class CommsAgent:
+    _SERVICE_CATALOG: dict[str, dict[str, Any]] = {
+        "amazon_kdp": {
+            "title": "Amazon KDP",
+            "url": "https://kdp.amazon.com",
+            "aliases": ("amazon", "амазон", "kdp", "кдп", "amazon kdp", "amazon books"),
+            "manual_fallback": True,
+        },
+        "etsy": {
+            "title": "Etsy",
+            "url": "https://www.etsy.com/signin",
+            "aliases": ("etsy", "етси", "этси"),
+            "manual_fallback": True,
+        },
+        "gumroad": {
+            "title": "Gumroad",
+            "url": "https://gumroad.com/login",
+            "aliases": ("gumroad", "гумроад", "гамроад"),
+            "manual_fallback": True,
+        },
+        "printful": {
+            "title": "Printful",
+            "url": "https://www.printful.com/dashboard",
+            "aliases": ("printful", "принтфул"),
+            "manual_fallback": True,
+        },
+        "twitter": {
+            "title": "X (Twitter)",
+            "url": "https://x.com/i/flow/login",
+            "aliases": ("twitter", "x.com", " x ", "твиттер", "твитер", "икс"),
+            "manual_fallback": True,
+        },
+        "reddit": {
+            "title": "Reddit",
+            "url": "https://www.reddit.com/login/",
+            "aliases": ("reddit", "реддит"),
+            "manual_fallback": True,
+        },
+        "threads": {
+            "title": "Threads",
+            "url": "https://www.threads.net/login",
+            "aliases": ("threads", "тредс", "тридс"),
+            "manual_fallback": True,
+        },
+        "instagram": {
+            "title": "Instagram",
+            "url": "https://www.instagram.com/accounts/login/",
+            "aliases": ("instagram", "insta", "инстаграм", "инста"),
+            "manual_fallback": True,
+        },
+        "facebook": {
+            "title": "Facebook",
+            "url": "https://www.facebook.com/login",
+            "aliases": ("facebook", "fb", "фейсбук", "фб"),
+            "manual_fallback": True,
+        },
+        "tiktok": {
+            "title": "TikTok",
+            "url": "https://www.tiktok.com/login",
+            "aliases": ("tiktok", "tik tok", "тикток", "тикток"),
+            "manual_fallback": True,
+        },
+        "pinterest": {
+            "title": "Pinterest",
+            "url": "https://www.pinterest.com/login/",
+            "aliases": ("pinterest", "пинтерест"),
+            "manual_fallback": True,
+        },
+        "youtube": {
+            "title": "YouTube Studio",
+            "url": "https://studio.youtube.com/",
+            "aliases": ("youtube", "ютуб", "ютьюб", "youtube studio"),
+            "manual_fallback": True,
+        },
+        "linkedin": {
+            "title": "LinkedIn",
+            "url": "https://www.linkedin.com/login",
+            "aliases": ("linkedin", "линкедин", "линкед ин"),
+            "manual_fallback": True,
+        },
+        "wordpress": {
+            "title": "WordPress",
+            "url": "https://wordpress.com/log-in",
+            "aliases": ("wordpress", "вордпресс", "wp"),
+            "manual_fallback": True,
+        },
+        "medium": {
+            "title": "Medium",
+            "url": "https://medium.com/m/signin",
+            "aliases": ("medium", "медиум"),
+            "manual_fallback": True,
+        },
+    }
     def __init__(self):
         self._bot: Optional[Bot] = None
         self._app: Optional[Application] = None
@@ -350,17 +443,13 @@ class CommsAgent:
         )
         if not has_action:
             return ""
-        aliases: dict[str, tuple[str, ...]] = {
-            "amazon_kdp": ("amazon", "амазон", "kdp", "кдп", "amazon kdp", "amazon books"),
-            "etsy": ("etsy", "етси", "этси"),
-            "gumroad": ("gumroad", "гумроад", "гамроад"),
-            "twitter": ("twitter", "x.com", "x ", "твиттер", "твитер"),
-            "reddit": ("reddit", "реддит"),
-            "printful": ("printful", "принтфул"),
-        }
-        for service, keys in aliases.items():
+        for service, meta in CommsAgent._SERVICE_CATALOG.items():
+            keys = tuple(meta.get("aliases") or ())
             if any(k in s for k in keys):
                 return service
+        custom = CommsAgent._extract_custom_login_target(s)
+        if custom:
+            return f"custom:{custom}"
         return ""
 
     @staticmethod
@@ -368,30 +457,62 @@ class CommsAgent:
         s = str(text or "").strip().lower()
         if not s:
             return ""
-        aliases: dict[str, tuple[str, ...]] = {
-            "amazon_kdp": ("amazon", "амазон", "kdp", "кдп", "amazon kdp", "amazon books"),
-            "etsy": ("etsy", "етси", "этси"),
-            "gumroad": ("gumroad", "гумроад", "гамроад"),
-            "twitter": ("twitter", "x.com", " x ", "твиттер", "твитер"),
-            "reddit": ("reddit", "реддит"),
-            "printful": ("printful", "принтфул"),
-        }
-        for service, keys in aliases.items():
+        for service, meta in CommsAgent._SERVICE_CATALOG.items():
+            keys = tuple(meta.get("aliases") or ())
             if any(k in s for k in keys):
                 return service
+        custom = CommsAgent._extract_custom_login_target(s)
+        if custom:
+            return f"custom:{custom}"
         return ""
 
     @staticmethod
     def _service_auth_meta(service: str) -> tuple[str, str]:
-        meta = {
-            "amazon_kdp": ("Amazon KDP", "https://kdp.amazon.com"),
-            "etsy": ("Etsy", "https://www.etsy.com/signin"),
-            "gumroad": ("Gumroad", "https://gumroad.com/login"),
-            "twitter": ("X (Twitter)", "https://x.com/i/flow/login"),
-            "reddit": ("Reddit", "https://www.reddit.com/login/"),
-            "printful": ("Printful", "https://www.printful.com/dashboard"),
-        }
-        return meta.get(service, (service, ""))
+        svc = str(service or "").strip().lower()
+        if svc.startswith("custom:"):
+            target = svc.split(":", 1)[1].strip()
+            if target.startswith("http://") or target.startswith("https://"):
+                auth_url = target
+                host = urlparse(target).netloc or target
+            else:
+                host = target
+                auth_url = f"https://{target}"
+            return f"Сайт {host}", auth_url
+        meta = CommsAgent._SERVICE_CATALOG.get(svc) or {}
+        title = str(meta.get("title") or service)
+        url = str(meta.get("url") or "")
+        return title, url
+
+    @staticmethod
+    def _extract_custom_login_target(text: str) -> str:
+        s = str(text or "").strip().lower()
+        if not s:
+            return ""
+        m_url = re.search(r"(https?://[^\s<>\"]+)", s)
+        if m_url:
+            target = m_url.group(1).rstrip(").,;")
+            try:
+                parsed = urlparse(target)
+                host = (parsed.netloc or "").strip().lower()
+                if host:
+                    return host
+            except Exception:
+                pass
+        m_dom = re.search(r"\b((?:[a-z0-9-]+\.)+[a-z]{2,})(?:/[^\s]*)?\b", s)
+        if m_dom:
+            domain = m_dom.group(1).strip()
+            if domain in {"kdp.amazon.com", "x.com", "reddit.com", "etsy.com", "gumroad.com"}:
+                return ""
+            return domain
+        return ""
+
+    @staticmethod
+    def _is_manual_auth_service(service: str) -> bool:
+        svc = str(service or "").strip().lower()
+        if svc.startswith("custom:"):
+            return True
+        meta = CommsAgent._SERVICE_CATALOG.get(svc) or {}
+        return bool(meta.get("manual_fallback", False))
 
     def _touch_service_context(self, service: str) -> None:
         svc = str(service or "").strip().lower()
@@ -399,6 +520,69 @@ class CommsAgent:
             return
         self._last_service_context = svc
         self._last_service_context_at = datetime.now(timezone.utc).isoformat()
+        self._record_context_learning(
+            skill_name="service_context_tracking",
+            description=(
+                "После команд входа запоминай последний сервис и используй его как контекст для коротких уточнений "
+                "вроде 'статус', 'проверь аккаунт', 'вход ок?'."
+            ),
+            anti_pattern=(
+                "Плохо: терять контекст и трактовать короткое 'статус' как общий статус VITO, "
+                "когда владелец только что говорил о конкретной платформе."
+            ),
+            method={"service": svc},
+        )
+
+    def _has_fresh_service_context(self, max_age_minutes: int = 180) -> bool:
+        if not self._last_service_context:
+            return False
+        stamp = str(self._last_service_context_at or "").strip()
+        if not stamp:
+            return True
+        try:
+            dt = datetime.fromisoformat(stamp)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            age_sec = (datetime.now(timezone.utc) - dt).total_seconds()
+            return age_sec <= max(60, int(max_age_minutes) * 60)
+        except Exception:
+            return True
+
+    def _get_memory_manager(self):
+        # Prefer shared runtime memory from conversation/decision loop.
+        candidates = [getattr(self, "_conversation_engine", None), getattr(self, "_decision_loop", None)]
+        for obj in candidates:
+            mm = getattr(obj, "memory", None) if obj else None
+            if mm and hasattr(mm, "save_skill") and hasattr(mm, "save_pattern"):
+                return mm
+        return None
+
+    def _record_context_learning(self, skill_name: str, description: str, anti_pattern: str, method: dict | None = None) -> None:
+        mm = self._get_memory_manager()
+        if mm is None:
+            return
+        try:
+            mm.save_skill(
+                name=skill_name,
+                description=description,
+                agent="comms_agent",
+                task_type="nlu_context",
+                method=method or {},
+            )
+            mm.save_pattern(
+                category="owner_context",
+                key=skill_name,
+                value=description,
+                confidence=0.95,
+            )
+            mm.save_pattern(
+                category="anti_pattern",
+                key=f"{skill_name}_anti",
+                value=anti_pattern,
+                confidence=0.95,
+            )
+        except Exception:
+            pass
 
     @staticmethod
     def _is_status_prompt(text: str) -> bool:
@@ -420,14 +604,12 @@ class CommsAgent:
         s = str(text or "").strip().lower()
         if not s or not self._is_status_prompt(s):
             return ""
-        if s in {"/status", "status", "статус"}:
-            return ""
         explicit = self._detect_service_from_text(s)
         if explicit:
             return explicit
         if any(x in s for x in ("vito", "вито", "система", "system")):
             return ""
-        return self._last_service_context
+        return self._last_service_context if self._has_fresh_service_context() else ""
 
     def _format_service_auth_status(self, service: str) -> str:
         svc = str(service or "").strip().lower()
@@ -523,6 +705,9 @@ class CommsAgent:
                 return False, "Etsy API проверка недоступна. Зафиксировал ручную авторизацию."
         if svc == "reddit":
             return False, "Reddit в browser_only режиме; зафиксировал ручную авторизацию."
+        if self._is_manual_auth_service(svc):
+            title, _ = self._service_auth_meta(svc)
+            return False, f"{title}: подтверждение только вручную (browser-only)."
         return False, "Проверка сервиса не реализована."
 
     async def _start_service_auth_flow(self, service: str, send_reply, with_button: bool = True) -> bool:
@@ -624,6 +809,11 @@ class CommsAgent:
         auth_url = ""
         if wait_lines:
             auth_url = wait_lines[-1].split("WAIT: url=", 1)[-1].strip()
+        if not auth_url:
+            # Fallback: даже если helper не вернул WAIT-ссылку (например, browser crash),
+            # всё равно даём владельцу стабильную ссылку входа и кнопку подтверждения.
+            _, fallback_url = self._service_auth_meta("amazon_kdp")
+            auth_url = fallback_url
         if auth_url and with_button:
             self._pending_service_auth["amazon_kdp"] = {
                 "service": "amazon_kdp",
@@ -638,9 +828,18 @@ class CommsAgent:
                     [InlineKeyboardButton("Отмена", callback_data="auth_cancel:amazon_kdp")],
                 ]
             )
-            await send_reply("Amazon требует ручную проверку. Войди и нажми «Я вошел».", kb)
+            await send_reply("Amazon требует ручную проверку. Войди по кнопке и нажми «Я вошел».", kb)
         elif auth_url:
-            await send_reply(f"Amazon требует ручную проверку. Ссылка для авторизации: {auth_url}")
+            self._pending_service_auth["amazon_kdp"] = {
+                "service": "amazon_kdp",
+                "url": auth_url,
+                "requested_at": datetime.now(timezone.utc).isoformat(),
+                "mode": "kdp_challenge_text",
+            }
+            await send_reply(
+                f"Amazon требует ручную проверку. Ссылка для авторизации: {auth_url}\n"
+                "После входа напиши: «я вошел»."
+            )
         else:
             await send_reply("Amazon запросил дополнительную проверку (captcha/challenge). После прохождения повтори: /kdp_login")
         logger.warning("KDP login requires challenge", extra={"event": "kdp_login_challenge", "context": {"output": tail}})
@@ -972,7 +1171,7 @@ class CommsAgent:
                 await self.send_message(f"Вход подтверждён: {title}.")
                 logger.info("Inline auth_done via text", extra={"event": "inline_auth_done", "context": {"service": service, "mode": "text"}})
             else:
-                if service in {"etsy", "reddit", "twitter", "gumroad", "printful"}:
+                if self._is_manual_auth_service(service):
                     self._service_auth_confirmed[service] = datetime.now(timezone.utc).isoformat()
                     await self.send_message(f"Вход зафиксирован вручную: {title}. Проверка: {detail}")
                     logger.info("Inline auth_done via text", extra={"event": "inline_auth_done", "context": {"service": service, "mode": "text_manual"}})
@@ -1563,10 +1762,10 @@ class CommsAgent:
     def _render_auth_hub() -> str:
         return (
             "Входы в сервисы\n"
-            "- Напиши: зайди на амазон\n"
-            "- Напиши: зайди на твиттер\n"
-            "- Напиши: зайди в реддит\n"
-            "- Напиши: зайди на этси / гумроад / принтфул\n\n"
+            "- Поддержка: Amazon KDP, Etsy, Gumroad, Printful\n"
+            "- Соцсети: X/Twitter, Reddit, Threads, Instagram, Facebook, TikTok, Pinterest, YouTube, LinkedIn\n"
+            "- Прочее: WordPress, Medium\n"
+            "- Любой сайт: 'зайди на https://site.com' или 'зайди на site.com'\n\n"
             "После входа нажми «Я вошел» или напиши «готово»."
         )
 
@@ -2370,7 +2569,7 @@ class CommsAgent:
                 await update.message.reply_text(f"Вход подтверждён: {title}.", reply_markup=self._main_keyboard())
                 logger.info("Inline auth_done via text", extra={"event": "inline_auth_done", "context": {"service": service, "mode": "text"}})
             else:
-                if service in {"etsy", "reddit", "twitter", "gumroad", "printful"}:
+                if self._is_manual_auth_service(service):
                     self._service_auth_confirmed[service] = datetime.now(timezone.utc).isoformat()
                     await update.message.reply_text(
                         f"Вход зафиксирован вручную: {title}. Проверка: {detail}",
@@ -2507,6 +2706,27 @@ class CommsAgent:
             )
             return
 
+        # 0.5 Context-aware service status: after "зайди на X", plain "статус" means X status.
+        service_status = self._detect_contextual_service_status_request(text)
+        if service_status:
+            await update.message.reply_text(
+                self._format_service_auth_status(service_status),
+                reply_markup=self._main_keyboard(),
+            )
+            self._record_context_learning(
+                skill_name="contextual_service_status_resolution",
+                description=(
+                    "Если у владельца активный контекст платформы, короткий запрос 'статус' трактуется "
+                    "как статус входа/аккаунта этой платформы."
+                ),
+                anti_pattern=(
+                    "Плохо: игнорировать недавний контекст сервиса и отвечать системным статусом VITO "
+                    "вместо статуса нужной платформы."
+                ),
+                method={"service": service_status, "source_text": text[:120]},
+            )
+            return
+
         # 1. Обработка нажатий persistent-кнопок (+алиасы старого меню)
         cmd = self._resolve_button_command(text)
         if cmd:
@@ -2549,13 +2769,6 @@ class CommsAgent:
 
         # 1.5. Natural language shortcuts (balance check, etc.)
         lower = text.strip().lower()
-        service_status = self._detect_contextual_service_status_request(text)
-        if service_status:
-            await update.message.reply_text(
-                self._format_service_auth_status(service_status),
-                reply_markup=self._main_keyboard(),
-            )
-            return
         if (not strict_cmds) and any(x in lower for x in ("llm_mode ", "режим llm", "режим lmm", "llm режим")):
             mode = "status"
             if any(x in lower for x in (" free", " тест", " gemini", " flash")):
@@ -3440,7 +3653,10 @@ class CommsAgent:
             service = str(request_id or "").strip().lower()
             self._pending_service_auth.pop(service, None)
             self._touch_service_context(service)
-            ok, detail = await self._verify_service_auth(service)
+            try:
+                ok, detail = await self._verify_service_auth(service)
+            except Exception as e:
+                ok, detail = False, f"Ошибка проверки авторизации: {e}"
             title, _ = self._service_auth_meta(service)
             if ok:
                 stamp = datetime.now(timezone.utc).isoformat()
@@ -3452,10 +3668,11 @@ class CommsAgent:
                     f"Inline auth_done: {service}",
                     extra={"event": "inline_auth_done", "context": {"service": service, "mode": "verified"}},
                 )
+                await self.send_message(label, level="result")
                 return
             # Fallback: for browser/manual flows keep owner's explicit confirmation,
             # but clearly mark that technical probe failed.
-            if service in {"etsy", "reddit", "twitter", "gumroad", "printful"}:
+            if self._is_manual_auth_service(service):
                 stamp = datetime.now(timezone.utc).isoformat()
                 self._service_auth_confirmed[service] = stamp
                 label = f"Вход зафиксирован вручную: {title}"
@@ -3465,9 +3682,11 @@ class CommsAgent:
                     f"Inline auth_done: {service}",
                     extra={"event": "inline_auth_done", "context": {"service": service, "mode": "manual_fallback", "detail": detail[:200]}},
                 )
+                await self.send_message(f"{label}. Можно продолжать работу.", level="result")
                 return
             await query.answer("Не подтверждено", show_alert=True)
             await query.edit_message_text(text=f"{query.message.text}\n\n— Вход не подтверждён.\n{detail}")
+            await self.send_message(f"Не удалось подтвердить вход: {title}. Деталь: {detail}", level="warning")
             return
 
         future = self._pending_approvals.pop(request_id, None)

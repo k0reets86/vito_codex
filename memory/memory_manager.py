@@ -38,6 +38,7 @@ class MemoryManager:
         self._memory_blocks = MemoryBlocks()
         self._gemini_embed_client = None
         self._gemini_embed_lock = threading.Lock()
+        self._embed_query_fallback_only = False
         logger.info("MemoryManager инициализирован", extra={"event": "init"})
 
     @property
@@ -93,6 +94,8 @@ class MemoryManager:
         return self._gemini_embed_client
 
     def _embed_texts(self, texts: list[str]) -> list[list[float]] | None:
+        if self._embed_query_fallback_only:
+            return None
         client = self._get_gemini_embed_client()
         if client is None:
             return None
@@ -122,6 +125,35 @@ class MemoryManager:
                 logger.debug(f"Gemini embeddings fallback error: {e}")
                 return None
         return None
+
+    @staticmethod
+    def _is_dimension_mismatch_error(err: Exception) -> bool:
+        msg = str(err).lower()
+        return ("dimension" in msg and "expecting embedding" in msg) or ("got 3072" in msg and "384" in msg)
+
+    def _upsert_chroma_safe(
+        self,
+        collection,
+        *,
+        ids: list[str],
+        documents: list[str],
+        metadatas: list[dict[str, Any]],
+        embeddings: list[list[float]] | None = None,
+    ) -> None:
+        if embeddings:
+            try:
+                collection.upsert(ids=ids, documents=documents, metadatas=metadatas, embeddings=embeddings)
+                return
+            except Exception as e:
+                if self._is_dimension_mismatch_error(e):
+                    self._embed_query_fallback_only = True
+                    logger.warning(
+                        "Chroma embedding dimension mismatch detected; switching to text-only mode",
+                        extra={"event": "chroma_dim_fallback"},
+                    )
+                else:
+                    raise
+        collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
 
     def store_knowledge(
         self,
@@ -164,10 +196,13 @@ class MemoryManager:
         meta["policy_reason"] = decision.reason
         try:
             embed = self._embed_texts([text])
-            if embed:
-                collection.upsert(ids=[doc_id], documents=[text], metadatas=[meta], embeddings=embed)
-            else:
-                collection.upsert(ids=[doc_id], documents=[text], metadatas=[meta])
+            self._upsert_chroma_safe(
+                collection,
+                ids=[doc_id],
+                documents=[text],
+                metadatas=[meta],
+                embeddings=embed,
+            )
             self._chroma_doc_count += 1
             logger.info(
                 f"Знание сохранено: {doc_id}",
@@ -340,7 +375,18 @@ class MemoryManager:
             raw_limit = max(n_results * 3, n_results + 5)
             embed = self._embed_texts([query])
             if embed:
-                results = collection.query(query_embeddings=embed, n_results=raw_limit)
+                try:
+                    results = collection.query(query_embeddings=embed, n_results=raw_limit)
+                except Exception as e:
+                    if self._is_dimension_mismatch_error(e):
+                        self._embed_query_fallback_only = True
+                        logger.warning(
+                            "Chroma query embedding mismatch; fallback to query_texts",
+                            extra={"event": "chroma_query_dim_fallback"},
+                        )
+                        results = collection.query(query_texts=[query], n_results=raw_limit)
+                    else:
+                        raise
             else:
                 results = collection.query(query_texts=[query], n_results=raw_limit)
             duration_ms = int((time.monotonic() - start) * 1000)
@@ -864,19 +910,13 @@ class MemoryManager:
                     "stored_at": datetime.now(timezone.utc).isoformat(),
                 }
                 skill_embed = self._embed_texts([skill_doc])
-                if skill_embed:
-                    collection.upsert(
-                        ids=[f"skill_{name}"],
-                        documents=[skill_doc],
-                        metadatas=[skill_meta],
-                        embeddings=skill_embed,
-                    )
-                else:
-                    collection.upsert(
-                        ids=[f"skill_{name}"],
-                        documents=[skill_doc],
-                        metadatas=[skill_meta],
-                    )
+                self._upsert_chroma_safe(
+                    collection,
+                    ids=[f"skill_{name}"],
+                    documents=[skill_doc],
+                    metadatas=[skill_meta],
+                    embeddings=skill_embed,
+                )
             except Exception as e:
                 logger.debug(f"Не удалось сохранить навык в ChromaDB: {e}")
             logger.info(f"Навык сохранён: {name}", extra={"event": "skill_saved", "context": {"agent": agent, "task_type": task_type}})
@@ -938,11 +978,26 @@ class MemoryManager:
             collection = self._get_chroma()
             embed = self._embed_texts([query])
             if embed:
-                chroma_results = collection.query(
-                    query_embeddings=embed,
-                    n_results=limit,
-                    where={"type": "skill"},
-                )
+                try:
+                    chroma_results = collection.query(
+                        query_embeddings=embed,
+                        n_results=limit,
+                        where={"type": "skill"},
+                    )
+                except Exception as e:
+                    if self._is_dimension_mismatch_error(e):
+                        self._embed_query_fallback_only = True
+                        logger.warning(
+                            "Skill query embedding mismatch; fallback to query_texts",
+                            extra={"event": "chroma_skill_query_dim_fallback"},
+                        )
+                        chroma_results = collection.query(
+                            query_texts=[query],
+                            n_results=limit,
+                            where={"type": "skill"},
+                        )
+                    else:
+                        raise
             else:
                 chroma_results = collection.query(
                     query_texts=[query],

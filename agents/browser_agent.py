@@ -5,7 +5,7 @@ Singleton: один инстанс Chromium на весь жизненный ц�
 
 OOM Protection:
 - Singleton pattern: max 1 browser instance
-- --single-process + --disable-dev-shm-usage Chrome flags
+- Reduced Chromium process pressure + --disable-dev-shm-usage flags
 - Watchdog: kills orphan headless_shell processes (max 2 allowed)
 - Memory limit: systemd MemoryMax=2G (RLIMIT_AS breaks V8/Node)
 - Guaranteed cleanup in finally blocks
@@ -88,6 +88,7 @@ class BrowserAgent(BaseAgent):
     _browser = None
     _playwright_inst = None
     _lock: Optional[asyncio.Lock] = None
+    _page_sem: Optional[asyncio.Semaphore] = None
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
@@ -103,6 +104,8 @@ class BrowserAgent(BaseAgent):
         self._page = None
         if BrowserAgent._lock is None:
             BrowserAgent._lock = asyncio.Lock()
+        if BrowserAgent._page_sem is None:
+            BrowserAgent._page_sem = asyncio.Semaphore(2)
 
     @property
     def capabilities(self) -> list[str]:
@@ -110,49 +113,69 @@ class BrowserAgent(BaseAgent):
 
     async def start(self) -> None:
         await super().start()
-        try:
-            from playwright.async_api import async_playwright
-
-            # Resource guard: проверяем есть ли RAM для Chromium (~300MB)
-            if not resource_guard.can_proceed(estimated_mb=300):
-                logger.warning(
-                    "Недостаточно RAM для запуска Chromium, пропускаю",
-                    extra={"event": "browser_skip_low_ram"},
-                )
-                self._status = AgentStatus.IDLE
+        lock = BrowserAgent._lock or asyncio.Lock()
+        async with lock:
+            if BrowserAgent._browser is not None and self._context is not None:
                 return
+            try:
+                from playwright.async_api import async_playwright
 
-            # Watchdog: clean up orphan processes before launching
-            _kill_orphan_headless_shells()
+                # Resource guard: проверяем есть ли RAM для Chromium (~300MB)
+                if not resource_guard.can_proceed(estimated_mb=300):
+                    logger.warning(
+                        "Недостаточно RAM для запуска Chromium, пропускаю",
+                        extra={"event": "browser_skip_low_ram"},
+                    )
+                    self._status = AgentStatus.IDLE
+                    return
 
-            if BrowserAgent._playwright_inst is None:
-                # Set memory limit before launching browser
-                _set_memory_limit()
+                # Watchdog: clean up orphan processes before launching
+                _kill_orphan_headless_shells()
 
-                BrowserAgent._playwright_inst = await async_playwright().start()
-                BrowserAgent._browser = await BrowserAgent._playwright_inst.chromium.launch(
-                    headless=True,
-                    args=[
-                        "--no-sandbox",
-                        "--disable-setuid-sandbox",
-                        "--disable-dev-shm-usage",
-                        "--single-process",
-                        "--disable-gpu",
-                        "--disable-extensions",
-                        "--disable-background-networking",
-                        "--js-flags=--max-old-space-size=256",
-                    ],
-                )
-                self._context = await BrowserAgent._browser.new_context(
-                    viewport={"width": 1280, "height": 720},
-                    user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-                )
-                logger.info("Playwright Chromium запущен", extra={"event": "browser_started"})
-        except Exception as e:
-            self._status = AgentStatus.ERROR
-            logger.error(f"Ошибка запуска Playwright: {e}", extra={"event": "browser_start_failed"}, exc_info=True)
-            # Ensure cleanup on failed start
-            await self._force_cleanup()
+                last_error: Exception | None = None
+                for attempt in range(1, 4):
+                    try:
+                        _set_memory_limit()
+                        if BrowserAgent._playwright_inst is None:
+                            BrowserAgent._playwright_inst = await async_playwright().start()
+                        BrowserAgent._browser = await BrowserAgent._playwright_inst.chromium.launch(
+                            headless=True,
+                            args=[
+                                "--no-sandbox",
+                                "--disable-setuid-sandbox",
+                                "--disable-dev-shm-usage",
+                                "--disable-gpu",
+                                "--disable-extensions",
+                                "--disable-background-networking",
+                                "--renderer-process-limit=1",
+                                "--js-flags=--max-old-space-size=256",
+                            ],
+                        )
+                        self._context = await BrowserAgent._browser.new_context(
+                            viewport={"width": 1280, "height": 720},
+                            user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+                        )
+                        logger.info(
+                            f"Playwright Chromium запущен (attempt={attempt})",
+                            extra={"event": "browser_started", "context": {"attempt": attempt}},
+                        )
+                        return
+                    except Exception as e:
+                        last_error = e
+                        logger.warning(
+                            f"Playwright start attempt {attempt} failed: {str(e)[:240]}",
+                            extra={"event": "browser_start_retry", "context": {"attempt": attempt}},
+                        )
+                        await self._force_cleanup()
+                        _kill_orphan_headless_shells()
+                        if attempt < 3:
+                            await asyncio.sleep(float(attempt))
+                raise last_error or RuntimeError("browser_start_failed")
+            except Exception as e:
+                self._status = AgentStatus.ERROR
+                logger.error(f"Ошибка запуска Playwright: {e}", extra={"event": "browser_start_failed"}, exc_info=True)
+                # Ensure cleanup on failed start
+                await self._force_cleanup()
 
     async def _force_cleanup(self) -> None:
         """Force-close all browser resources. Used on error paths."""
@@ -203,10 +226,23 @@ class BrowserAgent(BaseAgent):
     async def _ensure_browser(self) -> None:
         if BrowserAgent._browser is None or self._context is None:
             await self.start()
+        if BrowserAgent._browser is None or self._context is None:
+            raise RuntimeError("browser_unavailable")
 
     async def _new_page(self):
-        await self._ensure_browser()
-        return await self._context.new_page()
+        sem = BrowserAgent._page_sem
+        if sem is None:
+            BrowserAgent._page_sem = asyncio.Semaphore(2)
+            sem = BrowserAgent._page_sem
+        async with sem:
+            await self._ensure_browser()
+            try:
+                return await self._context.new_page()
+            except Exception:
+                await self._force_cleanup()
+                await self.start()
+                await self._ensure_browser()
+                return await self._context.new_page()
 
     async def navigate(self, url: str) -> TaskResult:
         page = await self._new_page()

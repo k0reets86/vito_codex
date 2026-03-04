@@ -1044,6 +1044,36 @@ async def test_handle_callback_auth_done_manual_fallback(comms, mock_callback_qu
 
 
 @pytest.mark.asyncio
+async def test_handle_callback_auth_done_manual_fallback_custom_site(comms, mock_callback_query):
+    update = MagicMock()
+    update.callback_query = mock_callback_query
+    mock_callback_query.data = "auth_done:custom:notion.so"
+    comms._pending_service_auth["custom:notion.so"] = {"service": "custom:notion.so", "url": "https://notion.so"}
+    comms._verify_service_auth = AsyncMock(return_value=(False, "browser_only"))
+
+    await comms._handle_callback(update, MagicMock())
+
+    mock_callback_query.answer.assert_called_once_with("Принято")
+    assert "Вход зафиксирован вручную" in mock_callback_query.edit_message_text.call_args[1]["text"]
+    assert "custom:notion.so" in comms._service_auth_confirmed
+
+
+@pytest.mark.asyncio
+async def test_handle_callback_auth_done_manual_fallback_amazon(comms, mock_callback_query):
+    update = MagicMock()
+    update.callback_query = mock_callback_query
+    mock_callback_query.data = "auth_done:amazon_kdp"
+    comms._pending_service_auth["amazon_kdp"] = {"service": "amazon_kdp", "url": "https://kdp.amazon.com"}
+    comms._verify_service_auth = AsyncMock(return_value=(False, "probe_failed"))
+
+    await comms._handle_callback(update, MagicMock())
+
+    mock_callback_query.answer.assert_called_once_with("Принято")
+    assert "Вход зафиксирован вручную" in mock_callback_query.edit_message_text.call_args[1]["text"]
+    assert "amazon_kdp" in comms._service_auth_confirmed
+
+
+@pytest.mark.asyncio
 async def test_on_message_login_request_starts_generic_service_auth(comms, mock_update):
     mock_update.message.text = "зайди в реддит"
     comms._start_service_auth_flow = AsyncMock(return_value=True)
@@ -1066,6 +1096,28 @@ async def test_on_message_twitter_login_request_starts_generic_service_auth(comm
 
 
 @pytest.mark.asyncio
+async def test_on_message_threads_login_request_starts_generic_service_auth(comms, mock_update):
+    mock_update.message.text = "зайди в threads"
+    comms._start_service_auth_flow = AsyncMock(return_value=True)
+    comms._handle_kdp_login_flow = AsyncMock(return_value=False)
+
+    await comms._on_message(mock_update, MagicMock())
+
+    assert comms._start_service_auth_flow.await_args.args[0] == "threads"
+
+
+@pytest.mark.asyncio
+async def test_on_message_custom_site_login_request_starts_generic_service_auth(comms, mock_update):
+    mock_update.message.text = "зайди на notion.so"
+    comms._start_service_auth_flow = AsyncMock(return_value=True)
+    comms._handle_kdp_login_flow = AsyncMock(return_value=False)
+
+    await comms._on_message(mock_update, MagicMock())
+
+    assert comms._start_service_auth_flow.await_args.args[0] == "custom:notion.so"
+
+
+@pytest.mark.asyncio
 async def test_on_message_contextual_service_status(comms, mock_update):
     comms._last_service_context = "twitter"
     mock_update.message.text = "покажи статус"
@@ -1078,6 +1130,27 @@ async def test_on_message_contextual_service_status(comms, mock_update):
     sent = mock_update.message.reply_text.call_args[0][0]
     assert "Twitter" in sent
     conv.process_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_on_message_contextual_service_status_plain_status(comms, mock_update):
+    comms._last_service_context = "amazon_kdp"
+    comms._last_service_context_at = "2026-03-04T01:00:00+00:00"
+    conv = MagicMock()
+    conv.process_message = AsyncMock(return_value={"response": "SHOULD_NOT_BE_USED"})
+    comms.set_modules(conversation_engine=conv)
+    mock_update.message.text = "статус"
+
+    await comms._on_message(mock_update, MagicMock())
+
+    sent = mock_update.message.reply_text.call_args[0][0]
+    assert "Amazon KDP" in sent
+    conv.process_message.assert_not_called()
+
+
+def test_detect_contextual_status_without_fresh_context_returns_empty(comms):
+    comms._last_service_context = ""
+    assert comms._detect_contextual_service_status_request("статус") == ""
 
 
 def test_humanize_owner_text_strips_technical_noise(comms):
