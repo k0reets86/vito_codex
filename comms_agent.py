@@ -471,6 +471,7 @@ class CommsAgent:
             for x in (
                 "зайди",
                 "зайти",
+                "войди",
                 "вход",
                 "логин",
                 "login",
@@ -1045,6 +1046,33 @@ class CommsAgent:
         output = (out_b or b"").decode("utf-8", errors="ignore")
         return int(proc.returncode or 0), output
 
+    async def _run_remote_auth_session(self, service: str, action: str = "status") -> tuple[int, str]:
+        cmd = [
+            "bash",
+            "scripts/remote_auth_session.sh",
+            str(service or "").strip().lower(),
+            str(action or "status"),
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
+        output = (out_b or b"").decode("utf-8", errors="ignore")
+        return int(proc.returncode or 0), output
+
+    @staticmethod
+    def _parse_remote_kv(text: str) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for line in str(text or "").splitlines():
+            s = line.strip()
+            if "=" not in s:
+                continue
+            k, v = s.split("=", 1)
+            out[k.strip().lower()] = v.strip()
+        return out
+
     async def _verify_service_auth(self, service: str) -> tuple[bool, str]:
         svc = str(service or "").strip().lower()
         if not svc:
@@ -1143,6 +1171,40 @@ class CommsAgent:
         title, auth_url = self._service_auth_meta(svc)
         if not auth_url:
             return False
+        # Browser-capture remote flow for key platforms with server-side session files.
+        if svc in {"etsy", "amazon_kdp", "kofi"}:
+            rc, out = await self._run_remote_auth_session(svc, "start")
+            if rc == 0:
+                kv = self._parse_remote_kv(out)
+                remote_url = kv.get("remote_url", "")
+                direct_url = kv.get("direct_url", "")
+                vnc_password = kv.get("vnc_password", "")
+                self._pending_service_auth[svc] = {
+                    "service": svc,
+                    "url": remote_url or direct_url or auth_url,
+                    "requested_at": datetime.now(timezone.utc).isoformat(),
+                    "mode": "remote",
+                }
+                msg = (
+                    f"Запускаю вход {title} в удалённом браузере сервера.\n"
+                    f"Ссылка: {remote_url or direct_url or auth_url}\n"
+                    f"Пароль: {vnc_password or f'(см. /auth {svc} remote)'}\n"
+                    "После входа нажми «Я вошел»."
+                )
+                if direct_url:
+                    msg += f"\nРезервная ссылка: {direct_url}"
+                if with_button and (remote_url or direct_url or auth_url):
+                    kb = InlineKeyboardMarkup(
+                        [
+                            [InlineKeyboardButton(f"Открыть вход {title}", url=(remote_url or direct_url or auth_url))],
+                            [InlineKeyboardButton("Я вошел", callback_data=f"auth_done:{svc}")],
+                            [InlineKeyboardButton("Отмена", callback_data=f"auth_cancel:{svc}")],
+                        ]
+                    )
+                    await send_reply(msg, kb)
+                else:
+                    await send_reply(msg)
+                return True
         if self._requires_strict_auth_verification(svc):
             try:
                 ok, _ = await self._verify_service_auth(svc)
@@ -3912,16 +3974,16 @@ class CommsAgent:
             return
 
         if action == "remote":
-            if service != "etsy":
+            if service not in {"etsy", "amazon_kdp", "kofi"}:
                 await update.message.reply_text(
-                    "Remote browser-сессия сейчас поддержана для Etsy.",
+                    "Remote browser-сессия сейчас поддержана для Etsy/Amazon KDP/Ko-fi.",
                     reply_markup=self._main_keyboard(),
                 )
                 return
-            rc, out = await self._run_etsy_remote_session("start")
+            rc, out = await self._run_remote_auth_session(service, "start")
             if rc != 0:
                 await update.message.reply_text(
-                    f"Не удалось запустить remote Etsy session.\n{out[:800]}",
+                    f"Не удалось запустить remote session для {service}.\n{out[:800]}",
                     reply_markup=self._main_keyboard(),
                 )
                 return

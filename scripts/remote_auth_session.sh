@@ -1,0 +1,164 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+RUNTIME_DIR="$ROOT_DIR/runtime/remote_auth"
+PID_DIR="$RUNTIME_DIR/pids"
+DISPLAY_NUM="${REMOTE_AUTH_DISPLAY:-:99}"
+VNC_PORT="${REMOTE_AUTH_VNC_PORT:-5901}"
+WS_PORT="${REMOTE_AUTH_WS_PORT:-6080}"
+PASS_FILE="$RUNTIME_DIR/vnc.pass"
+X11PASS_FILE="$RUNTIME_DIR/.x11vnc.pass"
+
+SERVICE="${1:-}"
+ACTION="${2:-status}"
+
+if [[ -z "$SERVICE" ]]; then
+  echo "Usage: $0 <service> <start|status|stop>" >&2
+  exit 1
+fi
+
+mkdir -p "$RUNTIME_DIR" "$PID_DIR"
+
+capture_pid_file() {
+  echo "$PID_DIR/capture_${SERVICE}.pid"
+}
+
+_pid_alive() {
+  local f="$1"
+  if [[ -f "$f" ]]; then
+    local p
+    p="$(cat "$f" 2>/dev/null || true)"
+    [[ -n "${p}" ]] && kill -0 "$p" 2>/dev/null
+  else
+    return 1
+  fi
+}
+
+_kill_pidfile() {
+  local f="$1"
+  if [[ -f "$f" ]]; then
+    local p
+    p="$(cat "$f" 2>/dev/null || true)"
+    if [[ -n "${p}" ]]; then
+      kill "$p" 2>/dev/null || true
+    fi
+    rm -f "$f"
+  fi
+}
+
+ensure_password() {
+  if [[ ! -f "$PASS_FILE" ]]; then
+    python3 - <<'PY' >"$PASS_FILE"
+import secrets, string
+alphabet = string.ascii_letters + string.digits
+print("".join(secrets.choice(alphabet) for _ in range(12)))
+PY
+  fi
+  chmod 600 "$PASS_FILE"
+  x11vnc -storepasswd "$(cat "$PASS_FILE")" "$X11PASS_FILE" >/dev/null 2>&1
+}
+
+ensure_backend() {
+  ensure_password
+
+  if ! _pid_alive "$PID_DIR/xvfb.pid"; then
+    nohup Xvfb "$DISPLAY_NUM" -screen 0 1366x900x24 >"$RUNTIME_DIR/xvfb.log" 2>&1 &
+    echo $! >"$PID_DIR/xvfb.pid"
+    sleep 1
+  fi
+
+  if ! _pid_alive "$PID_DIR/openbox.pid"; then
+    DISPLAY="$DISPLAY_NUM" nohup openbox >"$RUNTIME_DIR/openbox.log" 2>&1 &
+    echo $! >"$PID_DIR/openbox.pid"
+    sleep 1
+  fi
+
+  if ! _pid_alive "$PID_DIR/x11vnc.pid"; then
+    DISPLAY="$DISPLAY_NUM" nohup x11vnc \
+      -rfbport "$VNC_PORT" \
+      -display "$DISPLAY_NUM" \
+      -rfbauth "$X11PASS_FILE" \
+      -forever -shared -noxrecord -noxfixes -noxdamage \
+      >"$RUNTIME_DIR/x11vnc.log" 2>&1 &
+    echo $! >"$PID_DIR/x11vnc.pid"
+    sleep 1
+  fi
+
+  if ! _pid_alive "$PID_DIR/websockify.pid"; then
+    nohup /usr/bin/websockify --web /usr/share/novnc "$WS_PORT" "127.0.0.1:$VNC_PORT" \
+      >"$RUNTIME_DIR/websockify.log" 2>&1 &
+    echo $! >"$PID_DIR/websockify.pid"
+    sleep 1
+  fi
+}
+
+capture_cmd_for_service() {
+  case "$SERVICE" in
+    etsy)
+      echo "DISPLAY=$DISPLAY_NUM python3 $ROOT_DIR/scripts/etsy_auth_helper.py browser-capture --timeout-sec 1200 --storage-path $ROOT_DIR/runtime/etsy_storage_state.json --auto-submit"
+      ;;
+    amazon_kdp)
+      echo "DISPLAY=$DISPLAY_NUM python3 $ROOT_DIR/scripts/kdp_auth_helper.py browser-capture --timeout-sec 1200 --storage-path $ROOT_DIR/runtime/kdp_storage_state.json"
+      ;;
+    kofi)
+      echo "DISPLAY=$DISPLAY_NUM python3 $ROOT_DIR/scripts/kofi_auth_helper.py browser-capture --timeout-sec 1200 --storage-path $ROOT_DIR/runtime/kofi_storage_state.json --auto-submit"
+      ;;
+    *)
+      exit 2
+      ;;
+  esac
+}
+
+start_capture() {
+  local cpf
+  cpf="$(capture_pid_file)"
+  _kill_pidfile "$cpf"
+  local cmd
+  if ! cmd="$(capture_cmd_for_service)"; then
+    return 2
+  fi
+  nohup bash -lc "$cmd" >"$RUNTIME_DIR/capture_${SERVICE}.log" 2>&1 &
+  echo $! >"$cpf"
+}
+
+print_status() {
+  local host
+  host="${REMOTE_AUTH_HOST:-$(hostname -I | awk '{print $1}')}"
+  echo "REMOTE_URL=http://${host}/novnc/vnc.html?resize=remote&autoconnect=1&view_only=0&path=novnc/websockify"
+  echo "DIRECT_URL=http://${host}:${WS_PORT}/vnc.html?resize=remote&autoconnect=1&view_only=0"
+  echo "VNC_PASSWORD=$(cat "$PASS_FILE" 2>/dev/null || echo '<not-set>')"
+  echo "SERVICE=${SERVICE}"
+  echo "CAPTURE_LOG=$RUNTIME_DIR/capture_${SERVICE}.log"
+  if _pid_alive "$(capture_pid_file)"; then
+    echo "CAPTURE=running($(cat "$(capture_pid_file)"))"
+  else
+    echo "CAPTURE=stopped"
+  fi
+}
+
+start() {
+  ensure_backend
+  start_capture || true
+  print_status
+}
+
+stop() {
+  _kill_pidfile "$(capture_pid_file)"
+  print_status
+}
+
+status() {
+  print_status
+}
+
+case "$ACTION" in
+  start) start ;;
+  stop) stop ;;
+  status) status ;;
+  *)
+    echo "Usage: $0 <service> <start|status|stop>" >&2
+    exit 1
+    ;;
+esac
+
