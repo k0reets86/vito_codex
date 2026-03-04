@@ -119,6 +119,9 @@ class Settings:
     AUTONOMY_DISABLE_PUBLISH_DUPLICATE_BLOCK: bool = os.getenv("AUTONOMY_DISABLE_PUBLISH_DUPLICATE_BLOCK", "false").lower() in ("1", "true", "yes", "on")
     AUTONOMY_ALLOW_EXISTING_PRODUCT_UPDATE: bool = os.getenv("AUTONOMY_ALLOW_EXISTING_PRODUCT_UPDATE", "false").lower() in ("1", "true", "yes", "on")
     AUTONOMY_ACCEPT_INTERMEDIATE_PUBLISH_STATUSES: bool = os.getenv("AUTONOMY_ACCEPT_INTERMEDIATE_PUBLISH_STATUSES", "false").lower() in ("1", "true", "yes", "on")
+    AUTONOMY_AUTO_EXECUTE_REQUESTS: bool = os.getenv("AUTONOMY_AUTO_EXECUTE_REQUESTS", "false").lower() in ("1", "true", "yes", "on")
+    AUTONOMY_AUTO_LEARN_ON_FAILURE: bool = os.getenv("AUTONOMY_AUTO_LEARN_ON_FAILURE", "true").lower() in ("1", "true", "yes", "on")
+    AUTONOMY_AUTO_SELF_IMPROVE_ON_MISS: bool = os.getenv("AUTONOMY_AUTO_SELF_IMPROVE_ON_MISS", "false").lower() in ("1", "true", "yes", "on")
 
     # Autonomy toggles
     PROACTIVE_ENABLED: bool = os.getenv("PROACTIVE_ENABLED", "true").lower() in ("1", "true", "yes", "on")

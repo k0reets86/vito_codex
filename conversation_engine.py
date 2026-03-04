@@ -858,6 +858,13 @@ class ConversationEngine:
                 "actions": [{"action": "learn_service", "params": {"service": service}}],
                 "needs_confirmation": require_confirm,
             }
+        if bool(getattr(settings, "AUTONOMY_AUTO_EXECUTE_REQUESTS", False)):
+            return {
+                "intent": Intent.SYSTEM_ACTION.value,
+                "response": "Принял задачу. Выполняю автономно: сначала попробую существующими навыками, при необходимости доучусь и повторю.",
+                "actions": [{"action": "autonomous_execute", "params": {"request": text}}],
+                "needs_confirmation": False,
+            }
 
         prompt = (
             f"{VITO_PERSONALITY}\n\n"
@@ -1338,6 +1345,12 @@ class ConversationEngine:
                     lines.append(f"Self-improve error: {e}")
             return "Improvement cycle:\n- " + "\n- ".join(lines)
 
+        if action == "autonomous_execute":
+            request = str(params.get("request") or "").strip()
+            if not request:
+                return "Пустой запрос."
+            return await self._autonomous_execute(request)
+
         if action == "register_account" and self.agent_registry:
             url = params.get("url", "")
             form = params.get("form", {}) or {}
@@ -1398,6 +1411,7 @@ class ConversationEngine:
             actions.append("run_deep_research(topic) — глубокое исследование с источниками")
             actions.append("run_product_pipeline(topic, platforms, auto_publish=false) — сквозной pipeline товара")
             actions.append("run_improvement_cycle(request) — backup + HR + research + self-improve")
+            actions.append("autonomous_execute(request) — выполнить задачу или доучиться и выполнить")
         return "\n".join(f"  - {a}" for a in actions) if actions else "(нет действий)"
 
     def _allowed_actions(self) -> set[str]:
@@ -1426,7 +1440,109 @@ class ConversationEngine:
             allowed.add("run_deep_research")
             allowed.add("run_product_pipeline")
             allowed.add("run_improvement_cycle")
+            allowed.add("autonomous_execute")
         return allowed
+
+    async def _autonomous_execute(self, request: str) -> str:
+        """Owner request loop: execute with current skills, else learn and retry."""
+        if not self.agent_registry:
+            return "AgentRegistry недоступен."
+
+        capability = self._infer_capability(request)
+        attempts: list[str] = []
+
+        async def _run_cap(cap: str) -> tuple[bool, str]:
+            if not cap:
+                return False, "capability_not_detected"
+            try:
+                res = await self.agent_registry.dispatch(cap, step=request, content=request, goal_title=request[:120])
+            except Exception as e:
+                return False, f"dispatch_exception:{e}"
+            if res and res.success:
+                out = getattr(res, "output", None)
+                txt = str(out)[:900] if out is not None else "completed"
+                return True, txt
+            return False, getattr(res, "error", "dispatch_failed") if res else "dispatch_none"
+
+        ok, detail = await _run_cap(capability)
+        attempts.append(f"run:{capability or 'unknown'}:{'ok' if ok else detail}")
+        if ok:
+            return f"Задача выполнена ({capability}).\nРезультат: {detail}"
+
+        if bool(getattr(settings, "AUTONOMY_AUTO_LEARN_ON_FAILURE", True)):
+            # Learn via research agent and retry (cheap + robust).
+            try:
+                rr = await self.agent_registry.dispatch("research", step=request, topic=request, goal_title=f"Auto-learn: {request[:80]}")
+                attempts.append(f"learn:research:{'ok' if rr and rr.success else 'fail'}")
+            except Exception as e:
+                attempts.append(f"learn:research_exception:{e}")
+
+        if bool(getattr(settings, "AUTONOMY_AUTO_SELF_IMPROVE_ON_MISS", False)):
+            try:
+                si = await self.agent_registry.dispatch("self_improve", step=f"Improve capability for request: {request}")
+                attempts.append(f"learn:self_improve:{'ok' if si and si.success else 'fail'}")
+            except Exception as e:
+                attempts.append(f"learn:self_improve_exception:{e}")
+
+        # Retry with same capability or fallback orchestrate.
+        ok2, detail2 = await _run_cap(capability)
+        attempts.append(f"retry:{capability or 'unknown'}:{'ok' if ok2 else detail2}")
+        if ok2:
+            return (
+                f"Задача выполнена после обучения ({capability}).\n"
+                f"Результат: {detail2}\n"
+                f"Шаги: {' | '.join(attempts)}"
+            )
+
+        # Last fallback: core orchestrator.
+        try:
+            core = self.agent_registry.get("vito_core") if hasattr(self.agent_registry, "get") else None
+            if core is not None:
+                res = await core.execute_task("orchestrate", step=request, goal_title=request[:120])
+                if res and res.success:
+                    return (
+                        "Задача выполнена через оркестратор.\n"
+                        f"Результат: {str(getattr(res, 'output', ''))[:900]}\n"
+                        f"Шаги: {' | '.join(attempts)}"
+                    )
+        except Exception as e:
+            attempts.append(f"fallback:orchestrate_exception:{e}")
+
+        return (
+            "Автономный контур не смог завершить задачу с текущими навыками.\n"
+            "Я сохранил попытки в память ошибок и продолжу дообучение по этой теме.\n"
+            f"Шаги: {' | '.join(attempts[:8])}"
+        )
+
+    def _infer_capability(self, request: str) -> str:
+        text = str(request or "").strip()
+        if not text:
+            return ""
+        try:
+            core = self.agent_registry.get("vito_core") if hasattr(self.agent_registry, "get") else None
+            if core and hasattr(core, "classify_step"):
+                cap = core.classify_step(text)
+                if cap:
+                    return str(cap)
+        except Exception:
+            pass
+        # Heuristic fallback map.
+        s = self._normalize_for_nlu(text)
+        mapping = [
+            (("исслед", "research", "анализ", "deep"), "research"),
+            (("тренд", "niche", "ниш"), "trend_scan"),
+            (("seo", "ключев", "keyword", "мета"), "listing_seo_pack"),
+            (("пост", "tweet", "соц", "smm"), "social_media"),
+            (("товар", "листинг", "publish", "продукт"), "product_pipeline"),
+            (("перевод", "translate", "localize"), "translate"),
+            (("юрид", "tos", "gdpr", "copyright"), "legal"),
+            (("финанс", "юнит", "цена", "pricing"), "unit_economics"),
+            (("документ", "report", "отчет"), "documentation"),
+        ]
+        for keys, cap in mapping:
+            if any(k in s for k in keys):
+                return cap
+        return "orchestrate"
 
     @staticmethod
     def _extract_research_topic(text: str) -> str:

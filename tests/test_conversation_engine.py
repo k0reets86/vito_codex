@@ -262,6 +262,14 @@ class TestProcessMessage:
         assert result.get("needs_confirmation") is False
 
     @pytest.mark.asyncio
+    async def test_system_action_autonomous_execute_default(self, engine, monkeypatch):
+        monkeypatch.setattr("conversation_engine.settings.AUTONOMY_AUTO_EXECUTE_REQUESTS", True, raising=False)
+        result = await engine._handle_system_action("подготовь контент и опубликуй")
+        assert result["intent"] == "system_action"
+        assert result.get("actions")
+        assert result["actions"][0]["action"] == "autonomous_execute"
+
+    @pytest.mark.asyncio
     async def test_dispatch_action_run_product_pipeline(self, mock_llm_router, mock_memory):
         registry = MagicMock()
         registry.dispatch = AsyncMock(return_value=type("R", (), {"success": True, "output": {"steps": [{"ok": True}]}})())
@@ -271,6 +279,15 @@ class TestProcessMessage:
             {"topic": "AI templates", "platforms": ["gumroad"], "auto_publish": False},
         )
         assert "Product pipeline завершён" in msg
+
+    @pytest.mark.asyncio
+    async def test_dispatch_action_autonomous_execute_success_first_try(self, mock_llm_router, mock_memory):
+        registry = MagicMock()
+        registry.dispatch = AsyncMock(return_value=type("R", (), {"success": True, "output": "done", "error": ""})())
+        registry.get = MagicMock(return_value=None)
+        engine = ConversationEngine(llm_router=mock_llm_router, memory=mock_memory, agent_registry=registry)
+        msg = await engine._dispatch_action("autonomous_execute", {"request": "сделай seo оптимизацию"})
+        assert "Задача выполнена" in msg
 
     @pytest.mark.asyncio
     async def test_owner_task_state_persists_after_goal_then_question(self, mock_llm_router, mock_memory, tmp_path):
