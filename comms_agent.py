@@ -665,6 +665,10 @@ class CommsAgent:
         return any(
             token in s
             for token in (
+                "аккаунт",
+                "account",
+                "кабинет",
+                "профиль",
                 "товар",
                 "товары",
                 "продукт",
@@ -787,6 +791,28 @@ class CommsAgent:
                     )
             except Exception:
                 pass
+            try:
+                inv_rc, inv_out = await self._run_kdp_inventory_probe()
+                if inv_rc == 0:
+                    payload_line = ""
+                    for ln in reversed((inv_out or "").splitlines()):
+                        ln = ln.strip()
+                        if ln.startswith("{") and ln.endswith("}"):
+                            payload_line = ln
+                            break
+                    if payload_line:
+                        data = json.loads(payload_line)
+                        if bool(data.get("ok", False)):
+                            items = data.get("items") or []
+                            count = int(data.get("products_count", 0) or 0)
+                            lines = [f"{title}: состояние аккаунта", f"- Товаров/книг: {count}"]
+                            if items:
+                                lines.append("- Примеры:")
+                                for it in items[:5]:
+                                    lines.append(f"  - {str(it)[:120]}")
+                            return "\n".join(lines)
+            except Exception:
+                pass
 
         if not self._agent_registry:
             return f"{title}: модуль проверки товаров не подключён."
@@ -848,6 +874,24 @@ class CommsAgent:
             stderr=asyncio.subprocess.STDOUT,
         )
         out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
+        output = (out_b or b"").decode("utf-8", errors="ignore")
+        return int(proc.returncode or 0), output
+
+    async def _run_kdp_inventory_probe(self) -> tuple[int, str]:
+        storage = str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json") or "runtime/kdp_storage_state.json")
+        cmd = [
+            "python3",
+            "scripts/kdp_auth_helper.py",
+            "inventory",
+            "--storage-path",
+            storage,
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=150)
         output = (out_b or b"").decode("utf-8", errors="ignore")
         return int(proc.returncode or 0), output
 

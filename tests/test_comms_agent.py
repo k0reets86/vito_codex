@@ -1320,6 +1320,23 @@ async def test_on_message_contextual_service_inventory_amazon_requires_live_sess
 
 
 @pytest.mark.asyncio
+async def test_format_service_inventory_snapshot_amazon_uses_kdp_inventory_probe(comms):
+    comms._run_kdp_probe = AsyncMock(return_value=(0, "ok"))
+    comms._run_kdp_inventory_probe = AsyncMock(
+        return_value=(0, '{"ok": true, "products_count": 2, "items": ["Book A", "Book B"]}')
+    )
+    reg = MagicMock()
+    reg.dispatch = AsyncMock()
+    comms.set_modules(agent_registry=reg)
+
+    text = await comms._format_service_inventory_snapshot("amazon_kdp")
+
+    assert "Товаров/книг: 2" in text
+    assert "Book A" in text
+    reg.dispatch.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_on_message_contextual_inventory_has_priority_over_brainstorm(comms, mock_update):
     comms._last_service_context = "amazon_kdp"
     comms._last_service_context_at = datetime.now(timezone.utc).isoformat()
@@ -1335,6 +1352,12 @@ async def test_on_message_contextual_inventory_has_priority_over_brainstorm(comm
 
     comms._maybe_brainstorm_from_text.assert_not_called()
     conv.process_message.assert_not_called()
+
+
+def test_detect_contextual_inventory_request_for_account_phrase(comms):
+    comms._last_service_context = "amazon_kdp"
+    comms._last_service_context_at = datetime.now(timezone.utc).isoformat()
+    assert comms._detect_contextual_service_inventory_request("проверь аккаунт") == "amazon_kdp"
 
 
 def test_detect_contextual_status_without_fresh_context_returns_empty(comms):

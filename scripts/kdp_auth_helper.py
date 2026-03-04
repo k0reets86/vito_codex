@@ -369,6 +369,86 @@ async def probe_session(storage_path: str, headless: bool) -> int:
         return 0 if ok else 2
 
 
+async def inventory_snapshot(storage_path: str, headless: bool) -> int:
+    """Read KDP bookshelf using saved session and extract a lightweight inventory snapshot."""
+    from playwright.async_api import async_playwright
+
+    state = Path(storage_path)
+    if not state.exists():
+        print(f"ERROR: storage_state not found: {state}")
+        return 1
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=headless, args=_chromium_launch_args())
+        context = await browser.new_context(storage_state=str(state), viewport={"width": 1366, "height": 900})
+        page = await context.new_page()
+        await page.goto("https://kdp.amazon.com/bookshelf", wait_until="domcontentloaded", timeout=120000)
+        await page.wait_for_timeout(2500)
+
+        url = page.url
+        title = await page.title()
+        ok = _is_logged_in_url(url)
+        if not ok:
+            await context.close()
+            await browser.close()
+            print(json.dumps({"ok": False, "url": url, "title": title, "products_count": 0, "items": []}, ensure_ascii=False))
+            return 2
+
+        items = []
+        try:
+            items = await page.evaluate(
+                """() => {
+                    const bad = new Set([
+                      'bookshelf', 'reports', 'marketing', 'help', 'settings', 'sign out', 'sign in',
+                      'kindle direct publishing', 'kdp', 'dashboard', 'create', 'new'
+                    ]);
+                    const out = [];
+                    const seen = new Set();
+                    const pushText = (raw) => {
+                      const t = String(raw || '').replace(/\\s+/g, ' ').trim();
+                      if (!t) return;
+                      const low = t.toLowerCase();
+                      if (t.length < 3 || t.length > 140) return;
+                      if (bad.has(low)) return;
+                      if (/^[0-9.,$\\-\\s]+$/.test(t)) return;
+                      if (seen.has(low)) return;
+                      seen.add(low);
+                      out.push(t);
+                    };
+                    const selectors = [
+                      "[data-testid*='book']",
+                      "[data-testid*='title']",
+                      "a[href*='/title/']",
+                      "a[href*='/book/']",
+                      "h2", "h3"
+                    ];
+                    for (const sel of selectors) {
+                      const nodes = Array.from(document.querySelectorAll(sel));
+                      for (const n of nodes) {
+                        pushText(n.textContent || '');
+                        if (out.length >= 40) break;
+                      }
+                      if (out.length >= 40) break;
+                    }
+                    return out;
+                }"""
+            )
+        except Exception:
+            items = []
+
+        payload = {
+            "ok": True,
+            "url": url,
+            "title": title,
+            "products_count": len(items),
+            "items": items[:20],
+        }
+        await context.close()
+        await browser.close()
+        print(json.dumps(payload, ensure_ascii=False))
+        return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Amazon KDP auth helper")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -382,6 +462,10 @@ def main() -> int:
     p_probe.add_argument("--storage-path", default=str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json")))
     p_probe.add_argument("--headless", action="store_true")
 
+    p_inv = sub.add_parser("inventory", help="Extract KDP bookshelf inventory snapshot")
+    p_inv.add_argument("--storage-path", default=str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json")))
+    p_inv.add_argument("--headless", action="store_true")
+
     p_auto = sub.add_parser("auto-login", help="Headless login using env creds and optional OTP code")
     p_auto.add_argument("--timeout-sec", type=int, default=300)
     p_auto.add_argument("--storage-path", default=str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json")))
@@ -392,6 +476,8 @@ def main() -> int:
         return asyncio.run(browser_capture(int(args.timeout_sec), str(args.storage_path), bool(args.headless)))
     if args.cmd == "probe":
         return asyncio.run(probe_session(str(args.storage_path), bool(args.headless)))
+    if args.cmd == "inventory":
+        return asyncio.run(inventory_snapshot(str(args.storage_path), bool(args.headless)))
     if args.cmd == "auto-login":
         return asyncio.run(auto_login(int(args.timeout_sec), str(args.storage_path), str(args.otp_code or "")))
     return 1
