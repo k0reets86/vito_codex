@@ -110,6 +110,8 @@ class TestVITOCoreProductPipeline:
                     )
                 if task_type in {"legal", "marketing_strategy", "campaign_plan", "listing_create"}:
                     return TaskResult(success=True, output={"url": "https://example.com/item"})
+                if task_type == "quality_review":
+                    return TaskResult(success=True, output={"approved": True, "score": 9, "feedback": "ok"})
                 return TaskResult(success=True, output={})
 
         core = VITOCore(registry=DummyRegistry())

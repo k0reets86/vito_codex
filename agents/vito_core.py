@@ -5,6 +5,7 @@
 """
 
 import time
+import json
 from typing import Optional
 
 from agents.base_agent import BaseAgent, TaskResult
@@ -615,9 +616,45 @@ class VITOCore(BaseAgent):
             if not has_evidence:
                 evidence_ok = False
                 res["error"] = "missing_evidence"
-        if evidence_ok and publish_results:
+        # 7) Final responsibility gate: QualityJudge decides OK / rework.
+        final_decision = {
+            "owner": "quality_judge",
+            "status": "unknown",
+            "approved": False,
+            "score": 0,
+            "reason": "",
+        }
+        try:
+            q_payload = {
+                "topic": topic,
+                "platforms": platforms,
+                "participants": sorted(set(results.get("participants", []))),
+                "steps": results.get("steps", []),
+                "publish_pack": results.get("publish_pack", {}),
+                "publish": publish_results,
+            }
+            q = await self.registry.dispatch(
+                "quality_review",
+                content=json.dumps(q_payload, ensure_ascii=False),
+                content_type="product_pipeline_result",
+            )
+            if q and q.success and isinstance(getattr(q, "output", None), dict):
+                qout = q.output
+                final_decision["approved"] = bool(qout.get("approved", False))
+                final_decision["score"] = int(qout.get("score", 0) or 0)
+                final_decision["reason"] = str(qout.get("feedback", "") or "")
+                final_decision["status"] = "ok" if final_decision["approved"] else "rework"
+            else:
+                final_decision["status"] = "rework"
+                final_decision["reason"] = getattr(q, "error", "quality_review_failed") if q else "quality_review_missing"
+        except Exception as e:
+            final_decision["status"] = "rework"
+            final_decision["reason"] = f"quality_gate_exception:{e}"
+
+        results["final_decision"] = final_decision
+        if evidence_ok and publish_results and final_decision.get("approved"):
             return TaskResult(success=True, output=results)
-        return TaskResult(success=False, error="Publish step failed or not ready", output=results)
+        return TaskResult(success=False, error="Final gate: rework required", output=results)
 
     async def execute_task(self, task_type: str, **kwargs) -> TaskResult:
         """Классифицирует и диспетчеризирует задачу."""
