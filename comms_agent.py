@@ -1395,7 +1395,8 @@ class CommsAgent:
             self._pending_service_auth.pop("amazon_kdp", None)
             await send_reply("Готово: вход в Amazon KDP подтверждён и сессия сохранена.")
             return True
-        if "otp_required" in low:
+        mfa_hints = ("otp_required", "otp code not provided", "/ap/mfa", "mfa?")
+        if any(h in low for h in mfa_hints):
             self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat()}
             await send_reply("Нужен 6-значный код из Amazon/Authenticator. Отправь его одним сообщением.")
             return True
