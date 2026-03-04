@@ -1030,6 +1030,21 @@ class CommsAgent:
         output = (out_b or b"").decode("utf-8", errors="ignore")
         return int(proc.returncode or 0), output
 
+    async def _run_etsy_remote_session(self, action: str = "status") -> tuple[int, str]:
+        cmd = [
+            "bash",
+            "scripts/etsy_remote_session.sh",
+            str(action or "status"),
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=90)
+        output = (out_b or b"").decode("utf-8", errors="ignore")
+        return int(proc.returncode or 0), output
+
     async def _verify_service_auth(self, service: str) -> tuple[bool, str]:
         svc = str(service or "").strip().lower()
         if not svc:
@@ -3848,6 +3863,7 @@ class CommsAgent:
           /auth <service> status
           /auth <service> refresh
           /auth <service> verify
+          /auth etsy remote
         """
         if await self._reject_stranger(update):
             return
@@ -3895,8 +3911,31 @@ class CommsAgent:
                 await _reply(self._service_needs_session_refresh_text(service, title, detail))
             return
 
+        if action == "remote":
+            if service != "etsy":
+                await update.message.reply_text(
+                    "Remote browser-сессия сейчас поддержана для Etsy.",
+                    reply_markup=self._main_keyboard(),
+                )
+                return
+            rc, out = await self._run_etsy_remote_session("start")
+            if rc != 0:
+                await update.message.reply_text(
+                    f"Не удалось запустить remote Etsy session.\n{out[:800]}",
+                    reply_markup=self._main_keyboard(),
+                )
+                return
+            await update.message.reply_text(
+                "Etsy remote-сессия запущена.\n"
+                f"{out[:1200]}\n"
+                "Открой REMOTE_URL, введи VNC_PASSWORD, пройди вход Etsy в окне браузера, "
+                "потом нажми «Я вошел» в Telegram.",
+                reply_markup=self._main_keyboard(),
+            )
+            return
+
         await update.message.reply_text(
-            "Неизвестное действие. Используй: status, refresh или verify.",
+            "Неизвестное действие. Используй: status, refresh, verify или remote (для Etsy).",
             reply_markup=self._main_keyboard(),
         )
 

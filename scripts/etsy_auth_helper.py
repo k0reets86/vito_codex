@@ -128,10 +128,7 @@ Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
         await page.goto("https://www.etsy.com/signin", wait_until="domcontentloaded", timeout=120000)
         await page.wait_for_timeout(2000)
         if await _is_etsy_challenge_page(page):
-            print("OTP_REQUIRED: Etsy challenge/captcha detected")
-            await context.close()
-            await browser.close()
-            return 3
+            print("NOTICE: Etsy challenge/captcha detected. Complete it manually in opened browser window.")
 
         # Best effort prefill only; submit remains manual.
         if email:
