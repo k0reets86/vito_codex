@@ -1389,17 +1389,39 @@ class CommsAgent:
         # Если нужен MFA — просим только 6-значный код.
         rc, out = await self._run_kdp_auto_login()
         low = str(out or "").lower()
+
+        def _is_mfa_required(_rc: int, _low: str) -> bool:
+            mfa_hints = ("otp_required", "otp code not provided", "/ap/mfa", "mfa?")
+            return _rc in {2, 3} or any(h in _low for h in mfa_hints)
+
         if rc == 0:
             self._pending_kdp_otp = None
             self._mark_service_auth_confirmed("amazon_kdp")
             self._pending_service_auth.pop("amazon_kdp", None)
             await send_reply("Готово: вход в Amazon KDP подтверждён и сессия сохранена.")
             return True
-        mfa_hints = ("otp_required", "otp code not provided", "/ap/mfa", "mfa?")
-        if rc in {2, 3} or any(h in low for h in mfa_hints):
+        if _is_mfa_required(rc, low):
             self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat()}
             await send_reply("Нужен 6-значный код из Amazon/Authenticator. Отправь его одним сообщением.")
             return True
+
+        # Иногда первая попытка падает на нестабильности браузера (rc=9/4/5/6),
+        # но повтор сразу доходит до MFA. Делаем один внутренний ретрай.
+        if rc in {4, 5, 6, 9}:
+            await asyncio.sleep(1.0)
+            rc2, out2 = await self._run_kdp_auto_login()
+            low2 = str(out2 or "").lower()
+            if rc2 == 0:
+                self._pending_kdp_otp = None
+                self._mark_service_auth_confirmed("amazon_kdp")
+                self._pending_service_auth.pop("amazon_kdp", None)
+                await send_reply("Готово: вход в Amazon KDP подтверждён и сессия сохранена.")
+                return True
+            if _is_mfa_required(rc2, low2):
+                self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat()}
+                await send_reply("Нужен 6-значный код из Amazon/Authenticator. Отправь его одним сообщением.")
+                return True
+            rc, out = rc2, out2
 
         # 3) Без VNC fallback для Amazon в обычном диалоге:
         # remote-browser часто нестабилен на сервере и даёт "черный экран".
