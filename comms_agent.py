@@ -1521,46 +1521,32 @@ class CommsAgent:
         self._reset_kdp_auth_state_files()
 
         # 2) Предпочтительный путь: подготовить MFA страницу и просить OTP только после этого.
-        rc, out = await self._run_kdp_prepare_otp()
-        low = str(out or "").lower()
+        rc, out = 1, ""
 
         def _is_mfa_required(_rc: int, _low: str) -> bool:
             mfa_hints = ("otp_required", "otp code not provided", "/ap/mfa", "mfa?", "otp_ready")
             return _rc in {2, 3} or any(h in _low for h in mfa_hints)
 
-        if rc == 0:
-            if "otp_ready" in low:
-                self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat(), "prepared": True}
-                await send_reply("Нужен 6-значный код из Amazon/Authenticator. Отправь его одним сообщением.")
-                return True
-            # prepare-otp may also report already logged in
-            self._pending_kdp_otp = None
-            self._mark_service_auth_confirmed("amazon_kdp")
-            self._pending_service_auth.pop("amazon_kdp", None)
-            await send_reply("Готово: вход в Amazon KDP подтверждён и сессия сохранена.")
-            return True
-        if _is_mfa_required(rc, low):
-            self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat(), "prepared": True}
-            await send_reply("Нужен 6-значный код из Amazon/Authenticator. Отправь его одним сообщением.")
-            return True
-
-        # Иногда первая попытка падает на нестабильности браузера (rc=9/4/5/6),
-        # но повтор сразу доходит до MFA. Делаем один внутренний ретрай.
-        if rc in {4, 5, 6, 9}:
-            await asyncio.sleep(1.0)
-            rc2, out2 = await self._run_kdp_prepare_otp()
-            low2 = str(out2 or "").lower()
-            if rc2 == 0:
+        for attempt in range(3):
+            rc, out = await self._run_kdp_prepare_otp()
+            low = str(out or "").lower()
+            if rc == 0:
+                if "otp_ready" in low:
+                    self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat(), "prepared": True}
+                    await send_reply("Нужен 6-значный код из Amazon/Authenticator. Отправь его одним сообщением.")
+                    return True
+                # prepare-otp may also report already logged in
                 self._pending_kdp_otp = None
                 self._mark_service_auth_confirmed("amazon_kdp")
                 self._pending_service_auth.pop("amazon_kdp", None)
                 await send_reply("Готово: вход в Amazon KDP подтверждён и сессия сохранена.")
                 return True
-            if _is_mfa_required(rc2, low2):
+            if _is_mfa_required(rc, low):
                 self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat(), "prepared": True}
                 await send_reply("Нужен 6-значный код из Amazon/Authenticator. Отправь его одним сообщением.")
                 return True
-            rc, out = rc2, out2
+            if attempt < 2:
+                await asyncio.sleep(1.0 + attempt)
 
         # 3) Без VNC fallback для Amazon в обычном диалоге:
         # remote-browser часто нестабилен на сервере и даёт "черный экран".

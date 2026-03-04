@@ -1280,7 +1280,7 @@ async def test_handle_kdp_login_flow_retries_after_transient_failure_and_request
 @pytest.mark.asyncio
 async def test_handle_kdp_login_flow_fallback_enables_forced_otp(comms):
     send_reply = AsyncMock()
-    comms._run_kdp_prepare_otp = AsyncMock(side_effect=[(9, "ERROR: prepare_otp_exception"), (9, "ERROR: prepare_otp_exception_retry")])
+    comms._run_kdp_prepare_otp = AsyncMock(side_effect=[(9, "ERROR: prepare_otp_exception"), (9, "ERROR: prepare_otp_exception_retry"), (9, "ERROR: prepare_otp_exception_retry2")])
     comms._run_remote_auth_session = AsyncMock(return_value=(0, "REMOTE_URL=http://127.0.0.1/novnc\nVNC_PASSWORD=test"))
 
     handled = await comms._handle_kdp_login_flow("зайди на amazon kdp", send_reply, with_button=True)
