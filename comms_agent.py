@@ -1514,11 +1514,23 @@ class CommsAgent:
         if not self._is_kdp_login_request(text):
             return False
 
-        # Force fresh auth each time owner explicitly requests Amazon login.
-        self._pending_kdp_otp = None
-        self._pending_service_auth.pop("amazon_kdp", None)
-        self._clear_service_auth_confirmed("amazon_kdp")
-        self._reset_kdp_auth_state_files()
+        force_fresh = bool(getattr(settings, "KDP_AUTH_FORCE_FRESH_EACH_LOGIN", False))
+        if not force_fresh:
+            # Sticky session mode: if KDP session is alive, do not relogin.
+            try:
+                probe_rc, _ = await self._run_kdp_probe_stable()
+            except Exception:
+                probe_rc = 1
+            if probe_rc == 0:
+                self._mark_service_auth_confirmed("amazon_kdp")
+                await send_reply("Amazon KDP: активная сессия уже подтверждена, повторный логин не требуется.")
+                return True
+        else:
+            # Force fresh auth each time owner explicitly requests Amazon login.
+            self._pending_kdp_otp = None
+            self._pending_service_auth.pop("amazon_kdp", None)
+            self._clear_service_auth_confirmed("amazon_kdp")
+            self._reset_kdp_auth_state_files()
 
         # 2) Предпочтительный путь: подготовить MFA страницу и просить OTP только после этого.
         rc, out = 1, ""

@@ -103,6 +103,7 @@ class Settings:
     KDP_WATCHDOG_JITTER_MINUTES: int = int(os.getenv("KDP_WATCHDOG_JITTER_MINUTES", "30") or 30)
     KDP_WATCHDOG_STOP_ON_FAIL: bool = os.getenv("KDP_WATCHDOG_STOP_ON_FAIL", "true").lower() in ("1", "true", "yes", "on")
     KDP_WATCHDOG_STATE_PATH: str = os.getenv("KDP_WATCHDOG_STATE_PATH", "runtime/kdp_watchdog_state.json")
+    KDP_AUTH_FORCE_FRESH_EACH_LOGIN: bool = os.getenv("KDP_AUTH_FORCE_FRESH_EACH_LOGIN", "false").lower() in ("1", "true", "yes", "on")
 
     # Financial limits (USD)
     # Hierarchy: OPERATION_MAX < OPERATION_NOTIFY < DAILY_LIMIT < OPERATION_APPROVE
