@@ -67,3 +67,6 @@ Current progress: `6 / 41 = 14.6%`
 - For each task store: command, short output, key log line, DB proof (if relevant), pass/fail.
 - 2026-03-04: Mega Agent Audit completed (`PYTHONPATH=. python3 scripts/mega_agent_audit.py`) -> `reports/VITO_AGENT_MEGATEST_2026-03-04_1136UTC.json`, combat readiness `23/23 = 100%`.
 - 2026-03-04: Validation test passed (`pytest -q -c /dev/null tests/test_agent_megatest.py`) -> `1 passed`.
+- 2026-03-04: Live publish matrix executed (`PYTHONPATH=. python3 scripts/live_publish_matrix.py --live`) -> `reports/VITO_PUBLISH_MATRIX_LIVE_2026-03-04_1141UTC.json`.
+- 2026-03-04: Social live probe executed (`SOCIAL_LIVE_ALLOW_TWITTER=1 PYTHONPATH=. python3 scripts/social_live_probe.py`) -> `reports/VITO_SOCIAL_LIVE_PROBE_2026-03-04_1141UTC.json`.
+- 2026-03-04: Agent->Platform live combat audit executed (`PYTHONPATH=. python3 scripts/live_agent_platform_audit.py`) -> `reports/VITO_AGENT_PLATFORM_LIVE_AUDIT_2026-03-04_1146UTC.json`, responding paths `7/7 = 100%`.
