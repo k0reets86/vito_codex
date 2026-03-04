@@ -1244,8 +1244,15 @@ class CommsAgent:
         if not auth_url:
             return False
         if self._requires_strict_auth_verification(svc):
+            ok = False
             try:
-                ok, _ = await self._verify_service_auth(svc)
+                # Amazon must be validated by real live-check probe only.
+                # Cookie/storage presence alone is not enough to claim active session.
+                if svc == "amazon_kdp":
+                    probe_rc, _ = await self._run_kdp_probe()
+                    ok = probe_rc == 0
+                else:
+                    ok, _ = await self._verify_service_auth(svc)
             except Exception:
                 ok = False
             if ok:

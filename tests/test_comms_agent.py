@@ -1191,7 +1191,7 @@ async def test_handle_callback_help_topic_daily(comms, mock_callback_query):
 async def test_handle_kdp_login_flow_skips_relogin_when_live_check_ok(comms):
     comms._service_auth_confirmed["amazon_kdp"] = "2026-03-04T10:00:00+00:00"
     send_reply = AsyncMock()
-    comms._verify_service_auth = AsyncMock(return_value=(True, "ok"))
+    comms._run_kdp_probe = AsyncMock(return_value=(0, "ok"))
     comms._run_remote_auth_session = AsyncMock(return_value=(0, "REMOTE_URL=http://127.0.0.1/novnc\nVNC_PASSWORD=test"))
     handled = await comms._handle_kdp_login_flow("зайди на амазон", send_reply, with_button=True)
     assert handled is True
@@ -1202,7 +1202,7 @@ async def test_handle_kdp_login_flow_skips_relogin_when_live_check_ok(comms):
 @pytest.mark.asyncio
 async def test_handle_kdp_login_flow_starts_remote_auth_session(comms):
     send_reply = AsyncMock()
-    comms._verify_service_auth = AsyncMock(return_value=(False, "need_login"))
+    comms._run_kdp_probe = AsyncMock(return_value=(1, "need_login"))
     comms._run_remote_auth_session = AsyncMock(
         return_value=(
             0,
