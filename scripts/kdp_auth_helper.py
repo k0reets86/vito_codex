@@ -29,6 +29,20 @@ def _is_logged_in_url(url: str) -> bool:
     return any(x in u for x in ("/bookshelf", "/en_us/", "/reports"))
 
 
+def _chromium_launch_args() -> list[str]:
+    # Harden launch for constrained VPS/container environments where zygote/fork can fail.
+    args = [
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--disable-software-rasterizer",
+        "--renderer-process-limit=1",
+    ]
+    if bool(getattr(settings, "BROWSER_CONSTRAINED_MODE", True)):
+        args.extend(["--no-zygote", "--single-process"])
+    return args
+
+
 async def browser_capture(timeout_sec: int, storage_path: str, headless: bool) -> int:
     from playwright.async_api import async_playwright
 
@@ -48,7 +62,7 @@ async def browser_capture(timeout_sec: int, storage_path: str, headless: bool) -
         print("WARNING: headless=True может ухудшить прохождение защиты Amazon.")
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=headless, args=["--no-sandbox", "--disable-dev-shm-usage"])
+        browser = await p.chromium.launch(headless=headless, args=_chromium_launch_args())
         context = await browser.new_context(viewport={"width": 1366, "height": 900})
         page = await context.new_page()
         await page.goto("https://kdp.amazon.com", wait_until="domcontentloaded", timeout=120000)
@@ -119,7 +133,7 @@ async def auto_login(timeout_sec: int, storage_path: str, otp_code: str = "") ->
     last_url = ""
     try:
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+            browser = await p.chromium.launch(headless=True, args=_chromium_launch_args())
             context = await browser.new_context(viewport={"width": 1366, "height": 900})
             page = await context.new_page()
             await page.goto("https://kdp.amazon.com", wait_until="domcontentloaded", timeout=120000)
@@ -342,7 +356,7 @@ async def probe_session(storage_path: str, headless: bool) -> int:
         return 1
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=headless, args=["--no-sandbox", "--disable-dev-shm-usage"])
+        browser = await p.chromium.launch(headless=headless, args=_chromium_launch_args())
         context = await browser.new_context(storage_state=str(state), viewport={"width": 1280, "height": 720})
         page = await context.new_page()
         await page.goto("https://kdp.amazon.com/bookshelf", wait_until="domcontentloaded", timeout=120000)

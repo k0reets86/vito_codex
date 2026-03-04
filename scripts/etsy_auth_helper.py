@@ -24,6 +24,19 @@ from config.settings import settings
 from platforms.etsy import EtsyPlatform
 
 
+def _chromium_launch_args() -> list[str]:
+    args = [
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--disable-software-rasterizer",
+        "--renderer-process-limit=1",
+    ]
+    if bool(getattr(settings, "BROWSER_CONSTRAINED_MODE", True)):
+        args.extend(["--no-zygote", "--single-process"])
+    return args
+
+
 def _extract_code(raw: str) -> str:
     text = (raw or "").strip()
     if not text:
@@ -91,7 +104,7 @@ async def browser_capture(timeout_sec: int, storage_path: str, headless: bool) -
         print("WARNING: headless=True may fail on Etsy anti-bot checks.")
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=headless, args=["--no-sandbox", "--disable-dev-shm-usage"])
+        browser = await p.chromium.launch(headless=headless, args=_chromium_launch_args())
         context = await browser.new_context(viewport={"width": 1366, "height": 900})
         page = await context.new_page()
         await page.goto("https://www.etsy.com/signin", wait_until="domcontentloaded", timeout=120000)

@@ -22,7 +22,19 @@ class AmazonKDPPlatform(BasePlatform):
             from playwright.async_api import async_playwright
 
             async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+                args = [
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--disable-software-rasterizer",
+                    "--renderer-process-limit=1",
+                ]
+                if bool(getattr(settings, "BROWSER_CONSTRAINED_MODE", True)):
+                    args.extend(["--no-zygote", "--single-process"])
+                browser = await p.chromium.launch(
+                    headless=True,
+                    args=args,
+                )
                 context = await browser.new_context(storage_state=str(self._state_file), viewport={"width": 1280, "height": 720})
                 page = await context.new_page()
                 await page.goto("https://kdp.amazon.com/bookshelf", wait_until="domcontentloaded", timeout=90000)

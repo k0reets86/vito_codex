@@ -22,6 +22,7 @@ from typing import Any, Optional
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from config.resource_guard import resource_guard
+from config.settings import settings
 
 logger = get_logger("browser_agent", agent="browser_agent")
 
@@ -83,6 +84,23 @@ def _kill_orphan_headless_shells() -> int:
     return killed
 
 
+def _chromium_launch_args() -> list[str]:
+    base = [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--disable-software-rasterizer",
+        "--disable-extensions",
+        "--disable-background-networking",
+        "--renderer-process-limit=1",
+        "--js-flags=--max-old-space-size=256",
+    ]
+    if bool(getattr(settings, "BROWSER_CONSTRAINED_MODE", True)):
+        base.extend(["--no-zygote", "--single-process"])
+    return base
+
+
 class BrowserAgent(BaseAgent):
     _instance: Optional["BrowserAgent"] = None
     _browser = None
@@ -140,16 +158,7 @@ class BrowserAgent(BaseAgent):
                             BrowserAgent._playwright_inst = await async_playwright().start()
                         BrowserAgent._browser = await BrowserAgent._playwright_inst.chromium.launch(
                             headless=True,
-                            args=[
-                                "--no-sandbox",
-                                "--disable-setuid-sandbox",
-                                "--disable-dev-shm-usage",
-                                "--disable-gpu",
-                                "--disable-extensions",
-                                "--disable-background-networking",
-                                "--renderer-process-limit=1",
-                                "--js-flags=--max-old-space-size=256",
-                            ],
+                            args=_chromium_launch_args(),
                         )
                         self._context = await BrowserAgent._browser.new_context(
                             viewport={"width": 1280, "height": 720},
@@ -244,14 +253,35 @@ class BrowserAgent(BaseAgent):
                 await self._ensure_browser()
                 return await self._context.new_page()
 
+    async def _capture_failure_artifacts(self, page, prefix: str = "browser") -> dict[str, str]:
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        shot = f"/tmp/{prefix}_{ts}.png"
+        html = f"/tmp/{prefix}_{ts}.html"
+        out: dict[str, str] = {}
+        try:
+            await page.screenshot(path=shot, full_page=True)
+            out["screenshot"] = shot
+        except Exception:
+            pass
+        try:
+            content = await page.content()
+            with open(html, "w", encoding="utf-8", errors="ignore") as f:
+                f.write(content or "")
+            out["html"] = html
+        except Exception:
+            pass
+        return out
+
     async def navigate(self, url: str) -> TaskResult:
         page = await self._new_page()
         try:
             response = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            await page.wait_for_timeout(400)
             title = await page.title()
             return TaskResult(success=True, output={"url": url, "title": title, "status": response.status if response else 0})
         except Exception as e:
-            return TaskResult(success=False, error=str(e))
+            artifacts = await self._capture_failure_artifacts(page, "navigate_fail")
+            return TaskResult(success=False, error=str(e), output={"url": url, **artifacts})
         finally:
             try:
                 await page.close()
@@ -264,10 +294,12 @@ class BrowserAgent(BaseAgent):
         page = await self._new_page()
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            await page.wait_for_timeout(400)
             await page.screenshot(path=path, full_page=True)
             return TaskResult(success=True, output={"url": url, "path": path, "size_bytes": os.path.getsize(path)})
         except Exception as e:
-            return TaskResult(success=False, error=str(e))
+            artifacts = await self._capture_failure_artifacts(page, "screenshot_fail")
+            return TaskResult(success=False, error=str(e), output={"url": url, **artifacts})
         finally:
             try:
                 await page.close()
@@ -278,10 +310,12 @@ class BrowserAgent(BaseAgent):
         page = await self._new_page()
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            await page.wait_for_timeout(400)
             text = await page.inner_text(selector)
             return TaskResult(success=True, output="\n".join(l.strip() for l in text.splitlines() if l.strip())[:10000])
         except Exception as e:
-            return TaskResult(success=False, error=str(e))
+            artifacts = await self._capture_failure_artifacts(page, "extract_fail")
+            return TaskResult(success=False, error=str(e), output={"url": url, "selector": selector, **artifacts})
         finally:
             try:
                 await page.close()
@@ -292,6 +326,7 @@ class BrowserAgent(BaseAgent):
         page = await self._new_page()
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            await page.wait_for_timeout(400)
             filled = 0
             for sel, val in data.items():
                 try:
@@ -308,7 +343,8 @@ class BrowserAgent(BaseAgent):
                     pass
             return TaskResult(success=True, output={"fields_filled": filled, "total": len(data), "screenshot_path": shot})
         except Exception as e:
-            return TaskResult(success=False, error=str(e))
+            artifacts = await self._capture_failure_artifacts(page, "form_fail")
+            return TaskResult(success=False, error=str(e), output={"url": url, **artifacts})
         finally:
             try:
                 await page.close()
@@ -321,6 +357,7 @@ class BrowserAgent(BaseAgent):
         page = await self._new_page()
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            await page.wait_for_timeout(400)
             fi = await page.query_selector(selector)
             if fi:
                 await fi.set_input_files(file_path)
@@ -332,9 +369,11 @@ class BrowserAgent(BaseAgent):
                     except Exception:
                         pass
                 return TaskResult(success=True, output={"uploaded": True, "file": file_path, "screenshot_path": shot})
-            return TaskResult(success=False, error=f"Селектор не найден: {selector}")
+            artifacts = await self._capture_failure_artifacts(page, "upload_selector_missing")
+            return TaskResult(success=False, error=f"Селектор не найден: {selector}", output={"url": url, **artifacts})
         except Exception as e:
-            return TaskResult(success=False, error=str(e))
+            artifacts = await self._capture_failure_artifacts(page, "upload_fail")
+            return TaskResult(success=False, error=str(e), output={"url": url, **artifacts})
         finally:
             try:
                 await page.close()

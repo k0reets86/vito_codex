@@ -799,11 +799,16 @@ class ConversationEngine:
         if any(kw in lower for kw in ["изучи сервис", "изучи платформ", "добавь знания", "найди требования"]):
             # crude extraction of service name from text
             service = text.replace("изучи", "").replace("платформу", "").replace("сервис", "").strip()
+            require_confirm = not bool(getattr(settings, "AUTONOMY_MAX_MODE", False))
             return {
                 "intent": Intent.SYSTEM_ACTION.value,
-                "response": f"Подтверждаешь изучение сервиса '{service or 'unknown'}' и обновление базы знаний? Ответь: да/нет.",
+                "response": (
+                    f"Запускаю изучение сервиса '{service or 'unknown'}' и обновление базы знаний."
+                    if not require_confirm
+                    else f"Подтверждаешь изучение сервиса '{service or 'unknown'}' и обновление базы знаний? Ответь: да/нет."
+                ),
                 "actions": [{"action": "learn_service", "params": {"service": service}}],
-                "needs_confirmation": True,
+                "needs_confirmation": require_confirm,
             }
 
         prompt = (

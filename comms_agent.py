@@ -148,6 +148,19 @@ class CommsAgent:
             "manual_fallback": True,
         },
     }
+    _SITE_ALIAS_URLS: dict[str, str] = {
+        "укр нет": "ukr.net",
+        "укрнет": "ukr.net",
+        "ukr net": "ukr.net",
+        "ukrnet": "ukr.net",
+        "укр правда": "www.pravda.com.ua",
+        "укрправда": "www.pravda.com.ua",
+        "укр правду": "www.pravda.com.ua",
+        "укрправду": "www.pravda.com.ua",
+        "украинская правда": "www.pravda.com.ua",
+        "ukr pravda": "www.pravda.com.ua",
+        "ukrpravda": "www.pravda.com.ua",
+    }
     def __init__(self):
         self._bot: Optional[Bot] = None
         self._app: Optional[Application] = None
@@ -257,6 +270,10 @@ class CommsAgent:
             return False
         token = str(args[0] or "").strip().lower()
         return token in {"yes", "y", "да", "confirm", "ok"}
+
+    @staticmethod
+    def _autonomy_max_enabled() -> bool:
+        return bool(getattr(settings, "AUTONOMY_MAX_MODE", False))
 
     @staticmethod
     def _parse_bool_env(value: str) -> bool:
@@ -450,6 +467,9 @@ class CommsAgent:
         custom = CommsAgent._extract_custom_login_target(s)
         if custom:
             return f"custom:{custom}"
+        loose = CommsAgent._extract_loose_site_target(s)
+        if loose:
+            return f"custom:{loose}"
         return ""
 
     @staticmethod
@@ -464,6 +484,9 @@ class CommsAgent:
         custom = CommsAgent._extract_custom_login_target(s)
         if custom:
             return f"custom:{custom}"
+        loose = CommsAgent._extract_loose_site_target(s)
+        if loose:
+            return f"custom:{loose}"
         return ""
 
     @staticmethod
@@ -504,6 +527,37 @@ class CommsAgent:
             if domain in {"kdp.amazon.com", "x.com", "reddit.com", "etsy.com", "gumroad.com"}:
                 return ""
             return domain
+        return ""
+
+    @staticmethod
+    def _extract_loose_site_target(text: str) -> str:
+        s = str(text or "").strip().lower()
+        if not s:
+            return ""
+        compact = re.sub(r"\s+", " ", s)
+        for alias, host in CommsAgent._SITE_ALIAS_URLS.items():
+            if alias in compact:
+                return host
+        if "укрправд" in compact or "укр правд" in compact:
+            return "www.pravda.com.ua"
+        # Generic fallback: "зайди на <site>" even if owner omitted TLD.
+        m = re.search(r"(?:зайди|зайти|открой|войти)\s+(?:на|в)?\s*([^\n\r,;!?]+)$", compact)
+        if not m:
+            return ""
+        tail = m.group(1).strip().strip(".")
+        if not tail:
+            return ""
+        if "amazon" in tail or "амазон" in tail or "kdp" in tail:
+            return ""
+        tail = tail.replace(" ", "")
+        if not tail:
+            return ""
+        # If looks like host with dot - use as is.
+        if re.match(r"^(?:[a-z0-9-]+\.)+[a-z]{2,}$", tail):
+            return tail
+        # Last resort: append .com for short latin tokens.
+        if re.match(r"^[a-z0-9-]{3,40}$", tail):
+            return f"{tail}.com"
         return ""
 
     @staticmethod
@@ -600,6 +654,30 @@ class CommsAgent:
             )
         )
 
+    @staticmethod
+    def _is_inventory_prompt(text: str) -> bool:
+        s = str(text or "").strip().lower()
+        if not s:
+            return False
+        if any(x in s for x in ("тренд", "trend", "ниш", "niche", "конкурент", "рынок")):
+            return False
+        return any(
+            token in s
+            for token in (
+                "товар",
+                "товары",
+                "продукт",
+                "продукты",
+                "листинг",
+                "листинги",
+                "каталог",
+                "ассортимент",
+                "products",
+                "listings",
+                "inventory",
+            )
+        )
+
     def _detect_contextual_service_status_request(self, text: str) -> str:
         s = str(text or "").strip().lower()
         if not s or not self._is_status_prompt(s):
@@ -610,6 +688,36 @@ class CommsAgent:
         if any(x in s for x in ("vito", "вито", "система", "system")):
             return ""
         return self._last_service_context if self._has_fresh_service_context() else ""
+
+    def _detect_contextual_service_inventory_request(self, text: str) -> str:
+        s = str(text or "").strip().lower()
+        if not s or not self._is_inventory_prompt(s):
+            return ""
+        explicit = self._detect_service_from_text(s)
+        if explicit:
+            return explicit
+        if any(x in s for x in ("vito", "вито", "система", "system")):
+            return ""
+        return self._last_service_context if self._has_fresh_service_context() else ""
+
+    @staticmethod
+    def _is_auth_issue_prompt(text: str) -> bool:
+        s = str(text or "").strip().lower()
+        if not s:
+            return False
+        return any(
+            token in s
+            for token in (
+                "почему не заходит",
+                "не заходит",
+                "не входит",
+                "не могу войти",
+                "не получается войти",
+                "why can",
+                "why not login",
+                "login issue",
+            )
+        )
 
     def _format_service_auth_status(self, service: str) -> str:
         svc = str(service or "").strip().lower()
@@ -625,6 +733,104 @@ class CommsAgent:
         if self._service_auth_confirmed.get(svc):
             return f"{title}: вход подтверждён. Повторный логин сейчас не требуется."
         return f"{title}: вход пока не подтверждён. Напиши «зайди на {title}» для авторизации."
+
+    async def _format_service_auth_status_live(self, service: str) -> str:
+        svc = str(service or "").strip().lower()
+        base = self._format_service_auth_status(svc)
+        if not svc:
+            return base
+        title, _ = self._service_auth_meta(svc)
+        if svc in self._pending_service_auth:
+            return base
+
+        # Для Amazon делаем только probe (без авто-логина), чтобы статус не триггерил новый вход.
+        if svc == "amazon_kdp":
+            try:
+                probe_rc, _ = await self._run_kdp_probe()
+                if probe_rc == 0:
+                    self._service_auth_confirmed[svc] = datetime.now(timezone.utc).isoformat()
+                    return f"{title}: подключение активно (live-check OK). Повторный логин не требуется."
+                if self._service_auth_confirmed.get(svc):
+                    return (
+                        f"{title}: вход ранее подтверждён, но live-check сейчас не прошёл. "
+                        "Если действия в Amazon не выполняются, запусти вход заново."
+                    )
+                return (
+                    f"{title}: live-check не подтвердил сессию. "
+                    f"Нужна авторизация: зайди на {title}."
+                )
+            except Exception:
+                return (
+                    f"{title}: статус по кэшу — вход ранее подтверждён, "
+                    "но live-check сейчас недоступен."
+                    if self._service_auth_confirmed.get(svc)
+                    else f"{title}: вход пока не подтверждён."
+                )
+
+        # Для остальных сервисов сохраняем быстрый статус без тяжёлого live probe.
+        return base
+
+    async def _format_service_inventory_snapshot(self, service: str) -> str:
+        svc = str(service or "").strip().lower()
+        if not svc:
+            return "Не понял, по какому сервису проверить товары."
+        title, _ = self._service_auth_meta(svc)
+
+        if svc == "amazon_kdp":
+            try:
+                probe_rc, _ = await self._run_kdp_probe()
+                if probe_rc != 0:
+                    return (
+                        f"{title}: не вижу активной сессии аккаунта (live-check не пройден). "
+                        "Сначала зайди в аккаунт, потом повтори проверку товаров."
+                    )
+            except Exception:
+                pass
+
+        if not self._agent_registry:
+            return f"{title}: модуль проверки товаров не подключён."
+        try:
+            result = await self._agent_registry.dispatch("sales_check", platform=svc)
+        except Exception as e:
+            return f"{title}: ошибка запроса данных аккаунта: {e}"
+
+        if not result or not getattr(result, "success", False):
+            return f"{title}: не удалось получить данные аккаунта."
+        payload = getattr(result, "output", {}) or {}
+        data = payload.get(svc, payload) if isinstance(payload, dict) else {}
+        if not isinstance(data, dict):
+            return f"{title}: данные аккаунта получены в неподдерживаемом формате."
+        if data.get("error"):
+            return f"{title}: проверка аккаунта вернула ошибку: {data.get('error')}"
+
+        lines = [f"{title}: состояние аккаунта"]
+        has_metrics = False
+
+        for key, label in (
+            ("products_count", "Товаров"),
+            ("listings", "Листингов"),
+            ("sales", "Продаж"),
+            ("orders", "Заказов"),
+            ("total_views", "Просмотров"),
+            ("total_favorites", "Добавили в избранное"),
+        ):
+            if key in data:
+                lines.append(f"- {label}: {data.get(key)}")
+                has_metrics = True
+        if "revenue" in data:
+            try:
+                lines.append(f"- Выручка: ${float(data.get('revenue') or 0.0):.2f}")
+            except Exception:
+                lines.append(f"- Выручка: {data.get('revenue')}")
+            has_metrics = True
+
+        if not has_metrics:
+            if data.get("raw_data"):
+                lines.append("- Детальные данные получены, но формат неструктурирован.")
+            else:
+                lines.append("- Метрики товаров не вернулись. Возможно, у аккаунта нет доступных данных через текущий канал.")
+
+        return "\n".join(lines)
 
     async def _run_kdp_probe(self) -> tuple[int, str]:
         storage = str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json") or "runtime/kdp_storage_state.json")
@@ -783,6 +989,8 @@ class CommsAgent:
             rc, out = await self._run_kdp_auto_login(otp_code=maybe_otp)
             if rc == 0:
                 self._pending_kdp_otp = None
+                self._service_auth_confirmed["amazon_kdp"] = datetime.now(timezone.utc).isoformat()
+                self._pending_service_auth.pop("amazon_kdp", None)
                 await send_reply("Готово: вход в KDP подтвержден, сессия сохранена.")
                 return True
             self._pending_kdp_otp = None
@@ -793,10 +1001,26 @@ class CommsAgent:
         if not self._is_kdp_login_request(text):
             return False
 
+        # Если вход недавно подтверждён вручную/авто-проверкой, не запускаем новый login flow.
+        last = self._service_auth_confirmed.get("amazon_kdp", "")
+        if last:
+            try:
+                dt = datetime.fromisoformat(last)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                age_sec = (datetime.now(timezone.utc) - dt).total_seconds()
+                if age_sec < 12 * 3600:
+                    await send_reply("Amazon KDP: вход уже подтверждён недавно. Повторный логин не требуется.")
+                    return True
+            except Exception:
+                pass
+
         await send_reply("Запускаю вход в Amazon KDP через браузерный flow...")
         rc, out = await self._run_kdp_auto_login()
         tail = out[-3000:]
         if rc == 0:
+            self._service_auth_confirmed["amazon_kdp"] = datetime.now(timezone.utc).isoformat()
+            self._pending_service_auth.pop("amazon_kdp", None)
             await send_reply("Готово: VITO вошел в Amazon KDP и сохранил сессию.")
             return True
 
@@ -1135,6 +1359,20 @@ class CommsAgent:
             # owner_inbox path does not support inline markup; send plain text
             await self.send_message(msg)
 
+        service_inventory = self._detect_contextual_service_inventory_request(text)
+        if service_inventory:
+            await self.send_message(await self._format_service_inventory_snapshot(service_inventory), level="result")
+            return
+        service_status = self._detect_contextual_service_status_request(text)
+        if service_status:
+            await self.send_message(await self._format_service_auth_status_live(service_status), level="result")
+            return
+        if self._is_auth_issue_prompt(text):
+            svc = self._last_service_context if self._has_fresh_service_context() else ""
+            if svc:
+                await self.send_message(await self._format_service_auth_status_live(svc), level="result")
+                return
+
         if await self._handle_kdp_login_flow(text, _owner_reply, with_button=False):
             self._touch_service_context("amazon_kdp")
             return
@@ -1199,7 +1437,7 @@ class CommsAgent:
             else:
                 await self.send_message("Ок, отменил.", level="result")
             return
-        strict_cmds = bool(getattr(settings, "TELEGRAM_STRICT_COMMANDS", True))
+        strict_cmds = bool(getattr(settings, "TELEGRAM_STRICT_COMMANDS", True)) and not self._autonomy_max_enabled()
         if self._pending_system_action:
             if (not strict_cmds) and text.isdigit():
                 actions = list((self._pending_system_action or {}).get("actions") or [])
@@ -1246,7 +1484,22 @@ class CommsAgent:
 
         service_status = self._detect_contextual_service_status_request(text)
         if service_status:
-            await self.send_message(self._format_service_auth_status(service_status), level="result")
+            await self.send_message(await self._format_service_auth_status_live(service_status), level="result")
+            return
+        service_inventory = self._detect_contextual_service_inventory_request(text)
+        if service_inventory:
+            await self.send_message(await self._format_service_inventory_snapshot(service_inventory), level="result")
+            self._record_context_learning(
+                skill_name="contextual_service_inventory_resolution",
+                description=(
+                    "Если активен контекст платформы, запросы вида 'проверь товары/листинги' "
+                    "выполняются как проверка аккаунта этой платформы, а не как market research."
+                ),
+                anti_pattern=(
+                    "Плохо: отправлять владельца в analyze_niche, когда он просит проверить товары в текущем аккаунте."
+                ),
+                method={"service": service_inventory, "source_text": text[:120]},
+            )
             return
 
         if not strict_cmds:
@@ -1429,10 +1682,14 @@ class CommsAgent:
                     self._remember_choice_context(response)
                     await self.send_message(response, level="result")
                     if result.get("actions") and result.get("needs_confirmation"):
-                        self._pending_system_action = {
-                            "actions": result.get("actions", []),
-                            "origin_text": text,
-                        }
+                        if self._autonomy_max_enabled() and self._conversation_engine:
+                            out = await self._conversation_engine._execute_actions(result.get("actions", []))
+                            await self.send_message(out or "Действие выполнено.", level="result")
+                        else:
+                            self._pending_system_action = {
+                                "actions": result.get("actions", []),
+                                "origin_text": text,
+                            }
                 else:
                     await self.send_message("Понял. Чем могу помочь?")
                 return
@@ -2543,11 +2800,58 @@ class CommsAgent:
             source = "text"
 
         self._log_owner_request(text, source=source)
-        strict_cmds = bool(getattr(settings, "TELEGRAM_STRICT_COMMANDS", True))
+        strict_cmds = bool(getattr(settings, "TELEGRAM_STRICT_COMMANDS", True)) and not self._autonomy_max_enabled()
 
         async def _tg_reply(msg: str, markup=None) -> None:
             kwargs = {"reply_markup": markup} if markup is not None else {"reply_markup": self._main_keyboard()}
             await update.message.reply_text(msg, **kwargs)
+
+        # Highest-priority contextual routing: account inventory/status/auth issue.
+        service_inventory = self._detect_contextual_service_inventory_request(text)
+        if service_inventory:
+            await update.message.reply_text(
+                await self._format_service_inventory_snapshot(service_inventory),
+                reply_markup=self._main_keyboard(),
+            )
+            self._record_context_learning(
+                skill_name="contextual_service_inventory_resolution",
+                description=(
+                    "Если активен контекст платформы, запросы вида 'проверь товары/листинги' "
+                    "выполняются как проверка аккаунта этой платформы, а не как market research."
+                ),
+                anti_pattern=(
+                    "Плохо: отправлять владельца в analyze_niche, когда он просит проверить товары в текущем аккаунте."
+                ),
+                method={"service": service_inventory, "source_text": text[:120]},
+            )
+            return
+        service_status = self._detect_contextual_service_status_request(text)
+        if service_status:
+            await update.message.reply_text(
+                await self._format_service_auth_status_live(service_status),
+                reply_markup=self._main_keyboard(),
+            )
+            self._record_context_learning(
+                skill_name="contextual_service_status_resolution",
+                description=(
+                    "Если у владельца активный контекст платформы, короткий запрос 'статус' трактуется "
+                    "как статус входа/аккаунта этой платформы."
+                ),
+                anti_pattern=(
+                    "Плохо: игнорировать недавний контекст сервиса и отвечать системным статусом VITO "
+                    "вместо статуса нужной платформы."
+                ),
+                method={"service": service_status, "source_text": text[:120]},
+            )
+            return
+        if self._is_auth_issue_prompt(text):
+            svc = self._last_service_context if self._has_fresh_service_context() else ""
+            if svc:
+                await update.message.reply_text(
+                    await self._format_service_auth_status_live(svc),
+                    reply_markup=self._main_keyboard(),
+                )
+                return
 
         if await self._handle_kdp_login_flow(text, _tg_reply, with_button=True):
             self._touch_service_context("amazon_kdp")
@@ -2706,27 +3010,6 @@ class CommsAgent:
             )
             return
 
-        # 0.5 Context-aware service status: after "зайди на X", plain "статус" means X status.
-        service_status = self._detect_contextual_service_status_request(text)
-        if service_status:
-            await update.message.reply_text(
-                self._format_service_auth_status(service_status),
-                reply_markup=self._main_keyboard(),
-            )
-            self._record_context_learning(
-                skill_name="contextual_service_status_resolution",
-                description=(
-                    "Если у владельца активный контекст платформы, короткий запрос 'статус' трактуется "
-                    "как статус входа/аккаунта этой платформы."
-                ),
-                anti_pattern=(
-                    "Плохо: игнорировать недавний контекст сервиса и отвечать системным статусом VITO "
-                    "вместо статуса нужной платформы."
-                ),
-                method={"service": service_status, "source_text": text[:120]},
-            )
-            return
-
         # 1. Обработка нажатий persistent-кнопок (+алиасы старого меню)
         cmd = self._resolve_button_command(text)
         if cmd:
@@ -2869,10 +3152,14 @@ class CommsAgent:
                     self._remember_choice_context(response)
                     await self._send_response(update, response)
                     if result.get("actions") and result.get("needs_confirmation"):
-                        self._pending_system_action = {
-                            "actions": result.get("actions", []),
-                            "origin_text": text_for_engine,
-                        }
+                        if self._autonomy_max_enabled() and self._conversation_engine:
+                            out = await self._conversation_engine._execute_actions(result.get("actions", []))
+                            await self._send_response(update, out or "Действие выполнено.")
+                        else:
+                            self._pending_system_action = {
+                                "actions": result.get("actions", []),
+                                "origin_text": text_for_engine,
+                            }
                 else:
                     await update.message.reply_text(
                         "Понял. Чем могу помочь?", reply_markup=self._main_keyboard()

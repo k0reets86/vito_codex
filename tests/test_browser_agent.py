@@ -194,14 +194,19 @@ class TestOOMProtection:
         assert a is b
 
     def test_chrome_launch_args_include_single_process(self):
-        """Verify --single-process is in the launch args."""
-        # This is a code-inspection test verifying the args are present in source
-        import inspect
-        from agents.browser_agent import BrowserAgent
-        source = inspect.getsource(BrowserAgent.start)
-        assert "--single-process" in source
-        assert "--disable-dev-shm-usage" in source
-        assert "--no-sandbox" in source
+        """Verify constrained launch args include safe low-resource flags."""
+        from agents.browser_agent import _chromium_launch_args
+        args = _chromium_launch_args()
+        assert "--single-process" in args
+        assert "--disable-dev-shm-usage" in args
+        assert "--no-sandbox" in args
+
+    def test_chrome_launch_args_without_constrained_mode(self, monkeypatch):
+        from agents.browser_agent import _chromium_launch_args
+        monkeypatch.setattr("agents.browser_agent.settings.BROWSER_CONSTRAINED_MODE", False, raising=False)
+        args = _chromium_launch_args()
+        assert "--single-process" not in args
+        assert "--no-zygote" not in args
 
     @pytest.mark.asyncio
     async def test_page_close_on_navigate_error(self, mock_llm_router, mock_memory, mock_finance, mock_comms):

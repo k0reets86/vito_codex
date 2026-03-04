@@ -237,6 +237,20 @@ class TestProcessMessage:
         engine._execute_actions.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_system_action_learn_service_requires_confirmation_when_not_autonomy_max(self, engine, monkeypatch):
+        monkeypatch.setattr("conversation_engine.settings.AUTONOMY_MAX_MODE", False, raising=False)
+        result = await engine._handle_system_action("изучи сервис amazon kdp")
+        assert result["intent"] == "system_action"
+        assert result.get("needs_confirmation") is True
+
+    @pytest.mark.asyncio
+    async def test_system_action_learn_service_no_confirmation_in_autonomy_max(self, engine, monkeypatch):
+        monkeypatch.setattr("conversation_engine.settings.AUTONOMY_MAX_MODE", True, raising=False)
+        result = await engine._handle_system_action("изучи сервис amazon kdp")
+        assert result["intent"] == "system_action"
+        assert result.get("needs_confirmation") is False
+
+    @pytest.mark.asyncio
     async def test_owner_task_state_persists_after_goal_then_question(self, mock_llm_router, mock_memory, tmp_path):
         owner_state = OwnerTaskState(path=tmp_path / "owner_task_state.json")
         engine = ConversationEngine(

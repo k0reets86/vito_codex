@@ -154,6 +154,7 @@ class Settings:
 
     # Browser behavior
     BROWSER_DEFAULT_ON_URL: bool = os.getenv("BROWSER_DEFAULT_ON_URL", "true").lower() in ("1", "true", "yes", "on")
+    BROWSER_CONSTRAINED_MODE: bool = os.getenv("BROWSER_CONSTRAINED_MODE", "true").lower() in ("1", "true", "yes", "on")
 
     # Owner inbox (file-based comms)
     OWNER_INBOX_ENABLED: bool = os.getenv("OWNER_INBOX_ENABLED", "true").lower() in ("1", "true", "yes", "on")

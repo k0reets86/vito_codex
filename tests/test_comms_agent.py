@@ -524,10 +524,33 @@ async def test_on_message_sets_pending_system_action_without_auto_execute(comms,
     comms.set_modules(conversation_engine=conv)
     mock_update.message.text = "запусти сканирование"
 
-    await comms._on_message(mock_update, MagicMock())
+    with patch("comms_agent.settings.AUTONOMY_MAX_MODE", False):
+        await comms._on_message(mock_update, MagicMock())
 
     assert comms._pending_system_action is not None
     conv._execute_actions.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_on_message_autonomy_max_auto_executes_confirmation_actions(comms, mock_update):
+    conv = MagicMock()
+    conv.process_message = AsyncMock(
+        return_value={
+            "intent": "system_action",
+            "response": "Подтверди запуск",
+            "actions": [{"action": "scan_trends", "params": {}}],
+            "needs_confirmation": True,
+        }
+    )
+    conv._execute_actions = AsyncMock(return_value="[scan_trends] done")
+    comms.set_modules(conversation_engine=conv)
+    mock_update.message.text = "запусти сканирование"
+
+    with patch("comms_agent.settings.AUTONOMY_MAX_MODE", True):
+        await comms._on_message(mock_update, MagicMock())
+
+    conv._execute_actions.assert_called_once()
+    assert comms._pending_system_action is None
 
 
 @pytest.mark.asyncio
@@ -590,7 +613,9 @@ async def test_on_message_strict_mode_skips_natural_schedule(comms, mock_update)
     comms.set_modules(conversation_engine=conv)
     comms._maybe_schedule_from_text = AsyncMock(return_value=True)
     mock_update.message.text = "каждый день в 9 отчет по продажам"
-    with patch("comms_agent.settings.TELEGRAM_STRICT_COMMANDS", True):
+    with patch("comms_agent.settings.TELEGRAM_STRICT_COMMANDS", True), patch(
+        "comms_agent.settings.AUTONOMY_MAX_MODE", False
+    ):
         await comms._on_message(mock_update, MagicMock())
     comms._maybe_schedule_from_text.assert_not_called()
 
@@ -621,6 +646,21 @@ async def test_on_message_kdp_login_shortcut(comms, mock_update):
     comms._handle_kdp_login_flow = AsyncMock(return_value=True)
     await comms._on_message(mock_update, MagicMock())
     comms._handle_kdp_login_flow.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_on_message_kdp_login_real_path_bypasses_conversation(comms, mock_update):
+    mock_update.message.text = "зайди на амазон"
+    conv = MagicMock()
+    conv.process_message = AsyncMock(return_value={"response": "SHOULD_NOT_BE_USED"})
+    comms.set_modules(conversation_engine=conv)
+    comms._run_kdp_auto_login = AsyncMock(return_value=(0, "ok"))
+
+    await comms._on_message(mock_update, MagicMock())
+
+    conv.process_message.assert_not_called()
+    sent_texts = [call.args[0] for call in mock_update.message.reply_text.call_args_list]
+    assert any("Amazon KDP" in text for text in sent_texts)
 
 
 @pytest.mark.asyncio
@@ -1074,6 +1114,32 @@ async def test_handle_callback_auth_done_manual_fallback_amazon(comms, mock_call
 
 
 @pytest.mark.asyncio
+async def test_handle_kdp_login_flow_skips_relogin_when_recently_confirmed(comms):
+    comms._service_auth_confirmed["amazon_kdp"] = "2026-03-04T10:00:00+00:00"
+    send_reply = AsyncMock()
+    with patch("comms_agent.datetime") as dt:
+        real_datetime = __import__("datetime").datetime
+        dt.fromisoformat = real_datetime.fromisoformat
+        dt.now.return_value = real_datetime.fromisoformat("2026-03-04T10:05:00+00:00")
+        dt.timezone = __import__("datetime").timezone
+        comms._run_kdp_auto_login = AsyncMock(return_value=(0, "ok"))
+        handled = await comms._handle_kdp_login_flow("зайди на амазон", send_reply, with_button=True)
+    assert handled is True
+    comms._run_kdp_auto_login.assert_not_awaited()
+    assert "уже подтверждён" in send_reply.call_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_handle_kdp_login_flow_success_sets_confirmation_stamp(comms):
+    send_reply = AsyncMock()
+    comms._run_kdp_auto_login = AsyncMock(return_value=(0, "ok"))
+    handled = await comms._handle_kdp_login_flow("зайди на amazon kdp", send_reply, with_button=True)
+    assert handled is True
+    assert "amazon_kdp" in comms._service_auth_confirmed
+    assert "Готово: VITO вошел в Amazon KDP" in send_reply.call_args.args[0]
+
+
+@pytest.mark.asyncio
 async def test_on_message_login_request_starts_generic_service_auth(comms, mock_update):
     mock_update.message.text = "зайди в реддит"
     comms._start_service_auth_flow = AsyncMock(return_value=True)
@@ -1118,6 +1184,28 @@ async def test_on_message_custom_site_login_request_starts_generic_service_auth(
 
 
 @pytest.mark.asyncio
+async def test_on_message_custom_site_login_request_ukr_net_alias(comms, mock_update):
+    mock_update.message.text = "зайди на укр нет"
+    comms._start_service_auth_flow = AsyncMock(return_value=True)
+    comms._handle_kdp_login_flow = AsyncMock(return_value=False)
+
+    await comms._on_message(mock_update, MagicMock())
+
+    assert comms._start_service_auth_flow.await_args.args[0] == "custom:ukr.net"
+
+
+@pytest.mark.asyncio
+async def test_on_message_custom_site_login_request_ukr_pravda_alias(comms, mock_update):
+    mock_update.message.text = "зайди на укрправду"
+    comms._start_service_auth_flow = AsyncMock(return_value=True)
+    comms._handle_kdp_login_flow = AsyncMock(return_value=False)
+
+    await comms._on_message(mock_update, MagicMock())
+
+    assert comms._start_service_auth_flow.await_args.args[0] == "custom:www.pravda.com.ua"
+
+
+@pytest.mark.asyncio
 async def test_on_message_contextual_service_status(comms, mock_update):
     comms._last_service_context = "twitter"
     mock_update.message.text = "покажи статус"
@@ -1136,6 +1224,7 @@ async def test_on_message_contextual_service_status(comms, mock_update):
 async def test_on_message_contextual_service_status_plain_status(comms, mock_update):
     comms._last_service_context = "amazon_kdp"
     comms._last_service_context_at = "2026-03-04T01:00:00+00:00"
+    comms._run_kdp_probe = AsyncMock(return_value=(0, "ok"))
     conv = MagicMock()
     conv.process_message = AsyncMock(return_value={"response": "SHOULD_NOT_BE_USED"})
     comms.set_modules(conversation_engine=conv)
@@ -1148,9 +1237,81 @@ async def test_on_message_contextual_service_status_plain_status(comms, mock_upd
     conv.process_message.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_format_service_auth_status_live_amazon_probe_fail_with_cached_confirmed(comms):
+    comms._service_auth_confirmed["amazon_kdp"] = "2026-03-04T01:00:00+00:00"
+    comms._run_kdp_probe = AsyncMock(return_value=(1, "fail"))
+    text = await comms._format_service_auth_status_live("amazon_kdp")
+    assert "live-check" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_on_message_contextual_service_inventory_uses_service_context(comms, mock_update):
+    comms._last_service_context = "twitter"
+    comms._last_service_context_at = "2026-03-04T01:00:00+00:00"
+    conv = MagicMock()
+    conv.process_message = AsyncMock(return_value={"response": "SHOULD_NOT_BE_USED"})
+    comms.set_modules(conversation_engine=conv)
+    reg = MagicMock()
+    reg.dispatch = AsyncMock(return_value=type("R", (), {"success": True, "output": {"twitter": {"products_count": 3, "sales": 1}}})())
+    comms.set_modules(agent_registry=reg)
+    mock_update.message.text = "проверь есть ли там товары"
+
+    await comms._on_message(mock_update, MagicMock())
+
+    sent = mock_update.message.reply_text.call_args[0][0]
+    assert "Twitter" in sent
+    assert "Товаров: 3" in sent
+    conv.process_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_on_message_contextual_service_inventory_amazon_requires_live_session(comms, mock_update):
+    comms._last_service_context = "amazon_kdp"
+    comms._last_service_context_at = "2026-03-04T01:00:00+00:00"
+    comms._run_kdp_probe = AsyncMock(return_value=(1, "fail"))
+    conv = MagicMock()
+    conv.process_message = AsyncMock(return_value={"response": "SHOULD_NOT_BE_USED"})
+    comms.set_modules(conversation_engine=conv)
+    reg = MagicMock()
+    reg.dispatch = AsyncMock()
+    comms.set_modules(agent_registry=reg)
+    mock_update.message.text = "проверь есть ли там товары"
+
+    await comms._on_message(mock_update, MagicMock())
+
+    sent = mock_update.message.reply_text.call_args[0][0]
+    assert "не вижу активной сессии" in sent.lower()
+    reg.dispatch.assert_not_called()
+    conv.process_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_on_message_contextual_inventory_has_priority_over_brainstorm(comms, mock_update):
+    comms._last_service_context = "amazon_kdp"
+    comms._last_service_context_at = "2026-03-04T01:00:00+00:00"
+    comms._run_kdp_probe = AsyncMock(return_value=(1, "fail"))
+    comms._maybe_brainstorm_from_text = AsyncMock(return_value=True)
+    conv = MagicMock()
+    conv.process_message = AsyncMock(return_value={"response": "SHOULD_NOT_BE_USED"})
+    comms.set_modules(conversation_engine=conv)
+    mock_update.message.text = "проверь есть ли там товары"
+
+    with patch("comms_agent.settings.AUTONOMY_MAX_MODE", True):
+        await comms._on_message(mock_update, MagicMock())
+
+    comms._maybe_brainstorm_from_text.assert_not_called()
+    conv.process_message.assert_not_called()
+
+
 def test_detect_contextual_status_without_fresh_context_returns_empty(comms):
     comms._last_service_context = ""
     assert comms._detect_contextual_service_status_request("статус") == ""
+
+
+def test_detect_contextual_inventory_without_fresh_context_returns_empty(comms):
+    comms._last_service_context = ""
+    assert comms._detect_contextual_service_inventory_request("проверь товары") == ""
 
 
 def test_humanize_owner_text_strips_technical_noise(comms):

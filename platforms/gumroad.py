@@ -38,6 +38,7 @@ async def _launch_browser(p):
                 chromium_exe = cand
                 break
         headless = os.environ.get("VITO_BROWSER_HEADLESS", "1").lower() not in ("0", "false", "no")
+        constrained = bool(getattr(settings, "BROWSER_CONSTRAINED_MODE", True))
         launch_kwargs = {
             "headless": headless,
             "args": [
@@ -45,6 +46,7 @@ async def _launch_browser(p):
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
+                "--disable-software-rasterizer",
                 "--disable-crashpad",
                 "--no-crash-upload",
                 "--disable-features=Crashpad",
@@ -52,9 +54,9 @@ async def _launch_browser(p):
                 "--renderer-process-limit=1",
             ],
             "chromium_sandbox": False,
-            # Remove unstable defaults
-            "ignore_default_args": ["--single-process", "--no-zygote"],
         }
+        if constrained:
+            launch_kwargs["args"].extend(["--no-zygote", "--single-process"])
         if chromium_exe and chromium_exe.exists():
             launch_kwargs["executable_path"] = str(chromium_exe)
         return await p.chromium.launch(**launch_kwargs)
