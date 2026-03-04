@@ -1279,6 +1279,21 @@ async def test_handle_kdp_login_flow_retries_after_transient_failure_and_request
 
 
 @pytest.mark.asyncio
+async def test_handle_kdp_login_flow_fallback_enables_forced_otp(comms):
+    send_reply = AsyncMock()
+    comms._run_kdp_probe = AsyncMock(return_value=(2, "no_session"))
+    comms._run_kdp_auto_login = AsyncMock(side_effect=[(9, "ERROR: auto_login_exception=... url="), (9, "ERROR: auto_login_exception=... url=")])
+    comms._run_remote_auth_session = AsyncMock(return_value=(0, "REMOTE_URL=http://127.0.0.1/novnc\nVNC_PASSWORD=test"))
+
+    handled = await comms._handle_kdp_login_flow("зайди на amazon kdp", send_reply, with_button=True)
+
+    assert handled is True
+    assert comms._pending_kdp_otp is not None
+    assert bool(comms._pending_kdp_otp.get("forced")) is True
+    assert "Пришли 6-значный код" in send_reply.call_args.args[0]
+
+
+@pytest.mark.asyncio
 async def test_on_message_login_request_starts_generic_service_auth(comms, mock_update):
     mock_update.message.text = "зайди в реддит"
     comms._start_service_auth_flow = AsyncMock(return_value=True)

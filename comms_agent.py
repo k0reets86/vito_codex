@@ -1433,9 +1433,10 @@ class CommsAgent:
                 summary = f" Причина: {tail}"
         except Exception:
             summary = ""
+        self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat(), "forced": True}
         await send_reply(
             "Не смог завершить вход автоматически (без VNC). "
-            "Повтори «зайди на амазон» или пришли 6-значный код, если он у тебя уже есть."
+            "Пришли 6-значный код из Amazon/Authenticator одним сообщением, я завершу вход."
             f"{summary}"
         )
         logger.warning(
