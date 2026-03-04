@@ -290,6 +290,24 @@ class TestProcessMessage:
         assert "Задача выполнена" in msg
 
     @pytest.mark.asyncio
+    async def test_pick_capability_from_memory_prefers_successful_skill(self, mock_llm_router, mock_memory):
+        mock_memory.search_skills.return_value = [
+            {"task_type": "research", "success_count": 1, "fail_count": 3},
+            {"task_type": "listing_seo_pack", "success_count": 5, "fail_count": 0},
+        ]
+        engine = ConversationEngine(llm_router=mock_llm_router, memory=mock_memory, agent_registry=MagicMock())
+        cap = engine._pick_capability_from_memory("сделай seo для листинга")
+        assert cap == "listing_seo_pack"
+
+    @pytest.mark.asyncio
+    async def test_system_action_publish_now_routes_to_auto_publish(self, engine, monkeypatch):
+        monkeypatch.setattr("conversation_engine.settings.AUTONOMY_MAX_MODE", True, raising=False)
+        result = await engine._handle_system_action("ок публикуй товар на gumroad")
+        assert result["intent"] == "system_action"
+        assert result["actions"][0]["action"] == "run_product_pipeline"
+        assert result["actions"][0]["params"]["auto_publish"] is True
+
+    @pytest.mark.asyncio
     async def test_owner_task_state_persists_after_goal_then_question(self, mock_llm_router, mock_memory, tmp_path):
         owner_state = OwnerTaskState(path=tmp_path / "owner_task_state.json")
         engine = ConversationEngine(

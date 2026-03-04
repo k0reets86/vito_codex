@@ -823,6 +823,22 @@ class ConversationEngine:
                 "actions": [{"action": "run_product_pipeline", "params": {"topic": topic, "platforms": platforms, "auto_publish": False}}],
                 "needs_confirmation": require_confirm,
             }
+        if any(kw in lower for kw in ("ок публикуй", "publish now", "запускай публикацию", "опубликуй", "публикуй")) and any(
+            kw in lower for kw in ("товар", "продукт", "листинг", "gumroad", "etsy", "kofi", "amazon")
+        ):
+            topic = self._extract_product_topic(text)
+            platforms = self._extract_platforms(text)
+            require_confirm = not bool(getattr(settings, "AUTONOMY_MAX_MODE", False))
+            return {
+                "intent": Intent.SYSTEM_ACTION.value,
+                "response": (
+                    f"Принял. Запускаю публикацию: {topic} (платформы: {', '.join(platforms)})."
+                    if not require_confirm
+                    else f"Подтверждаешь live публикацию: {topic} ({', '.join(platforms)})? да/нет"
+                ),
+                "actions": [{"action": "run_product_pipeline", "params": {"topic": topic, "platforms": platforms, "auto_publish": True}}],
+                "needs_confirmation": require_confirm,
+            }
         if any(kw in lower for kw in ("прокач", "улучши себя", "самообуч", "саморазвит", "обнови навыки", "improvement cycle")):
             require_confirm = not bool(getattr(settings, "AUTONOMY_MAX_MODE", False))
             return {
@@ -1485,14 +1501,29 @@ class ConversationEngine:
         ok, detail = await _run_cap(capability)
         attempts.append(f"run:{capability or 'unknown'}:{'ok' if ok else detail}")
         if ok:
+            q_verdict = await self._maybe_quality_gate(capability, request, detail)
+            attempts.append(f"quality:{q_verdict}")
+            if q_verdict.startswith("rework"):
+                ok_re, detail_re = await _run_cap(capability)
+                attempts.append(f"rework:{capability or 'unknown'}:{'ok' if ok_re else detail_re}")
+                if ok_re:
+                    detail = detail_re
+                    q_verdict = await self._maybe_quality_gate(capability, request, detail_re)
+                    attempts.append(f"quality_after_rework:{q_verdict}")
             self._record_autonomy_learning(
                 request=request,
                 capability=capability or "unknown",
-                success=True,
+                success=not q_verdict.startswith("rework"),
                 attempts=attempts,
                 result_text=detail,
             )
-            return f"Задача выполнена ({capability}).\nРезультат: {detail}"
+            if q_verdict.startswith("rework"):
+                return (
+                    f"Задача выполнена технически ({capability}), но качество требует доработки.\n"
+                    f"Quality gate: {q_verdict}\n"
+                    f"Шаги: {' | '.join(attempts)}"
+                )
+            return f"Задача выполнена ({capability}).\nQuality gate: {q_verdict}\nРезультат: {detail}"
 
         if bool(getattr(settings, "AUTONOMY_AUTO_LEARN_ON_FAILURE", True)):
             # Learn via research agent and retry (cheap + robust).
@@ -1513,15 +1544,18 @@ class ConversationEngine:
         ok2, detail2 = await _run_cap(capability)
         attempts.append(f"retry:{capability or 'unknown'}:{'ok' if ok2 else detail2}")
         if ok2:
+            q2 = await self._maybe_quality_gate(capability, request, detail2)
+            attempts.append(f"quality:{q2}")
             self._record_autonomy_learning(
                 request=request,
                 capability=capability or "unknown",
-                success=True,
+                success=not q2.startswith("rework"),
                 attempts=attempts,
                 result_text=detail2,
             )
             return (
                 f"Задача выполнена после обучения ({capability}).\n"
+                f"Quality gate: {q2}\n"
                 f"Результат: {detail2}\n"
                 f"Шаги: {' | '.join(attempts)}"
             )
@@ -1532,15 +1566,18 @@ class ConversationEngine:
             if core is not None:
                 res = await core.execute_task("orchestrate", step=request, goal_title=request[:120])
                 if res and res.success:
+                    q3 = await self._maybe_quality_gate("orchestrate", request, str(getattr(res, "output", "")))
+                    attempts.append(f"quality:{q3}")
                     self._record_autonomy_learning(
                         request=request,
                         capability="orchestrate",
-                        success=True,
+                        success=not q3.startswith("rework"),
                         attempts=attempts,
                         result_text=str(getattr(res, "output", "")),
                     )
                     return (
                         "Задача выполнена через оркестратор.\n"
+                        f"Quality gate: {q3}\n"
                         f"Результат: {str(getattr(res, 'output', ''))[:900]}\n"
                         f"Шаги: {' | '.join(attempts)}"
                     )
@@ -1564,6 +1601,9 @@ class ConversationEngine:
         text = str(request or "").strip()
         if not text:
             return ""
+        skill_cap = self._pick_capability_from_memory(text)
+        if skill_cap:
+            return skill_cap
         try:
             core = self.agent_registry.get("vito_core") if hasattr(self.agent_registry, "get") else None
             if core and hasattr(core, "classify_step"):
@@ -1589,6 +1629,56 @@ class ConversationEngine:
             if any(k in s for k in keys):
                 return cap
         return "orchestrate"
+
+    def _pick_capability_from_memory(self, request: str) -> str:
+        mm = self.memory
+        if mm is None or not hasattr(mm, "search_skills"):
+            return ""
+        try:
+            rows = mm.search_skills(request, limit=5)
+        except Exception:
+            return ""
+        if not isinstance(rows, list):
+            return ""
+        best_cap = ""
+        best_score = -10**9
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            cap = str(r.get("task_type") or "").strip()
+            if not cap:
+                continue
+            succ = int(r.get("success_count", 0) or 0)
+            fail = int(r.get("fail_count", 0) or 0)
+            score = (succ * 2) - fail
+            if score > best_score:
+                best_score = score
+                best_cap = cap
+        return best_cap
+
+    async def _maybe_quality_gate(self, capability: str, request: str, output_text: str) -> str:
+        if not self.agent_registry:
+            return "skipped(no_registry)"
+        cap = str(capability or "").strip().lower()
+        if cap not in {
+            "research", "content_creation", "product_pipeline", "social_media",
+            "listing_create", "publish", "documentation", "seo", "listing_seo_pack",
+        }:
+            return "skipped(not_required)"
+        try:
+            q = await self.agent_registry.dispatch(
+                "quality_review",
+                content=f"capability={cap}\nrequest={request[:400]}\noutput={str(output_text)[:5000]}",
+                content_type=f"autonomy_{cap}",
+            )
+            if q and q.success and isinstance(getattr(q, "output", None), dict):
+                qo = q.output
+                approved = bool(qo.get("approved", False))
+                score = int(qo.get("score", 0) or 0)
+                return ("ok" if approved else "rework") + f"(score={score})"
+            return "skipped(quality_unavailable)"
+        except Exception as e:
+            return f"skipped(quality_error:{e})"
 
     def _record_autonomy_learning(
         self,
