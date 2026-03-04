@@ -99,7 +99,7 @@ capture_cmd_for_service() {
       echo "DISPLAY=$DISPLAY_NUM python3 $ROOT_DIR/scripts/etsy_auth_helper.py browser-capture --timeout-sec 1200 --storage-path $ROOT_DIR/runtime/etsy_storage_state.json --auto-submit"
       ;;
     amazon_kdp)
-      echo "DISPLAY=$DISPLAY_NUM python3 $ROOT_DIR/scripts/kdp_auth_helper.py browser-capture --timeout-sec 1200 --storage-path $ROOT_DIR/runtime/kdp_storage_state.json"
+      echo "DISPLAY=$DISPLAY_NUM python3 $ROOT_DIR/scripts/kdp_auth_helper.py browser-capture --timeout-sec 1200 --auto-submit --linger-sec 90 --storage-path $ROOT_DIR/runtime/kdp_storage_state.json"
       ;;
     kofi)
       echo "DISPLAY=$DISPLAY_NUM python3 $ROOT_DIR/scripts/kofi_auth_helper.py browser-capture --timeout-sec 1200 --storage-path $ROOT_DIR/runtime/kofi_storage_state.json --auto-submit"
@@ -161,4 +161,3 @@ case "$ACTION" in
     exit 1
     ;;
 esac
-

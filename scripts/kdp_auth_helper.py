@@ -43,7 +43,13 @@ def _chromium_launch_args() -> list[str]:
     return args
 
 
-async def browser_capture(timeout_sec: int, storage_path: str, headless: bool) -> int:
+async def browser_capture(
+    timeout_sec: int,
+    storage_path: str,
+    headless: bool,
+    auto_submit: bool = False,
+    linger_sec: int = 0,
+) -> int:
     from playwright.async_api import async_playwright
 
     email = str(getattr(settings, "KDP_EMAIL", "") or "")
@@ -61,8 +67,17 @@ async def browser_capture(timeout_sec: int, storage_path: str, headless: bool) -
     if headless:
         print("WARNING: headless=True может ухудшить прохождение защиты Amazon.")
 
+    async def _launch_interactive_browser(playwright_obj):
+        try:
+            return await playwright_obj.chromium.launch(headless=headless, args=_chromium_launch_args())
+        except Exception as e:
+            # Some VPS environments fail Chromium headed launch intermittently
+            # (thread/resource limits, Ozone/X11 quirks). Fallback keeps auth flow usable.
+            print(f"WARN: Chromium launch failed ({e}). Trying Firefox fallback...")
+            return await playwright_obj.firefox.launch(headless=headless)
+
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=headless, args=_chromium_launch_args())
+        browser = await _launch_interactive_browser(p)
         context = await browser.new_context(viewport={"width": 1366, "height": 900})
         page = await context.new_page()
         await page.goto("https://kdp.amazon.com", wait_until="domcontentloaded", timeout=120000)
@@ -83,6 +98,34 @@ async def browser_capture(timeout_sec: int, storage_path: str, headless: bool) -
                     break
                 except Exception:
                     continue
+        if auto_submit:
+            # Try to progress login form automatically, leaving only OTP/challenge for owner.
+            try:
+                for btn in ("input#continue", "input[name='continue']", "button:has-text('Continue')"):
+                    try:
+                        if await page.locator(btn).count() > 0:
+                            await page.click(btn, timeout=1500)
+                            await page.wait_for_timeout(900)
+                            break
+                    except Exception:
+                        continue
+                for sel in ("input[name='password']", "input[name='ap_password']", "input[type='password']"):
+                    try:
+                        if await page.locator(sel).count() > 0 and password:
+                            await page.fill(sel, password, timeout=1500)
+                            break
+                    except Exception:
+                        continue
+                for btn in ("input#signInSubmit", "input[name='signInSubmit']", "button:has-text('Sign in')"):
+                    try:
+                        if await page.locator(btn).count() > 0:
+                            await page.click(btn, timeout=1500)
+                            await page.wait_for_timeout(1200)
+                            break
+                    except Exception:
+                        continue
+            except Exception:
+                pass
 
         print("Ожидаю успешный вход (bookshelf/reports)...")
         end_ts = asyncio.get_event_loop().time() + max(120, int(timeout_sec))
@@ -109,6 +152,9 @@ async def browser_capture(timeout_sec: int, storage_path: str, headless: bool) -
         cookies = await context.cookies()
         cookie_path = out.with_suffix(".cookies.json")
         cookie_path.write_text(json.dumps(cookies, ensure_ascii=False, indent=2), encoding="utf-8")
+        if int(linger_sec or 0) > 0:
+            print(f"INFO: keeping browser open for {int(linger_sec)}s before close...")
+            await page.wait_for_timeout(int(linger_sec) * 1000)
         await context.close()
         await browser.close()
         print("OK: KDP сессия сохранена")
@@ -457,6 +503,8 @@ def main() -> int:
     p_capture.add_argument("--timeout-sec", type=int, default=600)
     p_capture.add_argument("--storage-path", default=str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json")))
     p_capture.add_argument("--headless", action="store_true")
+    p_capture.add_argument("--auto-submit", action="store_true", help="Autofill email/password and click login steps before OTP.")
+    p_capture.add_argument("--linger-sec", type=int, default=0, help="Keep browser visible for N seconds after successful capture.")
 
     p_probe = sub.add_parser("probe", help="Check saved KDP session")
     p_probe.add_argument("--storage-path", default=str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json")))
@@ -473,7 +521,15 @@ def main() -> int:
 
     args = parser.parse_args()
     if args.cmd == "browser-capture":
-        return asyncio.run(browser_capture(int(args.timeout_sec), str(args.storage_path), bool(args.headless)))
+        return asyncio.run(
+            browser_capture(
+                int(args.timeout_sec),
+                str(args.storage_path),
+                bool(args.headless),
+                bool(args.auto_submit),
+                int(getattr(args, "linger_sec", 0) or 0),
+            )
+        )
     if args.cmd == "probe":
         return asyncio.run(probe_session(str(args.storage_path), bool(args.headless)))
     if args.cmd == "inventory":
