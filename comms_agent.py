@@ -1373,6 +1373,67 @@ class CommsAgent:
         output = (out_b or b"").decode("utf-8", errors="ignore")
         return int(proc.returncode or 0), output
 
+    async def _run_kdp_prepare_otp(self) -> tuple[int, str]:
+        cmd = [
+            "python3",
+            "scripts/kdp_auth_helper.py",
+            "prepare-otp",
+            "--timeout-sec",
+            "120",
+            "--preauth-state-path",
+            "runtime/kdp_preauth_state.json",
+            "--preauth-meta-path",
+            "runtime/kdp_preauth_meta.json",
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=180)
+        output = (out_b or b"").decode("utf-8", errors="ignore")
+        return int(proc.returncode or 0), output
+
+    async def _run_kdp_submit_otp(self, otp_code: str) -> tuple[int, str]:
+        storage = str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json") or "runtime/kdp_storage_state.json")
+        cmd = [
+            "python3",
+            "scripts/kdp_auth_helper.py",
+            "submit-otp",
+            "--timeout-sec",
+            "120",
+            "--preauth-state-path",
+            "runtime/kdp_preauth_state.json",
+            "--preauth-meta-path",
+            "runtime/kdp_preauth_meta.json",
+            "--storage-path",
+            storage,
+            "--otp-code",
+            str(otp_code or "").strip(),
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=180)
+        output = (out_b or b"").decode("utf-8", errors="ignore")
+        return int(proc.returncode or 0), output
+
+    def _reset_kdp_auth_state_files(self) -> None:
+        """Force fresh KDP auth by clearing preauth+storage artifacts."""
+        paths = [
+            PROJECT_ROOT / "runtime" / "kdp_preauth_state.json",
+            PROJECT_ROOT / "runtime" / "kdp_preauth_meta.json",
+            PROJECT_ROOT / "runtime" / "kdp_storage_state.json",
+        ]
+        for p in paths:
+            try:
+                if p.exists():
+                    p.unlink()
+            except Exception:
+                pass
+
     async def _handle_kdp_login_flow(self, text: str, send_reply, with_button: bool = False) -> bool:
         maybe_otp = self._extract_otp_code(text)
         if self._pending_kdp_otp and maybe_otp:
@@ -1388,7 +1449,10 @@ class CommsAgent:
                 self._pending_service_auth.pop("amazon_kdp", None)
                 await send_reply("Готово: вход в KDP подтвержден (live-check OK).")
                 return True
-            rc, out = await self._run_kdp_auto_login(otp_code=maybe_otp)
+            if bool((self._pending_kdp_otp or {}).get("prepared", False)):
+                rc, out = await self._run_kdp_submit_otp(maybe_otp)
+            else:
+                rc, out = await self._run_kdp_auto_login(otp_code=maybe_otp)
             if rc == 0:
                 self._pending_kdp_otp = None
                 self._mark_service_auth_confirmed("amazon_kdp")
@@ -1425,7 +1489,11 @@ class CommsAgent:
                 await send_reply("Готово: вход в KDP подтвержден (live-check OK).")
                 return True
             # Keep pending OTP mode to let owner send a fresh code immediately.
-            self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat(), "retry": True}
+            self._pending_kdp_otp = {
+                "requested_at": datetime.now(timezone.utc).isoformat(),
+                "retry": True,
+                "prepared": bool((self._pending_kdp_otp or {}).get("prepared", False)),
+            }
             msg = "Код не подтвердился. Пришли новый 6-значный код (без /kdp_login)."
             low_all = f"{str(out or '').lower()}\n{str(out2 or '').lower()}"
             if "otp_rejected" in low_all or "expired" in low_all or "invalid" in low_all:
@@ -1443,23 +1511,18 @@ class CommsAgent:
         if not self._is_kdp_login_request(text):
             return False
 
-        # 1) Быстрая проверка: возможно сессия уже валидна.
-        try:
-            probe_rc, _ = await self._run_kdp_probe_stable()
-            if probe_rc == 0:
-                self._mark_service_auth_confirmed("amazon_kdp")
-                await send_reply("Amazon KDP: активная сессия уже подтверждена, повторный логин не требуется.")
-                return True
-        except Exception:
-            pass
+        # Force fresh auth each time owner explicitly requests Amazon login.
+        self._pending_kdp_otp = None
+        self._pending_service_auth.pop("amazon_kdp", None)
+        self._clear_service_auth_confirmed("amazon_kdp")
+        self._reset_kdp_auth_state_files()
 
-        # 2) Предпочтительный путь: серверный auto-login (без VNC).
-        # Если нужен MFA — просим только 6-значный код.
-        rc, out = await self._run_kdp_auto_login()
+        # 2) Предпочтительный путь: подготовить MFA страницу и просить OTP только после этого.
+        rc, out = await self._run_kdp_prepare_otp()
         low = str(out or "").lower()
 
         def _is_mfa_required(_rc: int, _low: str) -> bool:
-            mfa_hints = ("otp_required", "otp code not provided", "/ap/mfa", "mfa?")
+            mfa_hints = ("otp_required", "otp code not provided", "/ap/mfa", "mfa?", "otp_ready")
             return _rc in {2, 3} or any(h in _low for h in mfa_hints)
 
         if rc == 0:
@@ -1469,7 +1532,7 @@ class CommsAgent:
             await send_reply("Готово: вход в Amazon KDP подтверждён и сессия сохранена.")
             return True
         if _is_mfa_required(rc, low):
-            self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat()}
+            self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat(), "prepared": True}
             await send_reply("Нужен 6-значный код из Amazon/Authenticator. Отправь его одним сообщением.")
             return True
 
@@ -1477,7 +1540,7 @@ class CommsAgent:
         # но повтор сразу доходит до MFA. Делаем один внутренний ретрай.
         if rc in {4, 5, 6, 9}:
             await asyncio.sleep(1.0)
-            rc2, out2 = await self._run_kdp_auto_login()
+            rc2, out2 = await self._run_kdp_prepare_otp()
             low2 = str(out2 or "").lower()
             if rc2 == 0:
                 self._pending_kdp_otp = None
@@ -1486,7 +1549,7 @@ class CommsAgent:
                 await send_reply("Готово: вход в Amazon KDP подтверждён и сессия сохранена.")
                 return True
             if _is_mfa_required(rc2, low2):
-                self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat()}
+                self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat(), "prepared": True}
                 await send_reply("Нужен 6-значный код из Amazon/Authenticator. Отправь его одним сообщением.")
                 return True
             rc, out = rc2, out2

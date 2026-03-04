@@ -678,13 +678,13 @@ async def test_on_message_kdp_login_real_path_bypasses_conversation(comms, mock_
     conv = MagicMock()
     conv.process_message = AsyncMock(return_value={"response": "SHOULD_NOT_BE_USED"})
     comms.set_modules(conversation_engine=conv)
-    comms._run_kdp_auto_login = AsyncMock(return_value=(0, "ok"))
+    comms._run_kdp_prepare_otp = AsyncMock(return_value=(2, "OTP_REQUIRED: send code now"))
 
     await comms._on_message(mock_update, MagicMock())
 
     conv.process_message.assert_not_called()
     sent_texts = [call.args[0] for call in mock_update.message.reply_text.call_args_list]
-    assert any("Amazon KDP" in text for text in sent_texts)
+    assert any(("Amazon KDP" in text or "6-значный код" in text) for text in sent_texts)
 
 
 @pytest.mark.asyncio
@@ -1188,24 +1188,24 @@ async def test_handle_callback_help_topic_daily(comms, mock_callback_query):
 
 
 @pytest.mark.asyncio
-async def test_handle_kdp_login_flow_skips_relogin_when_live_check_ok(comms):
+async def test_handle_kdp_login_flow_forces_fresh_auth_and_requests_otp(comms):
     comms._service_auth_confirmed["amazon_kdp"] = "2026-03-04T10:00:00+00:00"
     send_reply = AsyncMock()
-    comms._run_kdp_probe = AsyncMock(return_value=(0, "ok"))
+    comms._run_kdp_prepare_otp = AsyncMock(return_value=(2, "OTP_REQUIRED: send code now"))
     comms._run_kdp_auto_login = AsyncMock(return_value=(1, "should_not_run"))
     comms._run_remote_auth_session = AsyncMock(return_value=(0, "REMOTE_URL=http://127.0.0.1/novnc\nVNC_PASSWORD=test"))
     handled = await comms._handle_kdp_login_flow("зайди на амазон", send_reply, with_button=True)
     assert handled is True
+    comms._run_kdp_prepare_otp.assert_awaited_once()
     comms._run_kdp_auto_login.assert_not_awaited()
     comms._run_remote_auth_session.assert_not_awaited()
-    assert "активная сессия уже подтверждена" in send_reply.call_args.args[0]
+    assert "Нужен 6-значный код" in send_reply.call_args.args[0]
 
 
 @pytest.mark.asyncio
 async def test_handle_kdp_login_flow_no_remote_fallback_when_auto_login_fails(comms):
     send_reply = AsyncMock()
-    comms._run_kdp_probe = AsyncMock(return_value=(1, "need_login"))
-    comms._run_kdp_auto_login = AsyncMock(return_value=(9, "auto_login_failed"))
+    comms._run_kdp_prepare_otp = AsyncMock(return_value=(2, "OTP_REQUIRED: send code now"))
     comms._run_remote_auth_session = AsyncMock(
         return_value=(
             0,
@@ -1215,7 +1215,7 @@ async def test_handle_kdp_login_flow_no_remote_fallback_when_auto_login_fails(co
     handled = await comms._handle_kdp_login_flow("зайди на amazon kdp", send_reply, with_button=True)
     assert handled is True
     comms._run_remote_auth_session.assert_not_awaited()
-    assert "Не смог завершить вход автоматически" in send_reply.call_args.args[0]
+    assert "Нужен 6-значный код" in send_reply.call_args.args[0]
 
 
 @pytest.mark.asyncio
@@ -1266,14 +1266,13 @@ async def test_handle_kdp_login_flow_requests_otp_code_on_rc_2_without_hint(comm
 @pytest.mark.asyncio
 async def test_handle_kdp_login_flow_retries_after_transient_failure_and_requests_otp(comms):
     send_reply = AsyncMock()
-    comms._run_kdp_probe = AsyncMock(return_value=(2, "no_session"))
-    comms._run_kdp_auto_login = AsyncMock(side_effect=[(9, "ERROR: auto_login_exception=... url="), (2, "OTP_REQUIRED: send code now")])
+    comms._run_kdp_prepare_otp = AsyncMock(side_effect=[(9, "ERROR: prepare_otp_exception=..."), (2, "OTP_REQUIRED: send code now")])
     comms._run_remote_auth_session = AsyncMock(return_value=(0, "REMOTE_URL=http://127.0.0.1/novnc\nVNC_PASSWORD=test"))
 
     handled = await comms._handle_kdp_login_flow("зайди на amazon kdp", send_reply, with_button=True)
 
     assert handled is True
-    assert comms._run_kdp_auto_login.await_count == 2
+    assert comms._run_kdp_prepare_otp.await_count == 2
     comms._run_remote_auth_session.assert_not_awaited()
     assert "Нужен 6-значный код" in send_reply.call_args.args[0]
 
@@ -1281,8 +1280,7 @@ async def test_handle_kdp_login_flow_retries_after_transient_failure_and_request
 @pytest.mark.asyncio
 async def test_handle_kdp_login_flow_fallback_enables_forced_otp(comms):
     send_reply = AsyncMock()
-    comms._run_kdp_probe = AsyncMock(return_value=(2, "no_session"))
-    comms._run_kdp_auto_login = AsyncMock(side_effect=[(9, "ERROR: auto_login_exception=... url="), (9, "ERROR: auto_login_exception=... url=")])
+    comms._run_kdp_prepare_otp = AsyncMock(side_effect=[(9, "ERROR: prepare_otp_exception"), (9, "ERROR: prepare_otp_exception_retry")])
     comms._run_remote_auth_session = AsyncMock(return_value=(0, "REMOTE_URL=http://127.0.0.1/novnc\nVNC_PASSWORD=test"))
 
     handled = await comms._handle_kdp_login_flow("зайди на amazon kdp", send_reply, with_button=True)

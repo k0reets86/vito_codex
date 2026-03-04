@@ -13,6 +13,7 @@ import argparse
 import asyncio
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -20,6 +21,25 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from config.settings import settings
+
+OTP_SELECTORS = (
+    "input[name='otpCode']",
+    "input[name='code']",
+    "input[name='cvf_input_code']",
+    "input#auth-mfa-otpcode",
+    "input[type='tel']",
+    "input[type='number']",
+)
+OTP_SUBMIT_BUTTONS = (
+    "input#auth-signin-button",
+    "input[name='mfaSubmit']",
+    "input[name='cvf-submit-otp-button']",
+    "button#cvf-submit-otp-button",
+    "button:has-text('Sign in')",
+    "button:has-text('Verify')",
+    "button[type='submit']",
+    "input[type='submit']",
+)
 
 
 def _is_logged_in_url(url: str) -> bool:
@@ -261,24 +281,8 @@ async def auto_login(timeout_sec: int, storage_path: str, otp_code: str = "") ->
             print(f"STEP: password_submitted {page.url}")
 
         # Step 3: OTP/MFA (if present)
-            otp_selectors = (
-                "input[name='otpCode']",
-                "input[name='code']",
-                "input[name='cvf_input_code']",
-                "input#auth-mfa-otpcode",
-                "input[type='tel']",
-                "input[type='number']",
-            )
-            otp_submit_buttons = (
-                "input#auth-signin-button",
-                "input[name='mfaSubmit']",
-                "input[name='cvf-submit-otp-button']",
-                "button#cvf-submit-otp-button",
-                "button:has-text('Sign in')",
-                "button:has-text('Verify')",
-                "button[type='submit']",
-                "input[type='submit']",
-            )
+            otp_selectors = OTP_SELECTORS
+            otp_submit_buttons = OTP_SUBMIT_BUTTONS
             otp_found = False
             for sel in otp_selectors:
                 try:
@@ -445,6 +449,227 @@ async def auto_login(timeout_sec: int, storage_path: str, otp_code: str = "") ->
         return 9
 
 
+async def prepare_otp_session(timeout_sec: int, preauth_state_path: str, preauth_meta_path: str) -> int:
+    """Go to Amazon MFA page (after email+password), save pre-OTP session state."""
+    from playwright.async_api import async_playwright
+
+    email = str(getattr(settings, "KDP_EMAIL", "") or "")
+    password = str(getattr(settings, "KDP_PASSWORD", "") or "")
+    state_out = Path(preauth_state_path)
+    meta_out = Path(preauth_meta_path)
+    state_out.parent.mkdir(parents=True, exist_ok=True)
+    meta_out.parent.mkdir(parents=True, exist_ok=True)
+
+    if not email or not password:
+        print("ERROR: KDP_EMAIL/KDP_PASSWORD missing in .env")
+        return 1
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True, args=_chromium_launch_args())
+        context = await browser.new_context(viewport={"width": 1366, "height": 900})
+        page = await context.new_page()
+        await page.goto("https://kdp.amazon.com", wait_until="domcontentloaded", timeout=120000)
+        await page.wait_for_timeout(1000)
+        print(f"STEP: opened {page.url}")
+
+        if await page.locator("input[name='ap_email'], input[type='email'], input[name='email']").count() == 0:
+            moved = False
+            for sel in ("a[href='/bookshelf']", "a:has-text('Sign in')"):
+                try:
+                    if await page.locator(sel).count() > 0:
+                        await page.click(sel, timeout=3000)
+                        moved = True
+                        break
+                except Exception:
+                    continue
+            if not moved:
+                await page.goto("https://kdp.amazon.com/bookshelf", wait_until="domcontentloaded", timeout=120000)
+            await page.wait_for_timeout(1200)
+            print(f"STEP: moved_to_signin {page.url}")
+
+        email_ok = False
+        for sel in ("input[name='email']", "input[name='ap_email']", "input[type='email']"):
+            try:
+                if await page.locator(sel).count() > 0:
+                    await page.fill(sel, email, timeout=3000)
+                    email_ok = True
+                    break
+            except Exception:
+                continue
+        if not email_ok:
+            await context.close()
+            await browser.close()
+            print(f"ERROR: email input not found. current_url={page.url}")
+            return 5
+        for btn in ("input#continue", "input[name='continue']", "button:has-text('Continue')"):
+            try:
+                if await page.locator(btn).count() > 0:
+                    await page.click(btn, timeout=2000)
+                    break
+            except Exception:
+                continue
+        await page.wait_for_timeout(900)
+        print(f"STEP: email_submitted {page.url}")
+
+        pwd_ok = False
+        for sel in ("input[name='password']", "input[name='ap_password']", "input[type='password']"):
+            try:
+                if await page.locator(sel).count() > 0:
+                    await page.fill(sel, password, timeout=3000)
+                    pwd_ok = True
+                    break
+            except Exception:
+                continue
+        if not pwd_ok:
+            await context.close()
+            await browser.close()
+            print(f"ERROR: password input not found. current_url={page.url}")
+            return 6
+        for btn in ("input#signInSubmit", "input[name='signInSubmit']", "button:has-text('Sign in')"):
+            try:
+                if await page.locator(btn).count() > 0:
+                    await page.click(btn, timeout=2500)
+                    break
+            except Exception:
+                continue
+        await page.wait_for_timeout(1200)
+        print(f"STEP: password_submitted {page.url}")
+
+        end_ts = asyncio.get_event_loop().time() + max(20, int(timeout_sec))
+        is_otp = False
+        while asyncio.get_event_loop().time() < end_ts:
+            if any((await page.locator(sel).count()) > 0 for sel in OTP_SELECTORS):
+                is_otp = True
+                break
+            if _is_logged_in_url(page.url):
+                await context.storage_state(path=str(state_out))
+                meta = {"prepared": False, "already_logged_in": True, "url": page.url, "ts": datetime.now(timezone.utc).isoformat()}
+                meta_out.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+                await context.close()
+                await browser.close()
+                print(f'{{"ok": true, "already_logged_in": true, "state": "{state_out}"}}')
+                return 0
+            await page.wait_for_timeout(800)
+
+        if not is_otp:
+            shot = state_out.with_suffix(".prepare.failed.png")
+            try:
+                await page.screenshot(path=str(shot), full_page=True)
+            except Exception:
+                pass
+            await context.close()
+            await browser.close()
+            print(f"ERROR: OTP page not reached. debug={shot}")
+            return 4
+
+        await context.storage_state(path=str(state_out))
+        meta = {"prepared": True, "url": page.url, "ts": datetime.now(timezone.utc).isoformat()}
+        meta_out.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        await context.close()
+        await browser.close()
+        print(f'{{"ok": true, "otp_ready": true, "state": "{state_out}", "url": "{page.url}"}}')
+        return 0
+
+
+async def submit_otp_from_preauth(timeout_sec: int, preauth_state_path: str, preauth_meta_path: str, storage_path: str, otp_code: str) -> int:
+    """Submit OTP on pre-authenticated MFA page without re-entering email/password."""
+    from playwright.async_api import async_playwright
+
+    if not otp_code:
+        print("ERROR: otp_code missing")
+        return 2
+
+    pre_state = Path(preauth_state_path)
+    pre_meta = Path(preauth_meta_path)
+    out = Path(storage_path)
+    if not pre_state.exists():
+        print(f"ERROR: preauth_state not found: {pre_state}")
+        return 1
+    target_url = "https://www.amazon.com/ap/mfa"
+    if pre_meta.exists():
+        try:
+            meta = json.loads(pre_meta.read_text(encoding="utf-8"))
+            u = str(meta.get("url") or "").strip()
+            if u:
+                target_url = u
+        except Exception:
+            pass
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True, args=_chromium_launch_args())
+        context = await browser.new_context(storage_state=str(pre_state), viewport={"width": 1366, "height": 900})
+        page = await context.new_page()
+        await page.goto(target_url, wait_until="domcontentloaded", timeout=120000)
+        await page.wait_for_timeout(600)
+
+        filled = False
+        for sel in OTP_SELECTORS:
+            try:
+                if await page.locator(sel).count() > 0:
+                    await page.fill(sel, otp_code, timeout=2500)
+                    print(f"STEP: otp_filled selector={sel}")
+                    filled = True
+                    break
+            except Exception:
+                continue
+        if not filled:
+            await context.close()
+            await browser.close()
+            print(f"ERROR: OTP input not found on preauth page. url={page.url}")
+            return 3
+
+        for btn in OTP_SUBMIT_BUTTONS:
+            try:
+                if await page.locator(btn).count() > 0:
+                    await page.click(btn, timeout=2500)
+                    print(f"STEP: otp_submitted button={btn} url={page.url}")
+                    break
+            except Exception:
+                continue
+        await page.wait_for_timeout(1200)
+
+        end_ts = asyncio.get_event_loop().time() + max(40, int(timeout_sec))
+        while asyncio.get_event_loop().time() < end_ts:
+            if _is_logged_in_url(page.url):
+                await context.storage_state(path=str(out))
+                await context.close()
+                await browser.close()
+                print(f'{{"ok": true, "storage_state": "{out}"}}')
+                return 0
+            try:
+                err_text = await page.evaluate(
+                    """() => {
+                      const sels = ['#auth-error-message-box .a-alert-content','.a-alert-content','#cvf-error-message','.cvf-widget-alert-message'];
+                      for (const s of sels) { const el = document.querySelector(s); if (el && el.textContent) return el.textContent.trim(); }
+                      return '';
+                    }"""
+                )
+            except Exception:
+                err_text = ""
+            low_err = str(err_text or "").lower()
+            if low_err and any(t in low_err for t in ("incorrect", "invalid", "expired", "wrong", "невер", "истек")):
+                shot = out.with_suffix(".otp_rejected.png")
+                try:
+                    await page.screenshot(path=str(shot), full_page=True)
+                except Exception:
+                    pass
+                await context.close()
+                await browser.close()
+                print(f"ERROR: otp_rejected message={err_text[:300]} debug={shot}")
+                return 7
+            await page.wait_for_timeout(900)
+
+        shot = out.with_suffix(".otp_timeout.png")
+        try:
+            await page.screenshot(path=str(shot), full_page=True)
+        except Exception:
+            pass
+        await context.close()
+        await browser.close()
+        print(f"ERROR: otp_submit_timeout url={target_url} debug={shot}")
+        return 8
+
+
 async def probe_session(storage_path: str, headless: bool) -> int:
     from playwright.async_api import async_playwright
 
@@ -571,6 +796,18 @@ def main() -> int:
     p_auto.add_argument("--storage-path", default=str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json")))
     p_auto.add_argument("--otp-code", default="")
 
+    p_prepare = sub.add_parser("prepare-otp", help="Prepare MFA page and save preauth session")
+    p_prepare.add_argument("--timeout-sec", type=int, default=120)
+    p_prepare.add_argument("--preauth-state-path", default="runtime/kdp_preauth_state.json")
+    p_prepare.add_argument("--preauth-meta-path", default="runtime/kdp_preauth_meta.json")
+
+    p_submit = sub.add_parser("submit-otp", help="Submit OTP using preauth session")
+    p_submit.add_argument("--timeout-sec", type=int, default=120)
+    p_submit.add_argument("--preauth-state-path", default="runtime/kdp_preauth_state.json")
+    p_submit.add_argument("--preauth-meta-path", default="runtime/kdp_preauth_meta.json")
+    p_submit.add_argument("--storage-path", default=str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json")))
+    p_submit.add_argument("--otp-code", required=True)
+
     args = parser.parse_args()
     if args.cmd == "browser-capture":
         return asyncio.run(
@@ -588,6 +825,18 @@ def main() -> int:
         return asyncio.run(inventory_snapshot(str(args.storage_path), bool(args.headless)))
     if args.cmd == "auto-login":
         return asyncio.run(auto_login(int(args.timeout_sec), str(args.storage_path), str(args.otp_code or "")))
+    if args.cmd == "prepare-otp":
+        return asyncio.run(prepare_otp_session(int(args.timeout_sec), str(args.preauth_state_path), str(args.preauth_meta_path)))
+    if args.cmd == "submit-otp":
+        return asyncio.run(
+            submit_otp_from_preauth(
+                int(args.timeout_sec),
+                str(args.preauth_state_path),
+                str(args.preauth_meta_path),
+                str(args.storage_path),
+                str(args.otp_code or ""),
+            )
+        )
     return 1
 
 
