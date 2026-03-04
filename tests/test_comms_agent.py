@@ -1192,9 +1192,11 @@ async def test_handle_kdp_login_flow_skips_relogin_when_live_check_ok(comms):
     comms._service_auth_confirmed["amazon_kdp"] = "2026-03-04T10:00:00+00:00"
     send_reply = AsyncMock()
     comms._run_kdp_probe = AsyncMock(return_value=(0, "ok"))
+    comms._run_kdp_auto_login = AsyncMock(return_value=(1, "should_not_run"))
     comms._run_remote_auth_session = AsyncMock(return_value=(0, "REMOTE_URL=http://127.0.0.1/novnc\nVNC_PASSWORD=test"))
     handled = await comms._handle_kdp_login_flow("зайди на амазон", send_reply, with_button=True)
     assert handled is True
+    comms._run_kdp_auto_login.assert_not_awaited()
     comms._run_remote_auth_session.assert_not_awaited()
     assert "активная сессия уже подтверждена" in send_reply.call_args.args[0]
 
@@ -1203,6 +1205,7 @@ async def test_handle_kdp_login_flow_skips_relogin_when_live_check_ok(comms):
 async def test_handle_kdp_login_flow_starts_remote_auth_session(comms):
     send_reply = AsyncMock()
     comms._run_kdp_probe = AsyncMock(return_value=(1, "need_login"))
+    comms._run_kdp_auto_login = AsyncMock(return_value=(9, "auto_login_failed"))
     comms._run_remote_auth_session = AsyncMock(
         return_value=(
             0,
@@ -1213,6 +1216,21 @@ async def test_handle_kdp_login_flow_starts_remote_auth_session(comms):
     assert handled is True
     assert "amazon_kdp" in comms._pending_service_auth
     assert "удалённом браузере сервера" in send_reply.call_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_handle_kdp_login_flow_requests_otp_code(comms):
+    send_reply = AsyncMock()
+    comms._run_kdp_probe = AsyncMock(return_value=(2, "no_session"))
+    comms._run_kdp_auto_login = AsyncMock(return_value=(2, "OTP_REQUIRED: send code now"))
+    comms._run_remote_auth_session = AsyncMock(return_value=(0, "REMOTE_URL=http://127.0.0.1/novnc\nVNC_PASSWORD=test"))
+
+    handled = await comms._handle_kdp_login_flow("зайди на amazon kdp", send_reply, with_button=True)
+
+    assert handled is True
+    assert comms._pending_kdp_otp is not None
+    comms._run_remote_auth_session.assert_not_awaited()
+    assert "Нужен 6-значный код" in send_reply.call_args.args[0]
 
 
 @pytest.mark.asyncio

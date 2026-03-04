@@ -1375,8 +1375,32 @@ class CommsAgent:
         if not self._is_kdp_login_request(text):
             return False
 
-        # Единый путь для Amazon: всегда remote browser-session flow.
-        # Иначе кнопка «Я вошел» подтверждает клиентский вход, но не серверную сессию VITO.
+        # 1) Быстрая проверка: возможно сессия уже валидна.
+        try:
+            probe_rc, _ = await self._run_kdp_probe()
+            if probe_rc == 0:
+                self._mark_service_auth_confirmed("amazon_kdp")
+                await send_reply("Amazon KDP: активная сессия уже подтверждена, повторный логин не требуется.")
+                return True
+        except Exception:
+            pass
+
+        # 2) Предпочтительный путь: серверный auto-login (без VNC).
+        # Если нужен MFA — просим только 6-значный код.
+        rc, out = await self._run_kdp_auto_login()
+        low = str(out or "").lower()
+        if rc == 0:
+            self._pending_kdp_otp = None
+            self._mark_service_auth_confirmed("amazon_kdp")
+            self._pending_service_auth.pop("amazon_kdp", None)
+            await send_reply("Готово: вход в Amazon KDP подтверждён и сессия сохранена.")
+            return True
+        if "otp_required" in low:
+            self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat()}
+            await send_reply("Нужен 6-значный код из Amazon/Authenticator. Отправь его одним сообщением.")
+            return True
+
+        # 3) Fallback: remote browser flow (если auto-login упёрся в challenge/captcha/UI).
         return await self._start_service_auth_flow("amazon_kdp", send_reply, with_button=with_button)
 
     def _log_owner_request(self, text: str, source: str = "text") -> None:
