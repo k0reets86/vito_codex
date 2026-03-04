@@ -69,6 +69,22 @@ async def _launch_browser(p):
             raise
 
 
+async def _launch_gumroad_publish_browser(p):
+    """Stable browser profile for Gumroad creation flow."""
+    headless = os.environ.get("VITO_BROWSER_HEADLESS", "1").lower() not in ("0", "false", "no")
+    return await p.chromium.launch(
+        headless=headless,
+        args=[
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            "--disable-software-rasterizer",
+            "--disable-blink-features=AutomationControlled",
+        ],
+        chromium_sandbox=False,
+    )
+
+
 class GumroadPlatform(BasePlatform):
     def __init__(self, **kwargs):
         super().__init__(name="gumroad", **kwargs)
@@ -279,7 +295,7 @@ class GumroadPlatform(BasePlatform):
             return False
         try:
             async with async_playwright() as p:
-                br = await _launch_browser(p)
+                br = await _launch_gumroad_publish_browser(p)
                 ctx = await br.new_context(
                     viewport={"width": 1280, "height": 1400},
                     user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
@@ -357,6 +373,20 @@ class GumroadPlatform(BasePlatform):
         pdf_path = content.get("pdf_path", "")
         cover_path = content.get("cover_path", "")
         thumb_path = content.get("thumb_path", "")
+        taxonomy_id_cfg = str(content.get("taxonomy_id", "66") or "66")
+        tags_cfg = content.get("tags", ["automation", "ai", "productivity", "workflow"]) or ["automation", "ai", "productivity", "workflow"]
+        if not isinstance(tags_cfg, list):
+            tags_cfg = [str(tags_cfg)]
+        tags_cfg = [str(t).strip().lower()[:32] for t in tags_cfg if str(t).strip()][:12]
+        if not tags_cfg:
+            tags_cfg = ["automation", "ai", "productivity", "workflow"]
+        before_ids: set[str] = set()
+        if not allow_existing_update:
+            try:
+                existing_before = await self.get_products()
+                before_ids = {str((x or {}).get("id") or "") for x in existing_before if (x or {}).get("id")}
+            except Exception:
+                before_ids = set()
 
         try:
             from playwright.async_api import async_playwright
@@ -469,6 +499,80 @@ class GumroadPlatform(BasePlatform):
                         return ""
                     return ""
 
+                async def _reopen_new_product_from_products_page() -> bool:
+                    """Try to recover create flow when Gumroad redirects /products/new -> /products."""
+                    try:
+                        # Direct link first
+                        href = await page.evaluate("""() => {
+                            const direct = Array.from(document.querySelectorAll('a[href*="/products/new"]')).find(Boolean);
+                            if (direct) return direct.getAttribute('href') || '';
+                            const nodes = Array.from(document.querySelectorAll('a,button'));
+                            for (const n of nodes) {
+                                const text = (n.textContent || '').trim().toLowerCase();
+                                if (text.includes('new product') || text.includes('create product') || text.includes('create')) {
+                                    if (n.tagName.toLowerCase() === 'a') return n.getAttribute('href') || '';
+                                }
+                            }
+                            return '';
+                        }""")
+                        if href:
+                            if href.startswith("/"):
+                                href = f"https://gumroad.com{href}"
+                            await page.goto(href, wait_until="domcontentloaded")
+                            await asyncio.sleep(2)
+                            if "/products/new" in page.url or "/products/" in page.url:
+                                return True
+                        # Button fallback
+                        for sel in [
+                            'a:has-text("New product")',
+                            'button:has-text("New product")',
+                            'a:has-text("Create")',
+                            'button:has-text("Create")',
+                        ]:
+                            try:
+                                loc = page.locator(sel).first
+                                if await loc.is_visible(timeout=1500):
+                                    await loc.click()
+                                    await asyncio.sleep(2)
+                                    if "/products/new" in page.url or "/products/" in page.url:
+                                        return True
+                            except Exception:
+                                continue
+                    except Exception:
+                        return False
+                    return False
+
+                async def _has_new_product_form() -> bool:
+                    try:
+                        name_ok = await page.locator('input[id^="name-"], input[placeholder^="Name"], input[name="name"]').count() > 0
+                        price_ok = await page.locator('input[id^="price-"], input[placeholder*="Price"], input[name="price"]').count() > 0
+                        next_ok = await page.locator('button[type="submit"][form^="new-product-form"], button:has-text("Next: Customize"), button:has-text("Next")').count() > 0
+                        return bool(name_ok and (price_ok or next_ok))
+                    except Exception:
+                        return False
+
+                async def _find_newly_created_draft() -> tuple[str, str]:
+                    """Detect newly created listing by diffing products before/after create attempt."""
+                    try:
+                        existing = await self.get_products()
+                        for prod in existing:
+                            pid = str(prod.get("id") or "")
+                            if not pid or pid in before_ids:
+                                continue
+                            if str(prod.get("name") or "").strip() != str(name).strip():
+                                continue
+                            short = prod.get("short_url", "") or prod.get("url", "")
+                            slug_local = ""
+                            if "/l/" in short:
+                                slug_local = short.split("/l/")[-1].split("?")[0]
+                            elif "gum.co/" in short:
+                                slug_local = short.rsplit("/", 1)[-1]
+                            if slug_local:
+                                return pid, slug_local
+                    except Exception:
+                        return "", ""
+                    return "", ""
+
                 if slug_from_api:
                     await page.goto(f"https://gumroad.com/products/{slug_from_api}/edit", wait_until="domcontentloaded")
                     await asyncio.sleep(2)
@@ -477,15 +581,47 @@ class GumroadPlatform(BasePlatform):
                     logger.info("Gumroad: open new product page", extra={"event": "gumroad_new_product"})
                     await page.goto("https://gumroad.com/products/new", wait_until="domcontentloaded")
                     await asyncio.sleep(2)
-                    # If redirected to products list and updates are not allowed, stop immediately
-                    try:
-                        if page.url.rstrip("/").endswith("/products") and not content.get("allow_existing_update"):
+                    # Recover flaky redirects until new-product form is actually present.
+                    if not await _has_new_product_form():
+                        recovered_form = False
+                        for _ in range(3):
+                            if page.url.rstrip("/").endswith("/products"):
+                                await _reopen_new_product_from_products_page()
+                            if await _has_new_product_form():
+                                recovered_form = True
+                                break
+                            await page.goto("https://gumroad.com/products/new", wait_until="domcontentloaded")
+                            await asyncio.sleep(2)
+                        if recovered_form:
+                            logger.info("Gumroad: new product form recovered", extra={"event": "gumroad_new_form_recovered"})
+                        elif not content.get("allow_existing_update"):
                             return {
                                 "platform": "gumroad",
                                 "status": "daily_limit",
-                                "error": "redirected_to_products_list_update_not_allowed",
+                                "error": "new_product_form_unavailable",
                                 "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
                             }
+                    # If redirected to products list and updates are not allowed, stop immediately
+                    try:
+                        if page.url.rstrip("/").endswith("/products") and not content.get("allow_existing_update"):
+                            # Sometimes Gumroad creates draft but returns to list; detect and attach to that draft.
+                            new_pid, new_slug = await _find_newly_created_draft()
+                            if new_slug:
+                                slug_from_api = new_slug
+                                product_id = new_pid
+                                await page.goto(f"https://gumroad.com/products/{new_slug}/edit", wait_until="domcontentloaded")
+                                await asyncio.sleep(2)
+                                logger.info("Gumroad: adopted newly created draft after list redirect", extra={"event": "gumroad_adopt_new_draft", "context": {"product_id": new_pid}})
+                            else:
+                                recovered = await _reopen_new_product_from_products_page()
+                                if not recovered or page.url.rstrip("/").endswith("/products"):
+                                    return {
+                                        "platform": "gumroad",
+                                        "status": "daily_limit",
+                                        "error": "redirected_to_products_list_update_not_allowed",
+                                        "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
+                                    }
+                                logger.info("Gumroad: create flow recovered from /products redirect", extra={"event": "gumroad_recover_new_flow"})
                     except Exception:
                         pass
                     if "login" in page.url:
@@ -550,9 +686,30 @@ class GumroadPlatform(BasePlatform):
 
                 # Fill price
                 try:
-                    price_el = page.locator('input[id^="price-"], input[placeholder*="Price"]').first
+                    price_el = page.locator('input[id*="price-cents"]:not([id*="suggested"]), input[id^="price-"], input[placeholder*="Price"]').first
                     if await price_el.is_visible(timeout=3000):
                         await price_el.fill(price)
+                        try:
+                            await price_el.press("Tab")
+                        except Exception:
+                            pass
+                        current_price = (await price_el.input_value()).strip()
+                        current_digits = "".join(ch for ch in current_price if ch.isdigit())
+                        if current_digits != str(price):
+                            await page.evaluate(
+                                """(val) => {
+                                    const els = Array.from(document.querySelectorAll('input[id*=\"price-cents\"]'))
+                                      .filter(el => !(el.id || '').includes('suggested'));
+                                    for (const el of els) {
+                                        el.focus();
+                                        el.value = String(val);
+                                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                                        el.blur();
+                                    }
+                                }""",
+                                str(price),
+                            )
                 except Exception:
                     pass
 
@@ -610,12 +767,20 @@ class GumroadPlatform(BasePlatform):
                         if allow_existing_update:
                             slug_from_api = await _open_product_from_products_page(name) or await _open_existing_product(name, allow_update=True)
                         else:
-                            return {
-                                "platform": "gumroad",
-                                "status": "daily_limit",
-                                "error": "new_draft_not_created_no_existing_update_allowed",
-                                "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
-                            }
+                            new_pid, new_slug = await _find_newly_created_draft()
+                            if new_slug:
+                                product_id = new_pid
+                                slug_from_api = new_slug
+                                await page.goto(f"https://gumroad.com/products/{new_slug}/edit", wait_until="domcontentloaded")
+                                await asyncio.sleep(2)
+                                logger.info("Gumroad: adopted draft after submit redirect", extra={"event": "gumroad_adopt_new_draft", "context": {"product_id": new_pid}})
+                            else:
+                                return {
+                                    "platform": "gumroad",
+                                    "status": "daily_limit",
+                                    "error": "new_draft_not_created_no_existing_update_allowed",
+                                    "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
+                                }
                     elif "/products/" not in page.url:
                         if allow_existing_update:
                             slug_from_api = await _open_existing_product(name, allow_update=True)
@@ -659,6 +824,13 @@ class GumroadPlatform(BasePlatform):
                 try:
                     if await summary_el.is_visible(timeout=3000):
                         await summary_el.fill(summary)
+                        try:
+                            await summary_el.press("Tab")
+                        except Exception:
+                            pass
+                        val = await summary_el.input_value()
+                        if not str(val or "").strip():
+                            await summary_el.fill(summary)
                         logger.info("Gumroad: summary filled", extra={"event": "gumroad_summary_filled"})
                 except Exception:
                     pass
@@ -670,11 +842,51 @@ class GumroadPlatform(BasePlatform):
                         await desc_el.click()
                         await page.keyboard.press("Control+a")
                         await page.keyboard.press("Backspace")
-                        for line in description.strip().split("\n"):
-                            if line.strip():
-                                await page.keyboard.type(line, delay=1)
-                            await page.keyboard.press("Enter")
+                        desc_lines = [ln for ln in description.strip().split("\n") if ln.strip()]
+                        if not desc_lines:
+                            desc_lines = [description.strip()]
+                        for i, line in enumerate(desc_lines):
+                            await page.keyboard.type(line, delay=1)
+                            if i != len(desc_lines) - 1:
+                                await page.keyboard.press("Enter")
+                        # Verify + fallback set (Tiptap can ignore keyboard input intermittently in headless mode)
+                        current_desc = (await desc_el.inner_text()).strip()
+                        if len(current_desc) < min(24, max(1, len(description.strip()) // 5)):
+                            await page.evaluate(
+                                """(text) => {
+                                    const el = document.querySelector('[contenteditable="true"]');
+                                    if (!el) return;
+                                    el.focus();
+                                    el.innerHTML = '';
+                                    const p = document.createElement('p');
+                                    p.textContent = text;
+                                    el.appendChild(p);
+                                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                                    el.blur();
+                                }""",
+                                description.strip(),
+                            )
+                        try:
+                            await page.keyboard.press("Tab")
+                        except Exception:
+                            pass
                         logger.info("Gumroad: description filled", extra={"event": "gumroad_description_filled"})
+                except Exception:
+                    pass
+
+                # Save Product tab edits explicitly before moving to Share/Content tabs.
+                try:
+                    for sel in [
+                        'button:has-text("Save changes")',
+                        'button:has-text("Save and continue")',
+                        'button:has-text("Save")',
+                    ]:
+                        btn = page.locator(sel).first
+                        if await btn.is_visible(timeout=1500):
+                            await btn.click()
+                            await asyncio.sleep(2)
+                            break
                 except Exception:
                     pass
 
@@ -794,7 +1006,7 @@ class GumroadPlatform(BasePlatform):
                             combos = page.locator('input[role="combobox"]')
                             if await combos.count() >= 2:
                                 tag_cb = combos.nth(1)
-                                for tag in ["automation", "ai", "productivity", "workflow"]:
+                                for tag in tags_cfg[:8]:
                                     await tag_cb.fill(tag)
                                     await page.keyboard.press("Enter")
                                     await asyncio.sleep(0.1)
@@ -871,7 +1083,7 @@ class GumroadPlatform(BasePlatform):
                 try:
                     tag_input = page.get_by_label("Tags").first
                     if await tag_input.is_visible(timeout=1500):
-                        for tag in ["automation", "ai", "productivity", "workflow"]:
+                        for tag in tags_cfg[:8]:
                             await tag_input.fill(tag)
                             await page.keyboard.press("Enter")
                             await asyncio.sleep(0.1)
@@ -880,8 +1092,8 @@ class GumroadPlatform(BasePlatform):
                     pass
 
                 # Try set category/tags via API (React UI is dynamic)
-                taxonomy_id = "66"  # Programming
-                tags = ["automation", "ai", "productivity", "workflow"]
+                taxonomy_id = taxonomy_id_cfg
+                tags = tags_cfg
                 async def _set_taxonomy_and_tags() -> bool:
                     try:
                         slug_local = slug or ""
