@@ -2028,6 +2028,18 @@ class CommsAgent:
             "4) /approve или /reject"
         )
 
+    @staticmethod
+    def _help_inline_keyboard() -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("Ежедневные", callback_data="help_topic:daily"),
+                    InlineKeyboardButton("Редкие", callback_data="help_topic:rare"),
+                ],
+                [InlineKeyboardButton("Системные", callback_data="help_topic:system")],
+            ]
+        )
+
     async def _cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self._reject_stranger(update):
             return
@@ -2049,7 +2061,10 @@ class CommsAgent:
         args = getattr(context, "args", None) or []
         topic = args[0] if args else None
         text = self._render_help(topic=topic)
-        await update.message.reply_text(text, reply_markup=self._main_keyboard())
+        if topic:
+            await update.message.reply_text(text, reply_markup=self._main_keyboard())
+            return
+        await update.message.reply_text(text, reply_markup=self._help_inline_keyboard())
 
     async def _cmd_help_daily(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self._reject_stranger(update):
@@ -3989,6 +4004,13 @@ class CommsAgent:
             return
 
         action, request_id = parts
+
+        if action == "help_topic":
+            topic = str(request_id or "").strip().lower()
+            await query.answer("Открываю")
+            text = self._render_help(topic if topic in {"daily", "rare", "system"} else None)
+            await self._safe_edit_callback_message(query, text)
+            return
 
         if action == "auth_cancel":
             self._pending_service_auth.pop(request_id, None)

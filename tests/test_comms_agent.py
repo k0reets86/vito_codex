@@ -95,6 +95,24 @@ async def test_cmd_start_stranger(comms, stranger_update):
 
 
 @pytest.mark.asyncio
+async def test_cmd_help_without_topic_uses_inline_sections(comms, mock_update):
+    ctx = MagicMock()
+    ctx.args = []
+
+    await comms._cmd_help(mock_update, ctx)
+
+    kwargs = mock_update.message.reply_text.call_args[1]
+    from telegram import InlineKeyboardMarkup
+
+    assert isinstance(kwargs["reply_markup"], InlineKeyboardMarkup)
+    rows = kwargs["reply_markup"].inline_keyboard
+    labels = [btn.text for row in rows for btn in row]
+    assert "Ежедневные" in labels
+    assert "Редкие" in labels
+    assert "Системные" in labels
+
+
+@pytest.mark.asyncio
 async def test_cmd_status(comms, mock_update):
     dl_mock = MagicMock()
     dl_mock.get_status.return_value = {"running": True, "tick_count": 5, "daily_spend": 1.23}
@@ -1130,6 +1148,19 @@ async def test_handle_callback_auth_done_survives_noneditable_message(comms, moc
     mock_callback_query.answer.assert_called_once_with("Вход подтверждён")
     comms.send_message.assert_awaited()
     assert "amazon_kdp" in comms._service_auth_confirmed
+
+
+@pytest.mark.asyncio
+async def test_handle_callback_help_topic_daily(comms, mock_callback_query):
+    update = MagicMock()
+    update.callback_query = mock_callback_query
+    mock_callback_query.data = "help_topic:daily"
+
+    await comms._handle_callback(update, MagicMock())
+
+    mock_callback_query.answer.assert_called_once_with("Открываю")
+    edited = mock_callback_query.edit_message_text.call_args[1]["text"]
+    assert "Ежедневные команды" in edited
 
 
 @pytest.mark.asyncio
