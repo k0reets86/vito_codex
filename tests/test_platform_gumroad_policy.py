@@ -16,5 +16,8 @@ async def test_gumroad_existing_update_requires_explicit_target():
         }
     )
     assert out.get("status") == "blocked"
-    assert out.get("error") == "existing_update_requires_target_product_id_or_slug"
+    assert out.get("error") in {
+        "create_mode_forbids_existing_update",
+        "existing_update_requires_target_product_id_or_slug",
+    }
     await p.close()

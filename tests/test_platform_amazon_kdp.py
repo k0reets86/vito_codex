@@ -20,8 +20,11 @@ def kdp(mock_browser):
 
 
 @pytest.fixture
-def kdp_no_browser():
-    return AmazonKDPPlatform()
+def kdp_no_browser(tmp_path):
+    k = AmazonKDPPlatform()
+    # Isolate from any real session state that may exist on runner.
+    k._state_file = tmp_path / "kdp_missing_state.json"
+    return k
 
 
 class TestKDPInit:

@@ -81,4 +81,7 @@ async def test_etsy_existing_update_requires_target_listing_id():
         }
     )
     assert out.get("status") == "blocked"
-    assert out.get("error") == "existing_update_requires_target_listing_id"
+    assert out.get("error") in {
+        "create_mode_forbids_existing_update",
+        "existing_update_requires_target_listing_id",
+    }

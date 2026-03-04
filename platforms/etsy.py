@@ -19,6 +19,7 @@ from config.logger import get_logger
 from config.paths import PROJECT_ROOT
 from config.settings import settings
 from modules.execution_facts import ExecutionFacts
+from modules.listing_optimizer import optimize_listing_payload
 from platforms.base_platform import BasePlatform
 
 logger = get_logger("etsy", agent="etsy")
@@ -128,6 +129,7 @@ class EtsyPlatform(BasePlatform):
         return False
 
     async def _publish_via_browser(self, content: dict) -> dict:
+        content = optimize_listing_payload("etsy", content or {})
         operation = str(content.get("operation") or "create").strip().lower()
         allow_existing_update = bool(content.get("allow_existing_update"))
         owner_edit_confirmed = bool(content.get("owner_edit_confirmed"))

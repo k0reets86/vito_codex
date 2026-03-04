@@ -5,6 +5,7 @@ from typing import Any
 
 from config.logger import get_logger
 from config.settings import settings
+from modules.listing_optimizer import optimize_listing_payload
 from platforms.base_platform import BasePlatform
 
 logger = get_logger("amazon_kdp", agent="amazon_kdp")
@@ -83,6 +84,7 @@ class AmazonKDPPlatform(BasePlatform):
 
     async def publish(self, content: dict) -> dict:
         """Публикация через BrowserAgent — заполнение форм KDP."""
+        content = optimize_listing_payload("amazon_kdp", content or {})
         operation = str(content.get("operation") or "create").strip().lower()
         allow_existing_update = bool(content.get("allow_existing_update"))
         owner_edit_confirmed = bool(content.get("owner_edit_confirmed"))

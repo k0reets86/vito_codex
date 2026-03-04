@@ -17,6 +17,7 @@ from config.settings import settings
 from platforms.base_platform import BasePlatform
 from modules.network_utils import network_available, network_status
 from modules.execution_facts import ExecutionFacts
+from modules.listing_optimizer import optimize_listing_payload
 
 logger = get_logger("gumroad", agent="gumroad")
 API_BASE = "https://api.gumroad.com/v2"
@@ -162,6 +163,7 @@ class GumroadPlatform(BasePlatform):
 
         Gumroad API does NOT support product creation (404). Uses Playwright + session cookie.
         """
+        content = optimize_listing_payload("gumroad", content or {})
         # Dry-run path: validate payload and return deterministic evidence without touching live account.
         if bool(content.get("dry_run")):
             name = str(content.get("name") or "VITO Gumroad DryRun").strip()
