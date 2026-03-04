@@ -1400,8 +1400,18 @@ class CommsAgent:
             await send_reply("Нужен 6-значный код из Amazon/Authenticator. Отправь его одним сообщением.")
             return True
 
-        # 3) Fallback: remote browser flow (если auto-login упёрся в challenge/captcha/UI).
-        return await self._start_service_auth_flow("amazon_kdp", send_reply, with_button=with_button)
+        # 3) Без VNC fallback для Amazon в обычном диалоге:
+        # remote-browser часто нестабилен на сервере и даёт "черный экран".
+        # Возвращаем явный next-step вместо запуска VNC-сессии.
+        await send_reply(
+            "Не смог завершить вход автоматически. Повтори через минуту команду «зайди на амазон». "
+            "Если снова попросит код — просто пришли 6 цифр сюда."
+        )
+        logger.warning(
+            "KDP auto-login failed without OTP; remote fallback suppressed",
+            extra={"event": "kdp_login_auto_failed_no_remote", "context": {"output": out[-1200:] if isinstance(out, str) else str(out)}},
+        )
+        return True
 
     def _log_owner_request(self, text: str, source: str = "text") -> None:
         """Append owner requests to requirements log with timestamp."""

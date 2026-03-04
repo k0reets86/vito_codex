@@ -1202,7 +1202,7 @@ async def test_handle_kdp_login_flow_skips_relogin_when_live_check_ok(comms):
 
 
 @pytest.mark.asyncio
-async def test_handle_kdp_login_flow_starts_remote_auth_session(comms):
+async def test_handle_kdp_login_flow_no_remote_fallback_when_auto_login_fails(comms):
     send_reply = AsyncMock()
     comms._run_kdp_probe = AsyncMock(return_value=(1, "need_login"))
     comms._run_kdp_auto_login = AsyncMock(return_value=(9, "auto_login_failed"))
@@ -1214,8 +1214,8 @@ async def test_handle_kdp_login_flow_starts_remote_auth_session(comms):
     )
     handled = await comms._handle_kdp_login_flow("зайди на amazon kdp", send_reply, with_button=True)
     assert handled is True
-    assert "amazon_kdp" in comms._pending_service_auth
-    assert "удалённом браузере сервера" in send_reply.call_args.args[0]
+    comms._run_remote_auth_session.assert_not_awaited()
+    assert "Не смог завершить вход автоматически" in send_reply.call_args.args[0]
 
 
 @pytest.mark.asyncio
