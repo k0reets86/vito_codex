@@ -1294,6 +1294,21 @@ async def test_handle_kdp_login_flow_fallback_enables_forced_otp(comms):
 
 
 @pytest.mark.asyncio
+async def test_handle_kdp_login_flow_otp_branch_accepts_probe_success_after_login_fail(comms):
+    send_reply = AsyncMock()
+    comms._pending_kdp_otp = {"requested_at": "2026-03-04T21:00:00+00:00"}
+    comms._run_kdp_auto_login = AsyncMock(return_value=(9, "auto_login_exception"))
+    comms._run_kdp_probe_stable = AsyncMock(return_value=(0, "ok"))
+
+    handled = await comms._handle_kdp_login_flow("123456", send_reply, with_button=True)
+
+    assert handled is True
+    assert comms._pending_kdp_otp is None
+    assert "amazon_kdp" in comms._service_auth_confirmed
+    assert "live-check OK" in send_reply.call_args_list[-1].args[0]
+
+
+@pytest.mark.asyncio
 async def test_on_message_login_request_starts_generic_service_auth(comms, mock_update):
     mock_update.message.text = "зайди в реддит"
     comms._start_service_auth_flow = AsyncMock(return_value=True)

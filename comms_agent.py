@@ -1384,9 +1384,44 @@ class CommsAgent:
                 self._pending_service_auth.pop("amazon_kdp", None)
                 await send_reply("Готово: вход в KDP подтвержден, сессия сохранена.")
                 return True
+            # Resilience: sometimes auto-login returns non-zero while session is already valid.
+            try:
+                probe_rc, _ = await self._run_kdp_probe_stable()
+            except Exception:
+                probe_rc = 1
+            if probe_rc == 0:
+                self._pending_kdp_otp = None
+                self._mark_service_auth_confirmed("amazon_kdp")
+                self._pending_service_auth.pop("amazon_kdp", None)
+                await send_reply("Готово: вход в KDP подтвержден (live-check OK).")
+                return True
+            # One retry with same OTP before giving up.
+            rc2, out2 = await self._run_kdp_auto_login(otp_code=maybe_otp)
+            if rc2 == 0:
+                self._pending_kdp_otp = None
+                self._mark_service_auth_confirmed("amazon_kdp")
+                self._pending_service_auth.pop("amazon_kdp", None)
+                await send_reply("Готово: вход в KDP подтвержден, сессия сохранена.")
+                return True
+            try:
+                probe_rc2, _ = await self._run_kdp_probe_stable()
+            except Exception:
+                probe_rc2 = 1
+            if probe_rc2 == 0:
+                self._pending_kdp_otp = None
+                self._mark_service_auth_confirmed("amazon_kdp")
+                self._pending_service_auth.pop("amazon_kdp", None)
+                await send_reply("Готово: вход в KDP подтвержден (live-check OK).")
+                return True
             self._pending_kdp_otp = None
             await send_reply("Не удалось завершить вход по коду. Повтори команду: /kdp_login")
-            logger.warning("KDP OTP login failed", extra={"event": "kdp_login_otp_failed", "context": {"output": out[-1200:]}})
+            logger.warning(
+                "KDP OTP login failed",
+                extra={
+                    "event": "kdp_login_otp_failed",
+                    "context": {"output": out[-800:] if isinstance(out, str) else str(out), "retry_output": out2[-800:] if isinstance(out2, str) else str(out2)},
+                },
+            )
             return True
 
         if not self._is_kdp_login_request(text):
