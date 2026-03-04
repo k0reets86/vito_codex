@@ -1239,6 +1239,27 @@ async def test_on_message_login_intent_has_priority_over_inventory_context(comms
 
 
 @pytest.mark.asyncio
+async def test_on_message_login_and_inventory_combined_uses_inventory_when_confirmed(comms, mock_update):
+    mock_update.message.text = "зайди на мой амазон, проверь наличие товаров"
+    comms._service_auth_confirmed["amazon_kdp"] = datetime.now(timezone.utc).isoformat()
+    comms._run_kdp_probe = AsyncMock(return_value=(0, "ok"))
+    comms._run_kdp_inventory_probe = AsyncMock(
+        return_value=(0, '{"ok": true, "products_count": 1, "items": ["Book X"]}')
+    )
+    comms._handle_kdp_login_flow = AsyncMock(return_value=False)
+    conv = MagicMock()
+    conv.process_message = AsyncMock(return_value={"response": "SHOULD_NOT_BE_USED"})
+    comms.set_modules(conversation_engine=conv)
+
+    await comms._on_message(mock_update, MagicMock())
+
+    sent = mock_update.message.reply_text.call_args[0][0]
+    assert "Товаров/книг: 1" in sent
+    comms._handle_kdp_login_flow.assert_not_called()
+    conv.process_message.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_on_message_contextual_service_status(comms, mock_update):
     comms._last_service_context = "twitter"
     mock_update.message.text = "покажи статус"

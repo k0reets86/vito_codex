@@ -1406,10 +1406,16 @@ class CommsAgent:
 
         # Login/auth intent must win over generic status/inventory routing
         # to avoid accidental fallback into planning/research branches.
+        login_svc = self._detect_service_login_request(text)
+        if login_svc and self._is_inventory_prompt(text):
+            self._touch_service_context(login_svc)
+            if self._service_auth_confirmed.get(login_svc):
+                await self.send_message(await self._format_service_inventory_snapshot(login_svc), level="result")
+                return
         if await self._handle_kdp_login_flow(text, _owner_reply, with_button=False):
             self._touch_service_context("amazon_kdp")
             return
-        svc = self._detect_service_login_request(text)
+        svc = login_svc
         if svc and svc != "amazon_kdp":
             if await self._start_service_auth_flow(svc, _owner_reply, with_button=False):
                 return
@@ -2853,10 +2859,19 @@ class CommsAgent:
 
         # Login/auth intent must win over contextual inventory/status parsing,
         # otherwise phrases like "зайди ... проверь товары" can be misrouted.
+        login_svc = self._detect_service_login_request(text)
+        if login_svc and self._is_inventory_prompt(text):
+            self._touch_service_context(login_svc)
+            if self._service_auth_confirmed.get(login_svc):
+                await update.message.reply_text(
+                    await self._format_service_inventory_snapshot(login_svc),
+                    reply_markup=self._main_keyboard(),
+                )
+                return
         if await self._handle_kdp_login_flow(text, _tg_reply, with_button=True):
             self._touch_service_context("amazon_kdp")
             return
-        svc = self._detect_service_login_request(text)
+        svc = login_svc
         if svc and svc != "amazon_kdp":
             if await self._start_service_auth_flow(svc, _tg_reply, with_button=True):
                 return
