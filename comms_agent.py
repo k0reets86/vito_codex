@@ -1892,6 +1892,8 @@ class CommsAgent:
         for line in s.splitlines():
             ln = line.strip()
             low = ln.lower()
+            if low.startswith("план действий:"):
+                continue
             if any(tok in low for tok in skip_tokens):
                 continue
             if low.startswith("{") or low.startswith("[{") or low.startswith('"id"'):

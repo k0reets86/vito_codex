@@ -842,13 +842,8 @@ class ConversationEngine:
                     actions = parsed.get("actions", [])
             except Exception:
                 reply = response
-        if actions:
-            action_list = ", ".join(str(a.get("action", "")).strip() for a in actions if isinstance(a, dict) and a.get("action"))
-            if action_list:
-                reply = (
-                    f"{reply}\n\n"
-                    f"План действий: {action_list}."
-                )
+        if "вот план" in str(reply).lower() and "думаешь" in str(reply).lower():
+            reply = "Принял. Запускаю выполнение и вернусь с результатом."
         risky_actions = {"apply_code_change"}
         needs_confirmation = any(
             str(a.get("action", "")).strip() in risky_actions
@@ -956,7 +951,7 @@ class ConversationEngine:
             f"Ответь JSON:\n"
             f'{{"goal_title": "краткое название (English)", '
             f'"goal_description": "план 5-7 шагов (English content, but plan itself in Russian for owner)", '
-            f'"confirmation": "предложение владельцу на русском: вот план, что думаешь?", '
+            f'"confirmation": "кратко и по-человечески на русском: принял задачу и начинаю выполнение", '
             f'"needs_approval": {str(not auto_approve).lower()}, '
             f'"estimated_cost_usd": 0.05, '
             f'"priority": "HIGH"}}'
