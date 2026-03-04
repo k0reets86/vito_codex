@@ -1534,6 +1534,7 @@ class CommsAgent:
 
         # 2) Предпочтительный путь: подготовить MFA страницу и просить OTP только после этого.
         rc, out = 1, ""
+        attempt_outputs: list[str] = []
 
         def _is_mfa_required(_rc: int, _low: str) -> bool:
             mfa_hints = ("otp_required", "otp code not provided", "/ap/mfa", "mfa?", "otp_ready")
@@ -1542,6 +1543,7 @@ class CommsAgent:
         for attempt in range(3):
             rc, out = await self._run_kdp_prepare_otp()
             low = str(out or "").lower()
+            attempt_outputs.append(str(out or ""))
             if rc == 0:
                 if "otp_ready" in low:
                     self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat(), "prepared": True}
@@ -1559,6 +1561,13 @@ class CommsAgent:
                 return True
             if attempt < 2:
                 await asyncio.sleep(1.0 + attempt)
+
+        # Some Playwright runs fail after reaching MFA URL; treat clear MFA URL evidence as prepared state.
+        all_low = "\n".join(attempt_outputs).lower()
+        if "/ap/mfa" in all_low or "mfa.arb" in all_low:
+            self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat(), "prepared": True}
+            await send_reply("Нужен 6-значный код из Amazon/Authenticator. Отправь его одним сообщением.")
+            return True
 
         # 3) Без VNC fallback для Amazon в обычном диалоге:
         # remote-browser часто нестабилен на сервере и даёт "черный экран".
