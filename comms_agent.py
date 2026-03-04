@@ -1426,7 +1426,11 @@ class CommsAgent:
                 return True
             # Keep pending OTP mode to let owner send a fresh code immediately.
             self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat(), "retry": True}
-            await send_reply("Код не подтвердился. Пришли новый 6-значный код (без /kdp_login).")
+            msg = "Код не подтвердился. Пришли новый 6-значный код (без /kdp_login)."
+            low_all = f"{str(out or '').lower()}\n{str(out2 or '').lower()}"
+            if "otp_rejected" in low_all or "expired" in low_all or "invalid" in low_all:
+                msg = "Код неверный или истёк. Пришли новый 6-значный код сразу после генерации."
+            await send_reply(msg)
             logger.warning(
                 "KDP OTP login failed",
                 extra={

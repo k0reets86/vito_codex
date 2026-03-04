@@ -261,7 +261,24 @@ async def auto_login(timeout_sec: int, storage_path: str, otp_code: str = "") ->
             print(f"STEP: password_submitted {page.url}")
 
         # Step 3: OTP/MFA (if present)
-            otp_selectors = ("input[name='otpCode']", "input[name='code']", "input[type='tel']", "input[type='number']")
+            otp_selectors = (
+                "input[name='otpCode']",
+                "input[name='code']",
+                "input[name='cvf_input_code']",
+                "input#auth-mfa-otpcode",
+                "input[type='tel']",
+                "input[type='number']",
+            )
+            otp_submit_buttons = (
+                "input#auth-signin-button",
+                "input[name='mfaSubmit']",
+                "input[name='cvf-submit-otp-button']",
+                "button#cvf-submit-otp-button",
+                "button:has-text('Sign in')",
+                "button:has-text('Verify')",
+                "button[type='submit']",
+                "input[type='submit']",
+            )
             otp_found = False
             for sel in otp_selectors:
                 try:
@@ -288,6 +305,7 @@ async def auto_login(timeout_sec: int, storage_path: str, otp_code: str = "") ->
                     try:
                         if await page.locator(sel).count() > 0:
                             await page.fill(sel, otp_code)
+                            print(f"STEP: otp_filled selector={sel}")
                             filled = True
                             break
                     except Exception:
@@ -297,9 +315,10 @@ async def auto_login(timeout_sec: int, storage_path: str, otp_code: str = "") ->
                     await browser.close()
                     print("ERROR: OTP input not found")
                     return 3
-                for btn in ("input#auth-signin-button", "input[name='mfaSubmit']", "button:has-text('Sign in')", "button:has-text('Verify')"):
+                for btn in otp_submit_buttons:
                     try:
                         await page.click(btn, timeout=2500)
+                        print(f"STEP: otp_submitted button={btn} url={page.url}")
                         break
                     except Exception:
                         continue
@@ -336,17 +355,50 @@ async def auto_login(timeout_sec: int, storage_path: str, otp_code: str = "") ->
                             try:
                                 if await page.locator(sel).count() > 0:
                                     await page.fill(sel, otp_code, timeout=3000)
+                                    print(f"STEP: otp_filled_late selector={sel}")
                                     break
                             except Exception:
                                 continue
-                        for btn in ("input#auth-signin-button", "input[name='mfaSubmit']", "button:has-text('Sign in')", "button:has-text('Verify')"):
+                        for btn in otp_submit_buttons:
                             try:
                                 if await page.locator(btn).count() > 0:
                                     await page.click(btn, timeout=2500)
+                                    print(f"STEP: otp_submitted_late button={btn} url={page.url}")
                                     break
                             except Exception:
                                 continue
                         await page.wait_for_timeout(1500)
+
+                # Fast-fail when OTP error is visible (invalid/expired) to avoid vague timeout.
+                try:
+                    err_text = await page.evaluate(
+                        """() => {
+                          const sels = [
+                            '#auth-error-message-box .a-alert-content',
+                            '.a-alert-content',
+                            '#cvf-error-message',
+                            '.cvf-widget-alert-message'
+                          ];
+                          for (const s of sels) {
+                            const el = document.querySelector(s);
+                            if (el && el.textContent) return el.textContent.trim();
+                          }
+                          return '';
+                        }"""
+                    )
+                except Exception:
+                    err_text = ""
+                low_err = str(err_text or "").lower()
+                if low_err and any(t in low_err for t in ("incorrect", "invalid", "expired", "wrong", "невер", "истек")):
+                    shot = out.with_suffix(".otp_rejected.png")
+                    try:
+                        await page.screenshot(path=str(shot), full_page=True)
+                    except Exception:
+                        pass
+                    await context.close()
+                    await browser.close()
+                    print(f"ERROR: otp_rejected message={err_text[:300]} debug={shot}")
+                    return 7
             # Handle intermediate continue/challenge buttons if visible
                 for btn in (
                     "input#auth-signin-button",
