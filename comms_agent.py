@@ -1420,6 +1420,25 @@ class CommsAgent:
         output = (out_b or b"").decode("utf-8", errors="ignore")
         return int(proc.returncode or 0), output
 
+    @staticmethod
+    def _kdp_prepare_has_mfa_evidence(output: str) -> bool:
+        low = str(output or "").lower()
+        return ("otp_ready" in low) or ("/ap/mfa" in low) or ("mfa.arb" in low)
+
+    def _kdp_preauth_ready(self) -> bool:
+        st = PROJECT_ROOT / "runtime" / "kdp_preauth_state.json"
+        meta = PROJECT_ROOT / "runtime" / "kdp_preauth_meta.json"
+        if not st.exists():
+            return False
+        if not meta.exists():
+            return True
+        try:
+            data = json.loads(meta.read_text(encoding="utf-8"))
+            url = str(data.get("url") or "").lower()
+            return ("/ap/mfa" in url) or ("mfa.arb" in url) or bool(data.get("prepared", False))
+        except Exception:
+            return True
+
     def _reset_kdp_auth_state_files(self) -> None:
         """Force fresh KDP auth by clearing preauth+storage artifacts."""
         paths = [
@@ -1449,53 +1468,39 @@ class CommsAgent:
                 self._pending_service_auth.pop("amazon_kdp", None)
                 await send_reply("Готово: вход в KDP подтвержден (live-check OK).")
                 return True
-            if bool((self._pending_kdp_otp or {}).get("prepared", False)):
-                rc, out = await self._run_kdp_submit_otp(maybe_otp)
-            else:
-                rc, out = await self._run_kdp_auto_login(otp_code=maybe_otp)
-            if rc == 0:
-                self._pending_kdp_otp = None
-                self._mark_service_auth_confirmed("amazon_kdp")
-                self._pending_service_auth.pop("amazon_kdp", None)
-                await send_reply("Готово: вход в KDP подтвержден, сессия сохранена.")
-                return True
-            # Resilience: sometimes auto-login returns non-zero while session is already valid.
-            try:
-                probe_rc, _ = await self._run_kdp_probe_stable()
-            except Exception:
-                probe_rc = 1
-            if probe_rc == 0:
-                self._pending_kdp_otp = None
-                self._mark_service_auth_confirmed("amazon_kdp")
-                self._pending_service_auth.pop("amazon_kdp", None)
-                await send_reply("Готово: вход в KDP подтвержден (live-check OK).")
-                return True
-            # One retry with same OTP before giving up.
-            if bool((self._pending_kdp_otp or {}).get("prepared", False)):
-                rc2, out2 = await self._run_kdp_submit_otp(maybe_otp)
-            else:
-                rc2, out2 = await self._run_kdp_auto_login(otp_code=maybe_otp)
-            if rc2 == 0:
-                self._pending_kdp_otp = None
-                self._mark_service_auth_confirmed("amazon_kdp")
-                self._pending_service_auth.pop("amazon_kdp", None)
-                await send_reply("Готово: вход в KDP подтвержден, сессия сохранена.")
-                return True
-            try:
-                probe_rc2, _ = await self._run_kdp_probe_stable()
-            except Exception:
-                probe_rc2 = 1
-            if probe_rc2 == 0:
-                self._pending_kdp_otp = None
-                self._mark_service_auth_confirmed("amazon_kdp")
-                self._pending_service_auth.pop("amazon_kdp", None)
-                await send_reply("Готово: вход в KDP подтвержден (live-check OK).")
-                return True
+            prepared_mode = bool((self._pending_kdp_otp or {}).get("prepared", False)) or self._kdp_preauth_ready()
+            attempts: list[tuple[str, tuple[int, str]]] = []
+            if prepared_mode:
+                attempts.append(("submit_otp", await self._run_kdp_submit_otp(maybe_otp)))
+            attempts.append(("auto_login", await self._run_kdp_auto_login(otp_code=maybe_otp)))
+            if prepared_mode:
+                attempts.append(("submit_otp_retry", await self._run_kdp_submit_otp(maybe_otp)))
+
+            for _mode, (rc_try, _out_try) in attempts:
+                if rc_try == 0:
+                    self._pending_kdp_otp = None
+                    self._mark_service_auth_confirmed("amazon_kdp")
+                    self._pending_service_auth.pop("amazon_kdp", None)
+                    await send_reply("Готово: вход в KDP подтвержден, сессия сохранена.")
+                    return True
+                try:
+                    probe_rc_try, _ = await self._run_kdp_probe_stable()
+                except Exception:
+                    probe_rc_try = 1
+                if probe_rc_try == 0:
+                    self._pending_kdp_otp = None
+                    self._mark_service_auth_confirmed("amazon_kdp")
+                    self._pending_service_auth.pop("amazon_kdp", None)
+                    await send_reply("Готово: вход в KDP подтвержден (live-check OK).")
+                    return True
+
+            out = attempts[0][1][1] if attempts else ""
+            out2 = attempts[-1][1][1] if attempts else ""
             # Keep pending OTP mode to let owner send a fresh code immediately.
             self._pending_kdp_otp = {
                 "requested_at": datetime.now(timezone.utc).isoformat(),
                 "retry": True,
-                "prepared": bool((self._pending_kdp_otp or {}).get("prepared", False)),
+                "prepared": prepared_mode,
             }
             msg = "Код не подтвердился. Пришли новый 6-значный код (без /kdp_login)."
             low_all = f"{str(out or '').lower()}\n{str(out2 or '').lower()}"
@@ -1586,10 +1591,18 @@ class CommsAgent:
                 summary = f" Причина: {reason[:180]}"
         except Exception:
             summary = ""
-        self._pending_kdp_otp = None
+        # Fallback: keep OTP flow active anyway and accept code in chat.
+        # In practice direct auto-login with provided OTP can still succeed
+        # even when prepare-otp stage is flaky.
+        prepared_guess = self._kdp_prepare_has_mfa_evidence(out) or self._kdp_preauth_ready()
+        self._pending_kdp_otp = {
+            "requested_at": datetime.now(timezone.utc).isoformat(),
+            "forced": True,
+            "prepared": bool(prepared_guess),
+        }
         await send_reply(
-            "Не смог открыть окно ввода кода Amazon (без VNC). "
-            "Повтори команду «зайди на амазон» через 10-20 секунд."
+            "Не смог стабильно открыть окно ввода кода Amazon. "
+            "Пришли 6-значный код из Amazon/Authenticator — попробую прямой вход."
             f"{summary}"
         )
         logger.warning(
