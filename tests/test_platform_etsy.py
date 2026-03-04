@@ -66,3 +66,19 @@ async def test_etsy_publish_browser_mode_requires_storage_state(tmp_path):
     etsy._storage_state_path = tmp_path / "missing_etsy_state.json"
     out = await etsy.publish({"title": "Browser listing", "description": "x"})
     assert out.get("status") == "needs_browser_login"
+
+
+@pytest.mark.asyncio
+async def test_etsy_existing_update_requires_target_listing_id():
+    etsy = EtsyPlatform()
+    etsy._mode = "browser_only"
+    out = await etsy.publish(
+        {
+            "title": "Browser listing",
+            "description": "x",
+            "allow_existing_update": True,
+            "dry_run": False,
+        }
+    )
+    assert out.get("status") == "blocked"
+    assert out.get("error") == "existing_update_requires_target_listing_id"

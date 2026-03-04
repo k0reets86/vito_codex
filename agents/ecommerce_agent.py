@@ -41,6 +41,10 @@ class ECommerceAgent(BaseAgent):
             self._status = AgentStatus.IDLE
 
     async def create_listing(self, platform: str, data: dict) -> TaskResult:
+        if data.get("allow_existing_update"):
+            target_id = str(data.get("target_product_id") or data.get("target_listing_id") or data.get("target_slug") or "").strip()
+            if not target_id:
+                return TaskResult(success=False, error="existing_update_requires_target_id")
         # Normalize minimal fields per platform
         if platform == "gumroad":
             if not data.get("category"):
@@ -119,6 +123,8 @@ class ECommerceAgent(BaseAgent):
             return TaskResult(success=False, error=f"Ошибка создания листинга на {platform}: {e}")
 
     async def update_listing(self, platform: str, listing_id: str, data: dict) -> TaskResult:
+        if not str(listing_id or "").strip():
+            return TaskResult(success=False, error="update_requires_explicit_listing_id")
         plat = self.platforms.get(platform)
         if not plat:
             return TaskResult(success=False, error=f"Платформа '{platform}' не зарегистрирована")

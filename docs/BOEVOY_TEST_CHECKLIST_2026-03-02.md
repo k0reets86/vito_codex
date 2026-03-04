@@ -72,3 +72,5 @@ Current progress: `6 / 41 = 14.6%`
 - 2026-03-04: Agent->Platform live combat audit executed (`PYTHONPATH=. python3 scripts/live_agent_platform_audit.py`) -> `reports/VITO_AGENT_PLATFORM_LIVE_AUDIT_2026-03-04_1146UTC.json`, responding paths `7/7 = 100%`.
 - 2026-03-04: Etsy switched to browser-only mode (`ETSY_MODE=browser_only`), API write-path bypassed in platform layer.
 - 2026-03-04: Agent->Platform live audit re-run after Etsy browser-only + auth precheck in ecommerce agent -> `reports/VITO_AGENT_PLATFORM_LIVE_AUDIT_2026-03-04_1156UTC.json`, responding paths `7/7 = 100%` (Etsy status: `needs_browser_login` until storage capture).
+- 2026-03-04: Gumroad hard safety policy: no fallback to old listings without explicit target id/slug and owner confirmation (`platforms/gumroad.py`, `agents/ecommerce_agent.py`).
+- 2026-03-04: Controlled single-product Gumroad cycle (`python3 scripts/gumroad_test_cycle.py ...`) -> `reports/VITO_GUMROAD_TEST_CYCLE_2026-03-04_1218UTC.json`, result: `daily_limit` (no modifications to existing listing).

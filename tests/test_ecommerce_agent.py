@@ -49,6 +49,22 @@ class TestECommerceAgent:
         assert result.success is True
 
     @pytest.mark.asyncio
+    async def test_create_listing_existing_update_requires_target(self, agent, tmp_path):
+        pdf = tmp_path / "test.pdf"
+        pdf.write_text("dummy", encoding="utf-8")
+        result = await agent.create_listing(
+            "gumroad",
+            {
+                "title": "Test Product",
+                "price": 9.99,
+                "pdf_path": str(pdf),
+                "allow_existing_update": True,
+            },
+        )
+        assert result.success is False
+        assert result.error == "existing_update_requires_target_id"
+
+    @pytest.mark.asyncio
     async def test_execute_task(self, agent):
         result = await agent.execute_task("sales_check", platform="gumroad")
         assert result.success is True

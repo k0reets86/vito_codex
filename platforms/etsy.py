@@ -128,6 +128,14 @@ class EtsyPlatform(BasePlatform):
         return False
 
     async def _publish_via_browser(self, content: dict) -> dict:
+        allow_existing_update = bool(content.get("allow_existing_update"))
+        target_listing_id = str(content.get("target_listing_id") or "").strip()
+        if allow_existing_update and not target_listing_id:
+            return {
+                "platform": "etsy",
+                "status": "blocked",
+                "error": "existing_update_requires_target_listing_id",
+            }
         if not self._storage_state_path.exists():
             return {
                 "platform": "etsy",
@@ -178,6 +186,21 @@ class EtsyPlatform(BasePlatform):
                         "error": "Stored Etsy session expired.",
                         "storage_state": str(self._storage_state_path),
                     }
+                if "/listing/" in current and "/edit" in current:
+                    if not allow_existing_update:
+                        return {
+                            "platform": "etsy",
+                            "status": "blocked",
+                            "error": "existing_listing_edit_detected_without_explicit_update",
+                            "url": page.url,
+                        }
+                    if target_listing_id and f"/listing/{target_listing_id}" not in current:
+                        return {
+                            "platform": "etsy",
+                            "status": "blocked",
+                            "error": "existing_listing_mismatch_target",
+                            "url": page.url,
+                        }
 
                 # Best-effort field fill; Etsy UI may vary by locale/account state.
                 for sel in ("input[name='title']", "input[data-test-id='listing-title-input']", "input[id*='title']"):

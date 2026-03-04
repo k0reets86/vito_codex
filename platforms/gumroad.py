@@ -198,6 +198,15 @@ class GumroadPlatform(BasePlatform):
                 "status": "blocked",
                 "error": "existing_update_requires_owner_confirmation",
             }
+        if content.get("allow_existing_update"):
+            target_product_id = str(content.get("target_product_id") or "").strip()
+            target_slug = str(content.get("target_slug") or "").strip()
+            if not (target_product_id or target_slug):
+                return {
+                    "platform": "gumroad",
+                    "status": "blocked",
+                    "error": "existing_update_requires_target_product_id_or_slug",
+                }
 
         # Validate required assets
         pdf_path = content.get("pdf_path", "")
@@ -332,6 +341,14 @@ class GumroadPlatform(BasePlatform):
             }
 
         allow_existing_update = bool(content.get("allow_existing_update")) and bool(content.get("owner_edit_confirmed"))
+        target_product_id = str(content.get("target_product_id") or "").strip()
+        target_slug = str(content.get("target_slug") or "").strip()
+        if allow_existing_update and not (target_product_id or target_slug):
+            return {
+                "platform": "gumroad",
+                "status": "blocked",
+                "error": "existing_update_requires_target_product_id_or_slug",
+            }
 
         name = content.get("name", "VITO Product")
         price = str(content.get("price", 9))
@@ -362,13 +379,20 @@ class GumroadPlatform(BasePlatform):
                 page = await ctx.new_page()
                 page.set_default_timeout(20000)
 
-                # Prefer editing existing product with same name only when explicitly allowed.
+                # Prefer editing an explicitly targeted existing product only when explicitly allowed.
                 slug_from_api = ""
                 if allow_existing_update:
                     try:
                         existing = await self.get_products()
                         for prod in existing:
-                            if prod.get("name") == name:
+                            pid = str(prod.get("id") or "")
+                            short = prod.get("short_url", "") or prod.get("url", "")
+                            slug_candidate = ""
+                            if "/l/" in short:
+                                slug_candidate = short.split("/l/")[-1].split("?")[0]
+                            elif "gum.co/" in short:
+                                slug_candidate = short.rsplit("/", 1)[-1]
+                            if (target_product_id and pid == target_product_id) or (target_slug and slug_candidate == target_slug):
                                 short = prod.get("short_url", "") or prod.get("url", "")
                                 if "/l/" in short:
                                     slug_from_api = short.split("/l/")[-1].split("?")[0]
@@ -385,23 +409,19 @@ class GumroadPlatform(BasePlatform):
                         existing = await self.get_products()
                         if not existing:
                             return ""
-                        # Prefer exact name match, else most recent
+                        # Only explicit target can be opened.
                         slug_local = ""
                         for prod in existing:
-                            if preferred_name and prod.get("name") == preferred_name:
-                                short = prod.get("short_url", "") or prod.get("url", "")
-                                if "/l/" in short:
-                                    slug_local = short.split("/l/")[-1].split("?")[0]
-                                elif "gum.co/" in short:
-                                    slug_local = short.rsplit("/", 1)[-1]
-                                if slug_local:
-                                    break
-                        if not slug_local:
-                            short = existing[0].get("short_url", "") or existing[0].get("url", "")
+                            pid = str(prod.get("id") or "")
+                            short = prod.get("short_url", "") or prod.get("url", "")
+                            slug_candidate = ""
                             if "/l/" in short:
-                                slug_local = short.split("/l/")[-1].split("?")[0]
+                                slug_candidate = short.split("/l/")[-1].split("?")[0]
                             elif "gum.co/" in short:
-                                slug_local = short.rsplit("/", 1)[-1]
+                                slug_candidate = short.rsplit("/", 1)[-1]
+                            if (target_product_id and pid == target_product_id) or (target_slug and slug_candidate == target_slug):
+                                slug_local = slug_candidate
+                                break
                         if slug_local:
                             await page.goto(f"https://gumroad.com/products/{slug_local}/edit", wait_until="domcontentloaded")
                             await asyncio.sleep(2)
