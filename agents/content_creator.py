@@ -38,7 +38,7 @@ class ContentCreator(BaseAgent):
 
     @property
     def capabilities(self) -> list[str]:
-        return ["content_creation", "article", "ebook", "product_description", "product_turnkey"]
+        return ["content_creation", "article", "ebook", "product_description", "product_turnkey", "copywriting", "copywriter"]
 
     async def execute_task(self, task_type: str, **kwargs) -> TaskResult:
         self._status = AgentStatus.RUNNING

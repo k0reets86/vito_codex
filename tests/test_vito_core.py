@@ -71,3 +71,48 @@ class TestVITOCoreExecute:
         result = await core.execute_task("anything")
         assert result.success is False
         assert "Нет registry и llm_router" in result.error
+
+
+class TestVITOCoreProductPipeline:
+    @pytest.mark.asyncio
+    async def test_product_pipeline_prepares_cross_agent_package(self):
+        registry = AgentRegistry()
+
+        class DummyRegistry:
+            async def dispatch(self, task_type, **kwargs):
+                if task_type == "niche_research":
+                    return TaskResult(success=True, output="AI planners")
+                if task_type == "research":
+                    return TaskResult(success=True, output="research report")
+                if task_type == "competitor_analysis":
+                    return TaskResult(success=True, output="competitors")
+                if task_type == "listing_seo_pack":
+                    return TaskResult(success=True, output={"seo_score": 90})
+                if task_type == "product_turnkey":
+                    return TaskResult(
+                        success=True,
+                        output={
+                            "topic": "AI planners",
+                            "files": {
+                                "pdf_path": "/tmp/a.pdf",
+                                "cover_path": "/tmp/c.png",
+                                "thumb_path": "/tmp/t.png",
+                            },
+                            "listing": {
+                                "title": "AI planners",
+                                "short_description": "short",
+                                "category": "Programming",
+                                "tags": ["ai", "planner"],
+                                "seo_title": "AI planners",
+                                "seo_description": "desc",
+                            },
+                        },
+                    )
+                if task_type in {"legal", "marketing_strategy", "campaign_plan", "listing_create"}:
+                    return TaskResult(success=True, output={"url": "https://example.com/item"})
+                return TaskResult(success=True, output={})
+
+        core = VITOCore(registry=DummyRegistry())
+        result = await core.execute_task("product_pipeline", topic="AI planners", platform="gumroad", auto_publish=False)
+        assert result.success is True
+        assert "publish_pack" in result.output

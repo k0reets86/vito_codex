@@ -3822,6 +3822,24 @@ class CommsAgent:
                         await update.message.reply_text(part, reply_markup=self._main_keyboard())
                 else:
                     await update.message.reply_text(formatted, reply_markup=self._main_keyboard())
+                if self._conversation_engine:
+                    self._pending_system_action = {
+                        "actions": [
+                            {
+                                "action": "run_product_pipeline",
+                                "params": {
+                                    "topic": text,
+                                    "platforms": ["gumroad"],
+                                    "auto_publish": False,
+                                },
+                            }
+                        ],
+                        "origin_text": f"deep:{text}",
+                    }
+                    await update.message.reply_text(
+                        "Если ок — напиши «да», и я автоматически соберу товар под ключ (контент, SEO, legal, SMM-план, publish-пакет).",
+                        reply_markup=self._main_keyboard(),
+                    )
             except Exception as e:
                 await update.message.reply_text(f"Ошибка анализа: {e}", reply_markup=self._main_keyboard())
         logger.info(f"Команда /deep выполнена: {text[:50]}", extra={"event": "cmd_deep"})

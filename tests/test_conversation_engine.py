@@ -161,6 +161,17 @@ class TestProcessMessage:
         engine.llm_router.call_llm.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_deterministic_deep_research_route_executes_without_llm(self, mock_llm_router, mock_memory):
+        registry = MagicMock()
+        engine = ConversationEngine(llm_router=mock_llm_router, memory=mock_memory, agent_registry=registry)
+        engine._execute_actions = AsyncMock(return_value="[run_deep_research] done")
+        result = await engine.process_message("проведи глубокое исследование ниши digital planners")
+        assert result["intent"] == "system_action"
+        assert "глубокое исследование" in result["response"].lower()
+        engine._execute_actions.assert_called_once()
+        engine.llm_router.call_llm.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_deterministic_network_check_route(self, engine):
         result = await engine.process_message("проверь доступ к интернету")
         assert result["intent"] == "question"
@@ -249,6 +260,17 @@ class TestProcessMessage:
         result = await engine._handle_system_action("изучи сервис amazon kdp")
         assert result["intent"] == "system_action"
         assert result.get("needs_confirmation") is False
+
+    @pytest.mark.asyncio
+    async def test_dispatch_action_run_product_pipeline(self, mock_llm_router, mock_memory):
+        registry = MagicMock()
+        registry.dispatch = AsyncMock(return_value=type("R", (), {"success": True, "output": {"steps": [{"ok": True}]}})())
+        engine = ConversationEngine(llm_router=mock_llm_router, memory=mock_memory, agent_registry=registry)
+        msg = await engine._dispatch_action(
+            "run_product_pipeline",
+            {"topic": "AI templates", "platforms": ["gumroad"], "auto_publish": False},
+        )
+        assert "Product pipeline завершён" in msg
 
     @pytest.mark.asyncio
     async def test_owner_task_state_persists_after_goal_then_question(self, mock_llm_router, mock_memory, tmp_path):

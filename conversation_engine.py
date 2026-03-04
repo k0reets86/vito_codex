@@ -267,6 +267,17 @@ class ConversationEngine:
 
         trend_request = self._has_keywords(normalized, ("тренд", "trends", "trend", "ниш", "niche"), fuzzy=True)
         trend_verb = self._has_keywords(normalized, ("найд", "скан", "проскан", "проанализ", "подбери", "research"), fuzzy=True)
+        deep_request = self._has_keywords(normalized, ("глубок", "deep", "исследован", "research"), fuzzy=True)
+        if deep_request and self._has_keywords(normalized, ("анализ", "исслед", "research", "разбор"), fuzzy=True):
+            topic = self._extract_research_topic(text)
+            actions = [{"action": "run_deep_research", "params": {"topic": topic}}]
+            out = await self._execute_actions(actions)
+            return {
+                "intent": Intent.SYSTEM_ACTION.value,
+                "response": f"Запускаю глубокое исследование по теме: {topic}.\n{out or 'Собираю источники и готовлю детальный отчёт.'}",
+                "actions": actions,
+                "needs_confirmation": False,
+            }
         if trend_request and trend_verb and self.agent_registry:
             actions = [{"action": "scan_trends", "params": {}}]
             out = await self._execute_actions(actions)
@@ -787,6 +798,43 @@ class ConversationEngine:
             }
         trend_request = any(kw in lower for kw in ("тренд", "trends", "trend", "ниш", "niche"))
         trend_verb = any(kw in lower for kw in ("найд", "скан", "проскан", "проанализ", "подбери", "research"))
+        if any(kw in lower for kw in ("глубок", "deep research", "deep", "глубокое исслед", "детальный анализ")):
+            topic = self._extract_research_topic(text)
+            actions = [{"action": "run_deep_research", "params": {"topic": topic}}]
+            out = await self._execute_actions(actions)
+            return {
+                "intent": Intent.SYSTEM_ACTION.value,
+                "response": f"Запускаю глубокое исследование: {topic}.\n{out or 'Собираю данные и источники.'}",
+                "actions": actions,
+                "needs_confirmation": False,
+            }
+        if any(kw in lower for kw in ("под ключ", "turnkey", "сделай товар", "создай товар", "запусти продукт", "product pipeline")):
+            topic = self._extract_product_topic(text)
+            platforms = self._extract_platforms(text)
+            require_confirm = not bool(getattr(settings, "AUTONOMY_MAX_MODE", False))
+            return {
+                "intent": Intent.SYSTEM_ACTION.value,
+                "response": (
+                    f"Собираю продукт под ключ: {topic} (платформы: {', '.join(platforms)}). "
+                    "Сделаю исследование, SEO, контент, юридическую проверку, публикационный пакет и SMM-план."
+                    if not require_confirm
+                    else f"Подтверждаешь запуск product pipeline под ключ: {topic} (платформы: {', '.join(platforms)})? да/нет"
+                ),
+                "actions": [{"action": "run_product_pipeline", "params": {"topic": topic, "platforms": platforms, "auto_publish": False}}],
+                "needs_confirmation": require_confirm,
+            }
+        if any(kw in lower for kw in ("прокач", "улучши себя", "самообуч", "саморазвит", "обнови навыки", "improvement cycle")):
+            require_confirm = not bool(getattr(settings, "AUTONOMY_MAX_MODE", False))
+            return {
+                "intent": Intent.SYSTEM_ACTION.value,
+                "response": (
+                    "Запускаю цикл прокачки: backup -> HR аудит -> research -> self-improve -> безопасная проверка."
+                    if not require_confirm
+                    else "Подтверждаешь запуск цикла прокачки (backup -> HR -> research -> self-improve)? да/нет"
+                ),
+                "actions": [{"action": "run_improvement_cycle", "params": {"request": text}}],
+                "needs_confirmation": require_confirm,
+            }
         if trend_request and trend_verb:
             actions = [{"action": "scan_trends", "params": {}}]
             out = await self._execute_actions(actions)
@@ -1228,6 +1276,68 @@ class ConversationEngine:
                 return f"Знания по сервису {service} обновлены"
             return f"Не удалось изучить сервис: {getattr(result, 'error', 'unknown')}"
 
+        if action == "run_deep_research" and self.agent_registry:
+            topic = str(params.get("topic") or "digital products").strip()
+            result = await self.agent_registry.dispatch("research", step=topic, topic=topic, goal_title=f"Deep research: {topic[:80]}")
+            if result and result.success:
+                meta = getattr(result, "metadata", {}) or {}
+                summary = str(meta.get("executive_summary") or str(result.output)[:1200])
+                return f"Глубокое исследование готово по теме '{topic}'.\n{summary}"
+            return f"Глубокое исследование не удалось: {getattr(result, 'error', 'unknown')}"
+
+        if action == "run_product_pipeline" and self.agent_registry:
+            topic = str(params.get("topic") or "Digital Product").strip()
+            platforms = params.get("platforms") or [params.get("platform", "gumroad")]
+            if isinstance(platforms, str):
+                platforms = [p.strip() for p in platforms.split(",") if p.strip()]
+            if not isinstance(platforms, list) or not platforms:
+                platforms = ["gumroad"]
+            auto_publish = bool(params.get("auto_publish", False))
+            res = await self.agent_registry.dispatch(
+                "product_pipeline",
+                topic=topic,
+                platform=",".join(platforms),
+                auto_publish=auto_publish,
+            )
+            if res and res.success:
+                out = getattr(res, "output", {}) or {}
+                done = len([s for s in (out.get("steps") or []) if s.get("ok")])
+                total = len(out.get("steps") or [])
+                return (
+                    f"Product pipeline завершён: {topic}\n"
+                    f"- Этапов успешно: {done}/{total}\n"
+                    f"- Платформы: {', '.join(platforms)}\n"
+                    f"- Auto publish: {'on' if auto_publish else 'off'}"
+                )
+            return f"Product pipeline завершился с ошибкой: {getattr(res, 'error', 'unknown')}"
+
+        if action == "run_improvement_cycle":
+            request = str(params.get("request") or "").strip()
+            lines = []
+            if self.self_updater:
+                try:
+                    bkp = self.self_updater.backup_current_code()
+                    lines.append(f"Backup: {bkp}" if bkp else "Backup: failed")
+                except Exception as e:
+                    lines.append(f"Backup error: {e}")
+            if self.agent_registry:
+                try:
+                    hr = await self.agent_registry.dispatch("hr")
+                    lines.append("HR audit: ok" if hr and hr.success else f"HR audit: fail ({getattr(hr, 'error', 'unknown')})")
+                except Exception as e:
+                    lines.append(f"HR audit error: {e}")
+                try:
+                    rs = await self.agent_registry.dispatch("research", step=request or "agent improvements")
+                    lines.append("Research scan: ok" if rs and rs.success else f"Research scan: fail ({getattr(rs, 'error', 'unknown')})")
+                except Exception as e:
+                    lines.append(f"Research scan error: {e}")
+                try:
+                    si = await self.agent_registry.dispatch("self_improve", step=request or "Improve weak agent interactions and safety")
+                    lines.append("Self-improve: ok" if si and si.success else f"Self-improve: fail ({getattr(si, 'error', 'unknown')})")
+                except Exception as e:
+                    lines.append(f"Self-improve error: {e}")
+            return "Improvement cycle:\n- " + "\n- ".join(lines)
+
         if action == "register_account" and self.agent_registry:
             url = params.get("url", "")
             form = params.get("form", {}) or {}
@@ -1285,6 +1395,9 @@ class ConversationEngine:
         if self.agent_registry:
             actions.append("self_improve(request) — самонастройка: анализ → код → тесты")
             actions.append("learn_service(service) — изучить сервис и добавить в базу знаний")
+            actions.append("run_deep_research(topic) — глубокое исследование с источниками")
+            actions.append("run_product_pipeline(topic, platforms, auto_publish=false) — сквозной pipeline товара")
+            actions.append("run_improvement_cycle(request) — backup + HR + research + self-improve")
         return "\n".join(f"  - {a}" for a in actions) if actions else "(нет действий)"
 
     def _allowed_actions(self) -> set[str]:
@@ -1310,7 +1423,47 @@ class ConversationEngine:
             allowed.add("self_improve")
             allowed.add("learn_service")
             allowed.add("register_account")
+            allowed.add("run_deep_research")
+            allowed.add("run_product_pipeline")
+            allowed.add("run_improvement_cycle")
         return allowed
+
+    @staticmethod
+    def _extract_research_topic(text: str) -> str:
+        s = str(text or "").strip()
+        s = re.sub(r"(?i)\b(проведи|сделай|запусти|выполни)\b", "", s).strip()
+        s = re.sub(r"(?i)\b(глубокое|глубокий|deep)\b", "", s).strip()
+        s = re.sub(r"(?i)\b(исследование|анализ|research)\b", "", s).strip(" :,-")
+        return s or "digital product niches for US market"
+
+    @staticmethod
+    def _extract_product_topic(text: str) -> str:
+        s = str(text or "").strip()
+        # remove imperative wrappers
+        s = re.sub(r"(?i)\b(сделай|создай|запусти|подготовь|оформи)\b", "", s).strip()
+        s = re.sub(r"(?i)\b(товар|продукт|под ключ|turnkey|pipeline)\b", "", s).strip(" :,-")
+        return s or "Digital Product Starter Kit"
+
+    @staticmethod
+    def _extract_platforms(text: str) -> list[str]:
+        s = str(text or "").lower()
+        out: list[str] = []
+        for k, v in (
+            ("gumroad", "gumroad"),
+            ("гумроад", "gumroad"),
+            ("etsy", "etsy"),
+            ("этси", "etsy"),
+            ("етси", "etsy"),
+            ("kofi", "kofi"),
+            ("ko-fi", "kofi"),
+            ("кофи", "kofi"),
+            ("amazon", "amazon_kdp"),
+            ("kdp", "amazon_kdp"),
+            ("амазон", "amazon_kdp"),
+        ):
+            if k in s and v not in out:
+                out.append(v)
+        return out or ["gumroad"]
 
     @staticmethod
     def _is_time_query(lower: str) -> bool:
