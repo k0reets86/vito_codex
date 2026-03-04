@@ -171,6 +171,79 @@ async def browser_capture(timeout_sec: int, storage_path: str, headless: bool, a
         return 0
 
 
+async def auto_login(timeout_sec: int, storage_path: str) -> int:
+    """Best-effort headless login using env credentials and save storage_state."""
+    from playwright.async_api import async_playwright
+
+    email = str(getattr(settings, "ETSY_EMAIL", "") or "").strip()
+    password = str(getattr(settings, "ETSY_PASSWORD", "") or "").strip()
+    if not email or not password:
+        print("ERROR: ETSY_EMAIL/ETSY_PASSWORD not configured")
+        return 2
+
+    out = Path(storage_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True, args=_chromium_launch_args())
+        context = await browser.new_context(viewport={"width": 1366, "height": 900})
+        page = await context.new_page()
+        try:
+            await page.goto("https://www.etsy.com/signin", wait_until="domcontentloaded", timeout=120000)
+            await page.wait_for_timeout(1200)
+
+            filled_email = False
+            for sel in ("input[type='email']", "input[name='email']", "#join_neu_email_field"):
+                try:
+                    await page.fill(sel, email, timeout=3000)
+                    filled_email = True
+                    break
+                except Exception:
+                    continue
+            filled_pass = False
+            for sel in ("input[type='password']", "input[name='password']", "#join_neu_password_field"):
+                try:
+                    await page.fill(sel, password, timeout=3000)
+                    filled_pass = True
+                    break
+                except Exception:
+                    continue
+            if not (filled_email and filled_pass):
+                print("ERROR: Etsy login fields not found")
+                return 1
+
+            clicked = False
+            for sel in ("button[type='submit']", "button[name='submit_attempt']", "button:has-text('Sign in')", "button:has-text('Войти')"):
+                try:
+                    btn = page.locator(sel).first
+                    if await btn.is_visible(timeout=1500):
+                        await btn.click()
+                        clicked = True
+                        break
+                except Exception:
+                    continue
+            if not clicked:
+                print("ERROR: Etsy submit button not found")
+                return 1
+
+            end_ts = asyncio.get_event_loop().time() + max(45, int(timeout_sec))
+            while asyncio.get_event_loop().time() < end_ts:
+                await page.wait_for_timeout(1200)
+                u = (page.url or "").lower()
+                if any(x in u for x in ("/your/", "/shop-manager", "/your/account")):
+                    await context.storage_state(path=str(out))
+                    print(f'{{"ok": true, "storage_state": "{out}"}}')
+                    return 0
+                if any(x in u for x in ("/challenge", "/captcha", "/two-factor", "/security")):
+                    print("OTP_REQUIRED: Etsy challenge detected")
+                    return 3
+            print("ERROR: Etsy login not confirmed before timeout")
+            return 1
+        finally:
+            await context.close()
+            await browser.close()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Etsy auth helper")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -184,6 +257,9 @@ def main() -> int:
     p_browser.add_argument("--storage-path", default="runtime/etsy_storage_state.json")
     p_browser.add_argument("--headless", action="store_true", help="Run headless (not recommended for Etsy login)")
     p_browser.add_argument("--auto-submit", action="store_true", help="Try clicking sign-in button automatically")
+    p_auto = sub.add_parser("auto-login", help="Headless login from ETSY_EMAIL/ETSY_PASSWORD and save storage_state")
+    p_auto.add_argument("--timeout-sec", type=int, default=120)
+    p_auto.add_argument("--storage-path", default="runtime/etsy_storage_state.json")
 
     args = parser.parse_args()
     if args.cmd == "oauth-start":
@@ -197,6 +273,13 @@ def main() -> int:
                 storage_path=str(args.storage_path),
                 headless=bool(args.headless),
                 auto_submit=bool(args.auto_submit),
+            )
+        )
+    if args.cmd == "auto-login":
+        return asyncio.run(
+            auto_login(
+                timeout_sec=int(args.timeout_sec),
+                storage_path=str(args.storage_path),
             )
         )
     return 1

@@ -972,6 +972,26 @@ class CommsAgent:
         output = (out_b or b"").decode("utf-8", errors="ignore")
         return int(proc.returncode or 0), output
 
+    async def _run_etsy_auto_login(self) -> tuple[int, str]:
+        storage = str(getattr(settings, "ETSY_STORAGE_STATE_FILE", "runtime/etsy_storage_state.json") or "runtime/etsy_storage_state.json")
+        cmd = [
+            "python3",
+            "scripts/etsy_auth_helper.py",
+            "auto-login",
+            "--timeout-sec",
+            "120",
+            "--storage-path",
+            storage,
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=180)
+        output = (out_b or b"").decode("utf-8", errors="ignore")
+        return int(proc.returncode or 0), output
+
     async def _verify_service_auth(self, service: str) -> tuple[bool, str]:
         svc = str(service or "").strip().lower()
         if not svc:
@@ -1030,12 +1050,17 @@ class CommsAgent:
                     return True, "Etsy авторизация подтверждена."
                 mode = str(getattr(settings, "ETSY_MODE", "api") or "api").lower()
                 if mode in {"browser", "browser_only"}:
-                    return False, "Etsy browser-сессия не подтверждена. Нужен вход через браузер и захват storage state."
+                    rc, out = await self._run_etsy_auto_login()
+                    if rc == 0:
+                        return True, "Etsy browser-сессия захвачена автоматически."
+                    if "OTP_REQUIRED" in out:
+                        return False, "Etsy требует дополнительную проверку (challenge/2FA). Нужен ручной вход на серверной сессии."
+                    return False, "Etsy browser-сессия не подтверждена. Авто-вход не прошёл."
                 return False, "Etsy API не подтвердил вход. Зафиксировал ручную авторизацию."
             except Exception:
                 mode = str(getattr(settings, "ETSY_MODE", "api") or "api").lower()
                 if mode in {"browser", "browser_only"}:
-                    return False, "Etsy browser-проверка недоступна. Зафиксировал ручную авторизацию."
+                    return False, "Etsy browser-проверка недоступна."
                 return False, "Etsy API проверка недоступна. Зафиксировал ручную авторизацию."
         if svc == "kofi":
             try:
