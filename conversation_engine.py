@@ -1205,7 +1205,20 @@ class ConversationEngine:
             clean_params = {k: v for k, v in params.items() if k != "task_type"}
             result = await self.agent_registry.dispatch(task_type, **clean_params)
             if result and result.success:
-                return f"Агент выполнил: {str(result.output)[:300]}"
+                out_text = str(result.output)[:300]
+                quality_scoped = {
+                    "research",
+                    "social_media",
+                    "content_creation",
+                    "documentation",
+                    "listing_seo_pack",
+                    "publish",
+                    "product_pipeline",
+                }
+                if str(task_type or "").strip().lower() in quality_scoped:
+                    q = await self._maybe_quality_gate(str(task_type), str(clean_params)[:250], str(result.output)[:5000])
+                    return f"Агент выполнил: {out_text}\nQuality gate: {q}"
+                return f"Агент выполнил: {out_text}"
             return f"Агент не смог выполнить: {result.error if result else 'нет агента'}"
 
         if action == "scan_trends" and self.agent_registry:

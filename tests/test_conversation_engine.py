@@ -281,6 +281,20 @@ class TestProcessMessage:
         assert "Product pipeline завершён" in msg
 
     @pytest.mark.asyncio
+    async def test_dispatch_agent_research_adds_quality_gate(self, mock_llm_router, mock_memory):
+        registry = MagicMock()
+        registry.dispatch = AsyncMock(
+            side_effect=[
+                type("R", (), {"success": True, "output": "research done", "error": ""})(),
+                type("Q", (), {"success": True, "output": {"approved": True, "score": 9}, "error": ""})(),
+            ]
+        )
+        engine = ConversationEngine(llm_router=mock_llm_router, memory=mock_memory, agent_registry=registry)
+        msg = await engine._dispatch_action("dispatch_agent", {"task_type": "research", "step": "test"})
+        assert "Агент выполнил" in msg
+        assert "Quality gate: ok(" in msg
+
+    @pytest.mark.asyncio
     async def test_dispatch_action_autonomous_execute_success_first_try(self, mock_llm_router, mock_memory):
         registry = MagicMock()
         registry.dispatch = AsyncMock(return_value=type("R", (), {"success": True, "output": "done", "error": ""})())
