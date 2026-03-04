@@ -70,6 +70,10 @@ class CommsAgent:
         self._pending_choice_context: dict | None = None
         # Ожидаем OTP-код для KDP auto-login
         self._pending_kdp_otp: dict | None = None
+        # Pending browser auth confirmations by service key (e.g. amazon_kdp, etsy).
+        self._pending_service_auth: dict[str, dict] = {}
+        # Last confirmed auth timestamps (runtime-memory).
+        self._service_auth_confirmed: dict[str, str] = {}
         self._telegram_conflict_mode: bool = False
 
         # Обратные ссылки на модули — устанавливаются через set_modules()
@@ -299,6 +303,163 @@ class CommsAgent:
         m = re.search(r"\b(\d{6,8})\b", s)
         return m.group(1) if m else ""
 
+    @staticmethod
+    def _detect_service_login_request(text: str) -> str:
+        s = str(text or "").strip().lower()
+        if not s:
+            return ""
+        has_action = any(x in s for x in ("зайди", "вход", "логин", "login", "auth", "авториза", "войти"))
+        if not has_action:
+            return ""
+        aliases: dict[str, tuple[str, ...]] = {
+            "amazon_kdp": ("amazon", "амазон", "kdp", "кдп", "amazon kdp", "amazon books"),
+            "etsy": ("etsy", "етси", "этси"),
+            "gumroad": ("gumroad", "гумроад", "гамроад"),
+            "twitter": ("twitter", "x.com", "x ", "твиттер", "твитер"),
+            "reddit": ("reddit", "реддит"),
+            "printful": ("printful", "принтфул"),
+        }
+        for service, keys in aliases.items():
+            if any(k in s for k in keys):
+                return service
+        return ""
+
+    @staticmethod
+    def _service_auth_meta(service: str) -> tuple[str, str]:
+        meta = {
+            "amazon_kdp": ("Amazon KDP", "https://kdp.amazon.com"),
+            "etsy": ("Etsy", "https://www.etsy.com/signin"),
+            "gumroad": ("Gumroad", "https://gumroad.com/login"),
+            "twitter": ("X (Twitter)", "https://x.com/i/flow/login"),
+            "reddit": ("Reddit", "https://www.reddit.com/login/"),
+            "printful": ("Printful", "https://www.printful.com/dashboard"),
+        }
+        return meta.get(service, (service, ""))
+
+    async def _run_kdp_probe(self) -> tuple[int, str]:
+        storage = str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json") or "runtime/kdp_storage_state.json")
+        cmd = [
+            "python3",
+            "scripts/kdp_auth_helper.py",
+            "probe",
+            "--storage-path",
+            storage,
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
+        output = (out_b or b"").decode("utf-8", errors="ignore")
+        return int(proc.returncode or 0), output
+
+    async def _verify_service_auth(self, service: str) -> tuple[bool, str]:
+        svc = str(service or "").strip().lower()
+        if not svc:
+            return False, "service_missing"
+        if svc == "amazon_kdp":
+            probe_rc, probe_out = await self._run_kdp_probe()
+            if probe_rc == 0:
+                return True, "Amazon KDP сессия подтверждена."
+            rc, out = await self._run_kdp_auto_login()
+            if rc == 0:
+                return True, "Amazon KDP вход подтверждён и сессия сохранена."
+            if "OTP_REQUIRED" in out:
+                self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat()}
+                return False, "Для Amazon нужен код из аутентификатора. Отправь 6 цифр."
+            return False, "Не удалось подтвердить вход Amazon автоматически."
+        if svc == "printful":
+            try:
+                from platforms.printful import PrintfulPlatform
+
+                p = PrintfulPlatform()
+                ok = await p.authenticate()
+                await p.close()
+                return ok, ("Printful авторизация подтверждена." if ok else "Printful авторизация не подтверждена.")
+            except Exception:
+                return False, "Ошибка проверки Printful."
+        if svc == "gumroad":
+            try:
+                from platforms.gumroad import GumroadPlatform
+
+                p = GumroadPlatform()
+                ok = await p.authenticate()
+                await p.close()
+                return ok, ("Gumroad авторизация подтверждена." if ok else "Gumroad авторизация не подтверждена.")
+            except Exception:
+                return False, "Ошибка проверки Gumroad."
+        if svc == "twitter":
+            try:
+                from platforms.twitter import TwitterPlatform
+
+                p = TwitterPlatform()
+                ok = await p.authenticate()
+                await p.close()
+                if ok:
+                    return True, "Twitter/X авторизация подтверждена."
+                return False, "Twitter/X API пока не подтверждает вход. Зафиксировал ручную авторизацию."
+            except Exception:
+                return False, "Twitter/X API проверка недоступна. Зафиксировал ручную авторизацию."
+        if svc == "etsy":
+            try:
+                from platforms.etsy import EtsyPlatform
+
+                p = EtsyPlatform()
+                ok = await p.authenticate()
+                await p.close()
+                if ok:
+                    return True, "Etsy авторизация подтверждена."
+                return False, "Etsy API не подтвердил вход. Зафиксировал ручную авторизацию."
+            except Exception:
+                return False, "Etsy API проверка недоступна. Зафиксировал ручную авторизацию."
+        if svc == "reddit":
+            return False, "Reddit в browser_only режиме; зафиксировал ручную авторизацию."
+        return False, "Проверка сервиса не реализована."
+
+    async def _start_service_auth_flow(self, service: str, send_reply, with_button: bool = True) -> bool:
+        svc = str(service or "").strip().lower()
+        if not svc:
+            return False
+        title, auth_url = self._service_auth_meta(svc)
+        if not auth_url:
+            return False
+        last = self._service_auth_confirmed.get(svc, "")
+        if last:
+            try:
+                dt = datetime.fromisoformat(last)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                age_sec = (datetime.now(timezone.utc) - dt).total_seconds()
+                if age_sec < 12 * 3600:
+                    await send_reply(f"{title}: вход уже подтверждён недавно. Можешь работать без повторного логина.")
+                    return True
+            except Exception:
+                pass
+        payload = {
+            "service": svc,
+            "url": auth_url,
+            "requested_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self._pending_service_auth[svc] = payload
+        if with_button:
+            kb = InlineKeyboardMarkup(
+                [
+                    [InlineKeyboardButton(f"Войти в {title}", url=auth_url)],
+                    [InlineKeyboardButton("Я вошел", callback_data=f"auth_done:{svc}")],
+                    [InlineKeyboardButton("Отмена", callback_data=f"auth_cancel:{svc}")],
+                ]
+            )
+            await send_reply(
+                f"Открой вход в {title}, авторизуйся, затем нажми «Я вошел».",
+                kb,
+            )
+            return True
+        await send_reply(
+            f"Ссылка для входа в {title}: {auth_url}\nПосле входа ответь: «я вошел»."
+        )
+        return True
+
     async def _run_kdp_auto_login(self, otp_code: str = "") -> tuple[int, str]:
         storage = str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json") or "runtime/kdp_storage_state.json")
         cmd = [
@@ -355,8 +516,20 @@ class CommsAgent:
         if wait_lines:
             auth_url = wait_lines[-1].split("WAIT: url=", 1)[-1].strip()
         if auth_url and with_button:
-            kb = InlineKeyboardMarkup([[InlineKeyboardButton("Открыть авторизацию Amazon", url=auth_url)]])
-            await send_reply("Amazon требует ручную проверку. Открой кнопку и подтверди вход.", kb)
+            self._pending_service_auth["amazon_kdp"] = {
+                "service": "amazon_kdp",
+                "url": auth_url,
+                "requested_at": datetime.now(timezone.utc).isoformat(),
+                "mode": "kdp_challenge",
+            }
+            kb = InlineKeyboardMarkup(
+                [
+                    [InlineKeyboardButton("Войти в Amazon", url=auth_url)],
+                    [InlineKeyboardButton("Я вошел", callback_data="auth_done:amazon_kdp")],
+                    [InlineKeyboardButton("Отмена", callback_data="auth_cancel:amazon_kdp")],
+                ]
+            )
+            await send_reply("Amazon требует ручную проверку. Войди и нажми «Я вошел».", kb)
         elif auth_url:
             await send_reply(f"Amazon требует ручную проверку. Ссылка для авторизации: {auth_url}")
         else:
@@ -654,6 +827,10 @@ class CommsAgent:
 
         if await self._handle_kdp_login_flow(text, _owner_reply, with_button=False):
             return
+        svc = self._detect_service_login_request(text)
+        if svc and svc != "amazon_kdp":
+            if await self._start_service_auth_flow(svc, _owner_reply, with_button=False):
+                return
 
         # Accept secrets/key updates via text
         if self._try_set_env_from_text(text):
@@ -672,6 +849,23 @@ class CommsAgent:
             return
 
         lower = text.lower()
+        if self._pending_service_auth and lower in ("я вошел", "вошел", "вошёл", "готово", "ok", "ок", "done"):
+            service = next(reversed(self._pending_service_auth))
+            self._pending_service_auth.pop(service, None)
+            ok, detail = await self._verify_service_auth(service)
+            title, _ = self._service_auth_meta(service)
+            if ok:
+                self._service_auth_confirmed[service] = datetime.now(timezone.utc).isoformat()
+                await self.send_message(f"Вход подтверждён: {title}.")
+                logger.info("Inline auth_done via text", extra={"event": "inline_auth_done", "context": {"service": service, "mode": "text"}})
+            else:
+                if service in {"etsy", "reddit", "twitter", "gumroad", "printful"}:
+                    self._service_auth_confirmed[service] = datetime.now(timezone.utc).isoformat()
+                    await self.send_message(f"Вход зафиксирован вручную: {title}. Проверка: {detail}")
+                    logger.info("Inline auth_done via text", extra={"event": "inline_auth_done", "context": {"service": service, "mode": "text_manual"}})
+                else:
+                    await self.send_message(f"Не удалось подтвердить вход: {detail}")
+            return
         if self._pending_owner_confirmation and (self._is_yes_token(lower) or self._is_no_token(lower)):
             payload = self._pending_owner_confirmation or {}
             self._pending_owner_confirmation = None
@@ -1955,8 +2149,32 @@ class CommsAgent:
 
         if await self._handle_kdp_login_flow(text, _tg_reply, with_button=True):
             return
+        svc = self._detect_service_login_request(text)
+        if svc and svc != "amazon_kdp":
+            if await self._start_service_auth_flow(svc, _tg_reply, with_button=True):
+                return
 
         lower = text.lower()
+        if self._pending_service_auth and lower in ("я вошел", "вошел", "вошёл", "готово", "ok", "ок", "done"):
+            service = next(reversed(self._pending_service_auth))
+            self._pending_service_auth.pop(service, None)
+            ok, detail = await self._verify_service_auth(service)
+            title, _ = self._service_auth_meta(service)
+            if ok:
+                self._service_auth_confirmed[service] = datetime.now(timezone.utc).isoformat()
+                await update.message.reply_text(f"Вход подтверждён: {title}.", reply_markup=self._main_keyboard())
+                logger.info("Inline auth_done via text", extra={"event": "inline_auth_done", "context": {"service": service, "mode": "text"}})
+            else:
+                if service in {"etsy", "reddit", "twitter", "gumroad", "printful"}:
+                    self._service_auth_confirmed[service] = datetime.now(timezone.utc).isoformat()
+                    await update.message.reply_text(
+                        f"Вход зафиксирован вручную: {title}. Проверка: {detail}",
+                        reply_markup=self._main_keyboard(),
+                    )
+                    logger.info("Inline auth_done via text", extra={"event": "inline_auth_done", "context": {"service": service, "mode": "text_manual"}})
+                else:
+                    await update.message.reply_text(f"Не удалось подтвердить вход: {detail}", reply_markup=self._main_keyboard())
+            return
         if self._pending_owner_confirmation and (self._is_yes_token(lower) or self._is_no_token(lower)):
             payload = self._pending_owner_confirmation or {}
             self._pending_owner_confirmation = None
@@ -2967,6 +3185,47 @@ class CommsAgent:
             return
 
         action, request_id = parts
+
+        if action == "auth_cancel":
+            self._pending_service_auth.pop(request_id, None)
+            await query.answer("Отменено")
+            await query.edit_message_text(
+                text=f"{query.message.text}\n\n— Отменено",
+            )
+            return
+
+        if action == "auth_done":
+            service = str(request_id or "").strip().lower()
+            self._pending_service_auth.pop(service, None)
+            ok, detail = await self._verify_service_auth(service)
+            title, _ = self._service_auth_meta(service)
+            if ok:
+                stamp = datetime.now(timezone.utc).isoformat()
+                self._service_auth_confirmed[service] = stamp
+                label = f"Вход подтверждён: {title}"
+                await query.answer("Вход подтверждён")
+                await query.edit_message_text(text=f"{query.message.text}\n\n— {label}")
+                logger.info(
+                    f"Inline auth_done: {service}",
+                    extra={"event": "inline_auth_done", "context": {"service": service, "mode": "verified"}},
+                )
+                return
+            # Fallback: for browser/manual flows keep owner's explicit confirmation,
+            # but clearly mark that technical probe failed.
+            if service in {"etsy", "reddit", "twitter", "gumroad", "printful"}:
+                stamp = datetime.now(timezone.utc).isoformat()
+                self._service_auth_confirmed[service] = stamp
+                label = f"Вход зафиксирован вручную: {title}"
+                await query.answer("Принято")
+                await query.edit_message_text(text=f"{query.message.text}\n\n— {label}\n(Проверка: {detail})")
+                logger.info(
+                    f"Inline auth_done: {service}",
+                    extra={"event": "inline_auth_done", "context": {"service": service, "mode": "manual_fallback", "detail": detail[:200]}},
+                )
+                return
+            await query.answer("Не подтверждено", show_alert=True)
+            await query.edit_message_text(text=f"{query.message.text}\n\n— Вход не подтверждён.\n{detail}")
+            return
 
         future = self._pending_approvals.pop(request_id, None)
         if future is None:

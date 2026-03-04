@@ -997,6 +997,47 @@ async def test_handle_callback_stranger(comms, mock_callback_query):
     mock_callback_query.answer.assert_called_once_with("Доступ запрещён", show_alert=True)
 
 
+@pytest.mark.asyncio
+async def test_handle_callback_auth_done_verified(comms, mock_callback_query):
+    update = MagicMock()
+    update.callback_query = mock_callback_query
+    mock_callback_query.data = "auth_done:amazon_kdp"
+    comms._pending_service_auth["amazon_kdp"] = {"service": "amazon_kdp", "url": "https://kdp.amazon.com"}
+    comms._verify_service_auth = AsyncMock(return_value=(True, "ok"))
+
+    await comms._handle_callback(update, MagicMock())
+
+    mock_callback_query.answer.assert_called_once_with("Вход подтверждён")
+    assert "Вход подтверждён" in mock_callback_query.edit_message_text.call_args[1]["text"]
+    assert "amazon_kdp" in comms._service_auth_confirmed
+
+
+@pytest.mark.asyncio
+async def test_handle_callback_auth_done_manual_fallback(comms, mock_callback_query):
+    update = MagicMock()
+    update.callback_query = mock_callback_query
+    mock_callback_query.data = "auth_done:reddit"
+    comms._pending_service_auth["reddit"] = {"service": "reddit", "url": "https://www.reddit.com/login/"}
+    comms._verify_service_auth = AsyncMock(return_value=(False, "browser_only"))
+
+    await comms._handle_callback(update, MagicMock())
+
+    mock_callback_query.answer.assert_called_once_with("Принято")
+    assert "Вход зафиксирован вручную" in mock_callback_query.edit_message_text.call_args[1]["text"]
+    assert "reddit" in comms._service_auth_confirmed
+
+
+@pytest.mark.asyncio
+async def test_on_message_login_request_starts_generic_service_auth(comms, mock_update):
+    mock_update.message.text = "зайди в реддит"
+    comms._start_service_auth_flow = AsyncMock(return_value=True)
+    comms._handle_kdp_login_flow = AsyncMock(return_value=False)
+
+    await comms._on_message(mock_update, MagicMock())
+
+    comms._start_service_auth_flow.assert_awaited_once()
+
+
 # ── request_approval с inline кнопками ──
 
 @pytest.mark.asyncio
