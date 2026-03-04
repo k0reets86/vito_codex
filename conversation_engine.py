@@ -1289,7 +1289,25 @@ class ConversationEngine:
             if result and result.success:
                 meta = getattr(result, "metadata", {}) or {}
                 summary = str(meta.get("executive_summary") or str(result.output)[:1200])
-                return f"Глубокое исследование готово по теме '{topic}'.\n{summary}"
+                verdict = "unknown"
+                score = 0
+                try:
+                    q = await self.agent_registry.dispatch(
+                        "quality_review",
+                        content=str(result.output)[:6000],
+                        content_type="deep_research_report",
+                    )
+                    if q and q.success and isinstance(getattr(q, "output", None), dict):
+                        qout = q.output
+                        score = int(qout.get("score", 0) or 0)
+                        verdict = "ok" if bool(qout.get("approved", False)) else "rework"
+                except Exception:
+                    pass
+                return (
+                    f"Глубокое исследование готово по теме '{topic}'.\n"
+                    f"Quality gate: {verdict} (score={score}).\n"
+                    f"{summary}"
+                )
             return f"Глубокое исследование не удалось: {getattr(result, 'error', 'unknown')}"
 
         if action == "run_product_pipeline" and self.agent_registry:
@@ -1467,6 +1485,13 @@ class ConversationEngine:
         ok, detail = await _run_cap(capability)
         attempts.append(f"run:{capability or 'unknown'}:{'ok' if ok else detail}")
         if ok:
+            self._record_autonomy_learning(
+                request=request,
+                capability=capability or "unknown",
+                success=True,
+                attempts=attempts,
+                result_text=detail,
+            )
             return f"Задача выполнена ({capability}).\nРезультат: {detail}"
 
         if bool(getattr(settings, "AUTONOMY_AUTO_LEARN_ON_FAILURE", True)):
@@ -1488,6 +1513,13 @@ class ConversationEngine:
         ok2, detail2 = await _run_cap(capability)
         attempts.append(f"retry:{capability or 'unknown'}:{'ok' if ok2 else detail2}")
         if ok2:
+            self._record_autonomy_learning(
+                request=request,
+                capability=capability or "unknown",
+                success=True,
+                attempts=attempts,
+                result_text=detail2,
+            )
             return (
                 f"Задача выполнена после обучения ({capability}).\n"
                 f"Результат: {detail2}\n"
@@ -1500,6 +1532,13 @@ class ConversationEngine:
             if core is not None:
                 res = await core.execute_task("orchestrate", step=request, goal_title=request[:120])
                 if res and res.success:
+                    self._record_autonomy_learning(
+                        request=request,
+                        capability="orchestrate",
+                        success=True,
+                        attempts=attempts,
+                        result_text=str(getattr(res, "output", "")),
+                    )
                     return (
                         "Задача выполнена через оркестратор.\n"
                         f"Результат: {str(getattr(res, 'output', ''))[:900]}\n"
@@ -1508,6 +1547,13 @@ class ConversationEngine:
         except Exception as e:
             attempts.append(f"fallback:orchestrate_exception:{e}")
 
+        self._record_autonomy_learning(
+            request=request,
+            capability=capability or "unknown",
+            success=False,
+            attempts=attempts,
+            result_text="",
+        )
         return (
             "Автономный контур не смог завершить задачу с текущими навыками.\n"
             "Я сохранил попытки в память ошибок и продолжу дообучение по этой теме.\n"
@@ -1543,6 +1589,59 @@ class ConversationEngine:
             if any(k in s for k in keys):
                 return cap
         return "orchestrate"
+
+    def _record_autonomy_learning(
+        self,
+        request: str,
+        capability: str,
+        success: bool,
+        attempts: list[str],
+        result_text: str,
+    ) -> None:
+        """Persist autonomous execution lessons for future tasks."""
+        mm = self.memory
+        if mm is None:
+            return
+        skill_name = f"autonomy:{capability}"
+        try:
+            mm.save_skill(
+                name=skill_name,
+                description=f"Autonomous loop for '{request[:80]}'",
+                agent="conversation_engine",
+                task_type=capability,
+                method={
+                    "request": request[:240],
+                    "attempts": attempts[:10],
+                    "success": bool(success),
+                },
+            )
+            mm.update_skill_success(skill_name, success=bool(success))
+            mm.update_skill_last_result(skill_name, str(result_text or "")[:500])
+        except Exception:
+            pass
+        try:
+            if success:
+                mm.save_pattern(
+                    category="autonomy_success",
+                    key=f"{capability}:{hash(request) % 100000}",
+                    value=" | ".join(attempts[:8]),
+                    confidence=0.85,
+                )
+            else:
+                mm.save_pattern(
+                    category="anti_pattern",
+                    key=f"autonomy_fail:{capability}:{hash(request) % 100000}",
+                    value=" | ".join(attempts[:8]),
+                    confidence=0.95,
+                )
+                mm.log_error(
+                    module="conversation_engine",
+                    error_type="autonomous_execute_failed",
+                    message=f"{capability}: {request[:180]}",
+                    resolution="auto_learn_retry_scheduled",
+                )
+        except Exception:
+            pass
 
     @staticmethod
     def _extract_research_topic(text: str) -> str:

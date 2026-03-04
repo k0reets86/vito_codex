@@ -3822,6 +3822,24 @@ class CommsAgent:
                         await update.message.reply_text(part, reply_markup=self._main_keyboard())
                 else:
                     await update.message.reply_text(formatted, reply_markup=self._main_keyboard())
+                # Final single-owner verdict for deep research quality.
+                try:
+                    if self._agent_registry:
+                        q = await self._agent_registry.dispatch(
+                            "quality_review",
+                            content=formatted[:6000],
+                            content_type="deep_research_report",
+                        )
+                        if q and q.success and isinstance(getattr(q, "output", None), dict):
+                            qout = q.output
+                            q_msg = (
+                                f"Финальный вердикт качества: "
+                                f"{'OK' if bool(qout.get('approved', False)) else 'ПЕРЕДЕЛАТЬ'} "
+                                f"(score={int(qout.get('score', 0) or 0)})."
+                            )
+                            await update.message.reply_text(q_msg, reply_markup=self._main_keyboard())
+                except Exception:
+                    pass
                 if self._conversation_engine:
                     self._pending_system_action = {
                         "actions": [
