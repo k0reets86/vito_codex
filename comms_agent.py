@@ -1360,6 +1360,16 @@ class CommsAgent:
             # owner_inbox path does not support inline markup; send plain text
             await self.send_message(msg)
 
+        # Login/auth intent must win over generic status/inventory routing
+        # to avoid accidental fallback into planning/research branches.
+        if await self._handle_kdp_login_flow(text, _owner_reply, with_button=False):
+            self._touch_service_context("amazon_kdp")
+            return
+        svc = self._detect_service_login_request(text)
+        if svc and svc != "amazon_kdp":
+            if await self._start_service_auth_flow(svc, _owner_reply, with_button=False):
+                return
+
         service_inventory = self._detect_contextual_service_inventory_request(text)
         if service_inventory:
             await self.send_message(await self._format_service_inventory_snapshot(service_inventory), level="result")
@@ -1372,14 +1382,6 @@ class CommsAgent:
             svc = self._last_service_context if self._has_fresh_service_context() else ""
             if svc:
                 await self.send_message(await self._format_service_auth_status_live(svc), level="result")
-                return
-
-        if await self._handle_kdp_login_flow(text, _owner_reply, with_button=False):
-            self._touch_service_context("amazon_kdp")
-            return
-        svc = self._detect_service_login_request(text)
-        if svc and svc != "amazon_kdp":
-            if await self._start_service_auth_flow(svc, _owner_reply, with_button=False):
                 return
 
         # Accept secrets/key updates via text
@@ -2803,6 +2805,16 @@ class CommsAgent:
             kwargs = {"reply_markup": markup} if markup is not None else {"reply_markup": self._main_keyboard()}
             await update.message.reply_text(msg, **kwargs)
 
+        # Login/auth intent must win over contextual inventory/status parsing,
+        # otherwise phrases like "зайди ... проверь товары" can be misrouted.
+        if await self._handle_kdp_login_flow(text, _tg_reply, with_button=True):
+            self._touch_service_context("amazon_kdp")
+            return
+        svc = self._detect_service_login_request(text)
+        if svc and svc != "amazon_kdp":
+            if await self._start_service_auth_flow(svc, _tg_reply, with_button=True):
+                return
+
         # Highest-priority contextual routing: account inventory/status/auth issue.
         service_inventory = self._detect_contextual_service_inventory_request(text)
         if service_inventory:
@@ -2848,14 +2860,6 @@ class CommsAgent:
                     await self._format_service_auth_status_live(svc),
                     reply_markup=self._main_keyboard(),
                 )
-                return
-
-        if await self._handle_kdp_login_flow(text, _tg_reply, with_button=True):
-            self._touch_service_context("amazon_kdp")
-            return
-        svc = self._detect_service_login_request(text)
-        if svc and svc != "amazon_kdp":
-            if await self._start_service_auth_flow(svc, _tg_reply, with_button=True):
                 return
 
         lower = text.lower()

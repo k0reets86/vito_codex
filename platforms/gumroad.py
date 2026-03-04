@@ -409,6 +409,46 @@ class GumroadPlatform(BasePlatform):
                     except Exception:
                         return ""
 
+                async def _open_product_from_products_page(preferred_name: str = "") -> str:
+                    """On /products listing page, open first matching product edit page.
+
+                    This is needed because Gumroad can bounce to /products after create flow.
+                    """
+                    try:
+                        href = await page.evaluate(
+                            """(preferredName) => {
+                                const anchors = Array.from(document.querySelectorAll('a[href*="/products/"]'));
+                                const filtered = anchors
+                                  .map(a => ({href: a.getAttribute('href') || '', text: (a.textContent || '').trim()}))
+                                  .filter(x => x.href && !x.href.includes('/products/new'));
+                                if (!filtered.length) return '';
+                                if (preferredName) {
+                                  const m = filtered.find(x => x.text && x.text.toLowerCase().includes(preferredName.toLowerCase()));
+                                  if (m) return m.href;
+                                }
+                                const edit = filtered.find(x => x.href.includes('/edit'));
+                                if (edit) return edit.href;
+                                return filtered[0].href;
+                            }""",
+                            preferred_name or "",
+                        )
+                    except Exception:
+                        href = ""
+                    if not href:
+                        return ""
+                    if href.startswith("/"):
+                        href = f"https://gumroad.com{href}"
+                    try:
+                        await page.goto(href, wait_until="domcontentloaded")
+                        await asyncio.sleep(2)
+                        # Normalize slug
+                        if "/products/" in page.url:
+                            slug_local = page.url.split("/products/")[-1].split("/")[0]
+                            return slug_local
+                    except Exception:
+                        return ""
+                    return ""
+
                 if slug_from_api:
                     await page.goto(f"https://gumroad.com/products/{slug_from_api}/edit", wait_until="domcontentloaded")
                     await asyncio.sleep(2)
@@ -497,13 +537,20 @@ class GumroadPlatform(BasePlatform):
                     pass
 
                 # Fill URL/slug if field exists
+                generated_slug = str(content.get("slug") or "").strip()
+                if not generated_slug:
+                    import re
+                    base = re.sub(r"[^a-z0-9\\-]+", "-", str(name).lower()).strip("-")
+                    if not base:
+                        base = "vito-product"
+                    generated_slug = f"{base[:42]}-{int(asyncio.get_event_loop().time())}"
                 try:
                     url_el = page.get_by_label("URL").first
                     if await url_el.is_visible(timeout=1500):
                         await url_el.click()
                         await page.keyboard.press("Control+a")
                         await page.keyboard.press("Backspace")
-                        await url_el.fill(content.get("slug", "boevoy-gumroad-test"))
+                        await url_el.fill(generated_slug)
                 except Exception:
                     try:
                         url_el = page.locator('input[name*="url"], input[placeholder*="URL"], input[placeholder*="url"]').first
@@ -511,7 +558,7 @@ class GumroadPlatform(BasePlatform):
                             await url_el.click()
                             await page.keyboard.press("Control+a")
                             await page.keyboard.press("Backspace")
-                            await url_el.fill(content.get("slug", "boevoy-gumroad-test"))
+                            await url_el.fill(generated_slug)
                     except Exception:
                         pass
 
@@ -538,8 +585,10 @@ class GumroadPlatform(BasePlatform):
                     pass
                 # Ensure we're on a specific product edit page, not products list
                 try:
-                    if ("/products/" not in page.url) or page.url.rstrip("/").endswith("/products"):
-                        slug_from_api = await _open_existing_product(name)
+                    if page.url.rstrip("/").endswith("/products"):
+                        slug_from_api = await _open_product_from_products_page(name) or await _open_existing_product(name, allow_update=True)
+                    elif "/products/" not in page.url:
+                        slug_from_api = await _open_existing_product(name, allow_update=True)
                     logger.info(f"Gumroad: page url {page.url}", extra={"event": "gumroad_page_url"})
                 except Exception:
                     pass

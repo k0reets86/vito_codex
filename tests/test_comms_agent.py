@@ -1225,6 +1225,20 @@ async def test_on_message_custom_site_login_request_ukr_pravda_alias(comms, mock
 
 
 @pytest.mark.asyncio
+async def test_on_message_login_intent_has_priority_over_inventory_context(comms, mock_update):
+    mock_update.message.text = "зайди на амазон и проверь товары"
+    conv = MagicMock()
+    conv.process_message = AsyncMock(return_value={"response": "SHOULD_NOT_BE_USED"})
+    comms.set_modules(conversation_engine=conv)
+    comms._handle_kdp_login_flow = AsyncMock(return_value=True)
+
+    await comms._on_message(mock_update, MagicMock())
+
+    comms._handle_kdp_login_flow.assert_awaited_once()
+    conv.process_message.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_on_message_contextual_service_status(comms, mock_update):
     comms._last_service_context = "twitter"
     mock_update.message.text = "покажи статус"
