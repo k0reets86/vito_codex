@@ -1168,19 +1168,15 @@ async def test_handle_callback_help_topic_daily(comms, mock_callback_query):
 
 
 @pytest.mark.asyncio
-async def test_handle_kdp_login_flow_skips_relogin_when_recently_confirmed(comms):
+async def test_handle_kdp_login_flow_skips_relogin_when_live_check_ok(comms):
     comms._service_auth_confirmed["amazon_kdp"] = "2026-03-04T10:00:00+00:00"
     send_reply = AsyncMock()
-    with patch("comms_agent.datetime") as dt:
-        real_datetime = __import__("datetime").datetime
-        dt.fromisoformat = real_datetime.fromisoformat
-        dt.now.return_value = real_datetime.fromisoformat("2026-03-04T10:05:00+00:00")
-        dt.timezone = __import__("datetime").timezone
-        comms._run_kdp_auto_login = AsyncMock(return_value=(0, "ok"))
-        handled = await comms._handle_kdp_login_flow("зайди на амазон", send_reply, with_button=True)
+    comms._verify_service_auth = AsyncMock(return_value=(True, "ok"))
+    comms._run_kdp_auto_login = AsyncMock(return_value=(0, "ok"))
+    handled = await comms._handle_kdp_login_flow("зайди на амазон", send_reply, with_button=True)
     assert handled is True
     comms._run_kdp_auto_login.assert_not_awaited()
-    assert "уже подтверждён" in send_reply.call_args.args[0]
+    assert "активная сессия уже подтверждена" in send_reply.call_args.args[0]
 
 
 @pytest.mark.asyncio

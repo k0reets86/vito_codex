@@ -1215,9 +1215,11 @@ class CommsAgent:
                 await send_reply(f"{title}: активная сессия уже подтверждена, повторный логин не требуется.")
                 return True
             self._clear_service_auth_confirmed(svc)
+            # Для strict-сервисов не доверяем age-based кэшу вовсе.
+            # Всегда продолжаем в полноценный auth flow.
 
         last = self._service_auth_confirmed.get(svc, "")
-        if last:
+        if last and not self._requires_strict_auth_verification(svc):
             try:
                 dt = datetime.fromisoformat(last)
                 if dt.tzinfo is None:
@@ -1293,19 +1295,19 @@ class CommsAgent:
         if not self._is_kdp_login_request(text):
             return False
 
-        # Если вход недавно подтверждён вручную/авто-проверкой, не запускаем новый login flow.
+        # Для strict-сервисов не доверяем только age-based stamp.
+        # Если есть stamp, подтверждаем реальный live-check; иначе продолжаем auth flow.
         last = self._service_auth_confirmed.get("amazon_kdp", "")
         if last:
             try:
-                dt = datetime.fromisoformat(last)
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                age_sec = (datetime.now(timezone.utc) - dt).total_seconds()
-                if age_sec < 12 * 3600:
-                    await send_reply("Amazon KDP: вход уже подтверждён недавно. Повторный логин не требуется.")
-                    return True
+                ok, _ = await self._verify_service_auth("amazon_kdp")
             except Exception:
-                pass
+                ok = False
+            if ok:
+                self._mark_service_auth_confirmed("amazon_kdp")
+                await send_reply("Amazon KDP: активная сессия уже подтверждена, повторный логин не требуется.")
+                return True
+            self._clear_service_auth_confirmed("amazon_kdp")
 
         await send_reply("Запускаю вход в Amazon KDP через браузерный flow...")
         rc, out = await self._run_kdp_auto_login()
