@@ -1396,7 +1396,7 @@ class CommsAgent:
             await send_reply("Готово: вход в Amazon KDP подтверждён и сессия сохранена.")
             return True
         mfa_hints = ("otp_required", "otp code not provided", "/ap/mfa", "mfa?")
-        if any(h in low for h in mfa_hints):
+        if rc in {2, 3} or any(h in low for h in mfa_hints):
             self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat()}
             await send_reply("Нужен 6-значный код из Amazon/Authenticator. Отправь его одним сообщением.")
             return True
@@ -1404,9 +1404,17 @@ class CommsAgent:
         # 3) Без VNC fallback для Amazon в обычном диалоге:
         # remote-browser часто нестабилен на сервере и даёт "черный экран".
         # Возвращаем явный next-step вместо запуска VNC-сессии.
+        summary = ""
+        try:
+            tail = str(out or "").strip().splitlines()[-1][:180]
+            if tail:
+                summary = f" Причина: {tail}"
+        except Exception:
+            summary = ""
         await send_reply(
-            "Не смог завершить вход автоматически. Повтори через минуту команду «зайди на амазон». "
-            "Если снова попросит код — просто пришли 6 цифр сюда."
+            "Не смог завершить вход автоматически (без VNC). "
+            "Повтори «зайди на амазон» или пришли 6-значный код, если он у тебя уже есть."
+            f"{summary}"
         )
         logger.warning(
             "KDP auto-login failed without OTP; remote fallback suppressed",
