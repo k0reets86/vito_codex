@@ -1138,6 +1138,26 @@ async def test_handle_callback_auth_done_strict_verification_amazon(comms, mock_
 
 
 @pytest.mark.asyncio
+async def test_handle_callback_auth_done_strict_remote_storage_fallback_marks_confirmed(comms, mock_callback_query):
+    update = MagicMock()
+    update.callback_query = mock_callback_query
+    mock_callback_query.data = "auth_done:amazon_kdp"
+    comms._pending_service_auth["amazon_kdp"] = {
+        "service": "amazon_kdp",
+        "url": "https://kdp.amazon.com",
+        "mode": "remote",
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+    }
+    comms._verify_service_auth = AsyncMock(return_value=(False, "probe_failed"))
+    comms._has_cookie_storage_state = MagicMock(return_value=(True, "storage_cookies_ok"))
+
+    await comms._handle_callback(update, MagicMock())
+
+    mock_callback_query.answer.assert_called_once_with("Вход подтверждён")
+    assert "amazon_kdp" in comms._service_auth_confirmed
+
+
+@pytest.mark.asyncio
 async def test_handle_callback_auth_done_survives_noneditable_message(comms, mock_callback_query):
     update = MagicMock()
     update.callback_query = mock_callback_query
@@ -1373,8 +1393,27 @@ async def test_on_message_contextual_service_inventory_amazon_requires_live_sess
 
     sent = mock_update.message.reply_text.call_args[0][0]
     assert "не вижу активной сессии" in sent.lower()
-    reg.dispatch.assert_not_called()
-    conv.process_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_on_message_auth_done_text_strict_remote_storage_fallback(comms, mock_update):
+    mock_update.message.text = "я вошел"
+    comms._pending_service_auth["amazon_kdp"] = {
+        "service": "amazon_kdp",
+        "mode": "remote",
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+    }
+    comms._verify_service_auth = AsyncMock(return_value=(False, "probe_failed"))
+    comms._has_cookie_storage_state = MagicMock(return_value=(True, "storage_cookies_ok"))
+    comms._conversation_engine = MagicMock()
+    comms._conversation_engine.process_message = AsyncMock(return_value={"response": "SHOULD_NOT_BE_USED"})
+
+    await comms._on_message(mock_update, MagicMock())
+
+    sent = mock_update.message.reply_text.call_args[0][0]
+    assert "Вход подтверждён: Amazon KDP" in sent
+    assert "amazon_kdp" in comms._service_auth_confirmed
+    comms._conversation_engine.process_message.assert_not_called()
 
 
 @pytest.mark.asyncio

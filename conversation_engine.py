@@ -1344,11 +1344,13 @@ class ConversationEngine:
                 out = getattr(res, "output", {}) or {}
                 done = len([s for s in (out.get("steps") or []) if s.get("ok")])
                 total = len(out.get("steps") or [])
+                q = await self._maybe_quality_gate("product_pipeline", topic, json.dumps(out, ensure_ascii=False)[:5000])
                 return (
                     f"Product pipeline завершён: {topic}\n"
                     f"- Этапов успешно: {done}/{total}\n"
                     f"- Платформы: {', '.join(platforms)}\n"
-                    f"- Auto publish: {'on' if auto_publish else 'off'}"
+                    f"- Auto publish: {'on' if auto_publish else 'off'}\n"
+                    f"- Quality gate: {q}"
                 )
             return f"Product pipeline завершился с ошибкой: {getattr(res, 'error', 'unknown')}"
 
@@ -1377,7 +1379,8 @@ class ConversationEngine:
                     lines.append("Self-improve: ok" if si and si.success else f"Self-improve: fail ({getattr(si, 'error', 'unknown')})")
                 except Exception as e:
                     lines.append(f"Self-improve error: {e}")
-            return "Improvement cycle:\n- " + "\n- ".join(lines)
+            quality = await self._maybe_quality_gate("documentation", request or "improvement_cycle", "\n".join(lines))
+            return "Improvement cycle:\n- " + "\n- ".join(lines) + f"\n- Quality gate: {quality}"
 
         if action == "autonomous_execute":
             request = str(params.get("request") or "").strip()

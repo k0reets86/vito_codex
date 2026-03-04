@@ -882,6 +882,12 @@ class CommsAgent:
                 if ok:
                     self._mark_service_auth_confirmed(svc)
                     return f"{title}: подключение активно (live-check OK). Повторный логин не требуется."
+                has_storage, _ = self._has_cookie_storage_state(svc)
+                if has_storage and self._service_auth_confirmed.get(svc):
+                    return (
+                        f"{title}: есть сохранённая browser-сессия, но прямой live-check сейчас не прошёл. "
+                        "Если действие не выполняется, запусти вход заново."
+                    )
                 self._clear_service_auth_confirmed(svc)
                 return f"{title}: вход не подтверждён (live-check fail). {detail}"
             except Exception as e:
@@ -1073,6 +1079,47 @@ class CommsAgent:
             out[k.strip().lower()] = v.strip()
         return out
 
+    def _service_storage_state_path(self, service: str) -> Path | None:
+        svc = str(service or "").strip().lower()
+        raw = ""
+        if svc == "amazon_kdp":
+            raw = str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json") or "runtime/kdp_storage_state.json")
+        elif svc == "etsy":
+            raw = str(getattr(settings, "ETSY_STORAGE_STATE_FILE", "runtime/etsy_storage_state.json") or "runtime/etsy_storage_state.json")
+        elif svc == "kofi":
+            raw = str(getattr(settings, "KOFI_STORAGE_STATE_FILE", "runtime/kofi_storage_state.json") or "runtime/kofi_storage_state.json")
+        if not raw:
+            return None
+        p = Path(raw)
+        if not p.is_absolute():
+            p = PROJECT_ROOT / p
+        return p
+
+    def _has_cookie_storage_state(self, service: str, since_iso: str = "") -> tuple[bool, str]:
+        p = self._service_storage_state_path(service)
+        if p is None:
+            return False, "no_storage_path"
+        if not p.exists():
+            return False, "storage_missing"
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            cookies = data.get("cookies") if isinstance(data, dict) else None
+            if not isinstance(cookies, list) or not cookies:
+                return False, "cookies_missing"
+            if since_iso:
+                try:
+                    req_dt = datetime.fromisoformat(str(since_iso))
+                    if req_dt.tzinfo is None:
+                        req_dt = req_dt.replace(tzinfo=timezone.utc)
+                    mtime = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
+                    if mtime < req_dt:
+                        return False, "storage_not_updated_after_login"
+                except Exception:
+                    pass
+            return True, "storage_cookies_ok"
+        except Exception:
+            return False, "storage_parse_failed"
+
     async def _verify_service_auth(self, service: str) -> tuple[bool, str]:
         svc = str(service or "").strip().lower()
         if not svc:
@@ -1081,6 +1128,9 @@ class CommsAgent:
             probe_rc, probe_out = await self._run_kdp_probe()
             if probe_rc == 0:
                 return True, "Amazon KDP сессия подтверждена."
+            has_storage, _ = self._has_cookie_storage_state("amazon_kdp")
+            if has_storage:
+                return True, "Amazon KDP: browser storage_state зафиксирован."
             rc, out = await self._run_kdp_auto_login()
             if rc == 0:
                 return True, "Amazon KDP вход подтверждён и сессия сохранена."
@@ -1131,6 +1181,9 @@ class CommsAgent:
                     return True, "Etsy авторизация подтверждена."
                 mode = str(getattr(settings, "ETSY_MODE", "api") or "api").lower()
                 if mode in {"browser", "browser_only"}:
+                    has_storage, _ = self._has_cookie_storage_state("etsy")
+                    if has_storage:
+                        return True, "Etsy: browser storage_state зафиксирован."
                     rc, out = await self._run_etsy_auto_login()
                     if rc == 0:
                         return True, "Etsy browser-сессия захвачена автоматически."
@@ -1153,6 +1206,9 @@ class CommsAgent:
                 await p.close()
                 if ok:
                     return True, "Ko-fi авторизация подтверждена."
+                has_storage, _ = self._has_cookie_storage_state("kofi")
+                if has_storage:
+                    return True, "Ko-fi: browser storage_state зафиксирован."
                 return False, "Ko-fi авторизация не подтверждена."
             except Exception:
                 return False, "Ko-fi проверка недоступна."
@@ -1637,7 +1693,7 @@ class CommsAgent:
         lower = text.lower()
         if self._pending_service_auth and lower in ("я вошел", "вошел", "вошёл", "готово", "ok", "ок", "done"):
             service = next(reversed(self._pending_service_auth))
-            self._pending_service_auth.pop(service, None)
+            pending = self._pending_service_auth.pop(service, None) or {}
             ok, detail = await self._verify_service_auth(service)
             title, _ = self._service_auth_meta(service)
             self._touch_service_context(service)
@@ -1647,6 +1703,14 @@ class CommsAgent:
                 logger.info("Inline auth_done via text", extra={"event": "inline_auth_done", "context": {"service": service, "mode": "text"}})
             else:
                 if self._requires_strict_auth_verification(service):
+                    since = str(pending.get("requested_at") or "")
+                    has_storage, storage_detail = self._has_cookie_storage_state(service, since_iso=since)
+                    if bool(pending.get("mode") == "remote") and has_storage:
+                        self._mark_service_auth_confirmed(service)
+                        await self.send_message(
+                            f"Вход подтверждён: {title} (server storage захвачен, detail={storage_detail})."
+                        )
+                        return
                     self._clear_service_auth_confirmed(service)
                     extra = f" {self._manual_capture_hint(service)}" if self._is_challenge_detail(detail) else ""
                     await self.send_message(self._service_needs_session_refresh_text(service, title, detail) + extra)
@@ -3133,7 +3197,7 @@ class CommsAgent:
         lower = text.lower()
         if self._pending_service_auth and lower in ("я вошел", "вошел", "вошёл", "готово", "ok", "ок", "done"):
             service = next(reversed(self._pending_service_auth))
-            self._pending_service_auth.pop(service, None)
+            pending = self._pending_service_auth.pop(service, None) or {}
             ok, detail = await self._verify_service_auth(service)
             title, _ = self._service_auth_meta(service)
             self._touch_service_context(service)
@@ -3143,6 +3207,15 @@ class CommsAgent:
                 logger.info("Inline auth_done via text", extra={"event": "inline_auth_done", "context": {"service": service, "mode": "text"}})
             else:
                 if self._requires_strict_auth_verification(service):
+                    since = str(pending.get("requested_at") or "")
+                    has_storage, storage_detail = self._has_cookie_storage_state(service, since_iso=since)
+                    if bool(pending.get("mode") == "remote") and has_storage:
+                        self._mark_service_auth_confirmed(service)
+                        await update.message.reply_text(
+                            f"Вход подтверждён: {title} (server storage захвачен, detail={storage_detail}).",
+                            reply_markup=self._main_keyboard(),
+                        )
+                        return
                     self._clear_service_auth_confirmed(service)
                     extra = f" {self._manual_capture_hint(service)}" if self._is_challenge_detail(detail) else ""
                     await update.message.reply_text(
@@ -4351,7 +4424,7 @@ class CommsAgent:
 
         if action == "auth_done":
             service = str(request_id or "").strip().lower()
-            self._pending_service_auth.pop(service, None)
+            pending = self._pending_service_auth.pop(service, None) or {}
             self._touch_service_context(service)
             try:
                 ok, detail = await self._verify_service_auth(service)
@@ -4374,6 +4447,17 @@ class CommsAgent:
             # Fallback: for browser/manual flows keep owner's explicit confirmation,
             # but clearly mark that technical probe failed.
             if self._requires_strict_auth_verification(service):
+                since = str(pending.get("requested_at") or "")
+                has_storage, storage_detail = self._has_cookie_storage_state(service, since_iso=since)
+                if bool(pending.get("mode") == "remote") and has_storage:
+                    stamp = datetime.now(timezone.utc).isoformat()
+                    self._service_auth_confirmed[service] = stamp
+                    self._save_auth_state()
+                    label = f"Вход подтверждён: {title} (server storage захвачен)"
+                    await query.answer("Вход подтверждён")
+                    await self._safe_edit_callback_message(query, f"{query.message.text}\n\n— {label}\n({storage_detail})")
+                    await self.send_message(label, level="result")
+                    return
                 self._clear_service_auth_confirmed(service)
                 extra = f" {self._manual_capture_hint(service)}" if self._is_challenge_detail(detail) else ""
                 await query.answer("Нужно обновить сессию", show_alert=False)
