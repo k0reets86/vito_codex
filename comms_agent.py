@@ -186,6 +186,8 @@ class CommsAgent:
         self._pending_choice_context: dict | None = None
         # Ожидаем OTP-код для KDP auto-login
         self._pending_kdp_otp: dict | None = None
+        # Serialize KDP browser-auth subprocesses to avoid Chromium resource races.
+        self._kdp_auth_lock = asyncio.Lock()
         # Pending browser auth confirmations by service key (e.g. amazon_kdp, etsy).
         self._pending_service_auth: dict[str, dict] = {}
         # Last confirmed auth timestamps (runtime-memory).
@@ -1015,14 +1017,15 @@ class CommsAgent:
             storage,
             "--headless",
         ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
-        output = (out_b or b"").decode("utf-8", errors="ignore")
-        return int(proc.returncode or 0), output
+        async with self._kdp_auth_lock:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
+            output = (out_b or b"").decode("utf-8", errors="ignore")
+            return int(proc.returncode or 0), output
 
     async def _run_kdp_probe_stable(self) -> tuple[int, str]:
         rc, out = await self._run_kdp_probe()
@@ -1041,14 +1044,15 @@ class CommsAgent:
             storage,
             "--headless",
         ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=150)
-        output = (out_b or b"").decode("utf-8", errors="ignore")
-        return int(proc.returncode or 0), output
+        async with self._kdp_auth_lock:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=150)
+            output = (out_b or b"").decode("utf-8", errors="ignore")
+            return int(proc.returncode or 0), output
 
     async def _run_etsy_auto_login(self) -> tuple[int, str]:
         storage = str(getattr(settings, "ETSY_STORAGE_STATE_FILE", "runtime/etsy_storage_state.json") or "runtime/etsy_storage_state.json")
@@ -1364,14 +1368,15 @@ class CommsAgent:
         ]
         if otp_code:
             cmd.extend(["--otp-code", otp_code])
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=220)
-        output = (out_b or b"").decode("utf-8", errors="ignore")
-        return int(proc.returncode or 0), output
+        async with self._kdp_auth_lock:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=220)
+            output = (out_b or b"").decode("utf-8", errors="ignore")
+            return int(proc.returncode or 0), output
 
     async def _run_kdp_prepare_otp(self) -> tuple[int, str]:
         cmd = [
@@ -1385,14 +1390,15 @@ class CommsAgent:
             "--preauth-meta-path",
             "runtime/kdp_preauth_meta.json",
         ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=180)
-        output = (out_b or b"").decode("utf-8", errors="ignore")
-        return int(proc.returncode or 0), output
+        async with self._kdp_auth_lock:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=180)
+            output = (out_b or b"").decode("utf-8", errors="ignore")
+            return int(proc.returncode or 0), output
 
     async def _run_kdp_submit_otp(self, otp_code: str) -> tuple[int, str]:
         storage = str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json") or "runtime/kdp_storage_state.json")
@@ -1411,14 +1417,15 @@ class CommsAgent:
             "--otp-code",
             str(otp_code or "").strip(),
         ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=180)
-        output = (out_b or b"").decode("utf-8", errors="ignore")
-        return int(proc.returncode or 0), output
+        async with self._kdp_auth_lock:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=180)
+            output = (out_b or b"").decode("utf-8", errors="ignore")
+            return int(proc.returncode or 0), output
 
     @staticmethod
     def _kdp_prepare_has_mfa_evidence(output: str) -> bool:
@@ -1474,7 +1481,6 @@ class CommsAgent:
             # Primary Telegram path: use full auto-login with OTP first (most stable in production).
             attempts: list[tuple[str, tuple[int, str]]] = [
                 ("auto_login", await self._run_kdp_auto_login(otp_code=maybe_otp)),
-                ("auto_login_retry", await self._run_kdp_auto_login(otp_code=maybe_otp)),
             ]
             # Optional fallback to preauth submit if such state exists.
             if prepared_mode:

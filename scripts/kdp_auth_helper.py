@@ -63,6 +63,15 @@ def _chromium_launch_args() -> list[str]:
     return args
 
 
+async def _launch_headless_browser(playwright_obj):
+    """Resilient headless launch for constrained servers."""
+    try:
+        return await playwright_obj.chromium.launch(headless=True, args=_chromium_launch_args())
+    except Exception as e:
+        print(f"WARN: Chromium headless launch failed ({e}). Trying Firefox fallback...")
+        return await playwright_obj.firefox.launch(headless=True)
+
+
 async def browser_capture(
     timeout_sec: int,
     storage_path: str,
@@ -199,7 +208,7 @@ async def auto_login(timeout_sec: int, storage_path: str, otp_code: str = "") ->
     last_url = ""
     try:
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True, args=_chromium_launch_args())
+            browser = await _launch_headless_browser(p)
             context = await browser.new_context(viewport={"width": 1366, "height": 900})
             page = await context.new_page()
             await page.goto("https://kdp.amazon.com", wait_until="domcontentloaded", timeout=120000)
@@ -465,7 +474,7 @@ async def prepare_otp_session(timeout_sec: int, preauth_state_path: str, preauth
         return 1
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, args=_chromium_launch_args())
+        browser = await _launch_headless_browser(p)
         context = await browser.new_context(viewport={"width": 1366, "height": 900})
         page = await context.new_page()
         await page.goto("https://kdp.amazon.com", wait_until="domcontentloaded", timeout=120000)
@@ -605,7 +614,7 @@ async def submit_otp_from_preauth(timeout_sec: int, preauth_state_path: str, pre
             pass
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, args=_chromium_launch_args())
+        browser = await _launch_headless_browser(p)
         context = await browser.new_context(storage_state=str(pre_state), viewport={"width": 1366, "height": 900})
         page = await context.new_page()
         await page.goto(target_url, wait_until="domcontentloaded", timeout=120000)
@@ -688,7 +697,10 @@ async def probe_session(storage_path: str, headless: bool) -> int:
         return 1
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=headless, args=_chromium_launch_args())
+        if headless:
+            browser = await _launch_headless_browser(p)
+        else:
+            browser = await p.chromium.launch(headless=False, args=_chromium_launch_args())
         context = await browser.new_context(storage_state=str(state), viewport={"width": 1280, "height": 720})
         page = await context.new_page()
         await page.goto("https://kdp.amazon.com/bookshelf", wait_until="domcontentloaded", timeout=120000)
@@ -711,7 +723,10 @@ async def inventory_snapshot(storage_path: str, headless: bool) -> int:
         return 1
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=headless, args=_chromium_launch_args())
+        if headless:
+            browser = await _launch_headless_browser(p)
+        else:
+            browser = await p.chromium.launch(headless=False, args=_chromium_launch_args())
         context = await browser.new_context(storage_state=str(state), viewport={"width": 1366, "height": 900})
         page = await context.new_page()
         await page.goto("https://kdp.amazon.com/bookshelf", wait_until="domcontentloaded", timeout=120000)
