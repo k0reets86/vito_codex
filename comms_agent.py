@@ -82,6 +82,12 @@ class CommsAgent:
             "aliases": ("printful", "принтфул"),
             "manual_fallback": True,
         },
+        "kofi": {
+            "title": "Ko-fi",
+            "url": "https://ko-fi.com/manage",
+            "aliases": ("kofi", "ko-fi", "кофи", "ко-фи"),
+            "manual_fallback": True,
+        },
         "twitter": {
             "title": "X (Twitter)",
             "url": "https://x.com/i/flow/login",
@@ -574,6 +580,12 @@ class CommsAgent:
         meta = CommsAgent._SERVICE_CATALOG.get(svc) or {}
         return bool(meta.get("manual_fallback", False))
 
+    @staticmethod
+    def _requires_strict_auth_verification(service: str) -> bool:
+        svc = str(service or "").strip().lower()
+        # Сервисы, для которых запрещаем "ручное подтверждение" без реального live-check.
+        return svc in {"amazon_kdp", "etsy", "gumroad", "printful", "twitter", "kofi"}
+
     def _touch_service_context(self, service: str) -> None:
         svc = str(service or "").strip().lower()
         if not svc:
@@ -683,6 +695,14 @@ class CommsAgent:
             return
         self._service_auth_confirmed[svc] = datetime.now(timezone.utc).isoformat()
         self._save_auth_state()
+
+    def _clear_service_auth_confirmed(self, service: str) -> None:
+        svc = str(service or "").strip().lower()
+        if not svc:
+            return
+        if svc in self._service_auth_confirmed:
+            self._service_auth_confirmed.pop(svc, None)
+            self._save_auth_state()
 
     @staticmethod
     def _is_status_prompt(text: str) -> bool:
@@ -816,6 +836,18 @@ class CommsAgent:
                     if self._service_auth_confirmed.get(svc)
                     else f"{title}: вход пока не подтверждён."
                 )
+
+        if self._requires_strict_auth_verification(svc):
+            try:
+                ok, detail = await self._verify_service_auth(svc)
+                if ok:
+                    self._mark_service_auth_confirmed(svc)
+                    return f"{title}: подключение активно (live-check OK). Повторный логин не требуется."
+                self._clear_service_auth_confirmed(svc)
+                return f"{title}: вход не подтверждён (live-check fail). {detail}"
+            except Exception as e:
+                self._clear_service_auth_confirmed(svc)
+                return f"{title}: вход не подтверждён. Ошибка проверки: {e}"
 
         # Для остальных сервисов сохраняем быстрый статус без тяжёлого live probe.
         return base
@@ -1005,6 +1037,18 @@ class CommsAgent:
                 if mode in {"browser", "browser_only"}:
                     return False, "Etsy browser-проверка недоступна. Зафиксировал ручную авторизацию."
                 return False, "Etsy API проверка недоступна. Зафиксировал ручную авторизацию."
+        if svc == "kofi":
+            try:
+                from platforms.kofi import KofiPlatform
+
+                p = KofiPlatform()
+                ok = await p.authenticate()
+                await p.close()
+                if ok:
+                    return True, "Ko-fi авторизация подтверждена."
+                return False, "Ko-fi авторизация не подтверждена."
+            except Exception:
+                return False, "Ko-fi проверка недоступна."
         if svc == "reddit":
             return False, "Reddit в browser_only режиме; зафиксировал ручную авторизацию."
         if self._is_manual_auth_service(svc):
@@ -1020,6 +1064,17 @@ class CommsAgent:
         title, auth_url = self._service_auth_meta(svc)
         if not auth_url:
             return False
+        if self._requires_strict_auth_verification(svc):
+            try:
+                ok, _ = await self._verify_service_auth(svc)
+            except Exception:
+                ok = False
+            if ok:
+                self._mark_service_auth_confirmed(svc)
+                await send_reply(f"{title}: активная сессия уже подтверждена, повторный логин не требуется.")
+                return True
+            self._clear_service_auth_confirmed(svc)
+
         last = self._service_auth_confirmed.get(svc, "")
         if last:
             try:
@@ -1509,7 +1564,10 @@ class CommsAgent:
                 await self.send_message(f"Вход подтверждён: {title}.")
                 logger.info("Inline auth_done via text", extra={"event": "inline_auth_done", "context": {"service": service, "mode": "text"}})
             else:
-                if self._is_manual_auth_service(service):
+                if self._requires_strict_auth_verification(service):
+                    self._clear_service_auth_confirmed(service)
+                    await self.send_message(f"Вход не подтверждён: {title}. {detail}")
+                elif self._is_manual_auth_service(service):
                     self._mark_service_auth_confirmed(service)
                     await self.send_message(f"Вход зафиксирован вручную: {title}. Проверка: {detail}")
                     logger.info("Inline auth_done via text", extra={"event": "inline_auth_done", "context": {"service": service, "mode": "text_manual"}})
@@ -3001,7 +3059,13 @@ class CommsAgent:
                 await update.message.reply_text(f"Вход подтверждён: {title}.", reply_markup=self._main_keyboard())
                 logger.info("Inline auth_done via text", extra={"event": "inline_auth_done", "context": {"service": service, "mode": "text"}})
             else:
-                if self._is_manual_auth_service(service):
+                if self._requires_strict_auth_verification(service):
+                    self._clear_service_auth_confirmed(service)
+                    await update.message.reply_text(
+                        f"Вход не подтверждён: {title}. {detail}",
+                        reply_markup=self._main_keyboard(),
+                    )
+                elif self._is_manual_auth_service(service):
                     self._mark_service_auth_confirmed(service)
                     await update.message.reply_text(
                         f"Вход зафиксирован вручную: {title}. Проверка: {detail}",
@@ -4093,6 +4157,12 @@ class CommsAgent:
                 return
             # Fallback: for browser/manual flows keep owner's explicit confirmation,
             # but clearly mark that technical probe failed.
+            if self._requires_strict_auth_verification(service):
+                self._clear_service_auth_confirmed(service)
+                await query.answer("Не подтверждено", show_alert=True)
+                await self._safe_edit_callback_message(query, f"{query.message.text}\n\n— Вход не подтверждён.\n{detail}")
+                await self.send_message(f"Не удалось подтвердить вход: {title}. Деталь: {detail}", level="warning")
+                return
             if self._is_manual_auth_service(service):
                 stamp = datetime.now(timezone.utc).isoformat()
                 self._service_auth_confirmed[service] = stamp

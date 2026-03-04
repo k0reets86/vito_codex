@@ -1123,7 +1123,7 @@ async def test_handle_callback_auth_done_manual_fallback_custom_site(comms, mock
 
 
 @pytest.mark.asyncio
-async def test_handle_callback_auth_done_manual_fallback_amazon(comms, mock_callback_query):
+async def test_handle_callback_auth_done_strict_verification_amazon(comms, mock_callback_query):
     update = MagicMock()
     update.callback_query = mock_callback_query
     mock_callback_query.data = "auth_done:amazon_kdp"
@@ -1132,9 +1132,9 @@ async def test_handle_callback_auth_done_manual_fallback_amazon(comms, mock_call
 
     await comms._handle_callback(update, MagicMock())
 
-    mock_callback_query.answer.assert_called_once_with("Принято")
-    assert "Вход зафиксирован вручную" in mock_callback_query.edit_message_text.call_args[1]["text"]
-    assert "amazon_kdp" in comms._service_auth_confirmed
+    mock_callback_query.answer.assert_called_once_with("Не подтверждено", show_alert=True)
+    assert "Вход не подтверждён" in mock_callback_query.edit_message_text.call_args[1]["text"]
+    assert "amazon_kdp" not in comms._service_auth_confirmed
 
 
 @pytest.mark.asyncio
