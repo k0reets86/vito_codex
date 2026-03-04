@@ -76,20 +76,20 @@ class HRAgent(BaseAgent):
         return TaskResult(success=True, output=ranking)
 
     async def suggest_improvements(self) -> TaskResult:
-        if not self.llm_router:
-            return TaskResult(success=False, error="LLM Router недоступен")
         statuses = []
         if self.registry:
             statuses = self.registry.get_all_statuses()
         stats_text = "\n".join(f"- {s.get('name', '?')}: completed={s.get('tasks_completed', 0)}, failed={s.get('tasks_failed', 0)}, cost=${s.get('total_cost', 0):.2f}" for s in statuses) or "Нет данных"
-        response = await self._call_llm(
-            task_type=TaskType.STRATEGY,
-            prompt=f"Проанализируй производительность агентов и дай рекомендации:\n{stats_text}\nПредложи: что улучшить, какие агенты неэффективны, как оптимизировать.",
-            estimated_tokens=1500,
-        )
-        if not response:
-            return TaskResult(success=False, error="LLM не вернул ответ")
-        return TaskResult(success=True, output=response)
+        response = None
+        if self.llm_router:
+            response = await self._call_llm(
+                task_type=TaskType.STRATEGY,
+                prompt=f"Проанализируй производительность агентов и дай рекомендации:\n{stats_text}\nПредложи: что улучшить, какие агенты неэффективны, как оптимизировать.",
+                estimated_tokens=1500,
+            )
+        if response:
+            return TaskResult(success=True, output=response)
+        return TaskResult(success=True, output=self._local_improvements(statuses), metadata={"mode": "local_fallback"})
 
     async def audit_knowledge_base(self) -> TaskResult:
         """Audit knowledge/skills coverage and suggest updates."""
@@ -141,3 +141,30 @@ class HRAgent(BaseAgent):
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
         return TaskResult(success=True, output=response)
+
+    def _local_improvements(self, statuses: list[dict]) -> dict:
+        ranking = []
+        actions = []
+        for s in statuses or []:
+            name = s.get("name", "?")
+            completed = int(s.get("tasks_completed", 0) or 0)
+            failed = int(s.get("tasks_failed", 0) or 0)
+            total = completed + failed
+            fail_rate = (failed / total) if total > 0 else 0.0
+            ranking.append({"agent": name, "fail_rate": round(fail_rate, 3), "total": total})
+            if total >= 3 and fail_rate >= 0.35:
+                actions.append(f"{name}: добавить playbook + тесты регрессии по типовым фейлам")
+            if total == 0:
+                actions.append(f"{name}: провести smoke-задачу и зафиксировать baseline")
+        ranking.sort(key=lambda x: x["fail_rate"], reverse=True)
+        if not actions:
+            actions = [
+                "Увеличить покрытие тестами task-routing",
+                "Фиксировать причины фейлов в memory anti-patterns",
+                "Внедрить еженедельный audit top-5 ошибок по агентам",
+            ]
+        return {
+            "summary": "Rule-based HR review",
+            "top_risks": ranking[:5],
+            "actions": actions[:8],
+        }

@@ -45,3 +45,9 @@ class TestSMMAgent:
         agent.llm_router.call_llm = AsyncMock(return_value="post created")
         result = await agent.execute_task("social_media", platform="instagram", content="test")
         assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_create_post_local_fallback_without_llm(self, agent):
+        agent.llm_router = None
+        result = await agent.create_post("twitter", "Проверка автономного режима")
+        assert result.success is True

@@ -54,3 +54,9 @@ class TestHRAgent:
     async def test_execute_task(self, agent):
         result = await agent.execute_task("hr")
         assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_suggest_improvements_local_fallback(self, agent):
+        agent.llm_router = None
+        result = await agent.suggest_improvements()
+        assert result.success is True

@@ -31,7 +31,7 @@ class SMMAgent(BaseAgent):
 
     @property
     def capabilities(self) -> list[str]:
-        return ["social_media", "scheduling"]
+        return ["social_media", "scheduling", "campaign_plan"]
 
     async def execute_task(self, task_type: str, **kwargs) -> TaskResult:
         self._status = AgentStatus.RUNNING
@@ -41,6 +41,24 @@ class SMMAgent(BaseAgent):
                 result = await self.create_post(kwargs.get("platform", "twitter"), kwargs.get("content", kwargs.get("step", "")))
             elif task_type == "scheduling":
                 result = await self.schedule_post(kwargs.get("platform", "twitter"), kwargs.get("content", ""), kwargs.get("publish_at", ""))
+            elif task_type == "campaign_plan":
+                topic = kwargs.get("content", kwargs.get("step", "digital product launch"))
+                tags = await self.suggest_hashtags(topic, kwargs.get("platform", "twitter"))
+                post = await self.create_post(kwargs.get("platform", "twitter"), topic)
+                result = TaskResult(
+                    success=bool(tags.success and post.success),
+                    output={
+                        "platform": kwargs.get("platform", "twitter"),
+                        "topic": topic,
+                        "post": post.output,
+                        "hashtags": tags.output,
+                        "next_actions": [
+                            "Опубликовать 1 основной пост",
+                            "Сделать 1 follow-up через 6-12 часов",
+                            "Собрать первые вопросы аудитории в комментариях",
+                        ],
+                    },
+                )
             elif task_type == "suggest_hashtags":
                 result = await self.suggest_hashtags(kwargs.get("content", ""), kwargs.get("platform", "twitter"))
             else:
@@ -53,21 +71,20 @@ class SMMAgent(BaseAgent):
             self._status = AgentStatus.IDLE
 
     async def create_post(self, platform: str, content: str, style: str = None) -> TaskResult:
-        if not self.llm_router:
-            return TaskResult(success=False, error="LLM Router недоступен")
-
         style_note = f" Стиль: {style}." if style else ""
         char_limit = 280 if platform == "twitter" else 2200
 
-        response = await self._call_llm(
-            task_type=TaskType.CONTENT,
-            prompt=f"Создай пост для {platform} (макс {char_limit} символов).{style_note}\nТема: {content}",
-            estimated_tokens=1000,
-        )
-        if not response:
-            return TaskResult(success=False, error="LLM не вернул ответ")
-
-        post_text = response.strip()
+        post_text = ""
+        if self.llm_router:
+            response = await self._call_llm(
+                task_type=TaskType.CONTENT,
+                prompt=f"Создай пост для {platform} (макс {char_limit} символов).{style_note}\nТема: {content}",
+                estimated_tokens=1000,
+            )
+            if response:
+                post_text = response.strip()
+        if not post_text:
+            post_text = self._local_post(platform, content, style=style)
 
         # Save to file first
         ts = int(time.time())
@@ -149,9 +166,35 @@ class SMMAgent(BaseAgent):
         return TaskResult(success=True, output={"scheduled": True, "platform": platform, "publish_at": publish_at, "post": post_result.output})
 
     async def suggest_hashtags(self, content: str, platform: str = "twitter") -> TaskResult:
-        if not self.llm_router:
-            return TaskResult(success=False, error="LLM Router недоступен")
-        response = await self._call_llm(task_type=TaskType.CONTENT, prompt=f"Подбери 15-20 хэштегов для {platform} по теме: {content[:500]}", estimated_tokens=500)
+        response = None
+        if self.llm_router:
+            response = await self._call_llm(task_type=TaskType.CONTENT, prompt=f"Подбери 15-20 хэштегов для {platform} по теме: {content[:500]}", estimated_tokens=500)
         if not response:
-            return TaskResult(success=False, error="LLM не вернул ответ")
+            response = self._local_hashtags(content, platform)
+            return TaskResult(success=True, output=response, metadata={"mode": "local_fallback"})
         return TaskResult(success=True, output=response, cost_usd=0.003)
+
+    def _local_post(self, platform: str, content: str, style: str | None = None) -> str:
+        topic = (content or "AI automation update").strip()
+        tone = (style or "practical").strip().lower()
+        core = f"{topic}: короткий разбор, что это дает на практике и как применить уже сегодня."
+        cta = "Если нужно — дам готовый чеклист внедрения."
+        text = f"{core} {cta}"
+        if tone in {"bold", "aggressive"}:
+            text = f"{topic}. Без воды: только шаги, которые дают результат. Писать \"план\" — пришлю сразу."
+        if platform == "twitter":
+            return text[:279]
+        return text
+
+    def _local_hashtags(self, content: str, platform: str) -> str:
+        words = [w.lower() for w in str(content or "").replace(",", " ").split() if len(w) >= 4][:10]
+        tags = ["#ai", "#automation", "#digitalproduct", "#growth", "#onlinebusiness"]
+        for w in words:
+            tag = "#" + "".join(ch for ch in w if ch.isalnum())
+            if len(tag) > 2 and tag not in tags:
+                tags.append(tag)
+            if len(tags) >= 12:
+                break
+        if platform == "twitter":
+            tags = tags[:8]
+        return " ".join(tags)

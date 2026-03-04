@@ -46,3 +46,9 @@ class TestLegalAgent:
         agent.llm_router.call_llm = AsyncMock(return_value="legal check done")
         result = await agent.execute_task("legal", action="check_tos", platform="gumroad")
         assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_check_tos_local_fallback(self, agent):
+        agent.llm_router = None
+        result = await agent.check_tos("etsy")
+        assert result.success is True

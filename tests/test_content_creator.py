@@ -53,3 +53,10 @@ class TestContentCreator:
         agent.llm_router.call_llm = AsyncMock(return_value=None)
         result = await agent.create_article("topic")
         assert result.success is False
+
+    @pytest.mark.asyncio
+    async def test_create_turnkey_product_local(self, agent):
+        agent.llm_router = None
+        result = await agent.create_turnkey_product("AI Etsy Starter Kit", platform="gumroad", price=9)
+        assert result.success is True
+        assert result.output.get("files", {}).get("listing_json")

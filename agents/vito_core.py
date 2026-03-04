@@ -53,6 +53,9 @@ _KEYWORD_CAPABILITY_RAW = {
     "research": "research",
     "исследов": "research",
     "контент": "content_creation",
+    "копирайт": "content_creation",
+    "copywrite": "content_creation",
+    "copywriter": "content_creation",
     "content": "content_creation",
     "article": "content_creation",
     "стать": "content_creation",
@@ -107,6 +110,8 @@ _KEYWORD_CAPABILITY_RAW = {
     "продуктовый pipeline": "product_pipeline",
     "pipeline продукта": "product_pipeline",
     "product pipeline": "product_pipeline",
+    "под ключ": "product_turnkey",
+    "turnkey": "product_turnkey",
 }
 
 # Sort by keyword length descending → longer (more specific) matches first

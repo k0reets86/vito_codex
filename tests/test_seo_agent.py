@@ -45,3 +45,13 @@ class TestSEOAgent:
         agent.llm_router.call_llm = AsyncMock(return_value="seo results")
         result = await agent.execute_task("keyword_research", topic="AI tools")
         assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_listing_seo_pack(self, agent):
+        result = await agent.listing_seo_pack(
+            platform="gumroad",
+            title="AI Prompt Bundle for Creators",
+            description="Ready-to-use prompts and templates for content and product launches.",
+            tags=["ai", "prompts"],
+        )
+        assert result.success is True

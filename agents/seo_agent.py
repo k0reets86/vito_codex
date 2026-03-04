@@ -7,6 +7,7 @@ import time
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from llm_router import TaskType
+from modules.listing_optimizer import optimize_listing_payload
 
 logger = get_logger("seo_agent", agent="seo_agent")
 
@@ -18,7 +19,7 @@ class SEOAgent(BaseAgent):
 
     @property
     def capabilities(self) -> list[str]:
-        return ["seo", "keyword_research"]
+        return ["seo", "keyword_research", "listing_seo_pack"]
 
     async def execute_task(self, task_type: str, **kwargs) -> TaskResult:
         self._status = AgentStatus.RUNNING
@@ -30,6 +31,13 @@ class SEOAgent(BaseAgent):
                 result = await self.optimize_content(kwargs.get("content", ""), kwargs.get("keywords", []))
             elif task_type == "generate_meta":
                 result = await self.generate_meta(kwargs.get("content", ""), kwargs.get("keywords", []))
+            elif task_type == "listing_seo_pack":
+                result = await self.listing_seo_pack(
+                    platform=kwargs.get("platform", "gumroad"),
+                    title=kwargs.get("title", kwargs.get("topic", "")),
+                    description=kwargs.get("description", kwargs.get("content", "")),
+                    tags=kwargs.get("tags", []),
+                )
             else:
                 result = await self.keyword_research(kwargs.get("step", task_type))
             result.duration_ms = int((time.monotonic() - start) * 1000)
@@ -141,3 +149,27 @@ class SEOAgent(BaseAgent):
         desc_base = clean[:120] if clean else f"Learn {kw} with practical steps and templates."
         description = (desc_base + " Start now.")[:160]
         return {"title": title, "description": description}
+
+    async def listing_seo_pack(self, platform: str, title: str, description: str, tags: list[str] | None = None) -> TaskResult:
+        payload = optimize_listing_payload(
+            platform,
+            {
+                "title": title,
+                "description": description,
+                "tags": tags or [],
+            },
+        )
+        pack = {
+            "platform": platform,
+            "title": payload.get("title"),
+            "short_description": payload.get("short_description"),
+            "long_description": payload.get("description"),
+            "tags": payload.get("tags"),
+            "seo_title": payload.get("seo_title"),
+            "seo_description": payload.get("seo_description"),
+            "keywords": payload.get("keywords", [])[:20],
+            "category": payload.get("category"),
+            "seo_score": payload.get("seo_score"),
+            "publish_ready": payload.get("publish_ready"),
+        }
+        return TaskResult(success=True, output=pack)
