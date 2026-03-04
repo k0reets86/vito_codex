@@ -1482,6 +1482,7 @@ class CommsAgent:
         self._app.add_handler(CommandHandler("smoke", self._cmd_smoke))
         self._app.add_handler(CommandHandler("llm_mode", self._cmd_llm_mode))
         self._app.add_handler(CommandHandler("kdp_login", self._cmd_kdp_login))
+        self._app.add_handler(CommandHandler("auth", self._cmd_auth))
         self._app.add_handler(
             MessageHandler(
                 filters.Document.ALL | filters.PHOTO | filters.VIDEO,
@@ -1521,6 +1522,7 @@ class CommsAgent:
             BotCommand("balances", "Балансы сервисов"),
             BotCommand("llm_mode", "Режим LLM: free/prod"),
             BotCommand("kdp_login", "Вход в Amazon KDP"),
+            BotCommand("auth", "Вход: status/refresh/verify"),
             BotCommand("health", "Проверка здоровья системы"),
             BotCommand("logs", "Последние логи"),
         ]
@@ -3825,6 +3827,78 @@ class CommsAgent:
             await self._handle_kdp_login_flow(otp, _reply, with_button=True)
             return
         await self._handle_kdp_login_flow("зайди на amazon kdp", _reply, with_button=True)
+
+    @staticmethod
+    def _resolve_service_key(raw: str) -> str:
+        s = str(raw or "").strip().lower()
+        if not s:
+            return ""
+        if s in CommsAgent._SERVICE_CATALOG:
+            return s
+        for service, meta in CommsAgent._SERVICE_CATALOG.items():
+            aliases = tuple(meta.get("aliases") or ())
+            if s == service or s in aliases:
+                return service
+        return ""
+
+    async def _cmd_auth(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Управление входом по платформам.
+
+        Usage:
+          /auth <service> status
+          /auth <service> refresh
+          /auth <service> verify
+        """
+        if await self._reject_stranger(update):
+            return
+        args = list(getattr(context, "args", None) or [])
+        if len(args) < 2:
+            await update.message.reply_text(
+                "Использование: /auth <service> <status|refresh|verify>\n"
+                "Пример: /auth etsy refresh",
+                reply_markup=self._main_keyboard(),
+            )
+            return
+        service = self._resolve_service_key(args[0])
+        action = str(args[1] or "").strip().lower()
+        if not service:
+            await update.message.reply_text(
+                "Неизвестный сервис. Примеры: etsy, amazon_kdp, gumroad, printful, twitter, kofi, reddit.",
+                reply_markup=self._main_keyboard(),
+            )
+            return
+
+        async def _reply(msg: str, markup=None) -> None:
+            kwargs = {"reply_markup": markup} if markup is not None else {"reply_markup": self._main_keyboard()}
+            await update.message.reply_text(msg, **kwargs)
+
+        if action == "status":
+            await _reply(await self._format_service_auth_status_live(service))
+            return
+        if action == "refresh":
+            if service == "amazon_kdp":
+                await self._handle_kdp_login_flow("зайди на amazon kdp", _reply, with_button=True)
+                return
+            started = await self._start_service_auth_flow(service, _reply, with_button=True)
+            if not started:
+                title, _ = self._service_auth_meta(service)
+                await _reply(f"Не удалось запустить flow входа для {title}.")
+            return
+        if action == "verify":
+            ok, detail = await self._verify_service_auth(service)
+            title, _ = self._service_auth_meta(service)
+            if ok:
+                self._mark_service_auth_confirmed(service)
+                await _reply(f"Вход подтверждён: {title}.")
+            else:
+                self._clear_service_auth_confirmed(service)
+                await _reply(self._service_needs_session_refresh_text(service, title, detail))
+            return
+
+        await update.message.reply_text(
+            "Неизвестное действие. Используй: status, refresh или verify.",
+            reply_markup=self._main_keyboard(),
+        )
 
     async def _cmd_brainstorm(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Мультимодельный брейншторм: /brainstorm <тема>."""
