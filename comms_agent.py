@@ -1377,6 +1377,17 @@ class CommsAgent:
         maybe_otp = self._extract_otp_code(text)
         if self._pending_kdp_otp and maybe_otp:
             await send_reply("Код получен. Подтверждаю вход в Amazon KDP...")
+            # If session already became valid, accept immediately.
+            try:
+                pre_probe_rc, _ = await self._run_kdp_probe_stable()
+            except Exception:
+                pre_probe_rc = 1
+            if pre_probe_rc == 0:
+                self._pending_kdp_otp = None
+                self._mark_service_auth_confirmed("amazon_kdp")
+                self._pending_service_auth.pop("amazon_kdp", None)
+                await send_reply("Готово: вход в KDP подтвержден (live-check OK).")
+                return True
             rc, out = await self._run_kdp_auto_login(otp_code=maybe_otp)
             if rc == 0:
                 self._pending_kdp_otp = None
@@ -1413,8 +1424,9 @@ class CommsAgent:
                 self._pending_service_auth.pop("amazon_kdp", None)
                 await send_reply("Готово: вход в KDP подтвержден (live-check OK).")
                 return True
-            self._pending_kdp_otp = None
-            await send_reply("Не удалось завершить вход по коду. Повтори команду: /kdp_login")
+            # Keep pending OTP mode to let owner send a fresh code immediately.
+            self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat(), "retry": True}
+            await send_reply("Код не подтвердился. Пришли новый 6-значный код (без /kdp_login).")
             logger.warning(
                 "KDP OTP login failed",
                 extra={

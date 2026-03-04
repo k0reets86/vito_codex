@@ -1309,6 +1309,21 @@ async def test_handle_kdp_login_flow_otp_branch_accepts_probe_success_after_logi
 
 
 @pytest.mark.asyncio
+async def test_handle_kdp_login_flow_otp_branch_keeps_pending_on_failure(comms):
+    send_reply = AsyncMock()
+    comms._pending_kdp_otp = {"requested_at": "2026-03-04T21:00:00+00:00"}
+    comms._run_kdp_probe_stable = AsyncMock(side_effect=[(1, "fail"), (1, "fail"), (1, "fail")])
+    comms._run_kdp_auto_login = AsyncMock(side_effect=[(9, "auto_login_exception"), (9, "auto_login_exception_retry")])
+
+    handled = await comms._handle_kdp_login_flow("654321", send_reply, with_button=True)
+
+    assert handled is True
+    assert comms._pending_kdp_otp is not None
+    assert bool(comms._pending_kdp_otp.get("retry")) is True
+    assert "Пришли новый 6-значный код" in send_reply.call_args_list[-1].args[0]
+
+
+@pytest.mark.asyncio
 async def test_on_message_login_request_starts_generic_service_auth(comms, mock_update):
     mock_update.message.text = "зайди в реддит"
     comms._start_service_auth_flow = AsyncMock(return_value=True)
