@@ -2022,6 +2022,7 @@ class DecisionLoop:
                         recent_duplicate_publish,
                         validate_publish_payload,
                     )
+                    from modules.listing_optimizer import optimize_listing_payload
 
                     publish_payload = {
                         "name": goal.title[:100],
@@ -2036,6 +2037,7 @@ class DecisionLoop:
                         "allow_existing_update": bool(getattr(settings, "AUTONOMY_ALLOW_EXISTING_PRODUCT_UPDATE", False)),
                         "owner_edit_confirmed": bool(getattr(settings, "AUTONOMY_ALLOW_EXISTING_PRODUCT_UPDATE", False)),
                     }
+                    publish_payload = optimize_listing_payload("gumroad", publish_payload)
                     ok_payload, payload_errors, _norm = validate_publish_payload("gumroad", publish_payload)
                     if not ok_payload:
                         return {

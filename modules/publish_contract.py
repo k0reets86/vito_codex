@@ -14,6 +14,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from modules.listing_optimizer import get_platform_spec
 
 DB_PATH = Path("/home/vito/vito-agent/memory/vito_local.db")
 
@@ -37,10 +38,13 @@ def normalize_publish_payload(platform: str, payload: dict[str, Any]) -> dict[st
 def validate_publish_payload(platform: str, payload: dict[str, Any]) -> tuple[bool, list[str], dict[str, Any]]:
     """Validate mandatory product card fields."""
     p = normalize_publish_payload(platform, payload)
+    spec = get_platform_spec(platform)
     errors: list[str] = []
 
-    if not p["name"] or len(p["name"]) < 6:
+    if not p["name"] or len(p["name"]) < int(spec.get("title_min", 6)):
         errors.append("invalid_name")
+    if len(p["name"]) > int(spec.get("title_max", 120)):
+        errors.append("name_too_long")
     if not p["description"] or len(p["description"]) < 40:
         errors.append("invalid_description")
     if p["price"] < 1:
@@ -58,6 +62,10 @@ def validate_publish_payload(platform: str, payload: dict[str, Any]) -> tuple[bo
             errors.append("missing_category")
         if len(p["tags"]) < 2:
             errors.append("missing_tags")
+    if len(p["tags"]) > int(spec.get("tags_max", 16)):
+        errors.append("too_many_tags")
+    if any(len(t) > int(spec.get("tag_max_len", 64)) for t in p["tags"]):
+        errors.append("tag_too_long")
 
     return (len(errors) == 0, errors, p)
 

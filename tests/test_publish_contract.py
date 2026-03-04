@@ -67,3 +67,30 @@ def test_signature_stable_for_same_payload(tmp_path: Path):
     s2 = build_publish_signature("gumroad", payload)
     assert s1 == s2
     assert len(s1) == 16
+
+
+def test_validate_publish_payload_platform_limits(tmp_path: Path):
+    pdf = tmp_path / "a.pdf"
+    cover = tmp_path / "cover.png"
+    thumb = tmp_path / "thumb.png"
+    pdf.write_bytes(b"%PDF-1.4 test")
+    cover.write_bytes(b"png")
+    thumb.write_bytes(b"png")
+    ok, errors, _ = validate_publish_payload(
+        "etsy",
+        {
+            "name": "X" * 220,
+            "description": "A" * 120,
+            "price": 5,
+            "pdf_path": str(pdf),
+            "cover_path": str(cover),
+            "thumb_path": str(thumb),
+            "category": "Digital",
+            "tags": ["a" * 40] * 20,
+            "draft_only": False,
+        },
+    )
+    assert ok is False
+    assert "name_too_long" in errors
+    assert "too_many_tags" in errors
+    assert "tag_too_long" in errors

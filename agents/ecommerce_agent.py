@@ -7,6 +7,7 @@ from pathlib import Path
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from config.settings import settings
+from modules.listing_optimizer import optimize_listing_payload
 
 logger = get_logger("ecommerce_agent", agent="ecommerce_agent")
 
@@ -41,6 +42,7 @@ class ECommerceAgent(BaseAgent):
             self._status = AgentStatus.IDLE
 
     async def create_listing(self, platform: str, data: dict) -> TaskResult:
+        data = optimize_listing_payload(platform, data or {})
         if data.get("allow_existing_update"):
             target_id = str(data.get("target_product_id") or data.get("target_listing_id") or data.get("target_slug") or "").strip()
             if not target_id:
@@ -56,6 +58,8 @@ class ECommerceAgent(BaseAgent):
         for key in ("pdf_path", "cover_path", "thumb_path", "preview_path"):
             if data.get(key):
                 preview_files.append(str(data.get(key)))
+        if isinstance(data.get("preview_paths"), list):
+            preview_files.extend([str(p) for p in data.get("preview_paths") if str(p).strip()])
         # Support image lists
         for key in ("images", "listing_images", "files"):
             if isinstance(data.get(key), list):
