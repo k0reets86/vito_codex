@@ -1171,6 +1171,19 @@ class CommsAgent:
         title, auth_url = self._service_auth_meta(svc)
         if not auth_url:
             return False
+        if self._requires_strict_auth_verification(svc):
+            try:
+                ok, _ = await self._verify_service_auth(svc)
+            except Exception:
+                ok = False
+            if ok:
+                self._mark_service_auth_confirmed(svc)
+                await send_reply(f"{title}: активная сессия уже подтверждена, повторный логин не требуется.")
+                return True
+            self._clear_service_auth_confirmed(svc)
+            # Для strict-сервисов не доверяем age-based кэшу вовсе.
+            # Всегда продолжаем в полноценный auth flow.
+
         # Browser-capture remote flow for key platforms with server-side session files.
         if svc in {"etsy", "amazon_kdp", "kofi"}:
             rc, out = await self._run_remote_auth_session(svc, "start")
@@ -1205,18 +1218,6 @@ class CommsAgent:
                 else:
                     await send_reply(msg)
                 return True
-        if self._requires_strict_auth_verification(svc):
-            try:
-                ok, _ = await self._verify_service_auth(svc)
-            except Exception:
-                ok = False
-            if ok:
-                self._mark_service_auth_confirmed(svc)
-                await send_reply(f"{title}: активная сессия уже подтверждена, повторный логин не требуется.")
-                return True
-            self._clear_service_auth_confirmed(svc)
-            # Для strict-сервисов не доверяем age-based кэшу вовсе.
-            # Всегда продолжаем в полноценный auth flow.
 
         last = self._service_auth_confirmed.get(svc, "")
         if last and not self._requires_strict_auth_verification(svc):
@@ -1295,73 +1296,9 @@ class CommsAgent:
         if not self._is_kdp_login_request(text):
             return False
 
-        # Для strict-сервисов не доверяем только age-based stamp.
-        # Если есть stamp, подтверждаем реальный live-check; иначе продолжаем auth flow.
-        last = self._service_auth_confirmed.get("amazon_kdp", "")
-        if last:
-            try:
-                ok, _ = await self._verify_service_auth("amazon_kdp")
-            except Exception:
-                ok = False
-            if ok:
-                self._mark_service_auth_confirmed("amazon_kdp")
-                await send_reply("Amazon KDP: активная сессия уже подтверждена, повторный логин не требуется.")
-                return True
-            self._clear_service_auth_confirmed("amazon_kdp")
-
-        await send_reply("Запускаю вход в Amazon KDP через браузерный flow...")
-        rc, out = await self._run_kdp_auto_login()
-        tail = out[-3000:]
-        if rc == 0:
-            self._mark_service_auth_confirmed("amazon_kdp")
-            self._pending_service_auth.pop("amazon_kdp", None)
-            await send_reply("Готово: VITO вошел в Amazon KDP и сохранил сессию.")
-            return True
-
-        if "OTP_REQUIRED" in out:
-            self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat()}
-            await send_reply("Нужен код из аутентификатора Amazon. Пришли только 6 цифр одним сообщением.")
-            return True
-
-        wait_lines = [ln for ln in out.splitlines() if ln.startswith("WAIT: url=")]
-        auth_url = ""
-        if wait_lines:
-            auth_url = wait_lines[-1].split("WAIT: url=", 1)[-1].strip()
-        if not auth_url:
-            # Fallback: даже если helper не вернул WAIT-ссылку (например, browser crash),
-            # всё равно даём владельцу стабильную ссылку входа и кнопку подтверждения.
-            _, fallback_url = self._service_auth_meta("amazon_kdp")
-            auth_url = fallback_url
-        if auth_url and with_button:
-            self._pending_service_auth["amazon_kdp"] = {
-                "service": "amazon_kdp",
-                "url": auth_url,
-                "requested_at": datetime.now(timezone.utc).isoformat(),
-                "mode": "kdp_challenge",
-            }
-            kb = InlineKeyboardMarkup(
-                [
-                    [InlineKeyboardButton("Войти в Amazon", url=auth_url)],
-                    [InlineKeyboardButton("Я вошел", callback_data="auth_done:amazon_kdp")],
-                    [InlineKeyboardButton("Отмена", callback_data="auth_cancel:amazon_kdp")],
-                ]
-            )
-            await send_reply("Amazon требует ручную проверку. Войди по кнопке и нажми «Я вошел».", kb)
-        elif auth_url:
-            self._pending_service_auth["amazon_kdp"] = {
-                "service": "amazon_kdp",
-                "url": auth_url,
-                "requested_at": datetime.now(timezone.utc).isoformat(),
-                "mode": "kdp_challenge_text",
-            }
-            await send_reply(
-                f"Amazon требует ручную проверку. Ссылка для авторизации: {auth_url}\n"
-                "После входа напиши: «я вошел»."
-            )
-        else:
-            await send_reply("Amazon запросил дополнительную проверку (captcha/challenge). После прохождения повтори: /kdp_login")
-        logger.warning("KDP login requires challenge", extra={"event": "kdp_login_challenge", "context": {"output": tail}})
-        return True
+        # Единый путь для Amazon: всегда remote browser-session flow.
+        # Иначе кнопка «Я вошел» подтверждает клиентский вход, но не серверную сессию VITO.
+        return await self._start_service_auth_flow("amazon_kdp", send_reply, with_button=with_button)
 
     def _log_owner_request(self, text: str, source: str = "text") -> None:
         """Append owner requests to requirements log with timestamp."""

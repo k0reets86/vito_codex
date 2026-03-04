@@ -1172,21 +1172,27 @@ async def test_handle_kdp_login_flow_skips_relogin_when_live_check_ok(comms):
     comms._service_auth_confirmed["amazon_kdp"] = "2026-03-04T10:00:00+00:00"
     send_reply = AsyncMock()
     comms._verify_service_auth = AsyncMock(return_value=(True, "ok"))
-    comms._run_kdp_auto_login = AsyncMock(return_value=(0, "ok"))
+    comms._run_remote_auth_session = AsyncMock(return_value=(0, "REMOTE_URL=http://127.0.0.1/novnc\nVNC_PASSWORD=test"))
     handled = await comms._handle_kdp_login_flow("зайди на амазон", send_reply, with_button=True)
     assert handled is True
-    comms._run_kdp_auto_login.assert_not_awaited()
+    comms._run_remote_auth_session.assert_not_awaited()
     assert "активная сессия уже подтверждена" in send_reply.call_args.args[0]
 
 
 @pytest.mark.asyncio
-async def test_handle_kdp_login_flow_success_sets_confirmation_stamp(comms):
+async def test_handle_kdp_login_flow_starts_remote_auth_session(comms):
     send_reply = AsyncMock()
-    comms._run_kdp_auto_login = AsyncMock(return_value=(0, "ok"))
+    comms._verify_service_auth = AsyncMock(return_value=(False, "need_login"))
+    comms._run_remote_auth_session = AsyncMock(
+        return_value=(
+            0,
+            "REMOTE_URL=http://127.0.0.1/novnc/vnc.html\nDIRECT_URL=http://127.0.0.1:6080/vnc.html\nVNC_PASSWORD=testpass",
+        )
+    )
     handled = await comms._handle_kdp_login_flow("зайди на amazon kdp", send_reply, with_button=True)
     assert handled is True
-    assert "amazon_kdp" in comms._service_auth_confirmed
-    assert "Готово: VITO вошел в Amazon KDP" in send_reply.call_args.args[0]
+    assert "amazon_kdp" in comms._pending_service_auth
+    assert "удалённом браузере сервера" in send_reply.call_args.args[0]
 
 
 @pytest.mark.asyncio
