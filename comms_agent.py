@@ -17,6 +17,7 @@
 
 import asyncio
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -103,6 +104,36 @@ class CommsAgent:
         }
 
         logger.info("CommsAgent инициализирован", extra={"event": "init"})
+
+    def _resolve_button_command(self, text: str) -> str | None:
+        """Resolve keyboard/menu button command with alias compatibility."""
+        raw = str(text or "").strip()
+        if not raw:
+            return None
+        if raw in self._button_map:
+            return self._button_map[raw]
+        normalized = re.sub(r"[^a-zA-Zа-яА-ЯёЁ0-9_ ]+", " ", raw).strip().lower()
+        normalized = re.sub(r"\s+", " ", normalized)
+        aliases = {
+            "статус": "status",
+            "цели": "goals",
+            "расходы": "spend",
+            "новая цель": "goal",
+            "помощь": "help",
+            "ежедневные": "help_daily",
+            "редкие": "help_rare",
+            "системные": "help_system",
+            "главная": "start",
+            "home": "start",
+            "main": "start",
+            "menu": "help",
+            "daily": "help_daily",
+            "daily commands": "help_daily",
+            "rare": "help_rare",
+            "system": "help_system",
+            "system commands": "help_system",
+        }
+        return aliases.get(normalized)
 
     @staticmethod
     def _is_confirmed(args: list[str] | None) -> bool:
@@ -480,6 +511,10 @@ class CommsAgent:
 
         self._app.add_handler(CommandHandler("start", self._cmd_start))
         self._app.add_handler(CommandHandler("help", self._cmd_help))
+        self._app.add_handler(CommandHandler("help_daily", self._cmd_help_daily))
+        self._app.add_handler(CommandHandler("help_rare", self._cmd_help_rare))
+        self._app.add_handler(CommandHandler("help_system", self._cmd_help_system))
+        self._app.add_handler(CommandHandler("main", self._cmd_start))
         self._app.add_handler(CommandHandler("status", self._cmd_status))
         self._app.add_handler(CommandHandler("goals", self._cmd_goals))
         self._app.add_handler(CommandHandler("spend", self._cmd_spend))
@@ -551,6 +586,9 @@ class CommsAgent:
         # Keep Telegram menu concise; full command catalog is available via /help.
         await self._bot.set_my_commands([
             BotCommand("help", "Справка по командам и сценариям"),
+            BotCommand("help_daily", "Ежедневные команды"),
+            BotCommand("help_rare", "Редкие команды"),
+            BotCommand("help_system", "Системные команды"),
             BotCommand("status", "Статус системы"),
             BotCommand("goals", "Активные цели"),
             BotCommand("goal", "Создать цель"),
@@ -1143,6 +1181,21 @@ class CommsAgent:
         topic = args[0] if args else None
         text = self._render_help(topic=topic)
         await update.message.reply_text(text, reply_markup=self._main_keyboard())
+
+    async def _cmd_help_daily(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if await self._reject_stranger(update):
+            return
+        await update.message.reply_text(self._render_help("daily"), reply_markup=self._main_keyboard())
+
+    async def _cmd_help_rare(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if await self._reject_stranger(update):
+            return
+        await update.message.reply_text(self._render_help("rare"), reply_markup=self._main_keyboard())
+
+    async def _cmd_help_system(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if await self._reject_stranger(update):
+            return
+        await update.message.reply_text(self._render_help("system"), reply_markup=self._main_keyboard())
 
     async def _cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self._reject_stranger(update):
@@ -2031,9 +2084,9 @@ class CommsAgent:
             )
             return
 
-        # 1. Обработка нажатий persistent-кнопок
-        if text in self._button_map:
-            cmd = self._button_map[text]
+        # 1. Обработка нажатий persistent-кнопок (+алиасы старого меню)
+        cmd = self._resolve_button_command(text)
+        if cmd:
             if cmd == "help":
                 await update.message.reply_text(self._render_help(), reply_markup=self._main_keyboard())
                 return
@@ -2047,6 +2100,7 @@ class CommsAgent:
                 await update.message.reply_text(self._render_help("system"), reply_markup=self._main_keyboard())
                 return
             handler = {
+                "start": self._cmd_start,
                 "status": self._cmd_status,
                 "goals": self._cmd_goals,
                 "spend": self._cmd_spend,

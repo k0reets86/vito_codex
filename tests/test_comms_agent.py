@@ -785,6 +785,25 @@ async def test_button_goals(comms, mock_update):
 
 
 @pytest.mark.asyncio
+async def test_button_legacy_main_alias(comms, mock_update):
+    mock_update.message.text = "Главная"
+    await comms._on_message(mock_update, MagicMock())
+    text = mock_update.message.reply_text.call_args[0][0]
+    assert "VITO на связи" in text
+
+
+@pytest.mark.asyncio
+async def test_button_with_emoji_status_alias(comms, mock_update):
+    dl_mock = MagicMock()
+    dl_mock.get_status.return_value = {"running": True, "tick_count": 0, "daily_spend": 0.0}
+    comms.set_modules(decision_loop=dl_mock)
+    mock_update.message.text = "📊 Статус"
+    await comms._on_message(mock_update, MagicMock())
+    text = mock_update.message.reply_text.call_args[0][0]
+    assert "VITO Status" in text
+
+
+@pytest.mark.asyncio
 async def test_button_spend(comms, mock_update):
     llm_mock = MagicMock()
     llm_mock.get_daily_spend.return_value = 1.50
