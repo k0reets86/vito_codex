@@ -535,10 +535,19 @@ async def prepare_otp_session(timeout_sec: int, preauth_state_path: str, preauth
         await page.wait_for_timeout(1200)
         print(f"STEP: password_submitted {page.url}")
 
+        async def _otp_inputs_present() -> bool:
+            for sel in OTP_SELECTORS:
+                try:
+                    if await page.locator(sel).count() > 0:
+                        return True
+                except Exception:
+                    continue
+            return False
+
         end_ts = asyncio.get_event_loop().time() + max(20, int(timeout_sec))
         is_otp = False
         while asyncio.get_event_loop().time() < end_ts:
-            if any((await page.locator(sel).count()) > 0 for sel in OTP_SELECTORS):
+            if await _otp_inputs_present():
                 is_otp = True
                 break
             if _is_logged_in_url(page.url):
