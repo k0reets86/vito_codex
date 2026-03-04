@@ -1471,7 +1471,10 @@ class CommsAgent:
                 await send_reply("Готово: вход в KDP подтвержден (live-check OK).")
                 return True
             # One retry with same OTP before giving up.
-            rc2, out2 = await self._run_kdp_auto_login(otp_code=maybe_otp)
+            if bool((self._pending_kdp_otp or {}).get("prepared", False)):
+                rc2, out2 = await self._run_kdp_submit_otp(maybe_otp)
+            else:
+                rc2, out2 = await self._run_kdp_auto_login(otp_code=maybe_otp)
             if rc2 == 0:
                 self._pending_kdp_otp = None
                 self._mark_service_auth_confirmed("amazon_kdp")
@@ -1526,6 +1529,11 @@ class CommsAgent:
             return _rc in {2, 3} or any(h in _low for h in mfa_hints)
 
         if rc == 0:
+            if "otp_ready" in low:
+                self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat(), "prepared": True}
+                await send_reply("Нужен 6-значный код из Amazon/Authenticator. Отправь его одним сообщением.")
+                return True
+            # prepare-otp may also report already logged in
             self._pending_kdp_otp = None
             self._mark_service_auth_confirmed("amazon_kdp")
             self._pending_service_auth.pop("amazon_kdp", None)
@@ -1559,15 +1567,22 @@ class CommsAgent:
         # Возвращаем явный next-step вместо запуска VNC-сессии.
         summary = ""
         try:
-            tail = str(out or "").strip().splitlines()[-1][:180]
-            if tail and tail.strip().lower() not in {"url=", "reason: url=", "причина: url="}:
-                summary = f" Причина: {tail}"
+            lines = [ln.strip() for ln in str(out or "").splitlines() if ln.strip()]
+            reason = ""
+            for ln in reversed(lines):
+                if ln.lower().startswith("error:"):
+                    reason = ln
+                    break
+            if not reason and lines:
+                reason = lines[-1]
+            if reason and reason.strip().lower() not in {"url=", "reason: url=", "причина: url="} and "[pid=" not in reason.lower():
+                summary = f" Причина: {reason[:180]}"
         except Exception:
             summary = ""
-        self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat(), "forced": True}
+        self._pending_kdp_otp = None
         await send_reply(
-            "Не смог завершить вход автоматически (без VNC). "
-            "Пришли 6-значный код из Amazon/Authenticator одним сообщением, я завершу вход."
+            "Не смог открыть окно ввода кода Amazon (без VNC). "
+            "Повтори команду «зайди на амазон» через 10-20 секунд."
             f"{summary}"
         )
         logger.warning(

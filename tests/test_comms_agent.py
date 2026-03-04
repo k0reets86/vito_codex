@@ -1286,9 +1286,8 @@ async def test_handle_kdp_login_flow_fallback_enables_forced_otp(comms):
     handled = await comms._handle_kdp_login_flow("зайди на amazon kdp", send_reply, with_button=True)
 
     assert handled is True
-    assert comms._pending_kdp_otp is not None
-    assert bool(comms._pending_kdp_otp.get("forced")) is True
-    assert "Пришли 6-значный код" in send_reply.call_args.args[0]
+    assert comms._pending_kdp_otp is None
+    assert "Не смог открыть окно ввода кода Amazon" in send_reply.call_args.args[0]
 
 
 @pytest.mark.asyncio
