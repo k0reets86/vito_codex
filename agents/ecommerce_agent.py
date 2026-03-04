@@ -85,6 +85,19 @@ class ECommerceAgent(BaseAgent):
         if not plat:
             return TaskResult(success=False, error=f"Платформа '{platform}' не зарегистрирована. Доступны: {list(self.platforms.keys())}")
         try:
+            if hasattr(plat, "authenticate"):
+                try:
+                    authed = await plat.authenticate()
+                    if not authed:
+                        logger.warning(
+                            f"Авторизация не подтверждена для {platform} перед publish",
+                            extra={"event": "listing_auth_not_confirmed", "context": {"platform": platform}},
+                        )
+                except Exception:
+                    logger.warning(
+                        f"Ошибка auth precheck для {platform}",
+                        extra={"event": "listing_auth_precheck_error", "context": {"platform": platform}},
+                    )
             result = await plat.publish(data)
             status = result.get("status") if isinstance(result, dict) else None
             accepted_statuses = {"ok", "success", "published"}

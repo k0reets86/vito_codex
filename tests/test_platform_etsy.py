@@ -8,6 +8,7 @@ from platforms.etsy import EtsyPlatform
 async def test_etsy_pkce_start_generates_auth_url(tmp_path, monkeypatch):
     monkeypatch.setattr("platforms.etsy.PROJECT_ROOT", tmp_path, raising=False)
     etsy = EtsyPlatform()
+    etsy._mode = "api"
     etsy._keystring = "etsy_key"
     etsy._state_path = tmp_path / "runtime" / "etsy_oauth_state.json"
     out = await etsy.start_oauth2_pkce()
@@ -20,6 +21,7 @@ async def test_etsy_pkce_start_generates_auth_url(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_etsy_complete_oauth2_persists_tokens(tmp_path):
     etsy = EtsyPlatform()
+    etsy._mode = "api"
     etsy._state_path = tmp_path / "runtime" / "etsy_oauth_state.json"
     etsy._keystring = "etsy_key"
     etsy._code_verifier = "verifier123"
@@ -34,6 +36,7 @@ async def test_etsy_complete_oauth2_persists_tokens(tmp_path):
 @pytest.mark.asyncio
 async def test_etsy_publish_returns_needs_oauth_with_auth_url():
     etsy = EtsyPlatform()
+    etsy._mode = "api"
     etsy._oauth_token = ""
     etsy.start_oauth2_pkce = AsyncMock(return_value={"auth_url": "https://www.etsy.com/oauth/connect?x=1", "redirect_uri": "http://localhost/cb"})
     out = await etsy.publish({"title": "x", "description": "y"})
@@ -44,6 +47,7 @@ async def test_etsy_publish_returns_needs_oauth_with_auth_url():
 @pytest.mark.asyncio
 async def test_etsy_publish_refreshes_and_retries_on_401():
     etsy = EtsyPlatform()
+    etsy._mode = "api"
     etsy._oauth_token = "old-token"
     etsy._refresh_token = "refresh-token"
     etsy._shop_id = "1234"
@@ -53,3 +57,12 @@ async def test_etsy_publish_refreshes_and_retries_on_401():
     assert out.get("status") == "created"
     assert str(out.get("listing_id")) == "999"
     assert etsy.refresh_oauth_token.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_etsy_publish_browser_mode_requires_storage_state(tmp_path):
+    etsy = EtsyPlatform()
+    etsy._mode = "browser_only"
+    etsy._storage_state_path = tmp_path / "missing_etsy_state.json"
+    out = await etsy.publish({"title": "Browser listing", "description": "x"})
+    assert out.get("status") == "needs_browser_login"

@@ -285,7 +285,16 @@ async def run() -> dict[str, Any]:
                 continue
             out = rr.get("output")
             status = out.get("status") if isinstance(out, dict) else None
-            if status in {"created", "published", "prepared", "draft", "needs_oauth", "not_authenticated", "not_configured"}:
+            if status in {
+                "created",
+                "published",
+                "prepared",
+                "draft",
+                "needs_oauth",
+                "needs_browser_login",
+                "not_authenticated",
+                "not_configured",
+            }:
                 ready += 1
         total = len(report["checks"])
         report["summary"] = {

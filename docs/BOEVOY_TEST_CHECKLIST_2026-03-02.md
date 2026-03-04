@@ -70,3 +70,5 @@ Current progress: `6 / 41 = 14.6%`
 - 2026-03-04: Live publish matrix executed (`PYTHONPATH=. python3 scripts/live_publish_matrix.py --live`) -> `reports/VITO_PUBLISH_MATRIX_LIVE_2026-03-04_1141UTC.json`.
 - 2026-03-04: Social live probe executed (`SOCIAL_LIVE_ALLOW_TWITTER=1 PYTHONPATH=. python3 scripts/social_live_probe.py`) -> `reports/VITO_SOCIAL_LIVE_PROBE_2026-03-04_1141UTC.json`.
 - 2026-03-04: Agent->Platform live combat audit executed (`PYTHONPATH=. python3 scripts/live_agent_platform_audit.py`) -> `reports/VITO_AGENT_PLATFORM_LIVE_AUDIT_2026-03-04_1146UTC.json`, responding paths `7/7 = 100%`.
+- 2026-03-04: Etsy switched to browser-only mode (`ETSY_MODE=browser_only`), API write-path bypassed in platform layer.
+- 2026-03-04: Agent->Platform live audit re-run after Etsy browser-only + auth precheck in ecommerce agent -> `reports/VITO_AGENT_PLATFORM_LIVE_AUDIT_2026-03-04_1156UTC.json`, responding paths `7/7 = 100%` (Etsy status: `needs_browser_login` until storage capture).

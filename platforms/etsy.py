@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import json
+import os
+import re
 import secrets
 from pathlib import Path
 from typing import Any
@@ -32,6 +35,10 @@ class EtsyPlatform(BasePlatform):
         self._refresh_token: str = settings.ETSY_OAUTH_REFRESH_TOKEN
         self._shop_id: str = settings.ETSY_SHOP_ID
         self._redirect_uri: str = settings.ETSY_OAUTH_REDIRECT_URI
+        self._mode: str = str(getattr(settings, "ETSY_MODE", "api") or "api").strip().lower()
+        self._storage_state_path = Path(str(getattr(settings, "ETSY_STORAGE_STATE_FILE", "runtime/etsy_storage_state.json") or "runtime/etsy_storage_state.json"))
+        if not self._storage_state_path.is_absolute():
+            self._storage_state_path = PROJECT_ROOT / self._storage_state_path
         self._code_verifier: str = ""
         self._session: aiohttp.ClientSession | None = None
         self._state_path = PROJECT_ROOT / "runtime" / "etsy_oauth_state.json"
@@ -75,6 +82,8 @@ class EtsyPlatform(BasePlatform):
 
     async def authenticate(self) -> bool:
         """Verify API key via ping endpoint."""
+        if self._mode in {"browser", "browser_only"}:
+            return await self._authenticate_browser_mode()
         if not self._keystring:
             self._authenticated = False
             return False
@@ -100,6 +109,177 @@ class EtsyPlatform(BasePlatform):
             logger.error(f"Etsy auth error: {e}", exc_info=True)
             self._authenticated = False
             return False
+
+    async def _authenticate_browser_mode(self) -> bool:
+        if not self._storage_state_path.exists():
+            self._authenticated = False
+            return False
+        try:
+            raw = self._storage_state_path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+            cookies = data.get("cookies") if isinstance(data, dict) else None
+            if isinstance(cookies, list) and len(cookies) > 0:
+                self._authenticated = True
+                return True
+        except Exception:
+            self._authenticated = False
+            return False
+        self._authenticated = False
+        return False
+
+    async def _publish_via_browser(self, content: dict) -> dict:
+        if not self._storage_state_path.exists():
+            return {
+                "platform": "etsy",
+                "status": "needs_browser_login",
+                "error": "Etsy browser session required. Run: python3 scripts/etsy_auth_helper.py browser-capture",
+                "storage_state": str(self._storage_state_path),
+            }
+        try:
+            from playwright.async_api import async_playwright
+        except Exception:
+            return {"platform": "etsy", "status": "error", "error": "playwright_not_installed"}
+
+        title = str(content.get("title") or "VITO Etsy Product").strip()
+        description = str(content.get("description") or "").strip()
+        price = str(content.get("price") or "5")
+        tags = content.get("tags") or []
+        shot = str(PROJECT_ROOT / "runtime" / "etsy_browser_publish.png")
+        page_html = str(PROJECT_ROOT / "runtime" / "etsy_browser_publish.html")
+
+        browser = None
+        context = None
+        page = None
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(
+                    headless=os.getenv("VITO_BROWSER_HEADLESS", "1").lower() not in {"0", "false", "no"},
+                    args=[
+                        "--no-sandbox",
+                        "--disable-dev-shm-usage",
+                        "--disable-gpu",
+                        "--disable-software-rasterizer",
+                        "--disable-blink-features=AutomationControlled",
+                    ],
+                )
+                context = await browser.new_context(
+                    storage_state=str(self._storage_state_path),
+                    viewport={"width": 1366, "height": 900},
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
+                )
+                page = await context.new_page()
+                await page.goto("https://www.etsy.com/your/shops/me/tools/listings/create", wait_until="domcontentloaded", timeout=90000)
+                await page.wait_for_timeout(2000)
+                current = page.url.lower()
+                if "/signin" in current or "/oauth" in current:
+                    return {
+                        "platform": "etsy",
+                        "status": "needs_browser_login",
+                        "error": "Stored Etsy session expired.",
+                        "storage_state": str(self._storage_state_path),
+                    }
+
+                # Best-effort field fill; Etsy UI may vary by locale/account state.
+                for sel in ("input[name='title']", "input[data-test-id='listing-title-input']", "input[id*='title']"):
+                    try:
+                        await page.fill(sel, title[:140])
+                        break
+                    except Exception:
+                        continue
+                for sel in ("textarea[name='description']", "textarea[id*='description']", "textarea"):
+                    try:
+                        await page.fill(sel, description[:5000])
+                        break
+                    except Exception:
+                        continue
+                for sel in ("input[name='price']", "input[id*='price']"):
+                    try:
+                        await page.fill(sel, price)
+                        break
+                    except Exception:
+                        continue
+                if tags:
+                    tags_text = ", ".join(str(t)[:20] for t in tags[:13])
+                    for sel in ("input[name='tags']", "input[id*='tag']"):
+                        try:
+                            await page.fill(sel, tags_text)
+                            break
+                        except Exception:
+                            continue
+
+                # Try draft/save actions if visible
+                for txt in ("Save as draft", "Save and continue", "Save"):
+                    try:
+                        btn = page.get_by_role("button", name=txt)
+                        if await btn.count():
+                            await btn.first.click(timeout=2500)
+                            await page.wait_for_timeout(1200)
+                            break
+                    except Exception:
+                        continue
+
+                try:
+                    await page.screenshot(path=shot, full_page=True)
+                except Exception:
+                    pass
+                try:
+                    html = await page.content()
+                    Path(page_html).parent.mkdir(parents=True, exist_ok=True)
+                    Path(page_html).write_text(html or "", encoding="utf-8")
+                except Exception:
+                    pass
+
+                listing_id = ""
+                m = re.search(r"/listing/(\d+)", page.url)
+                if m:
+                    listing_id = m.group(1)
+                if listing_id:
+                    url = f"https://www.etsy.com/listing/{listing_id}"
+                    try:
+                        ExecutionFacts().record(
+                            action="platform:publish",
+                            status="created",
+                            detail=f"etsy browser listing_id={listing_id}",
+                            evidence=url,
+                            source="etsy.publish.browser",
+                            evidence_dict={"platform": "etsy", "listing_id": listing_id, "url": url},
+                        )
+                    except Exception:
+                        pass
+                    return {
+                        "platform": "etsy",
+                        "status": "created",
+                        "listing_id": listing_id,
+                        "url": url,
+                        "mode": "browser_only",
+                        "screenshot_path": shot,
+                    }
+                return {
+                    "platform": "etsy",
+                    "status": "prepared",
+                    "mode": "browser_only",
+                    "url": page.url,
+                    "screenshot_path": shot,
+                    "note": "Draft editor opened and fields filled; listing_id not detected yet.",
+                }
+        except Exception as e:
+            return {"platform": "etsy", "status": "error", "error": str(e), "screenshot_path": shot}
+        finally:
+            try:
+                if page is not None:
+                    await page.close()
+            except Exception:
+                pass
+            try:
+                if context is not None:
+                    await context.close()
+            except Exception:
+                pass
+            try:
+                if browser is not None:
+                    await browser.close()
+            except Exception:
+                pass
 
     async def get_shop(self, shop_id: str = "") -> dict:
         """GET /v3/application/shops/{shop_id} — get shop info."""
@@ -338,6 +518,8 @@ class EtsyPlatform(BasePlatform):
                 "dry_run": True,
                 "title": title,
             }
+        if self._mode in {"browser", "browser_only"}:
+            return await self._publish_via_browser(content)
 
         if not self._oauth_token:
             logger.warning("Etsy publish requires OAuth2 token", extra={"event": "etsy_publish_no_oauth"})

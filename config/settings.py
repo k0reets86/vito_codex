@@ -74,6 +74,7 @@ class Settings:
     ETSY_OAUTH_ACCESS_TOKEN: str = os.getenv("ETSY_OAUTH_ACCESS_TOKEN", "")
     ETSY_OAUTH_REFRESH_TOKEN: str = os.getenv("ETSY_OAUTH_REFRESH_TOKEN", "")
     ETSY_OAUTH_REDIRECT_URI: str = os.getenv("ETSY_OAUTH_REDIRECT_URI", "http://localhost:9876/etsy/callback")
+    ETSY_MODE: str = os.getenv("ETSY_MODE", "api")
     ETSY_STORAGE_STATE_FILE: str = os.getenv("ETSY_STORAGE_STATE_FILE", "runtime/etsy_storage_state.json")
     GUMROAD_APP_ID: str = os.getenv("GUMROAD_APP_ID", "")
     GUMROAD_APP_SECRET: str = os.getenv("GUMROAD_APP_SECRET", "")

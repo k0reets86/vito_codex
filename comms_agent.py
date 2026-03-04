@@ -996,8 +996,14 @@ class CommsAgent:
                 await p.close()
                 if ok:
                     return True, "Etsy авторизация подтверждена."
+                mode = str(getattr(settings, "ETSY_MODE", "api") or "api").lower()
+                if mode in {"browser", "browser_only"}:
+                    return False, "Etsy browser-сессия не подтверждена. Нужен вход через браузер и захват storage state."
                 return False, "Etsy API не подтвердил вход. Зафиксировал ручную авторизацию."
             except Exception:
+                mode = str(getattr(settings, "ETSY_MODE", "api") or "api").lower()
+                if mode in {"browser", "browser_only"}:
+                    return False, "Etsy browser-проверка недоступна. Зафиксировал ручную авторизацию."
                 return False, "Etsy API проверка недоступна. Зафиксировал ручную авторизацию."
         if svc == "reddit":
             return False, "Reddit в browser_only режиме; зафиксировал ручную авторизацию."
