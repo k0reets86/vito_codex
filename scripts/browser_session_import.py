@@ -30,6 +30,13 @@ SERVICE_VERIFY_URLS: dict[str, str] = {
     "gumroad": "https://gumroad.com/products",
     "twitter": "https://x.com/home",
     "reddit": "https://www.reddit.com/",
+    "threads": "https://www.threads.net/",
+    "instagram": "https://www.instagram.com/",
+    "facebook": "https://www.facebook.com/",
+    "pinterest": "https://www.pinterest.com/",
+    "youtube": "https://studio.youtube.com/",
+    "linkedin": "https://www.linkedin.com/feed/",
+    "tiktok": "https://www.tiktok.com/",
 }
 
 
@@ -48,6 +55,20 @@ def _default_storage_path(service: str) -> str:
         return str(getattr(settings, "TWITTER_STORAGE_STATE_FILE", "runtime/twitter_storage_state.json") or "runtime/twitter_storage_state.json")
     if service == "reddit":
         return str(getattr(settings, "REDDIT_STORAGE_STATE_FILE", "runtime/reddit_storage_state.json") or "runtime/reddit_storage_state.json")
+    if service == "threads":
+        return str(getattr(settings, "THREADS_STORAGE_STATE_FILE", "runtime/threads_storage_state.json") or "runtime/threads_storage_state.json")
+    if service == "instagram":
+        return str(getattr(settings, "INSTAGRAM_STORAGE_STATE_FILE", "runtime/instagram_storage_state.json") or "runtime/instagram_storage_state.json")
+    if service == "facebook":
+        return str(getattr(settings, "FACEBOOK_STORAGE_STATE_FILE", "runtime/facebook_storage_state.json") or "runtime/facebook_storage_state.json")
+    if service == "pinterest":
+        return str(getattr(settings, "PINTEREST_STORAGE_STATE_FILE", "runtime/pinterest_storage_state.json") or "runtime/pinterest_storage_state.json")
+    if service == "youtube":
+        return str(getattr(settings, "YOUTUBE_STORAGE_STATE_FILE", "runtime/youtube_storage_state.json") or "runtime/youtube_storage_state.json")
+    if service == "linkedin":
+        return str(getattr(settings, "LINKEDIN_STORAGE_STATE_FILE", "runtime/linkedin_storage_state.json") or "runtime/linkedin_storage_state.json")
+    if service == "tiktok":
+        return str(getattr(settings, "TIKTOK_STORAGE_STATE_FILE", "runtime/tiktok_storage_state.json") or "runtime/tiktok_storage_state.json")
     raise ValueError(f"unsupported service: {service}")
 
 
@@ -159,6 +180,20 @@ async def _verify(service: str, storage_path: Path) -> tuple[bool, dict[str, Any
             ok = ok and ("x.com" in u or "twitter.com" in u)
         if service == "reddit":
             ok = ok and "reddit.com" in u
+        if service == "threads":
+            ok = ok and "threads.net" in u
+        if service == "instagram":
+            ok = ok and "instagram.com" in u
+        if service == "facebook":
+            ok = ok and "facebook.com" in u
+        if service == "pinterest":
+            ok = ok and "pinterest.com" in u
+        if service == "youtube":
+            ok = ok and "youtube.com" in u
+        if service == "linkedin":
+            ok = ok and "linkedin.com" in u
+        if service == "tiktok":
+            ok = ok and "tiktok.com" in u
 
         title = await page.title()
         await context.close()

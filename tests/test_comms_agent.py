@@ -1779,6 +1779,17 @@ def test_humanize_owner_text_strips_technical_noise(comms):
     assert "Дам результат" in out
 
 
+@pytest.mark.asyncio
+async def test_verify_service_auth_prefers_browser_storage_for_generic_service(monkeypatch, comms):
+    from config import settings as settings_mod
+
+    monkeypatch.setattr(settings_mod.settings, "AUTH_PREFER_BROWSER_COOKIE", True)
+    monkeypatch.setattr(comms, "_has_cookie_storage_state", lambda service, since_iso="": (True, "storage_cookies_ok"))
+    ok, detail = await comms._verify_service_auth("threads")
+    assert ok is True
+    assert "storage_state" in detail.lower()
+
+
 # ── request_approval с inline кнопками ──
 
 @pytest.mark.asyncio

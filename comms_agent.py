@@ -1339,6 +1339,27 @@ class CommsAgent:
         svc = str(service or "").strip().lower()
         if not svc:
             return False, "service_missing"
+        # Global rule: prefer browser cookie/storage auth first, API is fallback.
+        if bool(getattr(settings, "AUTH_PREFER_BROWSER_COOKIE", True)):
+            if svc == "gumroad":
+                cookie_file = Path("/tmp/gumroad_cookie.txt")
+                if cookie_file.exists() and cookie_file.read_text(encoding="utf-8", errors="ignore").strip():
+                    self._auth_broker.mark_authenticated(
+                        svc,
+                        method="cookie_import",
+                        detail="gumroad_cookie_file",
+                        ttl_sec=int(getattr(settings, "AUTH_SESSION_TTL_SEC", 10800) or 10800),
+                    )
+                    return True, "Gumroad: cookie-сессия зафиксирована."
+            has_storage, detail = self._has_cookie_storage_state(svc)
+            if has_storage:
+                self._auth_broker.mark_authenticated(
+                    svc,
+                    method="browser_storage",
+                    detail=detail,
+                    ttl_sec=int(getattr(settings, "AUTH_SESSION_TTL_SEC", 10800) or 10800),
+                )
+                return True, f"{svc}: browser storage_state подтверждён ({detail})."
         try:
             cached = self._auth_broker.get(svc)
             if bool(cached.get("is_valid")) and not self._requires_strict_auth_verification(svc):
@@ -1492,6 +1513,11 @@ class CommsAgent:
                 return True, f"Reddit browser storage_state: {detail}."
             self._auth_broker.mark_failed(svc, detail="reddit_browser_session_missing")
             return False, "Reddit в browser_only режиме; нужен storage_state после входа."
+        # Generic storage-only verification for other browser services.
+        has_storage, detail = self._has_cookie_storage_state(svc)
+        if has_storage:
+            self._auth_broker.mark_authenticated(svc, method="browser_storage", detail=detail, ttl_sec=int(getattr(settings, "AUTH_SESSION_TTL_SEC", 10800) or 10800))
+            return True, f"{svc}: browser storage_state подтверждён."
         if self._is_manual_auth_service(svc):
             title, _ = self._service_auth_meta(svc)
             return False, f"{title}: подтверждение только вручную (browser-only)."
