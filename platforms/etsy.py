@@ -40,6 +40,7 @@ class EtsyPlatform(BasePlatform):
         self._storage_state_path = Path(str(getattr(settings, "ETSY_STORAGE_STATE_FILE", "runtime/etsy_storage_state.json") or "runtime/etsy_storage_state.json"))
         if not self._storage_state_path.is_absolute():
             self._storage_state_path = PROJECT_ROOT / self._storage_state_path
+        self._storage_state_backup_path = self._storage_state_path.with_suffix(".backup.json")
         self._code_verifier: str = ""
         self._session: aiohttp.ClientSession | None = None
         self._state_path = PROJECT_ROOT / "runtime" / "etsy_oauth_state.json"
@@ -112,6 +113,16 @@ class EtsyPlatform(BasePlatform):
             return False
 
     async def _authenticate_browser_mode(self) -> bool:
+        if not self._storage_state_path.exists() and self._storage_state_backup_path.exists():
+            try:
+                self._storage_state_path.parent.mkdir(parents=True, exist_ok=True)
+                self._storage_state_path.write_text(
+                    self._storage_state_backup_path.read_text(encoding="utf-8"),
+                    encoding="utf-8",
+                )
+                logger.info("Etsy storage_state restored from backup", extra={"event": "etsy_storage_restore_backup"})
+            except Exception:
+                pass
         if not self._storage_state_path.exists():
             self._authenticated = False
             return False
@@ -120,6 +131,10 @@ class EtsyPlatform(BasePlatform):
             data = json.loads(raw)
             cookies = data.get("cookies") if isinstance(data, dict) else None
             if isinstance(cookies, list) and len(cookies) > 0:
+                try:
+                    self._storage_state_backup_path.write_text(raw, encoding="utf-8")
+                except Exception:
+                    pass
                 self._authenticated = True
                 return True
         except Exception:

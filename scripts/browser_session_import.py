@@ -103,6 +103,12 @@ async def _write_storage_state(cookies: list[dict[str, Any]], storage_path: Path
         await context.storage_state(path=str(storage_path))
         await context.close()
         await browser.close()
+    # Keep a backup to survive accidental overwrite/cleanup.
+    try:
+        backup_path = storage_path.with_suffix(".backup.json")
+        backup_path.write_text(storage_path.read_text(encoding="utf-8"), encoding="utf-8")
+    except Exception:
+        pass
 
 
 async def _verify(service: str, storage_path: Path) -> tuple[bool, dict[str, Any]]:
