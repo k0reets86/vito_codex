@@ -89,6 +89,7 @@ async def _launch_gumroad_publish_browser(p):
 class GumroadPlatform(BasePlatform):
     def __init__(self, **kwargs):
         super().__init__(name="gumroad", **kwargs)
+        self._mode = str(getattr(settings, "GUMROAD_MODE", "api") or "api").strip().lower()
         # Пробуем access_token, fallback на app_secret
         self._access_token = (
             getattr(settings, "GUMROAD_API_KEY", "")
@@ -110,6 +111,25 @@ class GumroadPlatform(BasePlatform):
 
     async def authenticate(self) -> bool:
         """GET /v2/user — проверка авторизации."""
+        if self._mode in {"browser", "browser_only"}:
+            if COOKIE_FILE.exists() and COOKIE_FILE.read_text(encoding="utf-8", errors="ignore").strip():
+                self._authenticated = True
+                return True
+            storage = Path(str(getattr(settings, "GUMROAD_STORAGE_STATE_FILE", "runtime/gumroad_storage_state.json") or "runtime/gumroad_storage_state.json"))
+            if not storage.is_absolute():
+                storage = PROJECT_ROOT / storage
+            if storage.exists():
+                try:
+                    import json as _json
+                    data = _json.loads(storage.read_text(encoding="utf-8"))
+                    cookies = data.get("cookies") if isinstance(data, dict) else None
+                    self._authenticated = isinstance(cookies, list) and len(cookies) > 0
+                    return self._authenticated
+                except Exception:
+                    self._authenticated = False
+                    return False
+            self._authenticated = False
+            return False
         if not self._access_token:
             self._authenticated = False
             return False

@@ -689,7 +689,13 @@ class CommsAgent:
     def _requires_strict_auth_verification(service: str) -> bool:
         svc = str(service or "").strip().lower()
         # Сервисы, для которых запрещаем "ручное подтверждение" без реального live-check.
-        return svc in {"amazon_kdp", "etsy", "gumroad", "printful", "twitter", "kofi"}
+        if svc == "twitter":
+            mode = str(getattr(settings, "TWITTER_MODE", "api") or "api").strip().lower()
+            return mode not in {"browser", "browser_only"}
+        if svc == "gumroad":
+            mode = str(getattr(settings, "GUMROAD_MODE", "api") or "api").strip().lower()
+            return mode not in {"browser", "browser_only"}
+        return svc in {"amazon_kdp", "etsy", "printful", "kofi"}
 
     def _touch_service_context(self, service: str) -> None:
         svc = str(service or "").strip().lower()
@@ -1266,6 +1272,26 @@ class CommsAgent:
             raw = str(getattr(settings, "KOFI_STORAGE_STATE_FILE", "runtime/kofi_storage_state.json") or "runtime/kofi_storage_state.json")
         elif svc == "printful":
             raw = str(getattr(settings, "PRINTFUL_STORAGE_STATE_FILE", "runtime/printful_storage_state.json") or "runtime/printful_storage_state.json")
+        elif svc == "gumroad":
+            raw = str(getattr(settings, "GUMROAD_STORAGE_STATE_FILE", "runtime/gumroad_storage_state.json") or "runtime/gumroad_storage_state.json")
+        elif svc == "twitter":
+            raw = str(getattr(settings, "TWITTER_STORAGE_STATE_FILE", "runtime/twitter_storage_state.json") or "runtime/twitter_storage_state.json")
+        elif svc == "reddit":
+            raw = str(getattr(settings, "REDDIT_STORAGE_STATE_FILE", "runtime/reddit_storage_state.json") or "runtime/reddit_storage_state.json")
+        elif svc == "threads":
+            raw = str(getattr(settings, "THREADS_STORAGE_STATE_FILE", "runtime/threads_storage_state.json") or "runtime/threads_storage_state.json")
+        elif svc == "pinterest":
+            raw = str(getattr(settings, "PINTEREST_STORAGE_STATE_FILE", "runtime/pinterest_storage_state.json") or "runtime/pinterest_storage_state.json")
+        elif svc == "instagram":
+            raw = str(getattr(settings, "INSTAGRAM_STORAGE_STATE_FILE", "runtime/instagram_storage_state.json") or "runtime/instagram_storage_state.json")
+        elif svc == "facebook":
+            raw = str(getattr(settings, "FACEBOOK_STORAGE_STATE_FILE", "runtime/facebook_storage_state.json") or "runtime/facebook_storage_state.json")
+        elif svc == "tiktok":
+            raw = str(getattr(settings, "TIKTOK_STORAGE_STATE_FILE", "runtime/tiktok_storage_state.json") or "runtime/tiktok_storage_state.json")
+        elif svc == "linkedin":
+            raw = str(getattr(settings, "LINKEDIN_STORAGE_STATE_FILE", "runtime/linkedin_storage_state.json") or "runtime/linkedin_storage_state.json")
+        elif svc == "youtube":
+            raw = str(getattr(settings, "YOUTUBE_STORAGE_STATE_FILE", "runtime/youtube_storage_state.json") or "runtime/youtube_storage_state.json")
         if not raw:
             return None
         p = Path(raw)
@@ -1332,6 +1358,15 @@ class CommsAgent:
             except Exception:
                 return False, "Ошибка проверки Printful."
         if svc == "gumroad":
+            mode = str(getattr(settings, "GUMROAD_MODE", "api") or "api").strip().lower()
+            if mode in {"browser", "browser_only"}:
+                cookie_file = Path("/tmp/gumroad_cookie.txt")
+                if cookie_file.exists() and cookie_file.read_text(encoding="utf-8", errors="ignore").strip():
+                    return True, "Gumroad browser cookie зафиксирован."
+                has_storage, detail = self._has_cookie_storage_state("gumroad")
+                if has_storage:
+                    return True, f"Gumroad browser storage_state: {detail}."
+                return False, "Gumroad browser-сессия не подтверждена."
             try:
                 from platforms.gumroad import GumroadPlatform
 
@@ -1342,6 +1377,12 @@ class CommsAgent:
             except Exception:
                 return False, "Ошибка проверки Gumroad."
         if svc == "twitter":
+            mode = str(getattr(settings, "TWITTER_MODE", "api") or "api").strip().lower()
+            if mode in {"browser", "browser_only"}:
+                has_storage, detail = self._has_cookie_storage_state("twitter")
+                if has_storage:
+                    return True, f"Twitter/X browser storage_state: {detail}."
+                return False, "Twitter/X browser-сессия не подтверждена."
             try:
                 from platforms.twitter import TwitterPlatform
 
@@ -1396,7 +1437,10 @@ class CommsAgent:
             except Exception:
                 return False, "Ko-fi проверка недоступна."
         if svc == "reddit":
-            return False, "Reddit в browser_only режиме; зафиксировал ручную авторизацию."
+            has_storage, detail = self._has_cookie_storage_state("reddit")
+            if has_storage:
+                return True, f"Reddit browser storage_state: {detail}."
+            return False, "Reddit в browser_only режиме; нужен storage_state после входа."
         if self._is_manual_auth_service(svc):
             title, _ = self._service_auth_meta(svc)
             return False, f"{title}: подтверждение только вручную (browser-only)."

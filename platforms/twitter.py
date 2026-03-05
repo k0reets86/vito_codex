@@ -28,6 +28,7 @@ UPLOAD_API_V1 = "https://upload.twitter.com/1.1/media/upload.json"
 class TwitterPlatform(BasePlatform):
     def __init__(self, **kwargs):
         super().__init__(name="twitter", **kwargs)
+        self._mode = str(getattr(settings, "TWITTER_MODE", "api") or "api").strip().lower()
         self._consumer_key = settings.TWITTER_CONSUMER_KEY
         self._consumer_secret = settings.TWITTER_CONSUMER_SECRET
         self._access_token = settings.TWITTER_ACCESS_TOKEN
@@ -82,6 +83,9 @@ class TwitterPlatform(BasePlatform):
 
     async def authenticate(self) -> bool:
         """Verify credentials via GET /2/users/me."""
+        if self._mode in {"browser", "browser_only"}:
+            self._authenticated = False
+            return False
         if not all([self._consumer_key, self._consumer_secret, self._access_token, self._access_secret]):
             self._authenticated = False
             return False
@@ -138,6 +142,16 @@ class TwitterPlatform(BasePlatform):
                 "status": "prepared",
                 "dry_run": True,
                 "text_preview": preview,
+            }
+
+        if self._mode in {"browser", "browser_only"}:
+            text = str(content.get("text", "") or "")
+            return {
+                "platform": "twitter",
+                "status": "needs_browser_flow",
+                "mode": "browser_only",
+                "text_preview": text[:280],
+                "error": "Twitter API disabled for current mode; use browser posting flow.",
             }
 
         if not self._authenticated:
