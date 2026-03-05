@@ -12,9 +12,18 @@ from typing import Any
 
 import aiohttp
 
+from config.paths import PROJECT_ROOT
 from config.logger import get_logger
 from config.settings import settings
 from platforms.base_platform import BasePlatform
+from platforms.gumroad_selector_bank import (
+    CONTENT_TAB_SELECTORS,
+    NEXT_SELECTORS,
+    PRODUCT_TAB_SELECTORS,
+    PUBLISH_SELECTORS,
+    SAVE_SELECTORS,
+    SHARE_TAB_SELECTORS,
+)
 from modules.network_utils import network_available, network_status
 from modules.execution_facts import ExecutionFacts
 from modules.listing_optimizer import optimize_listing_payload
@@ -818,12 +827,7 @@ class GumroadPlatform(BasePlatform):
                         pass
 
                 # Click Next: Customize for new product flow
-                for sel in [
-                    'button[type="submit"][form^="new-product-form"]',
-                    'button:has-text("Next: Customize")',
-                    'button:has-text("Next")',
-                    'button:has-text("Create")',
-                ]:
+                for sel in NEXT_SELECTORS:
                     try:
                         btn = page.locator(sel).first
                         if await btn.is_visible(timeout=3000):
@@ -1044,78 +1048,80 @@ class GumroadPlatform(BasePlatform):
 
                 # Try switch to Share tab to find tags/category
                 try:
-                    share_tab = page.locator('button:has-text("Share"), a:has-text("Share")').first
-                    if await share_tab.is_visible(timeout=2000):
-                        await share_tab.click()
-                        await asyncio.sleep(2)
-                        ui_dump2 = await page.evaluate("""() => {
-                            const labels = Array.from(document.querySelectorAll('label')).map(l => ({
-                                text: (l.innerText||'').trim(),
-                                for: l.getAttribute('for')||''
-                            })).filter(x=>x.text);
-                            const inputs = Array.from(document.querySelectorAll('input,select,textarea')).map(el => ({
-                                tag: el.tagName.toLowerCase(),
-                                type: el.getAttribute('type')||'',
-                                id: el.getAttribute('id')||'',
-                                name: el.getAttribute('name')||'',
-                                placeholder: el.getAttribute('placeholder')||'',
-                                aria: el.getAttribute('aria-label')||'',
-                                role: el.getAttribute('role')||''
-                            }));
-                            return {labels, inputs};
-                        }""")
-                        Path("/tmp/gumroad_ui_dump_share.json").write_text(str(ui_dump2)[:10000])
-                        logger.info("Gumroad: UI dump (share) saved", extra={"event": "gumroad_ui_dump_share"})
-                        # Set category/tags via Share tab comboboxes with option selection from suggestions.
-                        async def _select_combobox_option(combo, query: str) -> bool:
-                            try:
-                                await combo.click()
-                                await asyncio.sleep(0.15)
-                                await combo.fill(query)
-                                await asyncio.sleep(0.8)
-                                options = page.locator('[role="option"]')
-                                if await options.count() > 0:
-                                    preferred = page.get_by_role("option", name=query)
-                                    if await preferred.count() > 0:
-                                        await preferred.first.click(timeout=1800)
-                                    else:
-                                        await options.first.click(timeout=1800)
-                                    await asyncio.sleep(0.25)
+                    for sel in SHARE_TAB_SELECTORS:
+                        share_tab = page.locator(sel).first
+                        if await share_tab.is_visible(timeout=2000):
+                            await share_tab.click()
+                            await asyncio.sleep(2)
+                            ui_dump2 = await page.evaluate("""() => {
+                                const labels = Array.from(document.querySelectorAll('label')).map(l => ({
+                                    text: (l.innerText||'').trim(),
+                                    for: l.getAttribute('for')||''
+                                })).filter(x=>x.text);
+                                const inputs = Array.from(document.querySelectorAll('input,select,textarea')).map(el => ({
+                                    tag: el.tagName.toLowerCase(),
+                                    type: el.getAttribute('type')||'',
+                                    id: el.getAttribute('id')||'',
+                                    name: el.getAttribute('name')||'',
+                                    placeholder: el.getAttribute('placeholder')||'',
+                                    aria: el.getAttribute('aria-label')||'',
+                                    role: el.getAttribute('role')||''
+                                }));
+                                return {labels, inputs};
+                            }""")
+                            Path("/tmp/gumroad_ui_dump_share.json").write_text(str(ui_dump2)[:10000])
+                            logger.info("Gumroad: UI dump (share) saved", extra={"event": "gumroad_ui_dump_share"})
+                            # Set category/tags via Share tab comboboxes with option selection from suggestions.
+                            async def _select_combobox_option(combo, query: str) -> bool:
+                                try:
+                                    await combo.click()
+                                    await asyncio.sleep(0.15)
+                                    await combo.fill(query)
+                                    await asyncio.sleep(0.8)
+                                    options = page.locator('[role="option"]')
+                                    if await options.count() > 0:
+                                        preferred = page.get_by_role("option", name=query)
+                                        if await preferred.count() > 0:
+                                            await preferred.first.click(timeout=1800)
+                                        else:
+                                            await options.first.click(timeout=1800)
+                                        await asyncio.sleep(0.25)
+                                        return True
+                                    await page.keyboard.press("Enter")
                                     return True
-                                await page.keyboard.press("Enter")
-                                return True
+                                except Exception:
+                                    return False
+                            try:
+                                combos = page.locator('input[role="combobox"]')
+                                if await combos.count() >= 1:
+                                    cat_ok = await _select_combobox_option(combos.nth(0), "Programming")
+                                    if cat_ok:
+                                        logger.info("Gumroad: category set (share)", extra={"event": "gumroad_category_share"})
                             except Exception:
-                                return False
-                        try:
-                            combos = page.locator('input[role="combobox"]')
-                            if await combos.count() >= 1:
-                                cat_ok = await _select_combobox_option(combos.nth(0), "Programming")
-                                if cat_ok:
-                                    logger.info("Gumroad: category set (share)", extra={"event": "gumroad_category_share"})
-                        except Exception:
-                            pass
-                        try:
-                            combos = page.locator('input[role="combobox"]')
-                            if await combos.count() >= 2:
-                                tag_cb = combos.nth(1)
-                                added = 0
-                                for tag in tags_cfg[:5]:
-                                    if await _select_combobox_option(tag_cb, tag):
-                                        added += 1
-                                if added:
-                                    logger.info("Gumroad: tags set (share)", extra={"event": "gumroad_tags_share", "context": {"count": added}})
-                        except Exception:
-                            pass
-                        # Save after share updates
-                        try:
-                            for sel in ['button:has-text("Save and continue")', 'button:has-text("Save changes")', 'button:has-text("Save")']:
-                                btn = page.locator(sel).first
-                                if await btn.is_visible(timeout=2000):
-                                    await btn.click()
-                                    await asyncio.sleep(3)
-                                    break
-                        except Exception:
-                            pass
+                                pass
+                            try:
+                                combos = page.locator('input[role="combobox"]')
+                                if await combos.count() >= 2:
+                                    tag_cb = combos.nth(1)
+                                    added = 0
+                                    for tag in tags_cfg[:5]:
+                                        if await _select_combobox_option(tag_cb, tag):
+                                            added += 1
+                                    if added:
+                                        logger.info("Gumroad: tags set (share)", extra={"event": "gumroad_tags_share", "context": {"count": added}})
+                            except Exception:
+                                pass
+                            # Save after share updates
+                            try:
+                                for sel_save in SAVE_SELECTORS:
+                                    btn = page.locator(sel_save).first
+                                    if await btn.is_visible(timeout=2000):
+                                        await btn.click()
+                                        await asyncio.sleep(3)
+                                        break
+                            except Exception:
+                                pass
+                            break
                 except Exception:
                     pass
 
@@ -1482,10 +1488,12 @@ class GumroadPlatform(BasePlatform):
                                 pass
                         # Back to Product tab
                         try:
-                            product_tab = page.locator('button:has-text("Product"), a:has-text("Product")').first
-                            if await product_tab.is_visible(timeout=2000):
-                                await product_tab.click()
-                                await asyncio.sleep(2)
+                            for sel in PRODUCT_TAB_SELECTORS:
+                                product_tab = page.locator(sel).first
+                                if await product_tab.is_visible(timeout=2000):
+                                    await product_tab.click()
+                                    await asyncio.sleep(2)
+                                    break
                         except Exception:
                             pass
                 except Exception:
@@ -1493,7 +1501,7 @@ class GumroadPlatform(BasePlatform):
 
                 # Save
                 try:
-                    for sel in ['button:has-text("Save and continue")', 'button:has-text("Save changes")', 'button:has-text("Save")']:
+                    for sel in SAVE_SELECTORS:
                         btn = page.locator(sel).first
                         if await btn.is_visible(timeout=2000):
                             await btn.click()
@@ -1690,15 +1698,7 @@ class GumroadPlatform(BasePlatform):
                         return m.group(0)
                     return ""
                 async def _try_publish_buttons() -> str:
-                    for sel in [
-                        'button:has-text("Publish")',
-                        'button:has-text("Publish product")',
-                        'button:has-text("Make it public")',
-                        'button:has-text("Go live")',
-                        'button:has-text("Save and publish")',
-                        'a:has-text("Publish")',
-                        'label:has-text("Publish")',
-                    ]:
+                    for sel in PUBLISH_SELECTORS:
                         btn = page.locator(sel).first
                         if await btn.is_visible(timeout=2000):
                             await btn.click()
@@ -1726,10 +1726,13 @@ class GumroadPlatform(BasePlatform):
 
                 # Go to Content tab and upload PDF
                 if pdf_path and Path(pdf_path).exists():
-                    content_tab = page.locator('button:has-text("Content"), a:has-text("Content")').first
                     try:
-                        await content_tab.click()
-                        await asyncio.sleep(3)
+                        for sel in CONTENT_TAB_SELECTORS:
+                            content_tab = page.locator(sel).first
+                            if await content_tab.is_visible(timeout=2000):
+                                await content_tab.click()
+                                await asyncio.sleep(3)
+                                break
                     except Exception:
                         pass
 

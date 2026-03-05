@@ -2031,6 +2031,7 @@ class CommsAgent:
         self._app.add_handler(CommandHandler("goal", self._cmd_goal))
         self._app.add_handler(CommandHandler("agents", self._cmd_agents))
         self._app.add_handler(CommandHandler("skill_matrix_v2", self._cmd_skill_matrix_v2))
+        self._app.add_handler(CommandHandler("skill_eval", self._cmd_skill_eval))
         # New v0.3.0 commands
         self._app.add_handler(CommandHandler("report", self._cmd_report))
         self._app.add_handler(CommandHandler("stop", self._cmd_stop))
@@ -3109,6 +3110,40 @@ class CommsAgent:
                 f"svc={len(r.get('service', []))} helper={len(r.get('helper', []))} recipe={len(r.get('recipe', []))}"
             )
         await update.message.reply_text("\n".join(lines[:60]), reply_markup=self._main_keyboard())
+
+    async def _cmd_skill_eval(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Run lightweight skill eval loop for trigger quality."""
+        if await self._reject_stranger(update):
+            return
+        args = list(getattr(context, "args", None) or [])
+        if len(args) < 2:
+            await update.message.reply_text(
+                "Использование: /skill_eval <candidate_desc> | <baseline_desc>",
+                reply_markup=self._main_keyboard(),
+            )
+            return
+        raw = " ".join(args)
+        if "|" not in raw:
+            await update.message.reply_text(
+                "Формат: /skill_eval candidate | baseline",
+                reply_markup=self._main_keyboard(),
+            )
+            return
+        candidate_desc, baseline_desc = [x.strip() for x in raw.split("|", 1)]
+        from modules.skill_eval_loop import EvalCase, run_skill_eval_loop
+        evals = [
+            EvalCase(id="1", prompt="проведи глубокое исследование ниши", should_trigger=True, required_terms=["исслед"], forbidden_terms=[]),
+            EvalCase(id="2", prompt="опубликуй листинг на gumroad", should_trigger=True, required_terms=["gumroad"], forbidden_terms=[]),
+            EvalCase(id="3", prompt="какая погода в берлине", should_trigger=False, required_terms=[], forbidden_terms=["погода"]),
+            EvalCase(id="4", prompt="просто поболтай со мной", should_trigger=False, required_terms=[], forbidden_terms=["поболтай"]),
+        ]
+        res = run_skill_eval_loop(candidate_desc, baseline_desc, evals, max_iters=3)
+        rate = float(res.get("best_pass_rate", 0.0))
+        iters = int(res.get("iterations", 0))
+        await update.message.reply_text(
+            f"Skill Eval: best_pass_rate={rate:.2f}, iterations={iters}",
+            reply_markup=self._main_keyboard(),
+        )
 
     async def _cmd_fix(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Запуск self-improve пайплайна (кодовые исправления/интеграции)."""
