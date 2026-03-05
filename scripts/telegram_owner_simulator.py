@@ -110,6 +110,11 @@ def _builtin(name: str) -> list[Step]:
         return [
             Step("B01", "/brainstorm digital planner for Etsy", ["brainstorm", "роль", "иде"], ["traceback", "exception"]),
         ]
+    if key == "phase_recipe_exec":
+        return [
+            Step("R01", "/recipes", ["workflow recipes", "gumroad_publish"], ["traceback", "exception"]),
+            Step("R02", "/recipe_run twitter_publish", ["recipe", "twitter"], ["traceback", "exception"]),
+        ]
     raise ValueError(f"Unknown scenario: {name}")
 
 
@@ -171,6 +176,9 @@ async def _run_step(comms, owner_id: int, text: str) -> list[str]:
             "prefs": comms._cmd_prefs,
             "prefs_metrics": comms._cmd_prefs_metrics,
             "webop": comms._cmd_webop,
+            "recipes": comms._cmd_recipes,
+            "recipe_run": comms._cmd_recipe_run,
+            "skill_eval": comms._cmd_skill_eval,
             "health": comms._cmd_health,
             "errors": comms._cmd_errors,
             "balances": comms._cmd_balances,
