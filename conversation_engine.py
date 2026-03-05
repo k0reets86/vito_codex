@@ -243,6 +243,31 @@ class ConversationEngine:
         if str(text or "").strip().startswith("/"):
             return None
         normalized = self._normalize_for_nlu(text)
+        platform_key = self._extract_platform_key(text)
+        platform_op_kw = (
+            "зайди", "вход", "логин", "auth", "авториз", "сесс",
+            "статус аккаунта", "состояние аккаунта", "проверь аккаунт",
+            "товар", "листинг", "inventory", "status", "account",
+            "publish", "опубликуй", "редакт", "заполни", "draft",
+        )
+        if platform_key and self._looks_like_imperative_request(text) and self._has_keywords(normalized, platform_op_kw, fuzzy=True):
+            actions = [{"action": "run_platform_task", "params": {"platform": platform_key, "request": text}}]
+            out = await self._execute_actions(actions)
+            return {
+                "intent": Intent.SYSTEM_ACTION.value,
+                "response": (
+                    f"Запускаю задачу на платформе {platform_key}.\n"
+                    f"{out or 'Принял в выполнение.'}"
+                ),
+                "actions": actions,
+                "needs_confirmation": False,
+            }
+        complaint_kw = ("не вижу", "ничего не делаешь", "не делаешь", "завис", "висит", "что с задачей")
+        if self._has_keywords(normalized, complaint_kw, fuzzy=True):
+            return {
+                "intent": Intent.QUESTION.value,
+                "response": self._quick_status(),
+            }
 
         status_kw = ("статус", "status", "как дела", "что по задач", "активные задач", "progress", "прогресс")
         if self._has_keywords(normalized, status_kw, fuzzy=True):
@@ -619,25 +644,7 @@ class ConversationEngine:
                 "response": quick,
             }
 
-        context_from_memory = ""
-        if self.memory:
-            try:
-                similar = self.memory.search_knowledge(text, n_results=3)
-                if similar:
-                    context_from_memory = "\n\nИз памяти VITO:\n" + "\n".join(
-                        f"- {doc['text'][:200]}" for doc in similar
-                    )
-            except Exception:
-                pass
-            try:
-                skills = self.memory.search_skills(text, limit=3)
-                if skills:
-                    context_from_memory += "\n\nНавыки VITO:\n" + "\n".join(
-                        f"- {s['name']}: {s['description'][:150]} (успех: {s.get('success_count', 0)})"
-                        for s in skills
-                    )
-            except Exception:
-                pass
+        context_from_memory = self._build_operational_memory_context(text, include_errors=True)
         try:
             prefs = OwnerPreferenceModel().list_preferences(limit=5)
             if prefs:
@@ -779,6 +786,32 @@ class ConversationEngine:
 
         # Fast path for explicit self-improve requests
         lower = text.lower()
+        platform_key = self._extract_platform_key(text)
+        if platform_key and self._looks_like_imperative_request(text):
+            actions = [{"action": "run_platform_task", "params": {"platform": platform_key, "request": text}}]
+            out = await self._execute_actions(actions)
+            return {
+                "intent": Intent.SYSTEM_ACTION.value,
+                "response": f"Запускаю задачу на платформе {platform_key}.\n{out or 'Принял в выполнение.'}",
+                "actions": actions,
+                "needs_confirmation": False,
+            }
+        if any(kw in lower for kw in ("amazon", "амазон", "kdp", "кдп")) and any(
+            kw in lower for kw in ("заполни", "редакт", "fill", "draft")
+        ):
+            target_title = self._extract_target_title(text)
+            if target_title:
+                actions = [{"action": "run_kdp_draft_maintenance", "params": {"target_title": target_title, "language": "English"}}]
+                out = await self._execute_actions(actions)
+                return {
+                    "intent": Intent.SYSTEM_ACTION.value,
+                    "response": (
+                        f"Запускаю заполнение KDP-драфта: {target_title}.\n"
+                        f"{out or 'Выполняю и проверяю результат.'}"
+                    ),
+                    "actions": actions,
+                    "needs_confirmation": False,
+                }
         self_improve_keywords = [
             "исправь", "почини", "доработай", "улучши код", "улучши",
             "самоисправ", "добавь интеграц", "сделай интеграц",
@@ -885,6 +918,7 @@ class ConversationEngine:
         prompt = (
             f"{VITO_PERSONALITY}\n\n"
             f"=== СОСТОЯНИЕ СИСТЕМЫ ===\n{system_context}\n=== КОНЕЦ ===\n\n"
+            f"{self._build_operational_memory_context(text, include_errors=True)}\n\n"
             f"{owner_focus}\n\n"
             f"История разговора:\n{conversation_ctx}\n\n"
             f"Доступные действия:\n{available_actions}\n\n"
@@ -913,6 +947,23 @@ class ConversationEngine:
                     actions = parsed.get("actions", [])
             except Exception:
                 reply = response
+        if not actions and self._looks_like_imperative_request(text):
+            low = text.lower()
+            if any(k in low for k in ("amazon", "амазон", "kdp", "кдп")) and any(
+                k in low for k in ("удали", "удалить", "редакт", "заполни", "draft", "книг")
+            ):
+                return {
+                    "intent": Intent.SYSTEM_ACTION.value,
+                    "response": (
+                        "Понял задачу по KDP. Сейчас у меня автоматизированы: вход и инвентаризация. "
+                        "Удаление/полное редактирование драфтов в безопасном контуре ещё не подключено, "
+                        "поэтому не буду имитировать выполнение."
+                    ),
+                    "actions": [],
+                    "needs_confirmation": False,
+                }
+            actions = [{"action": "autonomous_execute", "params": {"request": text}}]
+            reply = "Принял задачу. Запускаю выполнение и вернусь с конкретным результатом."
         if "вот план" in str(reply).lower() and "думаешь" in str(reply).lower():
             reply = "Принял. Запускаю выполнение и вернусь с результатом."
         risky_actions = {"apply_code_change"}
@@ -994,6 +1045,7 @@ class ConversationEngine:
                         pass
             except Exception:
                 pass
+        hot_memory_ctx = self._build_operational_memory_context(text, include_errors=True)
 
         auto_approve = bool(getattr(settings, "OWNER_AUTO_APPROVE_GOALS", True))
         approval_hint = (
@@ -1004,6 +1056,7 @@ class ConversationEngine:
         prompt = (
             f"{VITO_PERSONALITY}\n\n"
             f"=== СОСТОЯНИЕ СИСТЕМЫ ===\n{system_context}\n=== КОНЕЦ ===\n\n"
+            f"{hot_memory_ctx}\n\n"
             f"{owner_focus}\n\n"
             f"История разговора:\n{conversation_ctx}\n\n"
             f"{skills_context}{owner_prefs}\n\n"
@@ -1426,6 +1479,86 @@ class ConversationEngine:
                 return f"Регистрация выполнена: {str(result.output)[:200]}"
             return f"Регистрация не удалась: {getattr(result, 'error', 'unknown')}"
 
+        if action == "run_kdp_draft_maintenance":
+            import asyncio as _asyncio
+            import json as _json
+
+            target_title = str(params.get("target_title") or "").strip()
+            language = str(params.get("language") or "English").strip() or "English"
+            if not target_title:
+                return "Для KDP-обновления нужен target_title."
+            storage = str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json") or "runtime/kdp_storage_state.json")
+            cmd = [
+                "python3",
+                "scripts/kdp_auth_helper.py",
+                "fill-draft",
+                "--storage-path",
+                storage,
+                "--headless",
+                "--target-title",
+                target_title,
+                "--language",
+                language,
+            ]
+            proc = await _asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=_asyncio.subprocess.PIPE,
+                stderr=_asyncio.subprocess.STDOUT,
+            )
+            out_b, _ = await _asyncio.wait_for(proc.communicate(), timeout=180)
+            out = (out_b or b"").decode("utf-8", errors="ignore")
+            rc = int(proc.returncode or 0)
+            if rc != 0:
+                return f"KDP-драфт не обновлён (rc={rc}). {out[-600:]}"
+            try:
+                payload = _json.loads(out.strip().splitlines()[-1])
+            except Exception:
+                payload = {}
+            if isinstance(payload, dict):
+                fields = payload.get("fields_filled") or []
+                return (
+                    "KDP-драфт обновлён.\n"
+                    f"- title: {payload.get('target_title', target_title)}\n"
+                    f"- fields_filled: {', '.join(fields) if fields else 'none'}\n"
+                    f"- saved_clicked: {bool(payload.get('saved_clicked', False))}\n"
+                    f"- screenshot: {payload.get('debug_screenshot', '')}"
+                )
+            return f"KDP-драфт обработан. {out[-700:]}"
+
+        if action == "run_platform_task":
+            platform = str(params.get("platform") or "").strip().lower()
+            request = str(params.get("request") or "").strip()
+            low = request.lower()
+            if not platform:
+                return "Платформа не определена."
+            # Status / inventory path
+            if any(k in low for k in ("статус", "состояние", "есть ли", "проверь", "товар", "товары", "листинг")):
+                if self.agent_registry and platform in {"gumroad", "etsy", "kofi", "printful", "amazon_kdp"}:
+                    res = await self.agent_registry.dispatch("sales_check", platform=platform)
+                    if res and res.success:
+                        return f"{platform}: {str(res.output)[:1200]}"
+            # KDP specific metadata fill by title
+            if platform == "amazon_kdp" and any(k in low for k in ("заполни", "редакт", "fill", "draft")):
+                tt = self._extract_target_title(request)
+                if not tt:
+                    return "Для KDP редактирования укажи точное название драфта."
+                return await self._dispatch_action("run_kdp_draft_maintenance", {"target_title": tt, "language": "English"})
+            # Publish / create listing via product pipeline
+            if any(k in low for k in ("опубликуй", "создай", "листинг", "товар", "publish", "create")):
+                topic = self._extract_product_topic(request)
+                return await self._dispatch_action(
+                    "run_product_pipeline",
+                    {"topic": topic, "platforms": [platform], "auto_publish": True},
+                )
+            # Social posting
+            if platform in {"twitter", "reddit", "threads"} and self.agent_registry:
+                content = request
+                res = await self.agent_registry.dispatch("social_media", platform=platform, content=content)
+                if res and res.success:
+                    return f"{platform}: пост опубликован/принят. {str(res.output)[:500]}"
+                return f"{platform}: не удалось выполнить постинг ({getattr(res, 'error', 'unknown')})."
+            return f"{platform}: задача распознана, но для такого типа операции пока нет безопасного раннера."
+
         return ""
 
     def _get_available_actions(self) -> str:
@@ -1460,6 +1593,8 @@ class ConversationEngine:
             actions.append("learn_service(service) — изучить сервис и добавить в базу знаний")
             actions.append("run_deep_research(topic) — глубокое исследование с источниками")
             actions.append("run_product_pipeline(topic, platforms, auto_publish=false) — сквозной pipeline товара")
+            actions.append("run_kdp_draft_maintenance(target_title, language) — заполнить метаданные KDP-драфта")
+            actions.append("run_platform_task(platform, request) — универсальный раннер платформенных задач")
             actions.append("run_improvement_cycle(request) — backup + HR + research + self-improve")
             actions.append("autonomous_execute(request) — выполнить задачу или доучиться и выполнить")
         return "\n".join(f"  - {a}" for a in actions) if actions else "(нет действий)"
@@ -1489,6 +1624,8 @@ class ConversationEngine:
             allowed.add("register_account")
             allowed.add("run_deep_research")
             allowed.add("run_product_pipeline")
+            allowed.add("run_kdp_draft_maintenance")
+            allowed.add("run_platform_task")
             allowed.add("run_improvement_cycle")
             allowed.add("autonomous_execute")
         return allowed
@@ -1500,6 +1637,14 @@ class ConversationEngine:
 
         capability = self._infer_capability(request)
         attempts: list[str] = []
+        low_req = str(request or "").lower()
+        if any(k in low_req for k in ("amazon", "амазон", "kdp", "кдп")) and any(
+            k in low_req for k in ("удали", "удалить", "редакт", "заполни", "draft", "книг")
+        ):
+            return (
+                "По Amazon KDP сейчас доступны только: вход и проверка инвентаря. "
+                "Операции удаления/редактирования драфтов ещё не реализованы в безопасном автоконтуре."
+            )
 
         async def _run_cap(cap: str) -> tuple[bool, str]:
             if not cap:
@@ -1840,6 +1985,116 @@ class ConversationEngine:
         if any(w in lower for w in ("обновлен", "updates", "апдейт")):
             return self._quick_updates()
         return ""
+
+    def _build_operational_memory_context(self, text: str, include_errors: bool = True) -> str:
+        """Build short, actionable memory context that is actually used in prompts."""
+        if not self.memory:
+            return ""
+        blocks: list[str] = []
+        try:
+            similar = self.memory.search_knowledge(text, n_results=3)
+            if similar:
+                blocks.append(
+                    "Из памяти VITO:\n" + "\n".join(
+                        f"- {str(doc.get('text', ''))[:220]}" for doc in similar if isinstance(doc, dict)
+                    )
+                )
+        except Exception:
+            pass
+        try:
+            skills = self.memory.search_skills(text, limit=4)
+            if skills:
+                blocks.append(
+                    "Навыки VITO:\n" + "\n".join(
+                        f"- {s.get('name')}: {str(s.get('description', ''))[:140]} "
+                        f"(ok={int(s.get('success_count', 0) or 0)}, fail={int(s.get('fail_count', 0) or 0)})"
+                        for s in skills if isinstance(s, dict)
+                    )
+                )
+        except Exception:
+            pass
+        try:
+            anti = self.memory.get_patterns(category="anti_pattern", query=text, limit=3)
+            if anti:
+                blocks.append(
+                    "Антипаттерны (избегать):\n" + "\n".join(
+                        f"- {p.get('pattern_key')}: {str(p.get('pattern_value', ''))[:170]}"
+                        for p in anti if isinstance(p, dict)
+                    )
+                )
+        except Exception:
+            pass
+        try:
+            good = self.memory.get_patterns(category="autonomy_success", query=text, limit=2)
+            if good:
+                blocks.append(
+                    "Успешные паттерны:\n" + "\n".join(
+                        f"- {p.get('pattern_key')}: {str(p.get('pattern_value', ''))[:170]}"
+                        for p in good if isinstance(p, dict)
+                    )
+                )
+        except Exception:
+            pass
+        if include_errors:
+            try:
+                errs = self.memory.get_recent_errors(limit=3, unresolved_only=True)
+                if errs:
+                    blocks.append(
+                        "Свежие нерешённые ошибки:\n" + "\n".join(
+                            f"- {e.get('module')}/{e.get('error_type')}: {str(e.get('message', ''))[:140]}"
+                            for e in errs if isinstance(e, dict)
+                        )
+                    )
+            except Exception:
+                pass
+        return ("\n\n".join(blocks)).strip()
+
+    @staticmethod
+    def _extract_target_title(text: str) -> str:
+        raw = str(text or "").strip()
+        # quoted title first
+        m = re.search(r"[\"“'«](.+?)[\"”'»]", raw)
+        if m:
+            return str(m.group(1) or "").strip()
+        # fallback after keyword
+        m2 = re.search(r"(?i)(?:заполни|редактируй|fill)\s+(.+)$", raw)
+        if m2:
+            v = str(m2.group(1) or "").strip()
+            # trim obvious tails
+            v = re.sub(r"(?i)\b(на английском|english|пожалуйста)\b.*$", "", v).strip(" .,:;")
+            return v
+        return ""
+
+    @staticmethod
+    def _extract_platform_key(text: str) -> str:
+        s = str(text or "").lower()
+        mapping = (
+            ("amazon_kdp", ("amazon", "амазон", "kdp", "кдп")),
+            ("gumroad", ("gumroad", "гумроад", "гамроад")),
+            ("etsy", ("etsy", "етси", "этси")),
+            ("kofi", ("kofi", "ko-fi", "кофи")),
+            ("printful", ("printful", "принтфул")),
+            ("twitter", ("twitter", "x.com", "икс", "твиттер")),
+            ("reddit", ("reddit", "реддит")),
+            ("threads", ("threads", "тредс", "тхредс")),
+        )
+        for key, aliases in mapping:
+            if any(a in s for a in aliases):
+                return key
+        return ""
+
+    @staticmethod
+    def _looks_like_imperative_request(text: str) -> bool:
+        s = str(text or "").strip().lower()
+        if not s:
+            return False
+        if s.endswith("?"):
+            return False
+        verbs = (
+            "сделай", "создай", "запусти", "проверь", "найди", "заполни",
+            "опубликуй", "удали", "редактируй", "исправь", "почини",
+        )
+        return any(v in s for v in verbs)
 
     def _quick_status(self) -> str:
         parts = ["VITO Status (fast)"]

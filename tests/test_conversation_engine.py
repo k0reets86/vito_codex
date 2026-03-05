@@ -172,6 +172,16 @@ class TestProcessMessage:
         engine.llm_router.call_llm.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_deterministic_platform_route_executes_without_llm(self, mock_llm_router, mock_memory):
+        engine = ConversationEngine(llm_router=mock_llm_router, memory=mock_memory, agent_registry=MagicMock())
+        engine._execute_actions = AsyncMock(return_value="amazon_kdp: ok")
+        result = await engine.process_message("зайди на амазон и проверь товары")
+        assert result["intent"] == "system_action"
+        assert "amazon_kdp" in result["response"].lower()
+        engine._execute_actions.assert_called_once()
+        engine.llm_router.call_llm.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_deterministic_network_check_route(self, engine):
         result = await engine.process_message("проверь доступ к интернету")
         assert result["intent"] == "question"

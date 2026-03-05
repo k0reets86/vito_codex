@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -49,6 +50,35 @@ def _is_logged_in_url(url: str) -> bool:
     return any(x in u for x in ("/bookshelf", "/en_us/", "/reports"))
 
 
+def _sanitize_inventory_items(items: list[str] | None) -> list[str]:
+    raw = items if isinstance(items, list) else []
+    blocked_substrings = (
+        "how would you rate your experience",
+        "visit our help center",
+        "thank you for your feedback",
+        "bookshelf",
+        "reports",
+        "marketing",
+        "help center",
+    )
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        low = text.lower()
+        if len(text) < 2 or len(text) > 180:
+            continue
+        if any(tok in low for tok in blocked_substrings):
+            continue
+        if low in seen:
+            continue
+        seen.add(low)
+        cleaned.append(text)
+    return cleaned
+
+
 def _chromium_launch_args() -> list[str]:
     # Harden launch for constrained VPS/container environments where zygote/fork can fail.
     args = [
@@ -56,6 +86,12 @@ def _chromium_launch_args() -> list[str]:
         "--disable-dev-shm-usage",
         "--disable-gpu",
         "--disable-software-rasterizer",
+        "--disable-background-networking",
+        "--disable-background-timer-throttling",
+        "--disable-breakpad",
+        "--disable-component-update",
+        "--disable-renderer-backgrounding",
+        "--disable-features=site-per-process,Translate,BackForwardCache",
         "--renderer-process-limit=1",
     ]
     if bool(getattr(settings, "BROWSER_CONSTRAINED_MODE", True)):
@@ -63,13 +99,72 @@ def _chromium_launch_args() -> list[str]:
     return args
 
 
-async def _launch_headless_browser(playwright_obj):
-    """Resilient headless launch for constrained servers."""
+def _chromium_executable_path() -> str | None:
+    """Prefer full Chromium binary over headless_shell for stability on VPS."""
+    explicit = str(getattr(settings, "BROWSER_CHROMIUM_EXECUTABLE", "") or "").strip()
+    if explicit and Path(explicit).exists():
+        return explicit
+    base = Path.home() / ".cache" / "ms-playwright"
     try:
-        return await playwright_obj.chromium.launch(headless=True, args=_chromium_launch_args())
-    except Exception as e:
-        print(f"WARN: Chromium headless launch failed ({e}). Trying Firefox fallback...")
-        return await playwright_obj.firefox.launch(headless=True)
+        candidates = sorted(base.glob("chromium-*/chrome-linux/chrome"), reverse=True)
+        for cand in candidates:
+            if cand.exists():
+                return str(cand)
+    except Exception:
+        return None
+    return None
+
+
+async def _launch_headless_browser(playwright_obj):
+    """Resilient browser launch for constrained servers.
+
+    Priority:
+    1) Chromium headless (fast path)
+    2) Chromium headed under virtual display (xvfb)
+    """
+    # Retry launch because constrained VPS can intermittently fail spawning renderer threads.
+    for attempt in range(1, 4):
+        try:
+            launch_kwargs = {
+                "headless": True,
+                "args": _chromium_launch_args(),
+                "chromium_sandbox": False,
+                "handle_sigint": False,
+                "handle_sigterm": False,
+                "handle_sighup": False,
+            }
+            exe = _chromium_executable_path()
+            if exe:
+                launch_kwargs["executable_path"] = exe
+            return await playwright_obj.chromium.launch(
+                **launch_kwargs,
+            )
+        except Exception as e:
+            print(f"WARN: Chromium headless launch failed (attempt {attempt}/3): {e}")
+            await asyncio.sleep(0.6 * attempt)
+    # If running under xvfb (DISPLAY set), try non-headless Chromium.
+    for attempt in range(1, 3):
+        try:
+            if os.getenv("DISPLAY"):
+                print(f"INFO: Trying Chromium headed mode on DISPLAY fallback ({attempt}/2)...")
+                launch_kwargs = {
+                    "headless": False,
+                    "args": _chromium_launch_args(),
+                    "chromium_sandbox": False,
+                    "handle_sigint": False,
+                    "handle_sigterm": False,
+                    "handle_sighup": False,
+                }
+                exe = _chromium_executable_path()
+                if exe:
+                    launch_kwargs["executable_path"] = exe
+                return await playwright_obj.chromium.launch(
+                    **launch_kwargs,
+                )
+        except Exception as e:
+            print(f"WARN: Chromium headed fallback failed ({attempt}/2): {e}")
+            await asyncio.sleep(0.7 * attempt)
+    raise RuntimeError("Chromium launch failed in this environment")
 
 
 async def browser_capture(
@@ -97,13 +192,26 @@ async def browser_capture(
         print("WARNING: headless=True может ухудшить прохождение защиты Amazon.")
 
     async def _launch_interactive_browser(playwright_obj):
-        try:
-            return await playwright_obj.chromium.launch(headless=headless, args=_chromium_launch_args())
-        except Exception as e:
-            # Some VPS environments fail Chromium headed launch intermittently
-            # (thread/resource limits, Ozone/X11 quirks). Fallback keeps auth flow usable.
-            print(f"WARN: Chromium launch failed ({e}). Trying Firefox fallback...")
-            return await playwright_obj.firefox.launch(headless=headless)
+        for attempt in range(1, 4):
+            try:
+                launch_kwargs = {
+                    "headless": headless,
+                    "args": _chromium_launch_args(),
+                    "chromium_sandbox": False,
+                    "handle_sigint": False,
+                    "handle_sigterm": False,
+                    "handle_sighup": False,
+                }
+                exe = _chromium_executable_path()
+                if exe:
+                    launch_kwargs["executable_path"] = exe
+                return await playwright_obj.chromium.launch(
+                    **launch_kwargs,
+                )
+            except Exception as e:
+                print(f"WARN: Chromium launch failed (attempt {attempt}/3): {e}")
+                await asyncio.sleep(0.6 * attempt)
+        raise RuntimeError("Chromium launch failed in interactive mode")
 
     async with async_playwright() as p:
         browser = await _launch_interactive_browser(p)
@@ -741,14 +849,15 @@ async def inventory_snapshot(storage_path: str, headless: bool) -> int:
             print(json.dumps({"ok": False, "url": url, "title": title, "products_count": 0, "items": []}, ensure_ascii=False))
             return 2
 
-        items = []
+        items: list[str] = []
         try:
             items = await page.evaluate(
                 """() => {
-                    const bad = new Set([
+                    const badSubstrings = [
                       'bookshelf', 'reports', 'marketing', 'help', 'settings', 'sign out', 'sign in',
-                      'kindle direct publishing', 'kdp', 'dashboard', 'create', 'new'
-                    ]);
+                      'kindle direct publishing', 'kdp', 'dashboard', 'create new', 'how would you rate your experience',
+                      'visit our help center', 'thank you for your feedback'
+                    ];
                     const out = [];
                     const seen = new Set();
                     const pushText = (raw) => {
@@ -756,23 +865,29 @@ async def inventory_snapshot(storage_path: str, headless: bool) -> int:
                       if (!t) return;
                       const low = t.toLowerCase();
                       if (t.length < 3 || t.length > 140) return;
-                      if (bad.has(low)) return;
+                      if (badSubstrings.some(x => low.includes(x))) return;
                       if (/^[0-9.,$\\-\\s]+$/.test(t)) return;
                       if (seen.has(low)) return;
                       seen.add(low);
                       out.push(t);
                     };
-                    const selectors = [
-                      "[data-testid*='book']",
-                      "[data-testid*='title']",
-                      "a[href*='/title/']",
+                    // Prefer title links/cards to avoid generic page text.
+                    const rowSelectors = [
+                      "a[href*='title-setup']",
                       "a[href*='/book/']",
-                      "h2", "h3"
+                      "a[href*='/title/']",
+                      "[data-testid*='book'] a",
+                      "[data-testid*='title']",
                     ];
-                    for (const sel of selectors) {
+                    for (const sel of rowSelectors) {
                       const nodes = Array.from(document.querySelectorAll(sel));
                       for (const n of nodes) {
                         pushText(n.textContent || '');
+                        const row = n.closest("tr, article, li, section, div");
+                        if (row) {
+                          const headers = row.querySelectorAll("h1,h2,h3,strong,[data-testid*='title']");
+                          for (const h of headers) pushText(h.textContent || '');
+                        }
                         if (out.length >= 40) break;
                       }
                       if (out.length >= 40) break;
@@ -782,6 +897,7 @@ async def inventory_snapshot(storage_path: str, headless: bool) -> int:
             )
         except Exception:
             items = []
+        items = _sanitize_inventory_items(items)
 
         payload = {
             "ok": True,
@@ -794,6 +910,182 @@ async def inventory_snapshot(storage_path: str, headless: bool) -> int:
         await browser.close()
         print(json.dumps(payload, ensure_ascii=False))
         return 0
+
+
+async def fill_draft_metadata(storage_path: str, headless: bool, target_title: str, language: str = "English") -> int:
+    """Open a KDP draft by title and fill common metadata fields (best effort)."""
+    from playwright.async_api import async_playwright
+
+    state = Path(storage_path)
+    if not state.exists():
+        print(f"ERROR: storage_state not found: {state}")
+        return 1
+    if not str(target_title or "").strip():
+        print("ERROR: target_title is required")
+        return 2
+
+    target = str(target_title).strip()
+    title_long = f"{target} | Complete Starter Edition"
+    subtitle = "Practical Guide for Fast Validation"
+    description = (
+        f"{target} is a practical draft for end-to-end KDP flow validation. "
+        "This metadata block is generated automatically for integration testing only."
+    )
+    keywords = ["digital", "productivity", "guide", "templates", "automation", "starter", "practical"]
+
+    async with async_playwright() as p:
+        browser = await (_launch_headless_browser(p) if headless else p.chromium.launch(headless=False, args=_chromium_launch_args()))
+        context = await browser.new_context(storage_state=str(state), viewport={"width": 1366, "height": 900})
+        page = await context.new_page()
+        await page.goto("https://kdp.amazon.com/bookshelf", wait_until="domcontentloaded", timeout=120000)
+        await page.wait_for_timeout(2500)
+
+        if not _is_logged_in_url(page.url):
+            await context.close()
+            await browser.close()
+            print(json.dumps({"ok": False, "error": "not_logged_in", "url": page.url}, ensure_ascii=False))
+            return 3
+
+        opened = False
+        for sel in (f"a:has-text('{target}')", f"text={target}", "a[href*='title-setup']", "a[href*='/title/']"):
+            try:
+                loc = page.locator(sel)
+                n = await loc.count()
+                if n <= 0:
+                    continue
+                idx = 0
+                if n > 1:
+                    for i in range(n):
+                        txt = str((await loc.nth(i).inner_text()) or "").strip().lower()
+                        if target.lower() in txt:
+                            idx = i
+                            break
+                await loc.nth(idx).click(timeout=3500)
+                await page.wait_for_timeout(2200)
+                opened = True
+                break
+            except Exception:
+                continue
+        if not opened:
+            shot = Path("runtime") / "kdp_fill_not_found.png"
+            try:
+                await page.screenshot(path=str(shot), full_page=True)
+            except Exception:
+                pass
+            await context.close()
+            await browser.close()
+            print(json.dumps({"ok": False, "error": "draft_not_found", "target_title": target, "debug_screenshot": str(shot)}, ensure_ascii=False))
+            return 4
+
+        cur_url = str(page.url or "").lower()
+        if "bookshelf" in cur_url:
+            # Try action button from the matched card/row.
+            for sel in (
+                f"text={target} >> xpath=ancestor::*[self::tr or self::div][1] >> text=Continue setup",
+                f"text={target} >> xpath=ancestor::*[self::tr or self::div][1] >> text=Edit eBook details",
+                "text=Continue setup",
+                "text=Edit eBook details",
+            ):
+                try:
+                    if await page.locator(sel).count() > 0:
+                        await page.locator(sel).first.click(timeout=3000)
+                        await page.wait_for_timeout(2200)
+                        cur_url = str(page.url or "").lower()
+                        if "bookshelf" not in cur_url:
+                            break
+                except Exception:
+                    continue
+        if "bookshelf" in cur_url:
+            shot = Path("runtime") / "kdp_fill_open_failed.png"
+            try:
+                await page.screenshot(path=str(shot), full_page=True)
+            except Exception:
+                pass
+            await context.close()
+            await browser.close()
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "error": "draft_open_failed",
+                        "target_title": target,
+                        "url": page.url,
+                        "debug_screenshot": str(shot),
+                    },
+                    ensure_ascii=False,
+                )
+            )
+            return 5
+
+        filled: list[str] = []
+        for sel, val, tag in (
+            ("input[name='title']", title_long, "title"),
+            ("input#title", title_long, "title"),
+            ("input[name*='title']", title_long, "title"),
+            ("input[name='subtitle']", subtitle, "subtitle"),
+            ("input#subtitle", subtitle, "subtitle"),
+            ("input[name*='subtitle']", subtitle, "subtitle"),
+            ("textarea[name='description']", description, "description"),
+            ("textarea#description", description, "description"),
+            ("textarea[name*='description']", description, "description"),
+            ("input[name='language']", language, "language"),
+            ("input[name*='language']", language, "language"),
+        ):
+            try:
+                loc = page.locator(sel)
+                if await loc.count() <= 0:
+                    continue
+                await loc.first.fill(str(val), timeout=1800)
+                if tag not in filled:
+                    filled.append(tag)
+            except Exception:
+                continue
+
+        try:
+            key_inputs = page.locator(
+                "input[name*='keyword'], input[id*='keyword'], input[placeholder*='keyword'], input[aria-label*='keyword']"
+            )
+            cnt = await key_inputs.count()
+            for i in range(min(cnt, 7)):
+                try:
+                    await key_inputs.nth(i).fill(keywords[i], timeout=1500)
+                except Exception:
+                    continue
+            if cnt > 0:
+                filled.append("keywords")
+        except Exception:
+            pass
+
+        saved = False
+        for sel in ("button:has-text('Save')", "button:has-text('Save and Continue')", "button:has-text('Continue')", "input[type='submit']"):
+            try:
+                if not filled:
+                    break
+                if await page.locator(sel).count() > 0:
+                    await page.locator(sel).first.click(timeout=2000)
+                    await page.wait_for_timeout(1800)
+                    saved = True
+                    break
+            except Exception:
+                continue
+
+        shot = Path("runtime") / "kdp_fill_result.png"
+        try:
+            await page.screenshot(path=str(shot), full_page=True)
+        except Exception:
+            pass
+        out = {
+            "ok": bool(filled),
+            "target_title": target,
+            "url": page.url,
+            "fields_filled": filled,
+            "saved_clicked": saved,
+            "debug_screenshot": str(shot),
+        }
+        await context.close()
+        await browser.close()
+        print(json.dumps(out, ensure_ascii=False))
+        return 0 if bool(filled) else 6
 
 
 def main() -> int:
@@ -832,6 +1124,12 @@ def main() -> int:
     p_submit.add_argument("--storage-path", default=str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json")))
     p_submit.add_argument("--otp-code", required=True)
 
+    p_fill = sub.add_parser("fill-draft", help="Fill metadata for one draft title (best effort)")
+    p_fill.add_argument("--storage-path", default=str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json")))
+    p_fill.add_argument("--headless", action="store_true")
+    p_fill.add_argument("--target-title", required=True)
+    p_fill.add_argument("--language", default="English")
+
     args = parser.parse_args()
     if args.cmd == "browser-capture":
         return asyncio.run(
@@ -859,6 +1157,15 @@ def main() -> int:
                 str(args.preauth_meta_path),
                 str(args.storage_path),
                 str(args.otp_code or ""),
+            )
+        )
+    if args.cmd == "fill-draft":
+        return asyncio.run(
+            fill_draft_metadata(
+                str(args.storage_path),
+                bool(args.headless),
+                str(args.target_title or ""),
+                str(args.language or "English"),
             )
         )
     return 1

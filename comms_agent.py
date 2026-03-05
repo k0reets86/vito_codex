@@ -763,6 +763,9 @@ class CommsAgent:
             for token in (
                 "статус",
                 "status",
+                "состояние аккаунта",
+                "состояние",
+                "state",
                 "проверь аккаунт",
                 "покажи аккаунт",
                 "проверка входа",
@@ -777,6 +780,8 @@ class CommsAgent:
         if not s:
             return False
         if any(x in s for x in ("тренд", "trend", "ниш", "niche", "конкурент", "рынок")):
+            return False
+        if any(x in s for x in ("профиль", "profile")) and any(x in s for x in ("настрой", "settings")):
             return False
         return any(
             token in s
@@ -952,7 +957,29 @@ class CommsAgent:
                         data = json.loads(payload_line)
                         if bool(data.get("ok", False)):
                             items = data.get("items") or []
+                            if isinstance(items, list):
+                                noise = (
+                                    "how would you rate your experience",
+                                    "visit our help center",
+                                    "thank you for your feedback",
+                                )
+                                cleaned: list[str] = []
+                                seen: set[str] = set()
+                                for it in items:
+                                    t = str(it or "").strip()
+                                    if not t:
+                                        continue
+                                    low = t.lower()
+                                    if any(n in low for n in noise):
+                                        continue
+                                    if low in seen:
+                                        continue
+                                    seen.add(low)
+                                    cleaned.append(t)
+                                items = cleaned
                             count = int(data.get("products_count", 0) or 0)
+                            if isinstance(items, list):
+                                count = len(items)
                             lines = [f"{title}: состояние аккаунта", f"- Товаров/книг: {count}"]
                             if items:
                                 lines.append("- Примеры:")
@@ -1009,7 +1036,7 @@ class CommsAgent:
 
     async def _run_kdp_probe(self) -> tuple[int, str]:
         storage = str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json") or "runtime/kdp_storage_state.json")
-        cmd = [
+        base = [
             "python3",
             "scripts/kdp_auth_helper.py",
             "probe",
@@ -1017,15 +1044,11 @@ class CommsAgent:
             storage,
             "--headless",
         ]
-        async with self._kdp_auth_lock:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-            out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
-            output = (out_b or b"").decode("utf-8", errors="ignore")
-            return int(proc.returncode or 0), output
+        variants = [
+            base,
+            ["xvfb-run", "-a", *base],
+        ]
+        return await self._run_kdp_variants(variants, timeout_sec=120)
 
     async def _run_kdp_probe_stable(self) -> tuple[int, str]:
         rc, out = await self._run_kdp_probe()
@@ -1036,7 +1059,7 @@ class CommsAgent:
 
     async def _run_kdp_inventory_probe(self) -> tuple[int, str]:
         storage = str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json") or "runtime/kdp_storage_state.json")
-        cmd = [
+        base = [
             "python3",
             "scripts/kdp_auth_helper.py",
             "inventory",
@@ -1044,15 +1067,32 @@ class CommsAgent:
             storage,
             "--headless",
         ]
+        variants = [
+            base,
+            ["xvfb-run", "-a", *base],
+        ]
+        return await self._run_kdp_variants(variants, timeout_sec=150)
+
+    async def _run_kdp_variants(self, variants: list[list[str]], timeout_sec: int) -> tuple[int, str]:
+        """Run KDP helper command variants, returning first success or full diagnostics."""
         async with self._kdp_auth_lock:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-            out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=150)
-            output = (out_b or b"").decode("utf-8", errors="ignore")
-            return int(proc.returncode or 0), output
+            chunks: list[str] = []
+            last_rc = 1
+            for cmd in variants:
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+                out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout_sec)
+                output = (out_b or b"").decode("utf-8", errors="ignore")
+                rc = int(proc.returncode or 0)
+                last_rc = rc
+                cmd_txt = " ".join(cmd)
+                chunks.append(f"$ {cmd_txt}\n{output}")
+                if rc == 0:
+                    return 0, "\n\n--- variant ---\n".join(chunks)
+            return last_rc, "\n\n--- variant ---\n".join(chunks)
 
     async def _run_etsy_auto_login(self) -> tuple[int, str]:
         storage = str(getattr(settings, "ETSY_STORAGE_STATE_FILE", "runtime/etsy_storage_state.json") or "runtime/etsy_storage_state.json")
@@ -1357,7 +1397,7 @@ class CommsAgent:
 
     async def _run_kdp_auto_login(self, otp_code: str = "") -> tuple[int, str]:
         storage = str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json") or "runtime/kdp_storage_state.json")
-        cmd = [
+        base = [
             "python3",
             "scripts/kdp_auth_helper.py",
             "auto-login",
@@ -1367,19 +1407,15 @@ class CommsAgent:
             storage,
         ]
         if otp_code:
-            cmd.extend(["--otp-code", otp_code])
-        async with self._kdp_auth_lock:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-            out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=220)
-            output = (out_b or b"").decode("utf-8", errors="ignore")
-            return int(proc.returncode or 0), output
+            base.extend(["--otp-code", otp_code])
+        variants = [
+            base,
+            ["xvfb-run", "-a", *base],
+        ]
+        return await self._run_kdp_variants(variants, timeout_sec=220)
 
     async def _run_kdp_prepare_otp(self) -> tuple[int, str]:
-        cmd = [
+        base = [
             "python3",
             "scripts/kdp_auth_helper.py",
             "prepare-otp",
@@ -1390,19 +1426,19 @@ class CommsAgent:
             "--preauth-meta-path",
             "runtime/kdp_preauth_meta.json",
         ]
-        async with self._kdp_auth_lock:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-            out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=180)
-            output = (out_b or b"").decode("utf-8", errors="ignore")
-            return int(proc.returncode or 0), output
+        variants = [
+            base,
+            ["xvfb-run", "-a", *base],
+        ]
+        return await self._run_kdp_variants(variants, timeout_sec=180)
+
+    async def _cleanup_browser_runtime(self) -> None:
+        """Keep browser runtime untouched to avoid killing active startup flow."""
+        return
 
     async def _run_kdp_submit_otp(self, otp_code: str) -> tuple[int, str]:
         storage = str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json") or "runtime/kdp_storage_state.json")
-        cmd = [
+        base = [
             "python3",
             "scripts/kdp_auth_helper.py",
             "submit-otp",
@@ -1417,15 +1453,11 @@ class CommsAgent:
             "--otp-code",
             str(otp_code or "").strip(),
         ]
-        async with self._kdp_auth_lock:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-            out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=180)
-            output = (out_b or b"").decode("utf-8", errors="ignore")
-            return int(proc.returncode or 0), output
+        variants = [
+            base,
+            ["xvfb-run", "-a", *base],
+        ]
+        return await self._run_kdp_variants(variants, timeout_sec=180)
 
     @staticmethod
     def _kdp_prepare_has_mfa_evidence(output: str) -> bool:
@@ -1464,6 +1496,7 @@ class CommsAgent:
         maybe_otp = self._extract_otp_code(text)
         if self._pending_kdp_otp and maybe_otp:
             await send_reply("Код получен. Подтверждаю вход в Amazon KDP...")
+            await self._cleanup_browser_runtime()
             # If session already became valid, accept immediately.
             try:
                 pre_probe_rc, _ = await self._run_kdp_probe_stable()
@@ -1476,15 +1509,20 @@ class CommsAgent:
                 await send_reply("Готово: вход в KDP подтвержден (live-check OK).")
                 return True
             prepared_mode = bool((self._pending_kdp_otp or {}).get("prepared", False)) or self._kdp_preauth_ready()
-            # Avoid stale/challenged session artifacts before OTP submission.
-            self._reset_kdp_auth_state_files()
-            # Primary Telegram path: use full auto-login with OTP first (most stable in production).
-            attempts: list[tuple[str, tuple[int, str]]] = [
-                ("auto_login", await self._run_kdp_auto_login(otp_code=maybe_otp)),
-            ]
-            # Optional fallback to preauth submit if such state exists.
+            # Stable Telegram path:
+            # if OTP page is already prepared, submit code into this prepared session first.
+            # Rebuilding the full login flow before OTP increases code expiry risk.
+            attempts: list[tuple[str, tuple[int, str]]] = []
             if prepared_mode:
-                attempts.append(("submit_otp_fallback", await self._run_kdp_submit_otp(maybe_otp)))
+                attempts.append(("submit_otp_prepared", await self._run_kdp_submit_otp(maybe_otp)))
+                if attempts[-1][1][0] != 0:
+                    # Prepared session may go stale; refresh it and retry submit once.
+                    prep_rc, _prep_out = await self._run_kdp_prepare_otp()
+                    if prep_rc == 0 or self._kdp_prepare_has_mfa_evidence(_prep_out):
+                        attempts.append(("submit_otp_refreshed", await self._run_kdp_submit_otp(maybe_otp)))
+            if not attempts:
+                # No prepared MFA session: fall back to direct full login with OTP.
+                attempts.append(("auto_login", await self._run_kdp_auto_login(otp_code=maybe_otp)))
 
             for _mode, (rc_try, _out_try) in attempts:
                 if rc_try == 0:
@@ -1516,12 +1554,19 @@ class CommsAgent:
             low_all = f"{str(out or '').lower()}\n{str(out2 or '').lower()}"
             if "otp_rejected" in low_all or "expired" in low_all or "invalid" in low_all:
                 msg = "Код неверный или истёк. Пришли новый 6-значный код сразу после генерации."
+            elif "chromium launch failed" in low_all or "error: auto_login_exception" in low_all:
+                msg = "Не смог запустить браузерную сессию Amazon. Повтори «зайди на амазон» через 10 секунд."
             await send_reply(msg)
             logger.warning(
                 "KDP OTP login failed",
                 extra={
                     "event": "kdp_login_otp_failed",
-                    "context": {"output": out[-800:] if isinstance(out, str) else str(out), "retry_output": out2[-800:] if isinstance(out2, str) else str(out2)},
+                    "context": {
+                        "output_head": (out[:4000] if isinstance(out, str) else str(out)),
+                        "output_tail": (out[-4000:] if isinstance(out, str) else str(out)),
+                        "retry_output_head": (out2[:4000] if isinstance(out2, str) else str(out2)),
+                        "retry_output_tail": (out2[-4000:] if isinstance(out2, str) else str(out2)),
+                    },
                 },
             )
             return True
@@ -1555,7 +1600,8 @@ class CommsAgent:
             mfa_hints = ("otp_required", "otp code not provided", "/ap/mfa", "mfa?", "otp_ready")
             return _rc in {2, 3} or any(h in _low for h in mfa_hints)
 
-        for attempt in range(3):
+        for attempt in range(5):
+            await self._cleanup_browser_runtime()
             rc, out = await self._run_kdp_prepare_otp()
             low = str(out or "").lower()
             attempt_outputs.append(str(out or ""))
@@ -1574,7 +1620,7 @@ class CommsAgent:
                 self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat(), "prepared": True}
                 await send_reply("Нужен 6-значный код из Amazon/Authenticator. Отправь его одним сообщением.")
                 return True
-            if attempt < 2:
+            if attempt < 4:
                 await asyncio.sleep(1.0 + attempt)
 
         # Some Playwright runs fail after reaching MFA URL; treat clear MFA URL evidence as prepared state.
@@ -1617,7 +1663,13 @@ class CommsAgent:
         )
         logger.warning(
             "KDP auto-login failed without OTP; remote fallback suppressed",
-            extra={"event": "kdp_login_auto_failed_no_remote", "context": {"output": out[-1200:] if isinstance(out, str) else str(out)}},
+            extra={
+                "event": "kdp_login_auto_failed_no_remote",
+                "context": {
+                    "output_head": (out[:4000] if isinstance(out, str) else str(out)),
+                    "output_tail": (out[-4000:] if isinstance(out, str) else str(out)),
+                },
+            },
         )
         return True
 

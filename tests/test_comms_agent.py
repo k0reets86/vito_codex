@@ -1191,6 +1191,7 @@ async def test_handle_callback_help_topic_daily(comms, mock_callback_query):
 async def test_handle_kdp_login_flow_forces_fresh_auth_and_requests_otp(comms):
     comms._service_auth_confirmed["amazon_kdp"] = "2026-03-04T10:00:00+00:00"
     send_reply = AsyncMock()
+    comms._run_kdp_probe_stable = AsyncMock(return_value=(1, "no_session"))
     comms._run_kdp_prepare_otp = AsyncMock(return_value=(2, "OTP_REQUIRED: send code now"))
     comms._run_kdp_auto_login = AsyncMock(return_value=(1, "should_not_run"))
     comms._run_remote_auth_session = AsyncMock(return_value=(0, "REMOTE_URL=http://127.0.0.1/novnc\nVNC_PASSWORD=test"))
@@ -1205,6 +1206,7 @@ async def test_handle_kdp_login_flow_forces_fresh_auth_and_requests_otp(comms):
 @pytest.mark.asyncio
 async def test_handle_kdp_login_flow_no_remote_fallback_when_auto_login_fails(comms):
     send_reply = AsyncMock()
+    comms._run_kdp_probe_stable = AsyncMock(return_value=(1, "no_session"))
     comms._run_kdp_prepare_otp = AsyncMock(return_value=(2, "OTP_REQUIRED: send code now"))
     comms._run_remote_auth_session = AsyncMock(
         return_value=(
@@ -1266,6 +1268,7 @@ async def test_handle_kdp_login_flow_requests_otp_code_on_rc_2_without_hint(comm
 @pytest.mark.asyncio
 async def test_handle_kdp_login_flow_retries_after_transient_failure_and_requests_otp(comms):
     send_reply = AsyncMock()
+    comms._run_kdp_probe_stable = AsyncMock(return_value=(1, "no_session"))
     comms._run_kdp_prepare_otp = AsyncMock(side_effect=[(9, "ERROR: prepare_otp_exception=..."), (2, "OTP_REQUIRED: send code now")])
     comms._run_remote_auth_session = AsyncMock(return_value=(0, "REMOTE_URL=http://127.0.0.1/novnc\nVNC_PASSWORD=test"))
 
@@ -1280,14 +1283,24 @@ async def test_handle_kdp_login_flow_retries_after_transient_failure_and_request
 @pytest.mark.asyncio
 async def test_handle_kdp_login_flow_fallback_enables_forced_otp(comms):
     send_reply = AsyncMock()
-    comms._run_kdp_prepare_otp = AsyncMock(side_effect=[(9, "ERROR: prepare_otp_exception"), (9, "ERROR: prepare_otp_exception_retry"), (9, "ERROR: prepare_otp_exception_retry2")])
+    comms._run_kdp_probe_stable = AsyncMock(return_value=(1, "no_session"))
+    comms._run_kdp_prepare_otp = AsyncMock(
+        side_effect=[
+            (9, "ERROR: prepare_otp_exception"),
+            (9, "ERROR: prepare_otp_exception_retry"),
+            (9, "ERROR: prepare_otp_exception_retry2"),
+            (9, "ERROR: prepare_otp_exception_retry3"),
+            (9, "ERROR: prepare_otp_exception_retry4"),
+        ]
+    )
     comms._run_remote_auth_session = AsyncMock(return_value=(0, "REMOTE_URL=http://127.0.0.1/novnc\nVNC_PASSWORD=test"))
 
     handled = await comms._handle_kdp_login_flow("зайди на amazon kdp", send_reply, with_button=True)
 
     assert handled is True
-    assert comms._pending_kdp_otp is None
-    assert "Не смог открыть окно ввода кода Amazon" in send_reply.call_args.args[0]
+    assert comms._pending_kdp_otp is not None
+    assert bool(comms._pending_kdp_otp.get("forced")) is True
+    assert "Пришли 6-значный код" in send_reply.call_args.args[0]
 
 
 @pytest.mark.asyncio
@@ -1458,6 +1471,7 @@ def test_detect_contextual_service_status_uses_pending_auth_when_no_fresh_contex
     comms._last_service_context_at = ""
     comms._pending_service_auth["amazon_kdp"] = {"service": "amazon_kdp"}
     assert comms._detect_contextual_service_status_request("статус аккаунта") == "amazon_kdp"
+    assert comms._detect_contextual_service_status_request("состояние аккаунта") == "amazon_kdp"
 
 
 @pytest.mark.asyncio
@@ -1550,6 +1564,26 @@ async def test_format_service_inventory_snapshot_amazon_uses_kdp_inventory_probe
     assert "Товаров/книг: 2" in text
     assert "Book A" in text
     reg.dispatch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_format_service_inventory_snapshot_amazon_filters_noise_items(comms):
+    comms._run_kdp_probe = AsyncMock(return_value=(0, "ok"))
+    comms._run_kdp_inventory_probe = AsyncMock(
+        return_value=(
+            0,
+            '{"ok": true, "products_count": 3, "items": ["How would you rate your experience using this page?", "VITO TEST DRAFT 1", "Visit our help center for resources to common issues"]}',
+        )
+    )
+    reg = MagicMock()
+    reg.dispatch = AsyncMock()
+    comms.set_modules(agent_registry=reg)
+
+    text = await comms._format_service_inventory_snapshot("amazon_kdp")
+
+    assert "Товаров/книг: 1" in text
+    assert "VITO TEST DRAFT 1" in text
+    assert "How would you rate your experience" not in text
 
 
 @pytest.mark.asyncio
