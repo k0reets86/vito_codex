@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 from config.settings import settings
 from modules.execution_facts import ExecutionFacts
+from modules.platform_result_contract import normalize_platform_result, validate_platform_result_contract
 from modules.publish_contract import build_publish_signature
 
 
@@ -162,26 +163,14 @@ class PublisherQueue:
 
     @staticmethod
     def _extract_evidence(result: dict | None) -> str:
-        r = result or {}
-        candidates = [
-            "url",
-            "public_url",
-            "product_url",
-            "post_url",
-            "tweet_url",
-            "file_path",
-            "screenshot_path",
-            "id",
-            "post_id",
-            "tweet_id",
-            "media_id",
-            "container_id",
-            "product_id",
-        ]
-        for k in candidates:
-            v = r.get(k)
-            if v:
-                return str(v)
+        normalized = normalize_platform_result(result or {}, platform=str((result or {}).get("platform", "")))
+        ev = normalized.get("evidence") if isinstance(normalized, dict) else {}
+        if not isinstance(ev, dict):
+            return ""
+        for key in ("url", "id", "path", "screenshot"):
+            val = str(ev.get(key) or "").strip()
+            if val:
+                return val
         return ""
 
     async def process_once(self) -> dict | None:
@@ -218,8 +207,23 @@ class PublisherQueue:
 
         try:
             result = await pl.publish(payload)
-            st = str((result or {}).get("status", "")).lower()
-            evidence = self._extract_evidence(result)
+            normalized = normalize_platform_result(result or {}, platform=platform, action="publish")
+            contract = validate_platform_result_contract(normalized, require_evidence_for_success=True)
+            if not contract.ok:
+                err = f"platform_contract_invalid:{','.join(contract.errors)}"
+                final = "failed" if attempts >= max_attempts else "queued"
+                self._set_status(job_id, final, attempts, error=err)
+                self.facts.record(
+                    action="platform:publish_job",
+                    status="failed",
+                    detail=f"{platform} job_id={job_id} err={err}",
+                    source="publisher_queue",
+                    evidence_dict={"platform": platform, "job_id": job_id, "trace_id": trace_id, "result": normalized},
+                )
+                return {"job_id": job_id, "platform": platform, "status": final, "error": err}
+
+            st = str(normalized.get("status", "")).lower()
+            evidence = self._extract_evidence(normalized)
             ok_status = st in {"published", "created", "draft", "prepared", "completed", "success", "draft_saved"}
             evidence_optional = st in {"draft", "prepared", "draft_saved"}
             if ok_status and (evidence or evidence_optional):
@@ -230,13 +234,13 @@ class PublisherQueue:
                     detail=f"{platform} job_id={job_id} st={st}",
                     evidence=evidence,
                     source="publisher_queue",
-                    evidence_dict={"platform": platform, "job_id": job_id, "trace_id": trace_id, "result": result},
+                    evidence_dict={"platform": platform, "job_id": job_id, "trace_id": trace_id, "result": normalized},
                 )
-                return {"job_id": job_id, "platform": platform, "status": "done", "result": result}
+                return {"job_id": job_id, "platform": platform, "status": "done", "result": normalized}
             if ok_status and not evidence and not evidence_optional:
                 err = "missing_evidence"
             else:
-                err = str((result or {}).get("error", f"publish_status:{st}"))
+                err = str(normalized.get("error", f"publish_status:{st}"))
         except Exception as e:
             err = str(e)
 

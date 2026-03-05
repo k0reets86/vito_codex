@@ -14,6 +14,7 @@ from typing import Optional
 
 from agents.base_agent import BaseAgent, TaskResult
 from config.logger import get_logger
+from modules.skill_matrix_v2 import build_agent_skill_matrix_v2, validate_agent_skill_matrix_v2
 from modules.step_contract import validate_step_output
 
 logger = get_logger("agent_registry", agent="registry")
@@ -69,6 +70,23 @@ class AgentRegistry:
     def find_by_capability(self, capability: str) -> list[BaseAgent]:
         """Находит агентов с указанной capability."""
         return [a for a in self._agents.values() if capability in a.capabilities]
+
+    def get_skill_matrix_v2(self) -> list[dict]:
+        """Return Skill Matrix v2 rows for all registered agents."""
+        rows: list[dict] = []
+        for agent in self._agents.values():
+            row = build_agent_skill_matrix_v2(
+                agent_name=agent.name,
+                capabilities=list(agent.capabilities),
+                description=getattr(agent, "description", ""),
+            )
+            ok, errors = validate_agent_skill_matrix_v2(row)
+            row["valid"] = bool(ok)
+            if errors:
+                row["errors"] = errors
+            rows.append(row)
+        rows.sort(key=lambda x: str(x.get("agent", "")))
+        return rows
 
     @staticmethod
     def _agent_score(agent: BaseAgent) -> float:

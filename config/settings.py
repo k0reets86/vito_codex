@@ -22,6 +22,8 @@ class Settings:
     # Telegram
     TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     TELEGRAM_OWNER_CHAT_ID: str = os.getenv("TELEGRAM_OWNER_CHAT_ID", "")
+    AUTH_BROKER_STATE_FILE: str = os.getenv("AUTH_BROKER_STATE_FILE", "runtime/auth_broker_state.json")
+    AUTH_SESSION_TTL_SEC: int = int(os.getenv("AUTH_SESSION_TTL_SEC", "10800") or 10800)
 
     # Database
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")

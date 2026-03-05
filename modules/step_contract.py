@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from modules.platform_result_contract import normalize_platform_result, validate_platform_result_contract
 
 @dataclass
 class StepContractResult:
@@ -44,6 +45,12 @@ def validate_step_output(output: Any, metadata: dict | None = None) -> StepContr
         return StepContractResult(len(errors) == 0, errors)
 
     if isinstance(output, dict):
+        # Unified platform result contract: normalize + validate whenever platform-ish payload is detected.
+        if any(k in output for k in ("platform", "product_id", "post_id", "listing_id", "tweet_id", "publish")):
+            normalized = normalize_platform_result(output, platform=str(output.get("platform", "") or ""))
+            pv = validate_platform_result_contract(normalized, require_evidence_for_success=True)
+            if not pv.ok:
+                errors.extend([f"platform_contract:{e}" for e in pv.errors])
         # Status (if present) must be known-like
         status = str(output.get("status", "")).strip().lower()
         if status and status not in ALLOWED_OUTPUT_STATUSES:

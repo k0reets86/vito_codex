@@ -51,6 +51,7 @@ from config.paths import PROJECT_ROOT, root_path
 from config.settings import settings
 from modules.owner_preference_model import OwnerPreferenceModel
 from modules.owner_pref_metrics import OwnerPreferenceMetrics
+from modules.auth_broker import AuthBroker
 from modules.data_lake import DataLake
 from modules.status_snapshot import build_status_snapshot, render_status_snapshot
 
@@ -252,6 +253,7 @@ class CommsAgent:
         self._auth_state_path = Path(
             str(getattr(settings, "TELEGRAM_AUTH_STATE_FILE", "runtime/service_auth_state.json") or "runtime/service_auth_state.json")
         )
+        self._auth_broker = AuthBroker(state_path=str(getattr(settings, "AUTH_BROKER_STATE_FILE", "runtime/auth_broker_state.json")))
         self._load_auth_state()
         self._telegram_conflict_mode: bool = False
         self._telegram_trace_path = Path(
@@ -805,6 +807,11 @@ class CommsAgent:
         if not svc:
             return
         self._service_auth_confirmed[svc] = datetime.now(timezone.utc).isoformat()
+        try:
+            ttl_sec = int(getattr(settings, "AUTH_SESSION_TTL_SEC", 10800) or 10800)
+            self._auth_broker.mark_authenticated(svc, method="manual_confirmed", detail="owner_confirmed", ttl_sec=ttl_sec)
+        except Exception:
+            pass
         self._save_auth_state()
 
     def _clear_service_auth_confirmed(self, service: str) -> None:
@@ -813,6 +820,10 @@ class CommsAgent:
             return
         if svc in self._service_auth_confirmed:
             self._service_auth_confirmed.pop(svc, None)
+            try:
+                self._auth_broker.clear(svc)
+            except Exception:
+                pass
             self._save_auth_state()
 
     @staticmethod
@@ -1328,19 +1339,30 @@ class CommsAgent:
         svc = str(service or "").strip().lower()
         if not svc:
             return False, "service_missing"
+        try:
+            cached = self._auth_broker.get(svc)
+            if bool(cached.get("is_valid")) and not self._requires_strict_auth_verification(svc):
+                method = str(cached.get("method") or "cached")
+                return True, f"{svc}: сессия подтверждена AuthBroker ({method})."
+        except Exception:
+            pass
         if svc == "amazon_kdp":
             probe_rc, probe_out = await self._run_kdp_probe_stable()
             if probe_rc == 0:
+                self._auth_broker.mark_authenticated(svc, method="browser_storage", detail="kdp_probe_ok", ttl_sec=int(getattr(settings, "AUTH_SESSION_TTL_SEC", 10800) or 10800))
                 return True, "Amazon KDP сессия подтверждена."
             has_storage, _ = self._has_cookie_storage_state("amazon_kdp")
             if has_storage:
+                self._auth_broker.mark_authenticated(svc, method="browser_storage", detail="kdp_storage_state", ttl_sec=int(getattr(settings, "AUTH_SESSION_TTL_SEC", 10800) or 10800))
                 return True, "Amazon KDP: browser storage_state зафиксирован."
             rc, out = await self._run_kdp_auto_login()
             if rc == 0:
+                self._auth_broker.mark_authenticated(svc, method="browser_storage", detail="kdp_auto_login", ttl_sec=int(getattr(settings, "AUTH_SESSION_TTL_SEC", 10800) or 10800))
                 return True, "Amazon KDP вход подтверждён и сессия сохранена."
             if "OTP_REQUIRED" in out:
                 self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat()}
                 return False, "Для Amazon нужен код из аутентификатора. Отправь 6 цифр."
+            self._auth_broker.mark_failed(svc, detail="kdp_verify_failed")
             return False, "Не удалось подтвердить вход Amazon автоматически."
         if svc == "printful":
             try:
@@ -1350,22 +1372,29 @@ class CommsAgent:
                 ok = await p.authenticate()
                 await p.close()
                 if ok:
+                    self._auth_broker.mark_authenticated(svc, method="api_key", detail="printful_api_auth", ttl_sec=int(getattr(settings, "AUTH_SESSION_TTL_SEC", 10800) or 10800))
                     return True, "Printful авторизация подтверждена."
                 has_storage, _ = self._has_cookie_storage_state("printful")
                 if has_storage:
+                    self._auth_broker.mark_authenticated(svc, method="browser_storage", detail="printful_storage_state", ttl_sec=int(getattr(settings, "AUTH_SESSION_TTL_SEC", 10800) or 10800))
                     return True, "Printful: browser storage_state зафиксирован."
+                self._auth_broker.mark_failed(svc, detail="printful_not_confirmed")
                 return False, "Printful авторизация не подтверждена."
             except Exception:
+                self._auth_broker.mark_failed(svc, detail="printful_verify_error")
                 return False, "Ошибка проверки Printful."
         if svc == "gumroad":
             mode = str(getattr(settings, "GUMROAD_MODE", "api") or "api").strip().lower()
             if mode in {"browser", "browser_only"}:
                 cookie_file = Path("/tmp/gumroad_cookie.txt")
                 if cookie_file.exists() and cookie_file.read_text(encoding="utf-8", errors="ignore").strip():
+                    self._auth_broker.mark_authenticated(svc, method="cookie_import", detail="gumroad_cookie_file", ttl_sec=int(getattr(settings, "AUTH_SESSION_TTL_SEC", 10800) or 10800))
                     return True, "Gumroad browser cookie зафиксирован."
                 has_storage, detail = self._has_cookie_storage_state("gumroad")
                 if has_storage:
+                    self._auth_broker.mark_authenticated(svc, method="browser_storage", detail=detail, ttl_sec=int(getattr(settings, "AUTH_SESSION_TTL_SEC", 10800) or 10800))
                     return True, f"Gumroad browser storage_state: {detail}."
+                self._auth_broker.mark_failed(svc, detail="gumroad_browser_session_missing")
                 return False, "Gumroad browser-сессия не подтверждена."
             try:
                 from platforms.gumroad import GumroadPlatform
@@ -1373,8 +1402,13 @@ class CommsAgent:
                 p = GumroadPlatform()
                 ok = await p.authenticate()
                 await p.close()
+                if ok:
+                    self._auth_broker.mark_authenticated(svc, method="oauth_token", detail="gumroad_api_auth", ttl_sec=int(getattr(settings, "AUTH_SESSION_TTL_SEC", 10800) or 10800))
+                else:
+                    self._auth_broker.mark_failed(svc, detail="gumroad_api_not_confirmed")
                 return ok, ("Gumroad авторизация подтверждена." if ok else "Gumroad авторизация не подтверждена.")
             except Exception:
+                self._auth_broker.mark_failed(svc, detail="gumroad_verify_error")
                 return False, "Ошибка проверки Gumroad."
         if svc == "twitter":
             mode = str(getattr(settings, "TWITTER_MODE", "api") or "api").strip().lower()
@@ -1390,9 +1424,12 @@ class CommsAgent:
                 ok = await p.authenticate()
                 await p.close()
                 if ok:
+                    self._auth_broker.mark_authenticated(svc, method="oauth_token", detail="twitter_api_auth", ttl_sec=int(getattr(settings, "AUTH_SESSION_TTL_SEC", 10800) or 10800))
                     return True, "Twitter/X авторизация подтверждена."
+                self._auth_broker.mark_failed(svc, detail="twitter_api_not_confirmed")
                 return False, "Twitter/X API пока не подтверждает вход. Зафиксировал ручную авторизацию."
             except Exception:
+                self._auth_broker.mark_failed(svc, detail="twitter_verify_error")
                 return False, "Twitter/X API проверка недоступна. Зафиксировал ручную авторизацию."
         if svc == "etsy":
             try:
@@ -1402,24 +1439,32 @@ class CommsAgent:
                 ok = await p.authenticate()
                 await p.close()
                 if ok:
+                    self._auth_broker.mark_authenticated(svc, method="oauth_token", detail="etsy_api_auth", ttl_sec=int(getattr(settings, "AUTH_SESSION_TTL_SEC", 10800) or 10800))
                     return True, "Etsy авторизация подтверждена."
                 mode = str(getattr(settings, "ETSY_MODE", "api") or "api").lower()
                 if mode in {"browser", "browser_only"}:
                     has_storage, _ = self._has_cookie_storage_state("etsy")
                     if has_storage:
+                        self._auth_broker.mark_authenticated(svc, method="browser_storage", detail="etsy_storage_state", ttl_sec=int(getattr(settings, "AUTH_SESSION_TTL_SEC", 10800) or 10800))
                         return True, "Etsy: browser storage_state зафиксирован."
                     rc, out = await self._run_etsy_auto_login()
                     if rc == 0:
+                        self._auth_broker.mark_authenticated(svc, method="browser_storage", detail="etsy_auto_login", ttl_sec=int(getattr(settings, "AUTH_SESSION_TTL_SEC", 10800) or 10800))
                         return True, "Etsy browser-сессия захвачена автоматически."
                     low = str(out or "").lower()
                     if "otp_required" in low or "challenge" in low or "captcha" in low or "datadome" in low:
+                        self._auth_broker.mark_failed(svc, detail="etsy_challenge")
                         return False, "Etsy challenge/captcha: нужен ручной server-capture сессии."
+                    self._auth_broker.mark_failed(svc, detail="etsy_auto_login_failed")
                     return False, "Etsy browser-сессия не подтверждена. Авто-вход не прошёл."
+                self._auth_broker.mark_failed(svc, detail="etsy_api_not_confirmed")
                 return False, "Etsy API не подтвердил вход. Зафиксировал ручную авторизацию."
             except Exception:
                 mode = str(getattr(settings, "ETSY_MODE", "api") or "api").lower()
                 if mode in {"browser", "browser_only"}:
+                    self._auth_broker.mark_failed(svc, detail="etsy_browser_check_error")
                     return False, "Etsy browser-проверка недоступна."
+                self._auth_broker.mark_failed(svc, detail="etsy_api_check_error")
                 return False, "Etsy API проверка недоступна. Зафиксировал ручную авторизацию."
         if svc == "kofi":
             try:
@@ -1429,17 +1474,23 @@ class CommsAgent:
                 ok = await p.authenticate()
                 await p.close()
                 if ok:
+                    self._auth_broker.mark_authenticated(svc, method="api_key", detail="kofi_api_auth", ttl_sec=int(getattr(settings, "AUTH_SESSION_TTL_SEC", 10800) or 10800))
                     return True, "Ko-fi авторизация подтверждена."
                 has_storage, _ = self._has_cookie_storage_state("kofi")
                 if has_storage:
+                    self._auth_broker.mark_authenticated(svc, method="browser_storage", detail="kofi_storage_state", ttl_sec=int(getattr(settings, "AUTH_SESSION_TTL_SEC", 10800) or 10800))
                     return True, "Ko-fi: browser storage_state зафиксирован."
+                self._auth_broker.mark_failed(svc, detail="kofi_not_confirmed")
                 return False, "Ko-fi авторизация не подтверждена."
             except Exception:
+                self._auth_broker.mark_failed(svc, detail="kofi_verify_error")
                 return False, "Ko-fi проверка недоступна."
         if svc == "reddit":
             has_storage, detail = self._has_cookie_storage_state("reddit")
             if has_storage:
+                self._auth_broker.mark_authenticated(svc, method="browser_storage", detail=detail, ttl_sec=int(getattr(settings, "AUTH_SESSION_TTL_SEC", 10800) or 10800))
                 return True, f"Reddit browser storage_state: {detail}."
+            self._auth_broker.mark_failed(svc, detail="reddit_browser_session_missing")
             return False, "Reddit в browser_only режиме; нужен storage_state после входа."
         if self._is_manual_auth_service(svc):
             title, _ = self._service_auth_meta(svc)
@@ -1979,6 +2030,7 @@ class CommsAgent:
         self._app.add_handler(CommandHandler("reject", self._cmd_reject))
         self._app.add_handler(CommandHandler("goal", self._cmd_goal))
         self._app.add_handler(CommandHandler("agents", self._cmd_agents))
+        self._app.add_handler(CommandHandler("skill_matrix_v2", self._cmd_skill_matrix_v2))
         # New v0.3.0 commands
         self._app.add_handler(CommandHandler("report", self._cmd_report))
         self._app.add_handler(CommandHandler("stop", self._cmd_stop))
@@ -2022,6 +2074,7 @@ class CommsAgent:
         self._app.add_handler(CommandHandler("llm_mode", self._cmd_llm_mode))
         self._app.add_handler(CommandHandler("kdp_login", self._cmd_kdp_login))
         self._app.add_handler(CommandHandler("auth", self._cmd_auth))
+        self._app.add_handler(CommandHandler("auth_status", self._cmd_auth_status))
         self._app.add_handler(
             MessageHandler(
                 filters.Document.ALL | filters.PHOTO | filters.VIDEO,
@@ -3032,6 +3085,29 @@ class CommsAgent:
 
         await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
         logger.info("Команда /agents выполнена", extra={"event": "cmd_agents"})
+
+    async def _cmd_skill_matrix_v2(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Показать Skill Matrix v2 (service/helper/persona/recipe) по всем агентам."""
+        if await self._reject_stranger(update):
+            return
+        if not self._agent_registry:
+            await update.message.reply_text("AgentRegistry не подключён", reply_markup=self._main_keyboard())
+            return
+        try:
+            rows = self._agent_registry.get_skill_matrix_v2()
+        except Exception as e:
+            await update.message.reply_text(f"Ошибка Skill Matrix v2: {e}", reply_markup=self._main_keyboard())
+            return
+        if not rows:
+            await update.message.reply_text("Skill Matrix v2 пуст.", reply_markup=self._main_keyboard())
+            return
+        lines = [f"Skill Matrix v2: {len(rows)} агентов"]
+        for r in rows:
+            lines.append(
+                f"- {r.get('agent')}: kind={r.get('primary_kind')} "
+                f"svc={len(r.get('service', []))} helper={len(r.get('helper', []))} recipe={len(r.get('recipe', []))}"
+            )
+        await update.message.reply_text("\n".join(lines[:60]), reply_markup=self._main_keyboard())
 
     async def _cmd_fix(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Запуск self-improve пайплайна (кодовые исправления/интеграции)."""
@@ -4563,6 +4639,21 @@ class CommsAgent:
             "Неизвестное действие. Используй: status, refresh, verify или remote (для Etsy).",
             reply_markup=self._main_keyboard(),
         )
+
+    async def _cmd_auth_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Показать Auth Broker статусы по сервисам (status/method/ttl)."""
+        if await self._reject_stranger(update):
+            return
+        services = sorted(self._SERVICE_CATALOG.keys())
+        lines = ["Auth Broker:"]
+        for svc in services:
+            node = self._auth_broker.get(svc)
+            status = str(node.get("status", "unknown"))
+            method = str(node.get("method", "-"))
+            valid = "yes" if bool(node.get("is_valid")) else "no"
+            exp = str(node.get("expires_at", ""))[:19] if node.get("expires_at") else "-"
+            lines.append(f"- {svc}: {status} via {method}, valid={valid}, exp={exp}")
+        await update.message.reply_text("\n".join(lines[:80]), reply_markup=self._main_keyboard())
 
     async def _cmd_brainstorm(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Мультимодельный брейншторм: /brainstorm <тема>."""
