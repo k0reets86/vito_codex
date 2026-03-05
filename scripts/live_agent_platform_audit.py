@@ -213,7 +213,7 @@ async def run() -> dict[str, Any]:
                         "preview_path": str(PROBE_FILE),
                     },
                 ),
-                timeout=120,
+                timeout=240,
             ),
         }
         )

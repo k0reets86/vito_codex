@@ -125,7 +125,7 @@ class Settings:
     AUTONOMY_AUTO_SELF_IMPROVE_ON_MISS: bool = os.getenv("AUTONOMY_AUTO_SELF_IMPROVE_ON_MISS", "false").lower() in ("1", "true", "yes", "on")
 
     # Autonomy toggles
-    PROACTIVE_ENABLED: bool = os.getenv("PROACTIVE_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+    PROACTIVE_ENABLED: bool = os.getenv("PROACTIVE_ENABLED", "false").lower() in ("1", "true", "yes", "on")
     BRAINSTORM_WEEKLY: bool = os.getenv("BRAINSTORM_WEEKLY", "true").lower() in ("1", "true", "yes", "on")
 
     # LLM cache
@@ -175,7 +175,7 @@ class Settings:
     PUBLISH_CREATE_GUARD_ENABLED: bool = os.getenv("PUBLISH_CREATE_GUARD_ENABLED", "true").lower() in ("1", "true", "yes", "on")
 
     # Owner inbox (file-based comms)
-    OWNER_INBOX_ENABLED: bool = os.getenv("OWNER_INBOX_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+    OWNER_INBOX_ENABLED: bool = os.getenv("OWNER_INBOX_ENABLED", "false").lower() in ("1", "true", "yes", "on")
     CONVERSATION_HISTORY_PATH: str = os.getenv("CONVERSATION_HISTORY_PATH", root_path("runtime", "conversation_history.json"))
     CANCEL_STATE_PATH: str = os.getenv("CANCEL_STATE_PATH", root_path("runtime", "cancel_state.json"))
     OWNER_TASK_STATE_PATH: str = os.getenv("OWNER_TASK_STATE_PATH", root_path("runtime", "owner_task_state.json"))

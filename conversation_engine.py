@@ -261,10 +261,11 @@ class ConversationEngine:
             }
         platform_key = self._extract_platform_key(text)
         platform_op_kw = (
-            "зайди", "вход", "логин", "auth", "авториз", "сесс",
+            "зайди", "зайти", "войди", "войти", "вход", "логин", "auth", "авториз", "сесс",
             "статус аккаунта", "состояние аккаунта", "проверь аккаунт",
             "товар", "листинг", "inventory", "status", "account",
             "publish", "опубликуй", "редакт", "заполни", "draft",
+            "пост", "tweet", "твит", "анонс",
         )
         if platform_key and self._looks_like_imperative_request(text) and self._has_keywords(normalized, platform_op_kw, fuzzy=True):
             actions = [{"action": "run_platform_task", "params": {"platform": platform_key, "request": text}}]
@@ -2129,7 +2130,7 @@ class ConversationEngine:
             ("amazon_kdp", ("amazon", "амазон", "kdp", "кдп")),
             ("gumroad", ("gumroad", "гумроад", "гамроад")),
             ("etsy", ("etsy", "етси", "этси")),
-            ("kofi", ("kofi", "ko-fi", "кофи")),
+            ("kofi", ("kofi", "ko-fi", "кофи", "ко-фи")),
             ("printful", ("printful", "принтфул")),
             ("twitter", ("twitter", "x.com", "икс", "твиттер")),
             ("reddit", ("reddit", "реддит")),
@@ -2150,6 +2151,7 @@ class ConversationEngine:
         verbs = (
             "сделай", "создай", "запусти", "проверь", "найди", "заполни",
             "опубликуй", "удали", "редактируй", "исправь", "почини",
+            "зайди", "зайти", "войди", "войти", "открой",
         )
         return any(v in s for v in verbs)
 

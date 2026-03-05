@@ -190,3 +190,31 @@ This block supersedes older notes where they conflict.
 - Always run auth probe before live publish (`authenticate` + lightweight read endpoint).
 - Prefer dry-run for new integrations; require explicit owner approval for first live action on each platform.
 - Treat browser automation as fallback for unavailable/blocked APIs, not as a method to bypass platform security controls.
+
+## Mega test task
+
+Stub response: operational output.
+
+## Mega test task
+
+Stub response: operational output.
+
+## Mega test task
+
+Stub response: operational output.
+
+## Mega test task
+
+Stub response: operational output.
+
+## Mega test task
+
+Stub response: operational output.
+
+## Mega test task
+
+Stub response: operational output.
+
+## Mega test task
+
+Stub response: operational output.

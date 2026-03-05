@@ -55,6 +55,56 @@ from modules.data_lake import DataLake
 
 logger = get_logger("comms_agent", agent="comms_agent")
 
+_TELEGRAM_TRACE_DEFAULT = root_path("runtime/telegram_trace.jsonl")
+
+
+def _append_telegram_trace_file(path: Path, direction: str, text: str, meta: dict[str, Any] | None = None) -> None:
+    """Write one Telegram trace line (best-effort, no exceptions)."""
+    try:
+        row = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "direction": str(direction or "").strip().lower(),
+            "text": str(text or ""),
+            "meta": dict(meta or {}),
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def _install_reply_text_trace_patch(path: Path) -> None:
+    """Patch telegram.Message.reply_text once to mirror bot replies into trace file."""
+    try:
+        from telegram import Message as TgMessage  # lazy import for safety
+
+        if bool(getattr(TgMessage, "_vito_reply_trace_patched", False)):
+            return
+        original = TgMessage.reply_text
+
+        async def _traced_reply_text(self, *args, **kwargs):  # type: ignore[override]
+            text = ""
+            if args:
+                text = str(args[0] or "")
+            elif "text" in kwargs:
+                text = str(kwargs.get("text") or "")
+            _append_telegram_trace_file(
+                path,
+                "out",
+                text,
+                {
+                    "chat_id": int(getattr(self, "chat_id", 0) or 0),
+                    "level": "reply",
+                },
+            )
+            return await original(self, *args, **kwargs)
+
+        TgMessage.reply_text = _traced_reply_text  # type: ignore[assignment]
+        setattr(TgMessage, "_vito_reply_trace_patched", True)
+    except Exception:
+        pass
+
 
 class CommsAgent:
     _SERVICE_CATALOG: dict[str, dict[str, Any]] = {
@@ -176,6 +226,8 @@ class CommsAgent:
 
         # Очередь запросов на одобрение: request_id → asyncio.Future
         self._pending_approvals: dict[str, asyncio.Future] = {}
+        # Anti-spam: remember last approval prompt per channel (e.g. publish_twitter)
+        self._approval_last_sent_at: dict[str, str] = {}
         # Ожидаем уточнение по расписанию
         self._pending_schedule_update: dict | None = None
         # Ожидаем подтверждение системного действия (из свободного текста)
@@ -201,6 +253,17 @@ class CommsAgent:
         )
         self._load_auth_state()
         self._telegram_conflict_mode: bool = False
+        self._telegram_trace_path = Path(
+            str(
+                getattr(
+                    settings,
+                    "TELEGRAM_TRACE_FILE",
+                    "runtime/telegram_trace.jsonl",
+                )
+                or "runtime/telegram_trace.jsonl"
+            )
+        )
+        _install_reply_text_trace_patch(self._telegram_trace_path)
 
         # Обратные ссылки на модули — устанавливаются через set_modules()
         self._goal_engine = None
@@ -240,6 +303,19 @@ class CommsAgent:
         }
 
         logger.info("CommsAgent инициализирован", extra={"event": "init"})
+
+    @staticmethod
+    def _approval_channel(request_id: str) -> str:
+        rid = str(request_id or "").strip().lower()
+        if rid.startswith("publish_"):
+            parts = rid.split("_")
+            if len(parts) >= 2:
+                return f"publish_{parts[1]}"
+        return ""
+
+    def _append_telegram_trace(self, direction: str, text: str, meta: dict[str, Any] | None = None) -> None:
+        """Best-effort trace for Telegram E2E verification without extra pollers."""
+        _append_telegram_trace_file(self._telegram_trace_path, direction, text, meta)
 
     def _resolve_button_command(self, text: str) -> str | None:
         """Resolve keyboard/menu button command with alias compatibility."""
@@ -778,6 +854,28 @@ class CommsAgent:
     def _is_inventory_prompt(text: str) -> bool:
         s = str(text or "").strip().lower()
         if not s:
+            return False
+        # Creation/publish intents must not be misrouted as inventory checks
+        # just because they contain words like "листинг"/"товар".
+        if any(
+            x in s
+            for x in (
+                "создай",
+                "создать",
+                "опубликуй",
+                "опубликовать",
+                "размести",
+                "разместить",
+                "заполни",
+                "заполнить",
+                "сгенерируй",
+                "сделай",
+                "make",
+                "create",
+                "publish",
+                "post ",
+            )
+        ):
             return False
         if any(x in s for x in ("тренд", "trend", "ниш", "niche", "конкурент", "рынок")):
             return False
@@ -2408,6 +2506,14 @@ class CommsAgent:
             return False
         return update.effective_chat.id == self._owner_id
 
+    @staticmethod
+    def _is_bot_sender(update: Update) -> bool:
+        try:
+            user = getattr(update, "effective_user", None)
+            return bool(user and getattr(user, "is_bot", False))
+        except Exception:
+            return False
+
     async def _send_response(self, update: Update, text: str) -> None:
         """Send response with smart file handling.
 
@@ -2525,6 +2631,12 @@ class CommsAgent:
 
     async def _reject_stranger(self, update: Update) -> bool:
         """Отклоняет сообщения от не-владельцев."""
+        if self._is_bot_sender(update):
+            logger.debug(
+                "Игнорирую сообщение от bot-sender",
+                extra={"event": "ignore_bot_sender"},
+            )
+            return True
         if self._is_owner(update):
             return False
         chat_id = update.effective_chat.id if update.effective_chat else "unknown"
@@ -3470,6 +3582,8 @@ class CommsAgent:
         text = update.message.text.strip()
         if not text:
             return
+
+        self._append_telegram_trace("in", text, {"chat_id": int(self._owner_id)})
 
         reply_meta = self._extract_reply_context(update)
         if reply_meta:
@@ -5108,6 +5222,7 @@ class CommsAgent:
             if len(clean) > 4000:
                 clean = clean[:4000] + "..."
             await self._bot.send_message(chat_id=self._owner_id, text=clean)
+            self._append_telegram_trace("out", clean, {"chat_id": int(self._owner_id), "level": str(level or "info")})
             logger.info(
                 f"Сообщение отправлено ({len(clean)} символов)",
                 extra={"event": "message_sent", "context": {"length": len(clean)}},
@@ -5196,8 +5311,40 @@ class CommsAgent:
             if timeout_seconds <= 0:
                 return None
             return True
+
+        # Anti-spam gate for repetitive publish approvals (e.g. publish_twitter_*)
+        channel = self._approval_channel(request_id)
+        if channel:
+            cooldown_sec = int(getattr(settings, "APPROVAL_REPEAT_COOLDOWN_SEC", 1800) or 1800)
+            # If same channel is already pending, suppress duplicate prompt.
+            if any(str(k).lower().startswith(f"{channel}_") for k in (self._pending_approvals or {}).keys()):
+                logger.info(
+                    "Approval suppressed: channel already pending",
+                    extra={"event": "approval_suppressed_pending", "context": {"request_id": request_id, "channel": channel}},
+                )
+                return None
+            last_iso = str(self._approval_last_sent_at.get(channel, "") or "").strip()
+            if last_iso:
+                try:
+                    last_dt = datetime.fromisoformat(last_iso)
+                    if last_dt.tzinfo is None:
+                        last_dt = last_dt.replace(tzinfo=timezone.utc)
+                    age = (datetime.now(timezone.utc) - last_dt).total_seconds()
+                    if age < max(60, cooldown_sec):
+                        logger.info(
+                            "Approval suppressed by cooldown",
+                            extra={
+                                "event": "approval_suppressed_cooldown",
+                                "context": {"request_id": request_id, "channel": channel, "age_sec": int(age)},
+                            },
+                        )
+                        return None
+                except Exception:
+                    pass
         future: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending_approvals[request_id] = future
+        if channel:
+            self._approval_last_sent_at[channel] = datetime.now(timezone.utc).isoformat()
 
         inline_kb = InlineKeyboardMarkup([
             [

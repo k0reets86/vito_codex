@@ -69,6 +69,22 @@ class TestIntentDetection:
         intent = await engine._detect_intent_llm("random text")
         assert intent == Intent.CONVERSATION
 
+    def test_extract_platform_key_supports_kofi_hyphen_ru(self, engine):
+        assert engine._extract_platform_key("создай товар на ко-фи") == "kofi"
+
+    def test_imperative_detection_supports_login_verbs(self, engine):
+        assert engine._looks_like_imperative_request("зайди на амазон") is True
+
+    @pytest.mark.asyncio
+    async def test_deterministic_platform_route_for_twitter_post(self, engine):
+        engine._execute_actions = AsyncMock(return_value="ok")
+        out = await engine._deterministic_owner_route("создай пост в твиттер с анонсом продукта")
+        assert out is not None
+        assert out.get("intent") == Intent.SYSTEM_ACTION.value
+        actions = out.get("actions") or []
+        assert actions and actions[0].get("action") == "run_platform_task"
+        assert actions[0].get("params", {}).get("platform") == "twitter"
+
 
 class TestProcessMessage:
     @pytest.mark.asyncio

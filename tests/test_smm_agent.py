@@ -51,3 +51,19 @@ class TestSMMAgent:
         agent.llm_router = None
         result = await agent.create_post("twitter", "Проверка автономного режима")
         assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_create_post_skips_approval_when_platform_not_authenticated(self, agent):
+        class FakePlatform:
+            async def authenticate(self):
+                return False
+
+            async def publish(self, payload):
+                return {"platform": "twitter", "status": "published"}
+
+        agent._platforms = {"twitter": FakePlatform()}
+        agent.comms.request_approval_with_files = AsyncMock(return_value=True)
+        result = await agent.create_post("twitter", "Test auth gate")
+        assert result.success is False
+        assert "not_authenticated" in (result.error or "")
+        agent.comms.request_approval_with_files.assert_not_called()

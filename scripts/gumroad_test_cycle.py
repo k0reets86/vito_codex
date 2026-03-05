@@ -62,6 +62,7 @@ async def run(args) -> dict:
     if state.get("product_id") and state.get("slug"):
         payload.update(
             {
+                "operation": "update",
                 "allow_existing_update": True,
                 "owner_edit_confirmed": True,
                 "target_product_id": str(state["product_id"]),

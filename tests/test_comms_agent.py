@@ -34,6 +34,8 @@ def mock_update():
     update = MagicMock()
     update.effective_chat = MagicMock()
     update.effective_chat.id = int(CommsAgent()._owner_id)
+    update.effective_user = MagicMock()
+    update.effective_user.is_bot = False
     update.message = MagicMock()
     update.message.reply_text = AsyncMock()
     update.message.text = ""
@@ -47,6 +49,8 @@ def stranger_update():
     update = MagicMock()
     update.effective_chat = MagicMock()
     update.effective_chat.id = 999999999
+    update.effective_user = MagicMock()
+    update.effective_user.is_bot = False
     update.message = MagicMock()
     update.message.reply_text = AsyncMock()
     return update
@@ -79,6 +83,13 @@ async def test_reject_stranger(comms, stranger_update):
 async def test_accept_owner(comms, mock_update):
     result = await comms._reject_stranger(mock_update)
     assert result is False
+
+
+@pytest.mark.asyncio
+async def test_reject_bot_sender_even_in_owner_chat(comms, mock_update):
+    mock_update.effective_user.is_bot = True
+    result = await comms._reject_stranger(mock_update)
+    assert result is True
 
 
 # ── Команды ──
@@ -796,6 +807,15 @@ async def test_request_approval_timeout(comms):
     result = await comms.request_approval("req_timeout", "Test approval", timeout_seconds=0)
     assert result is None
     assert "req_timeout" not in comms._pending_approvals
+
+
+@pytest.mark.asyncio
+async def test_request_approval_publish_channel_suppressed_when_pending(comms):
+    loop = asyncio.get_running_loop()
+    comms._pending_approvals["publish_twitter_prev"] = loop.create_future()
+    result = await comms.request_approval("publish_twitter_new1", "Test publish approval", timeout_seconds=30)
+    assert result is None
+    comms._bot.send_message.assert_not_called()
 
 
 def test_set_modules(comms):
@@ -1618,6 +1638,14 @@ def test_detect_contextual_status_without_fresh_context_returns_empty(comms):
 def test_detect_contextual_inventory_without_fresh_context_returns_empty(comms):
     comms._last_service_context = ""
     assert comms._detect_contextual_service_inventory_request("проверь товары") == ""
+
+
+def test_detect_contextual_inventory_does_not_capture_create_publish_intents(comms):
+    comms._last_service_context = "etsy"
+    comms._last_service_context_at = datetime.now(timezone.utc).isoformat()
+    assert comms._detect_contextual_service_inventory_request("создай листинг на этси") == ""
+    assert comms._detect_contextual_service_inventory_request("опубликуй товар на gumroad") == ""
+    assert comms._detect_contextual_service_inventory_request("create listing on etsy") == ""
 
 
 def test_humanize_owner_text_strips_technical_noise(comms):

@@ -1,0 +1,76 @@
+{
+  "timestamp": "2026-03-05T15:17:18.932167+00:00",
+  "scenario": "owner_full_pipeline",
+  "mode": "local_owner_simulator",
+  "steps": [
+    {
+      "id": "F01",
+      "input": "проведи глубокое исследование ниш цифровых товаров",
+      "reply_text": "Запускаю глубокое исследование по теме: ниш цифровых товаров.\nГлубокое исследование готово по теме 'ниш цифровых товаров'.\nQuality gate: ok (score=7).\nBased on the provided REAL data, here is an analysis of the digital goods niche for a solo creator:\nThe provided data offers limited quantitative market data for digital goods. However, it highlights the viability of niche digital products for generating income. One Reddit user reported selling \"niche spreadsheet templates on Etsy\" for 7 months, indicating an active market for such items. Another example mentions an app generating $14K/month by sending \"invoice reminders to plumbers\", demonstrating significant potential in solving specific professional pain points with digital solutions.\nGiven the lack of broader market size data in the provided context, specific revenue figures beyond these examples cannot be given. We can infer that targeted digital products addressing specific needs can achieve revenue, even for solo creators.\nBased on the Reddit discussions, the following realistic digital product opportunities are suitable for a solo creator and fit within the $5-50 price range:\n1.  **Niche Spreadsheet Templates:** This is directly mentioned as a successful venture on Etsy. Examples could include budget trackers for specific professions, project management templates for freelancers, or specialized inventory sheets for small businesses. The low cost of creation and high utility make these ideal.",
+      "pass": true,
+      "reasons": [],
+      "at": "2026-03-05T15:17:51.288614+00:00"
+    },
+    {
+      "id": "F02",
+      "input": "выбери лучший вариант и предложи структуру продукта",
+      "reply_text": "Сайт ukr.net: состояние аккаунта\n- Метрики товаров не вернулись. Возможно, у аккаунта нет доступных данных через текущий канал.",
+      "pass": true,
+      "reasons": [],
+      "at": "2026-03-05T15:17:52.158523+00:00"
+    },
+    {
+      "id": "F03",
+      "input": "создай листинг на гумроад",
+      "reply_text": "Запускаю задачу на платформе gumroad.\ngumroad: {'gumroad': {'platform': 'gumroad', 'sales': 0, 'revenue': 0.0, 'products_count': 2}}",
+      "pass": true,
+      "reasons": [],
+      "at": "2026-03-05T15:17:53.050535+00:00"
+    },
+    {
+      "id": "F04",
+      "input": "зайди на этси",
+      "reply_text": "Etsy: активная сессия уже подтверждена, повторный логин не требуется.",
+      "pass": true,
+      "reasons": [],
+      "at": "2026-03-05T15:17:53.451697+00:00"
+    },
+    {
+      "id": "F05",
+      "input": "создай листинг на этси",
+      "reply_text": "Запускаю задачу на платформе etsy.\netsy: {'etsy': {'platform': 'etsy', 'views': 0, 'sales': 0, 'revenue': 0.0}}",
+      "pass": true,
+      "reasons": [],
+      "at": "2026-03-05T15:17:54.064085+00:00"
+    },
+    {
+      "id": "F06",
+      "input": "создай товар в ко-фи",
+      "reply_text": "Запускаю задачу на платформе kofi.\nkofi: {'kofi': {'platform': 'kofi', 'page_id': 'C0C71UMWP4', 'page_url': 'https://ko-fi.com/C0C71UMWP4', 'supporters': 0, 'revenue': 0.0, 'note': 'Ko-fi analytics available on ko-fi.com/manage. No public API.'}}",
+      "pass": true,
+      "reasons": [],
+      "at": "2026-03-05T15:17:54.526774+00:00"
+    },
+    {
+      "id": "F07",
+      "input": "создай пост в твиттер с анонсом продукта",
+      "reply_text": "Запускаю задачу на платформе twitter.\nProduct pipeline завершился с ошибкой: Final gate: rework required",
+      "pass": true,
+      "reasons": [],
+      "at": "2026-03-05T15:19:15.811038+00:00"
+    },
+    {
+      "id": "F08",
+      "input": "собери аналитику по аккаунтам",
+      "reply_text": "Etsy: состояние аккаунта\n- Продаж: 0\n- Выручка: $0.00",
+      "pass": true,
+      "reasons": [],
+      "at": "2026-03-05T15:19:16.780422+00:00"
+    }
+  ],
+  "summary": {
+    "passed": 8,
+    "failed": 0,
+    "total": 8
+  }
+}

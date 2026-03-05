@@ -262,6 +262,30 @@ class GumroadPlatform(BasePlatform):
         if not COOKIE_FILE.exists() or not COOKIE_FILE.read_text().strip():
             await self._ensure_session_cookie()
         draft_only = bool(content.get("draft_only"))
+        keep_unpublished = bool(content.get("keep_unpublished")) or draft_only
+        allow_existing_update = bool(content.get("allow_existing_update")) and bool(content.get("owner_edit_confirmed"))
+        target_product_id = str(content.get("target_product_id") or "").strip()
+
+        async def _fallback_existing_publish(reason: str) -> dict | None:
+            """Fallback: for explicit existing-product flow, at least enforce publish/draft state via API."""
+            if not (allow_existing_update and target_product_id):
+                return None
+            try:
+                if keep_unpublished:
+                    out = await self.disable_product(target_product_id)
+                    if str(out.get("status") or "") in {"draft", "disabled"}:
+                        out["fallback"] = "api_toggle_after_browser_failure"
+                        out["fallback_reason"] = reason
+                        return out
+                else:
+                    out = await self.enable_product(target_product_id)
+                    if str(out.get("status") or "") == "published":
+                        out["fallback"] = "api_toggle_after_browser_failure"
+                        out["fallback_reason"] = reason
+                        return out
+            except Exception:
+                return None
+            return None
         try:
             result = await asyncio.wait_for(self._publish_via_browser(content), timeout=180)
             # Record execution facts to prevent false success claims
@@ -286,9 +310,16 @@ class GumroadPlatform(BasePlatform):
                 )
             except Exception:
                 pass
+            if str(result.get("status") or "") in {"timeout", "error", "cookie_expired", "daily_limit"}:
+                fb = await _fallback_existing_publish(str(result.get("error") or result.get("status") or "browser_publish_failed"))
+                if fb is not None:
+                    return fb
             return result
         except asyncio.TimeoutError:
             logger.error("Gumroad publish timed out")
+            fb = await _fallback_existing_publish("browser_publish_timeout")
+            if fb is not None:
+                return fb
             return {"platform": "gumroad", "status": "timeout", "error": "Publish timed out"}
 
     async def _ensure_session_cookie(self) -> bool:
@@ -434,6 +465,7 @@ class GumroadPlatform(BasePlatform):
 
                 # Prefer editing an explicitly targeted existing product only when explicitly allowed.
                 slug_from_api = ""
+                target_edit_url = ""
                 if allow_existing_update:
                     try:
                         existing = await self.get_products()
@@ -449,11 +481,14 @@ class GumroadPlatform(BasePlatform):
                                 short = prod.get("short_url", "") or prod.get("url", "")
                                 if "/l/" in short:
                                     slug_from_api = short.split("/l/")[-1].split("?")[0]
+                                    target_edit_url = short.rstrip("/") + "/edit"
                                 elif "gum.co/" in short:
                                     slug_from_api = short.rsplit("/", 1)[-1]
+                                    target_edit_url = f"https://gumroad.com/l/{slug_from_api}/edit"
                                 break
                     except Exception:
                         slug_from_api = ""
+                        target_edit_url = ""
 
                 async def _open_existing_product(preferred_name: str = "", allow_update: bool = False) -> str:
                     if not allow_update:
@@ -476,7 +511,8 @@ class GumroadPlatform(BasePlatform):
                                 slug_local = slug_candidate
                                 break
                         if slug_local:
-                            await page.goto(f"https://gumroad.com/products/{slug_local}/edit", wait_until="domcontentloaded")
+                            edit_url = target_edit_url or f"https://gumroad.com/l/{slug_local}/edit"
+                            await page.goto(edit_url, wait_until="domcontentloaded")
                             await asyncio.sleep(2)
                         return slug_local
                     except Exception:
@@ -597,7 +633,7 @@ class GumroadPlatform(BasePlatform):
                     return "", ""
 
                 if slug_from_api:
-                    await page.goto(f"https://gumroad.com/products/{slug_from_api}/edit", wait_until="domcontentloaded")
+                    await page.goto(target_edit_url or f"https://gumroad.com/l/{slug_from_api}/edit", wait_until="domcontentloaded")
                     await asyncio.sleep(2)
                 else:
                     # Step 1: Create product (may hit daily limit)

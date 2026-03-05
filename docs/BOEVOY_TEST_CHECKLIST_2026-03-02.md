@@ -2,7 +2,7 @@
 
 Progress formula: `completed / total * 100`
 
-Current progress: `7 / 41 = 17.1%`
+Current progress: `8 / 41 = 19.5%`
 
 ## Phase 1 — Runtime Baseline & Safety Gates
 - [x] T01 Configure Gemini-only mode and disable risky/high-cost modules for initial test wave.
@@ -12,7 +12,7 @@ Current progress: `7 / 41 = 17.1%`
 - [x] T05 Confirm no proactive spam goals for 1 full interval window in runtime logs.
 
 ## Phase 2 — Core Dialogue + Task Lifecycle
-- [ ] T06 `/start` + `/help` UX validation in Telegram (daily/rare/system sections).
+- [x] T06 `/start` + `/help` UX validation in Telegram (daily/rare/system sections).
 - [ ] T07 `/goal` creation from owner message; verify goal appears in queue.
 - [ ] T08 `/status` and `/report` consistency with actual loop and DB.
 - [ ] T09 `/cancel` hard pause + `/resume` recovery.
@@ -77,3 +77,24 @@ Current progress: `7 / 41 = 17.1%`
 - 2026-03-04: Gumroad target-only update cycle (single listing `yupwt`, `target_product_id=PKIVW0rjiJ_L_6ugL_5q7w==`) successfully published with updated fields and assets -> `reports/VITO_GUMROAD_TEST_CYCLE_2026-03-04_1248UTC.json`.
 - 2026-03-04: Full-cycle verified on single target listing (`draft profile -> publish -> back to draft`) with browser+API proof and checks = PASS -> `reports/VITO_GUMROAD_FULL_CYCLE_2026-03-04_1333UTC.json`.
 - 2026-03-04: Etsy+Ko-fi combined full-cycle probe executed -> `reports/VITO_ETSY_KOFI_FULL_CYCLE_2026-03-04_1352UTC.json`; blockers are auth-session only (`etsy_session_missing`, `kofi_session_missing`), code path returns deterministic `needs_browser_login`.
+- 2026-03-05: Telegram owner simulator smoke re-run passed (`/start`, `/help`, `/status`, `задачи`) -> `reports/VITO_TG_OWNER_SIM_smoke_2026-03-05_1430UTC.json` (`4/4`).
+- 2026-03-05: Telegram owner simulator platform-context re-run passed (`зайди на амазон`, `статус аккаунта`, `проверь товары`, `зайди на ukr.net`) -> `reports/VITO_TG_OWNER_SIM_platform_context_2026-03-05_1430UTC.json` (`4/4`).
+- 2026-03-05: Regression package re-run (core orchestration + comms + conversation + platform policy + smm):
+  - `pytest -q -c /dev/null tests/test_decision_loop.py tests/test_workflow_state_machine.py tests/test_workflow_threads.py` -> `69 passed`
+  - `pytest -q -c /dev/null tests/test_comms_agent.py` -> `130 passed`
+  - `pytest -q -c /dev/null tests/test_conversation_engine.py` -> `60 passed`
+  - `pytest -q -c /dev/null tests/test_platform_gumroad_policy.py tests/test_smm_agent.py` -> `9 passed`
+- 2026-03-05: Telegram owner simulator full package:
+  - `python3 scripts/telegram_owner_simulator.py --scenario smoke` -> `reports/VITO_TG_OWNER_SIM_smoke_2026-03-05_1517UTC.json` (`4/4`)
+  - `python3 scripts/telegram_owner_simulator.py --scenario owner_full_pipeline` -> `reports/VITO_TG_OWNER_SIM_owner_full_pipeline_2026-03-05_1519UTC.json` (`8/8`)
+  - `python3 scripts/telegram_owner_simulator.py --scenario platform_context` -> `reports/VITO_TG_OWNER_SIM_platform_context_2026-03-05_1531UTC.json` (`4/4`)
+- 2026-03-05: Live publish matrix re-run -> `reports/VITO_PUBLISH_MATRIX_LIVE_2026-03-05_1430UTC.json`:
+  - Etsy: `prepared` (browser editor opened, fields filled, listing_id not detected in this pass)
+  - Ko-fi: `prepared` (manual/browser upload required by platform)
+  - Printful: `needs_browser_flow` for Etsy-linked store type
+  - Twitter/Reddit: `not_authenticated` (current tokens/session)
+- 2026-03-05: Agent->Platform live audit re-run -> `reports/VITO_AGENT_PLATFORM_LIVE_AUDIT_2026-03-05_1433UTC.json`, combat responding paths `5/7 = 71.43%` (Twitter auth + Gumroad browser publish remain blockers in this run).
+- 2026-03-05: Gumroad reliability updates:
+  - `scripts/gumroad_test_cycle.py`: explicit update operation for controlled target listing state.
+  - `platforms/gumroad.py`: existing-product API-toggle fallback when browser flow fails/timeouts.
+  - `tests/test_platform_gumroad_policy.py`: fallback behavior covered; focused suite passed (`11 passed`).

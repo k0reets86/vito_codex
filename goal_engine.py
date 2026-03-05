@@ -150,6 +150,16 @@ class GoalEngine:
 
     def _persist_goal(self, goal: Goal) -> None:
         """Сохраняет одну цель в SQLite (INSERT OR REPLACE)."""
+        def _scalar(value):
+            if value is None:
+                return None
+            if isinstance(value, (str, int, float)):
+                return value
+            try:
+                return json.dumps(value, ensure_ascii=False)
+            except Exception:
+                return str(value)
+
         try:
             self._conn.execute(
                 """INSERT OR REPLACE INTO goals
@@ -159,17 +169,17 @@ class GoalEngine:
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     goal.goal_id,
-                    goal.title,
-                    goal.description,
+                    _scalar(goal.title),
+                    _scalar(goal.description),
                     goal.priority.value,
                     goal.status.value,
-                    goal.source,
+                    _scalar(goal.source),
                     goal.estimated_cost_usd,
                     goal.estimated_roi,
                     json.dumps(goal.plan, ensure_ascii=False),
                     json.dumps(goal.results, ensure_ascii=False),
-                    goal.lessons_learned,
-                    goal.parent_goal_id,
+                    _scalar(goal.lessons_learned),
+                    _scalar(goal.parent_goal_id),
                     goal.created_at.isoformat() if goal.created_at else None,
                     goal.started_at.isoformat() if goal.started_at else None,
                     goal.completed_at.isoformat() if goal.completed_at else None,

@@ -1093,6 +1093,83 @@ class MemoryManager:
         conn.commit()
         logger.info(f"Паттерн сохранён: {category}/{key}", extra={"event": "pattern_saved"})
 
+    def get_patterns(self, category: str = "", query: str = "", limit: int = 20) -> list[dict]:
+        """Return patterns with optional category/query filters (newest/high-confidence first)."""
+        conn = self._get_sqlite()
+        lim = max(1, int(limit or 20))
+        q = str(query or "").strip().lower()
+        cat = str(category or "").strip()
+        if cat and q:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM patterns
+                WHERE category = ?
+                  AND (LOWER(pattern_key) LIKE ? OR LOWER(pattern_value) LIKE ?)
+                ORDER BY confidence DESC, id DESC
+                LIMIT ?
+                """,
+                (cat, f"%{q}%", f"%{q}%", lim),
+            ).fetchall()
+        elif cat:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM patterns
+                WHERE category = ?
+                ORDER BY confidence DESC, id DESC
+                LIMIT ?
+                """,
+                (cat, lim),
+            ).fetchall()
+        elif q:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM patterns
+                WHERE LOWER(pattern_key) LIKE ? OR LOWER(pattern_value) LIKE ?
+                ORDER BY confidence DESC, id DESC
+                LIMIT ?
+                """,
+                (f"%{q}%", f"%{q}%", lim),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM patterns
+                ORDER BY confidence DESC, id DESC
+                LIMIT ?
+                """,
+                (lim,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_recent_errors(self, limit: int = 20, module: str = "", unresolved_only: bool = False) -> list[dict]:
+        """Return recent errors for quick operational context in runtime decisions."""
+        conn = self._get_sqlite()
+        lim = max(1, int(limit or 20))
+        mod = str(module or "").strip()
+        where = []
+        params: list[Any] = []
+        if mod:
+            where.append("module = ?")
+            params.append(mod)
+        if unresolved_only:
+            where.append("resolved = 0")
+        where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+        rows = conn.execute(
+            f"""
+            SELECT *
+            FROM errors
+            {where_sql}
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (*params, lim),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     # ── pgvector / PostgreSQL (долгосрочная эпизодическая память + Data Lake) ──
 
     async def _get_pg(self) -> asyncpg.Pool:

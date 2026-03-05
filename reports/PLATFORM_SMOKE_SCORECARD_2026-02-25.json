@@ -1,60 +1,60 @@
 {
-  "generated_at": "2026-03-04T06:56:45.893972+00:00",
+  "generated_at": "2026-03-05T01:17:32.580014+00:00",
   "window_days": 30,
   "platforms": [
     {
-      "platform": "gumroad",
-      "configured": true,
-      "evidence_count_30d": 0,
-      "success_count_30d": 0,
-      "fail_count_30d": 0,
-      "readiness_score": 30,
-      "note": "weak"
-    },
-    {
       "platform": "etsy",
       "configured": true,
-      "evidence_count_30d": 0,
-      "success_count_30d": 0,
+      "evidence_count_30d": 14,
+      "success_count_30d": 23,
       "fail_count_30d": 0,
-      "readiness_score": 30,
-      "note": "weak"
+      "readiness_score": 100,
+      "note": "ready"
     },
     {
       "platform": "twitter",
       "configured": true,
-      "evidence_count_30d": 0,
-      "success_count_30d": 0,
+      "evidence_count_30d": 16,
+      "success_count_30d": 28,
       "fail_count_30d": 0,
-      "readiness_score": 30,
-      "note": "weak"
+      "readiness_score": 100,
+      "note": "ready"
     },
     {
       "platform": "kofi",
       "configured": true,
-      "evidence_count_30d": 0,
-      "success_count_30d": 0,
+      "evidence_count_30d": 20,
+      "success_count_30d": 29,
       "fail_count_30d": 0,
-      "readiness_score": 30,
-      "note": "weak"
+      "readiness_score": 100,
+      "note": "ready"
     },
     {
       "platform": "printful",
       "configured": true,
-      "evidence_count_30d": 0,
-      "success_count_30d": 0,
+      "evidence_count_30d": 13,
+      "success_count_30d": 22,
       "fail_count_30d": 0,
-      "readiness_score": 30,
-      "note": "weak"
+      "readiness_score": 100,
+      "note": "ready"
+    },
+    {
+      "platform": "gumroad",
+      "configured": true,
+      "evidence_count_30d": 48,
+      "success_count_30d": 41,
+      "fail_count_30d": 7,
+      "readiness_score": 79,
+      "note": "ready"
     },
     {
       "platform": "wordpress",
       "configured": false,
-      "evidence_count_30d": 0,
-      "success_count_30d": 0,
+      "evidence_count_30d": 13,
+      "success_count_30d": 22,
       "fail_count_30d": 0,
-      "readiness_score": 0,
-      "note": "weak"
+      "readiness_score": 70,
+      "note": "ready"
     }
   ]
 }

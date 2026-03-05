@@ -1,0 +1,44 @@
+{
+  "timestamp": "2026-03-05T15:17:18.877452+00:00",
+  "scenario": "smoke",
+  "mode": "local_owner_simulator",
+  "steps": [
+    {
+      "id": "S01",
+      "input": "/start",
+      "reply_text": "VITO на связи.\n\nЧтобы не путаться в командах:\n/help — обзор\n/help_daily — ежедневные\n/help_rare — редкие\n/help_system — системные\n\nБыстрый старт:\n/status, /goals, /goal <текст>",
+      "pass": true,
+      "reasons": [],
+      "at": "2026-03-05T15:17:18.878325+00:00"
+    },
+    {
+      "id": "S02",
+      "input": "/help",
+      "reply_text": "Справка по командам VITO\n\nРазделы:\n/help_daily — ежедневные команды\n/help_rare — редкие команды\n/help_system — системные/осторожные\n\nТочечно по команде:\n/help status\n/help goal\n/help backup\n\nБыстрый старт:\n1) /status\n2) /goals\n3) /goal <что сделать>\n4) /approve или /reject",
+      "pass": true,
+      "reasons": [],
+      "at": "2026-03-05T15:17:18.878815+00:00"
+    },
+    {
+      "id": "S03",
+      "input": "/status",
+      "reply_text": "VITO Status\n\nDecision Loop: остановлен\nТиков: 0\nПотрачено сегодня: $0.00\n\nЦели: 0 всего, 0 выполнено, 0 в работе, 0 ожидают, 0 ждут одобрения",
+      "pass": true,
+      "reasons": [],
+      "at": "2026-03-05T15:17:18.910465+00:00"
+    },
+    {
+      "id": "S04",
+      "input": "задачи",
+      "reply_text": "Нет активных задач.",
+      "pass": true,
+      "reasons": [],
+      "at": "2026-03-05T15:17:18.914544+00:00"
+    }
+  ],
+  "summary": {
+    "passed": 4,
+    "failed": 0,
+    "total": 4
+  }
+}

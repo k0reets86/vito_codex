@@ -97,6 +97,21 @@ class SMMAgent(BaseAgent):
 
         if platform_obj:
             try:
+                # Do not spam owner approvals when platform is not authenticated.
+                # First check auth and fail fast.
+                if hasattr(platform_obj, "authenticate"):
+                    auth_ok = await platform_obj.authenticate()
+                    if not auth_ok:
+                        return TaskResult(
+                            success=False,
+                            error=f"{platform}_not_authenticated",
+                            metadata={
+                                "platform": platform,
+                                "published": False,
+                                "file_path": str(file_path),
+                                "approval_skipped": True,
+                            },
+                        )
                 # Owner approval gate for any publication
                 if self.comms:
                     import uuid
