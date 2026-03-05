@@ -136,7 +136,7 @@ class CommsAgent:
         "kofi": {
             "title": "Ko-fi",
             "url": "https://ko-fi.com/manage",
-            "aliases": ("kofi", "ko-fi", "кофи", "ко-фи"),
+            "aliases": ("kofi", "ko-fi", "ko fi", "кофи", "ко-фи", "ко фи"),
             "manual_fallback": True,
         },
         "twitter": {

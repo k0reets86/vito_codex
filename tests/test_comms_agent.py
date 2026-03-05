@@ -1737,6 +1737,10 @@ def test_detect_contextual_inventory_request_for_account_phrase(comms):
     assert comms._detect_contextual_service_inventory_request("проверь аккаунт") == "amazon_kdp"
 
 
+def test_detect_service_login_request_kofi_with_space(comms):
+    assert comms._detect_service_login_request("зайди на ко фи") == "kofi"
+
+
 def test_detect_contextual_status_without_fresh_context_returns_empty(comms):
     comms._last_service_context = ""
     assert comms._detect_contextual_service_status_request("статус") == ""
