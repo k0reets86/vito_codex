@@ -51,6 +51,35 @@ class TestPrintfulPublish:
         result = await printful.publish({"name": "test"})
         assert result["status"] == "not_authenticated"
 
+    @pytest.mark.asyncio
+    async def test_publish_store_restriction_returns_needs_browser_flow(self, printful):
+        printful._authenticated = True
+        printful._store_id = "1"
+
+        class _Resp:
+            status = 400
+
+            async def json(self):
+                return {
+                    "code": 400,
+                    "result": "This API endpoint applies only to Printful stores based on the Manual Order / API platform.",
+                    "error": {"message": "This API endpoint applies only to Printful stores based on the Manual Order / API platform."},
+                }
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        class _Sess:
+            def post(self, *args, **kwargs):
+                return _Resp()
+
+        printful._get_session = AsyncMock(return_value=_Sess())
+        result = await printful.publish({"sync_product": {"name": "VITO Probe"}})
+        assert result["status"] == "needs_browser_flow"
+
 
 class TestPrintfulAnalytics:
     @pytest.mark.asyncio

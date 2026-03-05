@@ -68,3 +68,33 @@ class TestECommerceAgent:
     async def test_execute_task(self, agent):
         result = await agent.execute_task("sales_check", platform="gumroad")
         assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_create_listing_printful_allows_no_preview_files(self, mock_llm_router, mock_memory, mock_finance, mock_comms):
+        from agents.ecommerce_agent import ECommerceAgent
+        printful = MagicMock()
+        printful.publish = AsyncMock(return_value={"platform": "printful", "status": "created", "id": "pf_1"})
+        agent = ECommerceAgent(
+            llm_router=mock_llm_router,
+            memory=mock_memory,
+            finance=mock_finance,
+            comms=mock_comms,
+            platforms={"printful": printful},
+        )
+        result = await agent.create_listing("printful", {"sync_product": {"name": "VITO POD"}})
+        assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_create_listing_printful_needs_browser_flow_is_failure(self, mock_llm_router, mock_memory, mock_finance, mock_comms):
+        from agents.ecommerce_agent import ECommerceAgent
+        printful = MagicMock()
+        printful.publish = AsyncMock(return_value={"platform": "printful", "status": "needs_browser_flow", "error": "restricted"})
+        agent = ECommerceAgent(
+            llm_router=mock_llm_router,
+            memory=mock_memory,
+            finance=mock_finance,
+            comms=mock_comms,
+            platforms={"printful": printful},
+        )
+        result = await agent.create_listing("printful", {"sync_product": {"name": "VITO POD"}})
+        assert result.success is False

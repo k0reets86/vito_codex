@@ -90,6 +90,24 @@ class PrintfulPlatform(BasePlatform):
             session = await self._get_session()
             async with session.post(f"{API_BASE}/store/products", params={"store_id": self._store_id}, json=content) as resp:
                 data = await resp.json()
+                code = int((data or {}).get("code", 0) or 0) if isinstance(data, dict) else 0
+                err = (data or {}).get("error", {}) if isinstance(data, dict) else {}
+                err_msg = str(err.get("message") or (data or {}).get("result") or "").strip() if isinstance(data, dict) else ""
+                if resp.status >= 400 or code >= 400 or err_msg:
+                    # Common real-world case: store is Etsy/Shopify-connected and /store/products API is not allowed.
+                    restricted = "manual order / api platform" in err_msg.lower()
+                    status = "needs_browser_flow" if restricted else "error"
+                    result = {
+                        "platform": "printful",
+                        "status": status,
+                        "error": err_msg or f"HTTP {resp.status}",
+                        "data": data,
+                    }
+                    logger.warning(
+                        f"Printful publish rejected: {result['error']}",
+                        extra={"event": "printful_publish_rejected", "context": {"status": status, "store_id": self._store_id}},
+                    )
+                    return result
                 logger.info(
                     f"Printful продукт создан: {content.get('sync_product', {}).get('name', 'unknown')}",
                     extra={"event": "printful_publish"},

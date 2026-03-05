@@ -68,7 +68,7 @@ class ECommerceAgent(BaseAgent):
         preview_files = [p for p in preview_files if p and Path(p).exists()]
         if platform == "gumroad" and not data.get("pdf_path"):
             return TaskResult(success=False, error="Gumroad publish requires pdf_path")
-        if not preview_files:
+        if not preview_files and platform in {"gumroad", "etsy", "kofi"}:
             return TaskResult(success=False, error="Preview files required before publication")
         if self.comms and bool(getattr(settings, "AUTONOMY_ECOMMERCE_APPROVAL_REQUIRED", False)):
             try:
@@ -108,7 +108,7 @@ class ECommerceAgent(BaseAgent):
                     )
             result = await plat.publish(data)
             status = result.get("status") if isinstance(result, dict) else None
-            accepted_statuses = {"ok", "success", "published"}
+            accepted_statuses = {"ok", "success", "published", "created"}
             if bool(getattr(settings, "AUTONOMY_ACCEPT_INTERMEDIATE_PUBLISH_STATUSES", False)):
                 accepted_statuses.update({"prepared", "created", "draft"})
             if status and status not in accepted_statuses:

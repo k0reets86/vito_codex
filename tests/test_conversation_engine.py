@@ -182,6 +182,16 @@ class TestProcessMessage:
         engine.llm_router.call_llm.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_deterministic_printful_etsy_route_executes_without_llm(self, mock_llm_router, mock_memory):
+        engine = ConversationEngine(llm_router=mock_llm_router, memory=mock_memory, agent_registry=MagicMock())
+        engine._execute_actions = AsyncMock(return_value="Printful->Etsy: ok")
+        result = await engine.process_message("создай листинг через принтфул и размести на этси")
+        assert result["intent"] == "system_action"
+        assert "printful" in result["response"].lower()
+        engine._execute_actions.assert_called_once()
+        engine.llm_router.call_llm.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_deterministic_network_check_route(self, engine):
         result = await engine.process_message("проверь доступ к интернету")
         assert result["intent"] == "question"
@@ -289,6 +299,19 @@ class TestProcessMessage:
             {"topic": "AI templates", "platforms": ["gumroad"], "auto_publish": False},
         )
         assert "Product pipeline завершён" in msg
+
+    @pytest.mark.asyncio
+    async def test_dispatch_action_run_printful_etsy_sync(self, mock_llm_router, mock_memory):
+        registry = MagicMock()
+        registry.dispatch = AsyncMock(
+            side_effect=[
+                type("R1", (), {"success": True, "output": {"platform": "printful", "status": "created"}})(),
+                type("R2", (), {"success": True, "output": {"etsy": {"listings": 1}}})(),
+            ]
+        )
+        engine = ConversationEngine(llm_router=mock_llm_router, memory=mock_memory, agent_registry=registry)
+        msg = await engine._dispatch_action("run_printful_etsy_sync", {"topic": "POD test", "auto_publish": True})
+        assert "Printful→Etsy" in msg
 
     @pytest.mark.asyncio
     async def test_dispatch_agent_research_adds_quality_gate(self, mock_llm_router, mock_memory):
