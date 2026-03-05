@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Import browser cookies JSON into Playwright storage_state for Amazon KDP / Etsy.
+"""Import browser cookies JSON into Playwright storage_state for platform browser auth.
 
 Usage examples:
   python3 scripts/browser_session_import.py --service amazon_kdp --cookies-file runtime/owner_input/amazon.cookies.json --verify
@@ -22,11 +22,32 @@ if str(PROJECT_ROOT) not in sys.path:
 from config.settings import settings
 
 
+SERVICE_VERIFY_URLS: dict[str, str] = {
+    "amazon_kdp": "https://kdp.amazon.com/bookshelf",
+    "etsy": "https://www.etsy.com/your/shops/me/tools/listings/create",
+    "kofi": "https://ko-fi.com/manage",
+    "printful": "https://www.printful.com/dashboard",
+    "gumroad": "https://gumroad.com/products",
+    "twitter": "https://x.com/home",
+    "reddit": "https://www.reddit.com/",
+}
+
+
 def _default_storage_path(service: str) -> str:
     if service == "amazon_kdp":
         return str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json") or "runtime/kdp_storage_state.json")
     if service == "etsy":
         return str(getattr(settings, "ETSY_STORAGE_STATE_FILE", "runtime/etsy_storage_state.json") or "runtime/etsy_storage_state.json")
+    if service == "kofi":
+        return str(getattr(settings, "KOFI_STORAGE_STATE_FILE", "runtime/kofi_storage_state.json") or "runtime/kofi_storage_state.json")
+    if service == "printful":
+        return str(getattr(settings, "PRINTFUL_STORAGE_STATE_FILE", "runtime/printful_storage_state.json") or "runtime/printful_storage_state.json")
+    if service == "gumroad":
+        return str(getattr(settings, "GUMROAD_STORAGE_STATE_FILE", "runtime/gumroad_storage_state.json") or "runtime/gumroad_storage_state.json")
+    if service == "twitter":
+        return str(getattr(settings, "TWITTER_STORAGE_STATE_FILE", "runtime/twitter_storage_state.json") or "runtime/twitter_storage_state.json")
+    if service == "reddit":
+        return str(getattr(settings, "REDDIT_STORAGE_STATE_FILE", "runtime/reddit_storage_state.json") or "runtime/reddit_storage_state.json")
     raise ValueError(f"unsupported service: {service}")
 
 
@@ -122,16 +143,22 @@ async def _verify(service: str, storage_path: Path) -> tuple[bool, dict[str, Any
         context = await browser.new_context(storage_state=str(storage_path), viewport={"width": 1280, "height": 720})
         page = await context.new_page()
 
+        url = SERVICE_VERIFY_URLS.get(service, "")
+        if not url:
+            await context.close()
+            await browser.close()
+            return False, {"error": "verify_url_not_defined"}
+        await page.goto(url, wait_until="domcontentloaded", timeout=120000)
+        await page.wait_for_timeout(1200)
+        u = (page.url or "").lower()
+        bad_markers = ("signin", "/sign", "login", "challenge", "captcha")
+        ok = not any(m in u for m in bad_markers)
         if service == "amazon_kdp":
-            await page.goto("https://kdp.amazon.com/bookshelf", wait_until="domcontentloaded", timeout=120000)
-            await page.wait_for_timeout(1200)
-            u = (page.url or "").lower()
-            ok = ("signin" not in u and "ap/signin" not in u and any(x in u for x in ("/bookshelf", "/en_us/", "/reports")))
-        else:
-            await page.goto("https://www.etsy.com/your/shops/me/tools/listings/create", wait_until="domcontentloaded", timeout=120000)
-            await page.wait_for_timeout(1200)
-            u = (page.url or "").lower()
-            ok = ("signin" not in u and "/sign" not in u and "login" not in u)
+            ok = ok and any(x in u for x in ("/bookshelf", "/en_us/", "/reports", "kdp.amazon.com"))
+        if service == "twitter":
+            ok = ok and ("x.com" in u or "twitter.com" in u)
+        if service == "reddit":
+            ok = ok and "reddit.com" in u
 
         title = await page.title()
         await context.close()
@@ -141,7 +168,7 @@ async def _verify(service: str, storage_path: Path) -> tuple[bool, dict[str, Any
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Import browser cookies into Playwright storage_state")
-    ap.add_argument("--service", required=True, choices=["amazon_kdp", "etsy"])
+    ap.add_argument("--service", required=True, choices=sorted(list(SERVICE_VERIFY_URLS.keys())))
     ap.add_argument("--cookies-file", required=True)
     ap.add_argument("--storage-path", default="")
     ap.add_argument("--verify", action="store_true")

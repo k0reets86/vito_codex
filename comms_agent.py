@@ -2078,6 +2078,7 @@ class CommsAgent:
         self._app.add_handler(CommandHandler("kdp_login", self._cmd_kdp_login))
         self._app.add_handler(CommandHandler("auth", self._cmd_auth))
         self._app.add_handler(CommandHandler("auth_status", self._cmd_auth_status))
+        self._app.add_handler(CommandHandler("auth_cookie", self._cmd_auth_cookie))
         self._app.add_handler(
             MessageHandler(
                 filters.Document.ALL | filters.PHOTO | filters.VIDEO,
@@ -4785,6 +4786,79 @@ class CommsAgent:
             exp = str(node.get("expires_at", ""))[:19] if node.get("expires_at") else "-"
             lines.append(f"- {svc}: {status} via {method}, valid={valid}, exp={exp}")
         await update.message.reply_text("\n".join(lines[:80]), reply_markup=self._main_keyboard())
+
+    async def _cmd_auth_cookie(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Import cookie JSON into storage_state and verify auth.
+
+        Usage:
+          /auth_cookie <service> <cookies_json_path> [verify]
+        """
+        if await self._reject_stranger(update):
+            return
+        args = list(getattr(context, "args", None) or [])
+        if len(args) < 2:
+            await update.message.reply_text(
+                "Использование: /auth_cookie <service> <cookies_json_path> [verify]\n"
+                "Пример: /auth_cookie etsy input/owner_inbox/etsy.cookies.json verify",
+                reply_markup=self._main_keyboard(),
+            )
+            return
+        service = self._resolve_service_key(args[0])
+        if not service:
+            await update.message.reply_text("Неизвестный сервис.", reply_markup=self._main_keyboard())
+            return
+        cookies_path = str(args[1] or "").strip()
+        verify = any(str(a).strip().lower() in {"verify", "check", "1", "true"} for a in args[2:])
+        if not cookies_path:
+            await update.message.reply_text("Не указан путь к cookies JSON.", reply_markup=self._main_keyboard())
+            return
+        cookie_file = Path(cookies_path)
+        if not cookie_file.is_absolute():
+            cookie_file = PROJECT_ROOT / cookie_file
+        if not cookie_file.exists():
+            await update.message.reply_text(f"Файл не найден: {cookie_file}", reply_markup=self._main_keyboard())
+            return
+
+        cmd = [
+            "python3",
+            "scripts/browser_session_import.py",
+            "--service",
+            service,
+            "--cookies-file",
+            str(cookie_file),
+        ]
+        if verify:
+            cmd.append("--verify")
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=str(PROJECT_ROOT),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        out_b, _ = await proc.communicate()
+        output = (out_b or b"").decode("utf-8", errors="ignore").strip()
+        if int(proc.returncode or 0) == 0:
+            try:
+                self._auth_broker.mark_authenticated(
+                    service,
+                    method="cookie_import",
+                    detail="auth_cookie_import_ok",
+                    ttl_sec=int(getattr(settings, "AUTH_SESSION_TTL_SEC", 10800) or 10800),
+                )
+            except Exception:
+                pass
+            self._mark_service_auth_confirmed(service)
+            await update.message.reply_text(
+                f"Cookie-импорт выполнен: {service}.\n{output[:1200]}",
+                reply_markup=self._main_keyboard(),
+            )
+            return
+
+        self._auth_broker.mark_failed(service, detail=f"auth_cookie_import_failed_rc={int(proc.returncode or 0)}")
+        await update.message.reply_text(
+            f"Cookie-импорт не удался: {service}\n{output[:1200]}",
+            reply_markup=self._main_keyboard(),
+        )
 
     async def _cmd_brainstorm(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Мультимодельный брейншторм: /brainstorm <тема>."""
