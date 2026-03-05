@@ -24,6 +24,7 @@ class Settings:
     TELEGRAM_OWNER_CHAT_ID: str = os.getenv("TELEGRAM_OWNER_CHAT_ID", "")
     AUTH_BROKER_STATE_FILE: str = os.getenv("AUTH_BROKER_STATE_FILE", "runtime/auth_broker_state.json")
     AUTH_SESSION_TTL_SEC: int = int(os.getenv("AUTH_SESSION_TTL_SEC", "10800") or 10800)
+    MCP_TOOL_SCOPING_ENABLED: bool = os.getenv("MCP_TOOL_SCOPING_ENABLED", "true").lower() in ("1", "true", "yes", "on")
 
     # Database
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")

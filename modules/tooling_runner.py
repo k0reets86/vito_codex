@@ -7,6 +7,7 @@ import urllib.request
 from typing import Any
 
 from config.settings import settings
+from modules.mcp_tool_scope import enforce_mcp_tool_scope
 from modules.mcp_sandbox_worker import MCPSandboxWorker
 from modules.operator_policy import OperatorPolicy
 from modules.tooling_contract import validate_tooling_response
@@ -98,12 +99,34 @@ class ToolingRunner:
 
         protocol = str(adapter.get("protocol", "")).strip().lower()
         endpoint = str(adapter.get("endpoint", "")).strip()
+        schema = adapter.get("schema")
+        if not isinstance(schema, dict):
+            try:
+                schema = json.loads(str(adapter.get("schema_json") or "{}"))
+            except Exception:
+                schema = {}
         if protocol == "openapi":
             result = self._run_openapi_probe(adapter_key=adapter_key, endpoint=endpoint)
             result = self._apply_contract(result)
             self._record_event(adapter_key, result)
             return result
         if protocol == "mcp":
+            if bool(getattr(settings, "MCP_TOOL_SCOPING_ENABLED", True)):
+                ok_scope, scope_reason = enforce_mcp_tool_scope(
+                    task_type=str(input_data.get("task_type", "") or adapter_key),
+                    adapter_schema=schema or {},
+                    input_data=input_data,
+                )
+                if not ok_scope:
+                    result = {
+                        "status": "error",
+                        "error": "mcp_scope_blocked",
+                        "reason": scope_reason,
+                        "adapter_key": adapter_key,
+                        "protocol": "mcp",
+                    }
+                    self._record_event(adapter_key, result)
+                    return result
             result = self._run_mcp_live(adapter_key=adapter_key, endpoint=endpoint, input_data=input_data)
             result = self._apply_contract(result)
             self._record_event(adapter_key, result)

@@ -2056,6 +2056,7 @@ class CommsAgent:
         self._app.add_handler(CommandHandler("skills_audit", self._cmd_skills_audit))
         self._app.add_handler(CommandHandler("skills_fix", self._cmd_skills_fix))
         self._app.add_handler(CommandHandler("playbooks", self._cmd_playbooks))
+        self._app.add_handler(CommandHandler("recipes", self._cmd_recipes))
         self._app.add_handler(CommandHandler("workflow", self._cmd_workflow))
         self._app.add_handler(CommandHandler("handoffs", self._cmd_handoffs))
         self._app.add_handler(CommandHandler("prefs", self._cmd_prefs))
@@ -3243,6 +3244,38 @@ class CommsAgent:
                 f"(ok:{r.get('success_count',0)} fail:{r.get('fail_count',0)})"
             )
         await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
+
+    async def _cmd_recipes(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Показать workflow recipes по платформам."""
+        if await self._reject_stranger(update):
+            return
+        try:
+            from modules.workflow_recipes import list_workflow_recipes, get_workflow_recipe
+            args = list(getattr(context, "args", None) or [])
+            if args:
+                key = str(args[0] or "").strip().lower()
+                rec = get_workflow_recipe(key)
+                if not rec:
+                    await update.message.reply_text(f"Recipe не найден: {key}", reply_markup=self._main_keyboard())
+                    return
+                lines = [
+                    f"Recipe: {key}",
+                    f"Platform: {rec.get('platform', '-')}",
+                    f"Goal: {rec.get('goal', '-')}",
+                    "Steps:",
+                ]
+                for idx, step in enumerate(rec.get("steps", []), start=1):
+                    lines.append(f"{idx}. {step}")
+                lines.append(f"Evidence: {', '.join(rec.get('required_evidence', []) or [])}")
+                await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
+                return
+            rows = list_workflow_recipes()
+            lines = ["Workflow Recipes:"]
+            for r in rows:
+                lines.append(f"- {r.get('name')}: {r.get('platform')} ({len(r.get('steps', []) or [])} steps)")
+            await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
+        except Exception as e:
+            await update.message.reply_text(f"Recipes error: {e}", reply_markup=self._main_keyboard())
 
     async def _cmd_workflow(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Показать здоровье workflow и последние события по цели."""

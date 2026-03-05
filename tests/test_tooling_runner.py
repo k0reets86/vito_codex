@@ -132,3 +132,26 @@ def test_tooling_runner_live_stage_gate(tmp_path, monkeypatch):
     run = ToolingRunner(sqlite_path=db).run("stage_demo", dry_run=False)
     assert run["status"] == "error"
     assert run["error"] == "adapter_stage_not_allowed_for_live"
+
+
+def test_tooling_runner_mcp_scope_block(tmp_path, monkeypatch):
+    db = str(tmp_path / "tool_run.db")
+    reg = ToolingRegistry(sqlite_path=db)
+    reg.upsert_adapter(
+        adapter_key="mcp_scope_adapter",
+        adapter_stage="production",
+        protocol="mcp",
+        endpoint="stdio://python3 -c \"import json,sys; print(json.dumps({'ok':True}))\"",
+        schema={"tools": [{"name": "create_post"}, {"name": "delete_user"}]},
+    )
+    from config import settings as settings_mod
+    monkeypatch.setattr(settings_mod.settings, "TOOLING_RUN_LIVE_ENABLED", True)
+    monkeypatch.setattr(settings_mod.settings, "TOOLING_MCP_ALLOW_CMDS", "python3")
+    monkeypatch.setattr(settings_mod.settings, "MCP_TOOL_SCOPING_ENABLED", True)
+    run = ToolingRunner(sqlite_path=db).run(
+        "mcp_scope_adapter",
+        {"task_type": "social_publish", "requested_tools": ["delete_user"]},
+        dry_run=False,
+    )
+    assert run["status"] == "error"
+    assert run["error"] == "mcp_scope_blocked"
