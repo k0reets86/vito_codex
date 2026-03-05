@@ -254,11 +254,15 @@ class ResearchAgent(BaseAgent):
             f"Research topic: {topic}\n\n"
             f"REAL DATA collected from public sources:\n"
             f"<external_data>{data_context}</external_data>{no_data_note}\n\n"
-            f"Based on this REAL data, provide:\n"
-            f"1. Market overview (use real numbers from the data above, cite sources)\n"
-            f"2. Top 3-5 product opportunities (realistic for a solo creator, $5-50 price range)\n"
-            f"3. Competition level (based on Reddit activity and Product Hunt listings)\n"
-            f"4. Recommended first product (specific, actionable, realistic timeline)\n\n"
+            f"Based on this REAL data, provide a structured report with exact sections:\n"
+            f"## Executive Summary\n"
+            f"## Market Signals (with numbers + source tags)\n"
+            f"## Top Opportunities (3-5 ideas with price range and why now)\n"
+            f"## Competition Snapshot\n"
+            f"## Risks & Constraints\n"
+            f"## 7-Day Action Plan\n"
+            f"## Sources\n"
+            f"## Confidence Score (0-100 with short rationale)\n\n"
             f"IMPORTANT: Be REALISTIC. Solo creator budget. No '$57M projections'. "
             f"Real first-month revenue for digital products is $0-500. "
             f"If data is limited, say so honestly. Write in English (target market: US/CA/EU)."
@@ -280,6 +284,11 @@ class ResearchAgent(BaseAgent):
             return TaskResult(success=False, error="LLM returned empty response")
 
         self._record_expense(0.02, f"Deep research: {topic[:50]}")
+        response = self._enforce_owner_research_schema(
+            output=response,
+            topic=topic,
+            sources=list(real_data.keys()),
+        )
 
         # 4. Generate executive summary for owner
         executive_summary = self._format_executive_summary(response, topic)
@@ -460,3 +469,26 @@ class ResearchAgent(BaseAgent):
             return f"Research completed: {topic}"
 
         return "\n".join(summary_lines)
+
+    @staticmethod
+    def _enforce_owner_research_schema(output: str, topic: str, sources: list[str]) -> str:
+        """Normalize report into stable owner-friendly schema for Telegram."""
+        text = str(output or "").strip()
+        if not text:
+            text = "No research details returned by model."
+        low = text.lower()
+        has_confidence = ("confidence score" in low) or ("confidence:" in low)
+        has_sources = "sources" in low
+        coverage = min(100, 40 + (len([s for s in sources if s]) * 20))
+        if has_confidence and has_sources:
+            return text
+        src = ", ".join(sorted({str(s).strip() for s in (sources or []) if str(s).strip()})) or "estimated/no_live_sources"
+        return (
+            "## Executive Summary\n"
+            f"{text[:2200]}\n\n"
+            "## Sources\n"
+            f"- {src}\n\n"
+            "## Confidence Score (0-100)\n"
+            f"- {coverage} (based on available live sources and evidence density)\n"
+            f"- Topic: {topic}"
+        )

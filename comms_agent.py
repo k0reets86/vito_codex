@@ -52,6 +52,7 @@ from config.settings import settings
 from modules.owner_preference_model import OwnerPreferenceModel
 from modules.owner_pref_metrics import OwnerPreferenceMetrics
 from modules.data_lake import DataLake
+from modules.status_snapshot import build_status_snapshot, render_status_snapshot
 
 logger = get_logger("comms_agent", agent="comms_agent")
 
@@ -2275,15 +2276,8 @@ class CommsAgent:
             await self.send_message(self._render_help("system"))
             return
         if (not strict_cmds and any(kw in lower for kw in ["статус", "/status"])) or lower.strip() in ("/status", "status"):
-            if self._decision_loop and self._goal_engine:
-                st = self._decision_loop.get_status()
-                gs = self._goal_engine.get_stats()
-                await self.send_message(
-                    f"VITO Status\nDecision Loop: {'работает' if st['running'] else 'остановлен'}\n"
-                    f"Тиков: {st['tick_count']}\nПотрачено сегодня: ${st['daily_spend']:.2f}\n"
-                    f"Цели: {gs['total']} всего, {gs['completed']} выполнено, {gs['executing']} в работе, {gs['pending']} ожидают"
-                )
-                return
+            await self.send_message(self._render_unified_status())
+            return
         if lower.strip() in ("/workflow", "workflow"):
             try:
                 from modules.workflow_state_machine import WorkflowStateMachine
@@ -2827,53 +2821,21 @@ class CommsAgent:
             "- /balances — балансы"
         )
 
+    def _render_unified_status(self, *, title: str = "VITO Status") -> str:
+        snap = build_status_snapshot(
+            decision_loop=self._decision_loop,
+            goal_engine=self._goal_engine,
+            llm_router=self._llm_router,
+            finance=self._finance,
+            owner_task_state=self._owner_task_state,
+            pending_approvals_count=len(self._pending_approvals or {}),
+        )
+        return render_status_snapshot(snap, title=title)
+
     async def _cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self._reject_stranger(update):
             return
-
-        parts = ["VITO Status"]
-
-        if self._decision_loop:
-            st = self._decision_loop.get_status()
-            parts.append(
-                f"Decision Loop: {'работает' if st['running'] else 'остановлен'}\n"
-                f"Тиков: {st['tick_count']}\n"
-                f"Потрачено сегодня: ${st['daily_spend']:.2f}"
-            )
-
-        if self._goal_engine:
-            try:
-                self._goal_engine.reload_goals()
-            except Exception:
-                pass
-            goals = self._goal_engine.get_all_goals()
-            st_map: dict[str, int] = {}
-            for g in goals:
-                key = str(getattr(getattr(g, "status", None), "value", "") or "")
-                if key:
-                    st_map[key] = st_map.get(key, 0) + 1
-            parts.append(
-                f"Цели: {len(goals)} всего, {st_map.get('completed', 0)} выполнено, "
-                f"{st_map.get('executing', 0)} в работе, {st_map.get('pending', 0)} ожидают, "
-                f"{st_map.get('waiting_approval', 0)} ждут одобрения"
-            )
-
-        llm_spend = float(self._llm_router.get_daily_spend() if self._llm_router else 0.0)
-        fin_spend = float(self._finance.get_daily_spent() if self._finance else 0.0)
-        if llm_spend > 0 or fin_spend > 0:
-            parts.append(f"Траты сегодня: LLM ${llm_spend:.2f}; Финконтроль ${fin_spend:.2f}")
-
-        if self._pending_approvals:
-            parts.append(f"Ожидают одобрения: {len(self._pending_approvals)}")
-        if self._owner_task_state:
-            try:
-                active = self._owner_task_state.get_active()
-                if active:
-                    parts.append(f"Текущая задача: {str(active.get('text', ''))[:120]}")
-            except Exception:
-                pass
-
-        await update.message.reply_text("\n\n".join(parts), reply_markup=self._main_keyboard())
+        await update.message.reply_text(self._render_unified_status(), reply_markup=self._main_keyboard())
         logger.info("Команда /status выполнена", extra={"event": "cmd_status"})
 
     async def _cmd_goals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

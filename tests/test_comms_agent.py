@@ -246,6 +246,23 @@ async def test_cmd_status_reload_goals_called(comms, mock_update):
 
 
 @pytest.mark.asyncio
+async def test_cmd_status_uses_unified_snapshot_with_spend_breakdown(comms, mock_update):
+    dl_mock = MagicMock()
+    dl_mock.get_status.return_value = {"running": True, "tick_count": 11, "daily_spend": 0.33}
+    ge_mock = MagicMock()
+    ge_mock.get_all_goals.return_value = []
+    llm_mock = MagicMock()
+    llm_mock.get_daily_spend.return_value = 1.2
+    fin_mock = MagicMock()
+    fin_mock.get_daily_spent.return_value = 2.4
+    comms.set_modules(goal_engine=ge_mock, decision_loop=dl_mock, llm_router=llm_mock, finance=fin_mock)
+
+    await comms._cmd_status(mock_update, MagicMock())
+    text = mock_update.message.reply_text.call_args[0][0]
+    assert "Траты сегодня: LLM $1.20; Финконтроль $2.40" in text
+
+
+@pytest.mark.asyncio
 async def test_cmd_goals_empty(comms, mock_update):
     ge_mock = MagicMock()
     ge_mock.get_all_goals.return_value = []

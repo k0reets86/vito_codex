@@ -28,6 +28,8 @@ class TestResearchAgent:
         result = await agent.deep_research("digital products market")
         assert result.success is True
         assert result.output is not None
+        assert "## Sources" in result.output
+        assert "## Confidence Score" in result.output
 
     @pytest.mark.asyncio
     async def test_competitor_analysis(self, agent):

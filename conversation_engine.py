@@ -33,6 +33,7 @@ from modules.owner_preference_model import OwnerPreferenceModel
 from modules.conversation_memory import ConversationMemory
 from modules.cancel_state import CancelState
 from modules.owner_task_state import OwnerTaskState
+from modules.status_snapshot import build_status_snapshot, render_status_snapshot
 from llm_router import LLMRouter, TaskType, MODEL_REGISTRY
 from modules.prompt_guard import wrap_untrusted_text
 
@@ -1405,6 +1406,7 @@ class ConversationEngine:
             if result and result.success:
                 meta = getattr(result, "metadata", {}) or {}
                 summary = str(meta.get("executive_summary") or str(result.output)[:1200])
+                sources = list(meta.get("data_sources") or [])
                 verdict = "unknown"
                 score = 0
                 try:
@@ -1419,10 +1421,12 @@ class ConversationEngine:
                         verdict = "ok" if bool(qout.get("approved", False)) else "rework"
                 except Exception:
                     pass
-                return (
-                    f"Глубокое исследование готово по теме '{topic}'.\n"
-                    f"Quality gate: {verdict} (score={score}).\n"
-                    f"{summary}"
+                return self._format_deep_research_owner_report(
+                    topic=topic,
+                    summary=summary,
+                    score=score,
+                    verdict=verdict,
+                    sources=sources,
                 )
             return f"Глубокое исследование не удалось: {getattr(result, 'error', 'unknown')}"
 
@@ -2156,31 +2160,39 @@ class ConversationEngine:
         return any(v in s for v in verbs)
 
     def _quick_status(self) -> str:
-        parts = ["VITO Status (fast)"]
-        if self.decision_loop:
-            st = self.decision_loop.get_status()
-            parts.append(
-                f"Decision Loop: {'работает' if st['running'] else 'остановлен'} "
-                f"(тики: {st['tick_count']}, spend: ${st['daily_spend']:.2f})"
-            )
-        if self.goal_engine:
-            gs = self.goal_engine.get_stats()
-            parts.append(
-                f"Цели: {gs['total']} всего, {gs['completed']} выполнено, "
-                f"{gs['executing']} в работе, {gs['pending']} ожидают"
-            )
+        pending = 0
         if self.comms:
             pending = len(getattr(self.comms, "_pending_approvals", {}) or {})
-            if pending:
-                parts.append(f"Ожидают одобрения: {pending}")
-        if self.owner_task_state:
-            try:
-                active = self.owner_task_state.get_active()
-                if active:
-                    parts.append(f"Активная задача владельца: {str(active.get('text', ''))[:120]}")
-            except Exception:
-                pass
-        return "\n".join(parts)
+        snap = build_status_snapshot(
+            decision_loop=self.decision_loop,
+            goal_engine=self.goal_engine,
+            llm_router=self.llm_router,
+            finance=self.finance,
+            owner_task_state=self.owner_task_state,
+            pending_approvals_count=pending,
+        )
+        return render_status_snapshot(snap, title="VITO Status (fast)")
+
+    @staticmethod
+    def _format_deep_research_owner_report(
+        *,
+        topic: str,
+        summary: str,
+        score: int,
+        verdict: str,
+        sources: list[str],
+    ) -> str:
+        src = ", ".join(sorted({str(s).strip() for s in (sources or []) if str(s).strip()})) or "not_detected"
+        status = "ok" if str(verdict).lower() == "ok" else "rework"
+        body = str(summary or "").strip()
+        if len(body) > 3500:
+            body = body[:3500].rstrip() + "\n..."
+        return (
+            f"Глубокое исследование готово: {topic}\n\n"
+            f"Quality gate: {status} (score={int(score or 0)}).\n"
+            f"Источники: {src}\n\n"
+            f"Результат:\n{body}"
+        )
 
     def _quick_spend(self) -> str:
         spend = self.llm_router.get_daily_spend() if self.llm_router else 0.0

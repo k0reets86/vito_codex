@@ -330,6 +330,30 @@ class TestProcessMessage:
         assert "Printful→Etsy" in msg
 
     @pytest.mark.asyncio
+    async def test_dispatch_action_run_deep_research_formats_sources_and_quality(self, mock_llm_router, mock_memory):
+        registry = MagicMock()
+        registry.dispatch = AsyncMock(
+            side_effect=[
+                type(
+                    "R",
+                    (),
+                    {
+                        "success": True,
+                        "output": "Long report body",
+                        "metadata": {"executive_summary": "Summary line", "data_sources": ["reddit", "google_trends"]},
+                        "error": "",
+                    },
+                )(),
+                type("Q", (), {"success": True, "output": {"approved": True, "score": 88}, "error": ""})(),
+            ]
+        )
+        engine = ConversationEngine(llm_router=mock_llm_router, memory=mock_memory, agent_registry=registry)
+        msg = await engine._dispatch_action("run_deep_research", {"topic": "digital planners"})
+        assert "Глубокое исследование готово" in msg
+        assert "Источники: google_trends, reddit" in msg
+        assert "score=88" in msg
+
+    @pytest.mark.asyncio
     async def test_dispatch_agent_research_adds_quality_gate(self, mock_llm_router, mock_memory):
         registry = MagicMock()
         registry.dispatch = AsyncMock(
