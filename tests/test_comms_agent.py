@@ -1762,14 +1762,18 @@ def test_detect_contextual_inventory_does_not_capture_create_publish_intents(com
 def test_humanize_owner_text_strips_technical_noise(comms):
     src = (
         "Вот план, что думаешь?\n"
+        "Принял: задача создана\n"
         "Принято.\n"
         "active task fixed\n"
+        "job_id=17\n"
         "task_id=abc123\n"
         "{\"goal_id\":\"g1\"}\n"
         "Дам результат."
     )
     out = comms._humanize_owner_text(src)
     assert "вот план" not in out.lower()
+    assert "принял:" not in out.lower()
+    assert "job_id" not in out.lower()
     assert "task_id" not in out.lower()
     assert "goal_id" not in out.lower()
     assert "Дам результат" in out

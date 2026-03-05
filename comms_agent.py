@@ -2694,13 +2694,19 @@ class CommsAgent:
         skip_tokens = (
             "request_id",
             "task_id",
+            "job_id",
             "goal_id",
             "trace_id",
             "session_id",
+            "workflow_id",
             "active task fixed",
             "активная задача зафиксирована",
             "workflow_session",
             "pending_approvals",
+            "contract_invalid",
+            "publisher_queue",
+            "tooling_contract_failed",
+            "traceback",
         )
         cleaned: list[str] = []
         for line in s.splitlines():
@@ -2711,6 +2717,10 @@ class CommsAgent:
             if low.startswith("вот план, что думаешь"):
                 continue
             if low.startswith("план:"):
+                continue
+            if low.startswith("принял:"):
+                continue
+            if low.startswith("код получен.") and "подтверждаю вход" in low:
                 continue
             if any(tok in low for tok in skip_tokens):
                 continue
