@@ -167,3 +167,53 @@ class TestRecommendation:
     def test_bad(self, judge):
         rec = judge._generate_recommendation("niche", 30, [])
         assert "Слабая" in rec
+
+
+class TestBrainstormRound:
+    @pytest.mark.asyncio
+    async def test_brainstorm_round_fallbacks_to_gemini_on_auth_error(self, judge):
+        # Prepare llm router internals used by brainstorm round.
+        judge.llm_router._finance = MagicMock()
+        judge.llm_router._record_spend = MagicMock()
+
+        async def _call_provider_side_effect(model, prompt, system_role):
+            if model.provider == "anthropic":
+                raise Exception("Error code: 401 - invalid x-api-key")
+            return ("fallback ok", 0.0)
+
+        judge.llm_router._call_provider = AsyncMock(side_effect=_call_provider_side_effect)
+
+        text = await judge._brainstorm_round(
+            model_key="claude-sonnet",
+            system_role="role",
+            prompt="topic",
+        )
+        assert "fallback: gemini-flash" in text
+        assert "fallback ok" in text
+
+    @pytest.mark.asyncio
+    async def test_brainstorm_round_returns_soft_error_when_unavailable(self, judge):
+        judge.llm_router._finance = MagicMock()
+        judge.llm_router._record_spend = MagicMock()
+        judge.llm_router._call_provider = AsyncMock(side_effect=Exception("network down"))
+
+        text = await judge._brainstorm_round(
+            model_key="gpt-5",
+            system_role="role",
+            prompt="topic",
+        )
+        assert "временно недоступен" in text.lower()
+
+    @pytest.mark.asyncio
+    async def test_brainstorm_round_skips_fallback_on_cooldown(self, judge):
+        judge.llm_router._finance = MagicMock()
+        judge.llm_router._record_spend = MagicMock()
+        judge._brainstorm_fallback_block_until = 10**12  # future timestamp
+        judge.llm_router._call_provider = AsyncMock(side_effect=Exception("Error code: 401 - invalid x-api-key"))
+
+        text = await judge._brainstorm_round(
+            model_key="claude-opus",
+            system_role="role",
+            prompt="topic",
+        )
+        assert "cooldown" in text.lower()

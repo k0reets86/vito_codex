@@ -136,10 +136,10 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
 TASK_MODEL_MAP: dict[TaskType, list[str]] = {
     TaskType.ROUTINE: ["gemini-flash", "gpt-4o-mini", "claude-haiku"],
     TaskType.CONTENT: ["claude-sonnet", "claude-haiku", "gemini-flash"],
-    TaskType.CODE: ["gpt-o3", "claude-sonnet", "gpt-5"],
+    TaskType.CODE: ["gpt-o3", "claude-sonnet", "gpt-5", "gemini-flash"],
     TaskType.RESEARCH: ["perplexity", "gemini-flash", "claude-sonnet"],
-    TaskType.STRATEGY: ["claude-opus", "gpt-5", "claude-sonnet"],
-    TaskType.SELF_HEAL: ["gpt-o3", "claude-sonnet", "gpt-5"],
+    TaskType.STRATEGY: ["claude-opus", "gpt-5", "claude-sonnet", "gemini-flash"],
+    TaskType.SELF_HEAL: ["gpt-o3", "claude-sonnet", "gpt-5", "gemini-flash"],
 }
 
 
@@ -166,6 +166,7 @@ class LLMRouter:
         self._comms = comms
         self._guardrails = LLMGuardrails(sqlite_path=self._sqlite_path)
         self._research_url_context = ResearchURLContextPipeline()
+        self._provider_cooldown_until: dict[str, float] = {}
         self._init_spend_table()
         logger.info("LLMRouter инициализирован", extra={"event": "init"})
 
@@ -322,6 +323,9 @@ class LLMRouter:
         return self._openrouter
 
     def _provider_available(self, provider: str) -> bool:
+        cool_until = float(self._provider_cooldown_until.get(provider, 0.0) or 0.0)
+        if cool_until > time.time():
+            return False
         if provider == "anthropic":
             return bool(settings.ANTHROPIC_API_KEY)
         if provider == "openai":
@@ -333,6 +337,28 @@ class LLMRouter:
         if provider == "openrouter":
             return bool(settings.OPENROUTER_API_KEY)
         return False
+
+    def _provider_backoff_seconds(self, error_str: str) -> float:
+        low = str(error_str or "").lower()
+        # Auth/invalid key: aggressive cooldown to stop token waste.
+        if any(m in low for m in ("invalid x-api-key", "authentication_error", "unauthorized", "error code: 401", "\"status\": 401")):
+            return 15 * 60
+        # Quota/rate-limit: shorter cooldown.
+        if any(m in low for m in ("insufficient_quota", "resource_exhausted", "rate_limit", "quota")):
+            m = re.search(r"retry in\\s+([0-9]+(?:\\.[0-9]+)?)s", low)
+            if m:
+                try:
+                    return max(30.0, min(15 * 60.0, float(m.group(1))))
+                except Exception:
+                    pass
+            m2 = re.search(r"retrydelay['\"]?\\s*[:=]\\s*['\"]?([0-9]+)s", low)
+            if m2:
+                try:
+                    return max(30.0, min(15 * 60.0, float(m2.group(1))))
+                except Exception:
+                    pass
+            return 5 * 60
+        return 0.0
 
     def _openrouter_model_id(self, model: ModelConfig) -> str:
         # Optional override mapping via env JSON: {"claude-opus-4-6":"anthropic/claude-3.7-sonnet"}
@@ -600,6 +626,13 @@ class LLMRouter:
 
                 except Exception as e:
                     error_str = str(e)
+                    backoff = self._provider_backoff_seconds(error_str)
+                    if backoff > 0:
+                        self._provider_cooldown_until[model.provider] = time.time() + backoff
+                        logger.warning(
+                            f"Provider cooldown set: {model.provider} for {int(backoff)}s",
+                            extra={"event": "provider_cooldown_set", "context": {"provider": model.provider, "seconds": int(backoff)}},
+                        )
                     # Try OpenRouter fallback once on auth/network errors
                     if self._provider_available("openrouter") and model.provider != "openrouter":
                         try:

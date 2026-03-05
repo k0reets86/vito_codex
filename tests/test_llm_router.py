@@ -3,6 +3,7 @@
 import logging
 import os
 import tempfile
+import time
 from datetime import date
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -86,6 +87,15 @@ def test_select_model_routine(router):
 def test_select_model_self_heal(router):
     result = router.select_model(TaskType.SELF_HEAL)
     assert result.model.provider == "openai"  # o3 / Codex first, Claude last resort
+
+
+def test_strategy_has_gemini_fallback():
+    assert "gemini-flash" in TASK_MODEL_MAP[TaskType.STRATEGY]
+
+
+def test_provider_cooldown_blocks_availability(router):
+    router._provider_cooldown_until["anthropic"] = time.time() + 60
+    assert router._provider_available("anthropic") is False
 
 
 def test_select_model_needs_approval_high_cost(router):

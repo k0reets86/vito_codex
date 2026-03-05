@@ -6,6 +6,8 @@
 
 import asyncio
 import json
+import re
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -74,6 +76,7 @@ class JudgeProtocol:
         self.llm_router = llm_router
         self.memory = memory
         self.comms = comms
+        self._brainstorm_fallback_block_until: float = 0.0
         logger.info("JudgeProtocol инициализирован", extra={"event": "init"})
 
     async def evaluate_niche(
@@ -333,31 +336,103 @@ class JudgeProtocol:
         if not self.llm_router.check_daily_limit():
             return "[Бюджет исчерпан — раунд пропущен]"
 
-        try:
-            text, cost = await self.llm_router._call_provider(model, prompt, system_role)
-            # Record spend
-            self.llm_router._record_spend(
-                model.display_name, "strategy_brainstorm", 0, 0, cost
+        async def _call(model_ref, key: str, role: str, body: str) -> tuple[str, float]:
+            # Не даём одному раунду зависать бесконечно.
+            return await asyncio.wait_for(
+                self.llm_router._call_provider(model_ref, body, role),
+                timeout=35,
             )
-            # Bridge to financial controller
+
+        def _record(model_name: str, cost: float) -> None:
+            self.llm_router._record_spend(model_name, "strategy_brainstorm", 0, 0, cost)
             if self.llm_router._finance and cost > 0:
                 try:
                     from financial_controller import ExpenseCategory
+
                     self.llm_router._finance.record_expense(
                         amount_usd=cost,
                         category=ExpenseCategory.API,
                         agent="judge_brainstorm",
-                        description=f"{model.display_name}: brainstorm",
+                        description=f"{model_name}: brainstorm",
                     )
                 except Exception:
                     pass
+
+        def _is_auth_or_quota_error(err_text: str) -> bool:
+            low = err_text.lower()
+            markers = (
+                "invalid x-api-key",
+                "authentication_error",
+                "insufficient_quota",
+                "unauthorized",
+                "status\": 401",
+                "error code: 401",
+                "quota",
+            )
+            return any(m in low for m in markers)
+
+        def _fallback_blocked() -> bool:
+            return time.time() < float(self._brainstorm_fallback_block_until or 0.0)
+
+        def _extract_retry_seconds(err_text: str) -> float:
+            # Gemini SDK message variants:
+            # - "Please retry in 29.78s."
+            # - "retryDelay': '30s'"
+            m1 = re.search(r"retry in\\s+([0-9]+(?:\\.[0-9]+)?)s", err_text, flags=re.I)
+            if m1:
+                try:
+                    return float(m1.group(1))
+                except Exception:
+                    pass
+            m2 = re.search(r"retryDelay['\"]?\\s*[:=]\\s*['\"]?([0-9]+)s", err_text, flags=re.I)
+            if m2:
+                try:
+                    return float(m2.group(1))
+                except Exception:
+                    pass
+            return 60.0
+
+        try:
+            text, cost = await _call(model, model_key, system_role, prompt)
+            _record(model.display_name, cost)
             return text
         except Exception as e:
+            err = str(e)
             logger.warning(
-                f"Brainstorm round error ({model_key}): {e}",
+                f"Brainstorm round error ({model_key}): {err}",
                 extra={"event": "brainstorm_round_error"},
             )
-            return f"[Ошибка {model_key}: {e}]"
+
+            # Если внешний провайдер недоступен по ключу/квоте, не роняем раунд:
+            # быстро деградируем на Gemini Flash, чтобы цепочка brainstorm оставалась рабочей.
+            if model_key != "gemini-flash" and _is_auth_or_quota_error(err):
+                if _fallback_blocked():
+                    return "[fallback gemini-flash временно на cooldown из-за quota; раунд пропущен]"
+                fallback = MODEL_REGISTRY.get("gemini-flash")
+                if fallback is not None:
+                    try:
+                        fb_prompt = (
+                            "Основная модель недоступна (auth/quota). "
+                            "Выполни этот раунд максимально полно как fallback.\n\n"
+                            + prompt
+                        )
+                        text, cost = await _call(fallback, "gemini-flash", system_role, fb_prompt)
+                        _record(fallback.display_name, cost)
+                        return (
+                            "[fallback: gemini-flash]\n"
+                            + (text or "")
+                        )
+                    except Exception as fe:
+                        fe_text = str(fe)
+                        if "resource_exhausted" in fe_text.lower() or "quota" in fe_text.lower():
+                            retry_sec = max(10.0, min(300.0, _extract_retry_seconds(fe_text)))
+                            self._brainstorm_fallback_block_until = time.time() + retry_sec
+                        logger.warning(
+                            f"Brainstorm fallback error (gemini-flash): {fe}",
+                            extra={"event": "brainstorm_fallback_error"},
+                        )
+
+            return f"[Раунд {model_key} временно недоступен: {err[:180]}]"
 
     def format_brainstorm_for_telegram(self, result: dict[str, Any]) -> str:
         """Format brainstorm result for Telegram."""

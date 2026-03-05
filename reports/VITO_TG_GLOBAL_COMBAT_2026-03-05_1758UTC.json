@@ -1,0 +1,438 @@
+{
+  "timestamp": "2026-03-05T18:04:21.831965+00:00",
+  "mode": "tg_global_combat_suite",
+  "steps": [
+    {
+      "cmd": "python3 scripts/telegram_owner_simulator.py --scenario smoke",
+      "rc": 0,
+      "report_path": "/home/vito/vito-agent/reports/VITO_TG_OWNER_SIM_smoke_2026-03-05_1758UTC.json",
+      "stdout_tail": "[2026-03-05 17:58:17,741] INFO agent_registry: Агент зарегистрирован: analytics_agent (analytics, dashboard, forecast)\n[2026-03-05 17:58:17,741] INFO agent_registry: Агент зарегистрирован: economics_agent (pricing, unit_economics)\n[2026-03-05 17:58:17,741] INFO agent_registry: Агент зарегистрирован: legal_agent (legal, copyright, gdpr)\n[2026-03-05 17:58:17,742] INFO agent_registry: Агент зарегистрирован: risk_agent (risk_assessment, reputation)\n[2026-03-05 17:58:17,742] INFO agent_registry: Агент зарегистрирован: security_agent (security, key_rotation)\n[2026-03-05 17:58:17,742] INFO agent_registry: Агент зарегистрирован: devops_agent (health_check, backup, monitoring, shell)\n[2026-03-05 17:58:17,742] INFO agent_registry: Агент зарегистрирован: hr_agent (hr, performance_evaluation, knowledge_audit, agent_development)\n[2026-03-05 17:58:17,742] INFO agent_registry: Агент зарегистрирован: partnership_agent (partnership, affiliate)\n[2026-03-05 17:58:17,742] INFO agent_registry: Агент зарегистрирован: research_agent (research, competitor_analysis, market_analysis)\n[2026-03-05 17:58:17,742] INFO agent_registry: Агент зарегистрирован: document_agent (documentation, knowledge_base, document_parse, image_ocr, video_extract)\n[2026-03-05 17:58:17,742] INFO agent_registry: Агент зарегистрирован: account_manager (account_management, email_code)\n[2026-03-05 17:58:17,742] INFO agent_registry: Агент зарегистрирован: browser_agent (browse, web_scrape, form_fill, register_with_email)\n[2026-03-05 17:58:17,742] INFO agent_registry: Агент зарегистрирован: publisher_agent (publish, wordpress)\n[2026-03-05 17:58:17,742] INFO agent_registry: Агент зарегистрирован: quality_judge (quality_review, content_check)\n[2026-03-05 17:58:17,752] INFO self_updater: SelfUpdater инициализирован\n[2026-03-05 17:58:17,756] INFO self_healer: SelfHealer инициализирован\n[2026-03-05 17:58:17,756] INFO code_generator: CodeGenerator инициализирован\n[2026-03-05 17:58:17,757] INFO knowledge_updater: KnowledgeUpdater инициализирован\n[2026-03-05 17:58:18,069] INFO memory_manager: ChromaDB подключён: /home/vito/vito-agent/memory/chroma_db\nBoth GOOGLE_API_KEY and GEMINI_API_KEY are set. Using GOOGLE_API_KEY.\n[2026-03-05 17:58:19,522] WARNING memory_manager: Chroma embedding dimension mismatch detected; switching to text-only mode\n[2026-03-05 17:58:19,973] INFO memory_manager: Знание сохранено: commerce_calendar\n[2026-03-05 17:58:19,978] INFO conversation_engine: ConversationEngine инициализирован\n[2026-03-05 17:58:19,979] INFO judge_protocol: JudgeProtocol инициализирован\n[2026-03-05 17:58:20,044] INFO decision_loop: DecisionLoop инициализирован\n[2026-03-05 17:58:20,085] INFO comms_agent: Команда /status выполнена\n[2026-03-05 17:58:20,088] INFO main: VITO завершает работу...\n[2026-03-05 17:58:20,088] INFO decision_loop: Decision Loop остановлен\n[2026-03-05 17:58:20,089] INFO memory_manager: SQLite закрыт\n[2026-03-05 17:58:20,089] INFO main: VITO остановлен",
+      "payload": {
+        "timestamp": "2026-03-05T17:58:20.058728+00:00",
+        "scenario": "smoke",
+        "mode": "local_owner_simulator",
+        "steps": [
+          {
+            "id": "S01",
+            "input": "/start",
+            "reply_text": "VITO на связи.\n\nЧтобы не путаться в командах:\n/help — обзор\n/help_daily — ежедневные\n/help_rare — редкие\n/help_system — системные\n\nБыстрый старт:\n/status, /goals, /goal <текст>",
+            "pass": true,
+            "reasons": [],
+            "at": "2026-03-05T17:58:20.059716+00:00"
+          },
+          {
+            "id": "S02",
+            "input": "/help",
+            "reply_text": "Справка по командам VITO\n\nРазделы:\n/help_daily — ежедневные команды\n/help_rare — редкие команды\n/help_system — системные/осторожные\n\nТочечно по команде:\n/help status\n/help goal\n/help backup\n\nБыстрый старт:\n1) /status\n2) /goals\n3) /goal <что сделать>\n4) /approve или /reject",
+            "pass": true,
+            "reasons": [],
+            "at": "2026-03-05T17:58:20.060277+00:00"
+          },
+          {
+            "id": "S03",
+            "input": "/status",
+            "reply_text": "VITO Status\n\nDecision Loop: остановлен\nТиков: 0\nПотрачено сегодня: $0.00\n\nЦели: 0 всего, 0 выполнено, 0 в работе, 0 ожидают, 0 ждут одобрения",
+            "pass": true,
+            "reasons": [],
+            "at": "2026-03-05T17:58:20.085327+00:00"
+          },
+          {
+            "id": "S04",
+            "input": "задачи",
+            "reply_text": "Нет активных задач.",
+            "pass": true,
+            "reasons": [],
+            "at": "2026-03-05T17:58:20.088721+00:00"
+          }
+        ],
+        "summary": {
+          "passed": 4,
+          "failed": 0,
+          "total": 4
+        }
+      }
+    },
+    {
+      "cmd": "python3 scripts/telegram_owner_simulator.py --scenario platform_context",
+      "rc": 0,
+      "report_path": "/home/vito/vito-agent/reports/VITO_TG_OWNER_SIM_platform_context_2026-03-05_1758UTC.json",
+      "stdout_tail": "[2026-03-05 17:58:23,559] INFO agent_registry: Агент зарегистрирован: browser_agent (browse, web_scrape, form_fill, register_with_email)\n[2026-03-05 17:58:23,559] INFO agent_registry: Агент зарегистрирован: publisher_agent (publish, wordpress)\n[2026-03-05 17:58:23,559] INFO agent_registry: Агент зарегистрирован: quality_judge (quality_review, content_check)\n[2026-03-05 17:58:23,568] INFO self_updater: SelfUpdater инициализирован\n[2026-03-05 17:58:23,572] INFO self_healer: SelfHealer инициализирован\n[2026-03-05 17:58:23,573] INFO code_generator: CodeGenerator инициализирован\n[2026-03-05 17:58:23,573] INFO knowledge_updater: KnowledgeUpdater инициализирован\n[2026-03-05 17:58:23,893] INFO memory_manager: ChromaDB подключён: /home/vito/vito-agent/memory/chroma_db\nBoth GOOGLE_API_KEY and GEMINI_API_KEY are set. Using GOOGLE_API_KEY.\n[2026-03-05 17:58:25,520] WARNING memory_manager: Chroma embedding dimension mismatch detected; switching to text-only mode\n[2026-03-05 17:58:25,992] INFO memory_manager: Знание сохранено: commerce_calendar\n[2026-03-05 17:58:25,997] INFO conversation_engine: ConversationEngine инициализирован\n[2026-03-05 17:58:25,997] INFO judge_protocol: JudgeProtocol инициализирован\n[2026-03-05 17:58:26,056] INFO decision_loop: DecisionLoop инициализирован\n[2026-03-05 17:58:30,857] INFO memory_manager: Навык сохранён: service_context_tracking\n[2026-03-05 17:58:30,867] INFO memory_manager: Паттерн сохранён: owner_context/service_context_tracking\n[2026-03-05 17:58:30,870] INFO memory_manager: Паттерн сохранён: anti_pattern/service_context_tracking_anti\n[2026-03-05 17:58:40,742] INFO memory_manager: Навык сохранён: contextual_service_inventory_resolution\n[2026-03-05 17:58:40,751] INFO memory_manager: Паттерн сохранён: owner_context/contextual_service_inventory_resolution\n[2026-03-05 17:58:40,754] INFO memory_manager: Паттерн сохранён: anti_pattern/contextual_service_inventory_resolution_anti\n[2026-03-05 17:58:50,636] INFO memory_manager: Навык сохранён: contextual_service_inventory_resolution\n[2026-03-05 17:58:50,647] INFO memory_manager: Паттерн сохранён: owner_context/contextual_service_inventory_resolution\n[2026-03-05 17:58:50,651] INFO memory_manager: Паттерн сохранён: anti_pattern/contextual_service_inventory_resolution_anti\n[2026-03-05 17:58:50,980] INFO memory_manager: Навык сохранён: service_context_tracking\n[2026-03-05 17:58:50,989] INFO memory_manager: Паттерн сохранён: owner_context/service_context_tracking\n[2026-03-05 17:58:50,992] INFO memory_manager: Паттерн сохранён: anti_pattern/service_context_tracking_anti\n[2026-03-05 17:58:50,993] INFO main: VITO завершает работу...\n[2026-03-05 17:58:50,993] INFO decision_loop: Decision Loop остановлен\n[2026-03-05 17:58:50,994] INFO memory_manager: SQLite закрыт\n[2026-03-05 17:58:50,994] INFO main: VITO остановлен",
+      "payload": {
+        "timestamp": "2026-03-05T17:58:26.071625+00:00",
+        "scenario": "platform_context",
+        "mode": "local_owner_simulator",
+        "steps": [
+          {
+            "id": "P01",
+            "input": "зайди на амазон",
+            "reply_text": "Amazon KDP: активная сессия уже подтверждена, повторный логин не требуется.",
+            "pass": true,
+            "reasons": [],
+            "at": "2026-03-05T17:58:30.870485+00:00"
+          },
+          {
+            "id": "P02",
+            "input": "статус аккаунта",
+            "reply_text": "Amazon KDP: состояние аккаунта\n- Товаров/книг: 3\n- Примеры:\n  - Edit paperback content\n  - Edit paperback rights & pricing\n  - Continue setup",
+            "pass": true,
+            "reasons": [],
+            "at": "2026-03-05T17:58:40.755002+00:00"
+          },
+          {
+            "id": "P03",
+            "input": "проверь есть ли там товары",
+            "reply_text": "Amazon KDP: состояние аккаунта\n- Товаров/книг: 3\n- Примеры:\n  - Edit paperback content\n  - Edit paperback rights & pricing\n  - Continue setup",
+            "pass": true,
+            "reasons": [],
+            "at": "2026-03-05T17:58:50.651693+00:00"
+          },
+          {
+            "id": "P04",
+            "input": "зайди на укр нет",
+            "reply_text": "Открой вход в Сайт ukr.net, авторизуйся, затем нажми «Я вошел».",
+            "pass": true,
+            "reasons": [],
+            "at": "2026-03-05T17:58:50.993359+00:00"
+          }
+        ],
+        "summary": {
+          "passed": 4,
+          "failed": 0,
+          "total": 4
+        }
+      }
+    },
+    {
+      "cmd": "python3 scripts/live_publish_matrix.py --live",
+      "rc": 0,
+      "report_path": "/home/vito/vito-agent/reports/VITO_PUBLISH_MATRIX_LIVE_2026-03-05_1801UTC.json",
+      "stdout_tail": "/home/vito/vito-agent/reports/VITO_PUBLISH_MATRIX_LIVE_2026-03-05_1801UTC.json\n[2026-03-05 17:58:52,683] WARNING twitter: Twitter auth failed: 401 {\n  \"title\": \"Unauthorized\",\n  \"type\": \"about:blank\",\n  \"status\": 401,\n  \"detail\": \"Unauthorized\"\n}\n[2026-03-05 17:58:52,795] WARNING twitter: Twitter auth failed: 401 {\n  \"title\": \"Unauthorized\",\n  \"type\": \"about:blank\",\n  \"status\": 401,\n  \"detail\": \"Unauthorized\"\n}\n[2026-03-05 18:01:28,560] INFO printful: Printful авторизация успешна\n[2026-03-05 18:01:29,053] INFO kofi: Ko-fi page verified: C0C71UMWP4\n[2026-03-05 18:01:29,053] INFO kofi: Ko-fi product prepared (manual upload needed): VITO Probe 20260305-175852\n[2026-03-05 18:01:29,085] INFO wordpress: WordPress not configured (no URL or password)",
+      "payload": {
+        "timestamp": "2026-03-05T17:58:52.544908+00:00",
+        "mode": "live",
+        "results": [
+          {
+            "platform": "twitter",
+            "auth_ok": false,
+            "publish": {
+              "platform": "twitter",
+              "status": "not_authenticated"
+            }
+          },
+          {
+            "platform": "reddit",
+            "auth_ok": false,
+            "publish": {
+              "platform": "reddit",
+              "status": "not_authenticated"
+            }
+          },
+          {
+            "platform": "etsy",
+            "auth_ok": true,
+            "publish": {
+              "platform": "etsy",
+              "status": "prepared",
+              "mode": "browser_only",
+              "url": "https://www.etsy.com/your/shops/me/listing-editor/create#details",
+              "screenshot_path": "/home/vito/vito-agent/runtime/etsy_browser_publish.png",
+              "note": "Draft editor opened and fields filled; listing_id not detected yet."
+            }
+          },
+          {
+            "platform": "printful",
+            "auth_ok": true,
+            "publish": {
+              "platform": "printful",
+              "status": "needs_browser_flow",
+              "error": "Store type 'etsy' does not support create via /store/products API. Use browser flow in Printful dashboard (linked Etsy store).",
+              "store_type": "etsy",
+              "sync_probe": {
+                "ok": true,
+                "count": 0
+              }
+            }
+          },
+          {
+            "platform": "kofi",
+            "auth_ok": true,
+            "publish": {
+              "platform": "kofi",
+              "status": "prepared",
+              "title": "VITO Probe 20260305-175852",
+              "price": 1,
+              "description": "Automated probe product",
+              "shop_url": "https://ko-fi.com/s/C0C71UMWP4",
+              "note": "Ko-fi has no public product API. Use browser automation or manual upload."
+            }
+          },
+          {
+            "platform": "wordpress",
+            "auth_ok": false,
+            "publish": {
+              "platform": "wordpress",
+              "status": "not_configured",
+              "error": "Set WORDPRESS_URL and WORDPRESS_APP_PASSWORD in .env"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "cmd": "python3 scripts/live_agent_platform_audit.py",
+      "rc": 0,
+      "report_path": "/home/vito/vito-agent/reports/VITO_AGENT_PLATFORM_LIVE_AUDIT_2026-03-05_1804UTC.json",
+      "stdout_tail": "[2026-03-05 18:01:33,395] INFO gumroad: Gumroad: 2 продуктов\n[2026-03-05 18:01:34,100] INFO gumroad: Gumroad: open new product page\n[2026-03-05 18:01:43,907] WARNING ecommerce_agent: Листинг НЕ создан на gumroad: daily_limit\n[2026-03-05 18:01:44,332] INFO printful: Printful авторизация успешна\n[2026-03-05 18:01:44,726] WARNING ecommerce_agent: Листинг НЕ создан на printful: needs_browser_flow\n[2026-03-05 18:04:20,213] INFO ecommerce_agent: Листинг создан на etsy\n[2026-03-05 18:04:20,296] INFO kofi: Ko-fi page verified: C0C71UMWP4\n[2026-03-05 18:04:20,297] INFO kofi: Ko-fi product prepared (manual upload needed): VITO Agent Audit Product 20260305-180130\n[2026-03-05 18:04:20,317] INFO ecommerce_agent: Листинг создан на kofi\n[2026-03-05 18:04:20,325] INFO quality_judge: Quality review: score=8, approved=True, threshold=7\n[2026-03-05 18:04:20,325] INFO publisher_agent: Опубликовано на WordPress: VITO Agent Audit Post 20260305-180130\n[2026-03-05 18:04:20,472] WARNING twitter: Twitter auth failed: 401 {\n  \"title\": \"Unauthorized\",\n  \"type\": \"about:blank\",\n  \"status\": 401,\n  \"detail\": \"Unauthorized\"\n}\n[2026-03-05 18:04:20,654] INFO gumroad: Gumroad авторизация: VITO\n[2026-03-05 18:04:20,713] INFO kofi: Ko-fi page verified: C0C71UMWP4\n[2026-03-05 18:04:21,136] INFO printful: Printful авторизация успешна\n[2026-03-05 18:04:21,136] INFO wordpress: WordPress not configured (no URL or password)\nException ignored in: <function BaseSubprocessTransport.__del__ at 0xe591968f2e80>\nTraceback (most recent call last):\n  File \"/usr/lib/python3.12/asyncio/base_subprocess.py\", line 126, in __del__\n  File \"/usr/lib/python3.12/asyncio/base_subprocess.py\", line 104, in close\n  File \"/usr/lib/python3.12/asyncio/unix_events.py\", line 767, in close\n  File \"/usr/lib/python3.12/asyncio/unix_events.py\", line 753, in write_eof\n  File \"/usr/lib/python3.12/asyncio/base_events.py\", line 795, in call_soon\n  File \"/usr/lib/python3.12/asyncio/base_events.py\", line 541, in _check_closed\nRuntimeError: Event loop is closed",
+      "payload": {
+        "timestamp": "2026-03-05T18:01:30.270949+00:00",
+        "mode": "live_agent_platform_audit",
+        "checks": [
+          {
+            "agent": "browser_agent",
+            "capability": "browse",
+            "target": "https://example.com",
+            "result": {
+              "success": true,
+              "error": "",
+              "output": {
+                "url": "https://example.com",
+                "title": "Example Domain",
+                "status": 200
+              },
+              "metadata": {}
+            }
+          },
+          {
+            "agent": "smm_agent",
+            "capability": "social_media",
+            "target": "twitter",
+            "result": {
+              "success": false,
+              "error": "twitter_not_authenticated",
+              "output": null,
+              "metadata": {
+                "platform": "twitter",
+                "published": false,
+                "file_path": "/home/vito/vito-agent/output/social/twitter_1772733692.txt",
+                "approval_skipped": true
+              }
+            }
+          },
+          {
+            "agent": "ecommerce_agent",
+            "capability": "listing_create",
+            "target": "gumroad",
+            "result": {
+              "success": false,
+              "error": "new_product_form_unavailable",
+              "output": {
+                "platform": "gumroad",
+                "status": "daily_limit",
+                "error": "new_product_form_unavailable",
+                "screenshot_path": ""
+              },
+              "metadata": {}
+            }
+          },
+          {
+            "agent": "ecommerce_agent",
+            "capability": "listing_create",
+            "target": "printful",
+            "result": {
+              "success": false,
+              "error": "Store type 'etsy' does not support create via /store/products API. Use browser flow in Printful dashboard (linked Etsy store).",
+              "output": {
+                "platform": "printful",
+                "status": "needs_browser_flow",
+                "error": "Store type 'etsy' does not support create via /store/products API. Use browser flow in Printful dashboard (linked Etsy store).",
+                "store_type": "etsy",
+                "sync_probe": {
+                  "ok": true,
+                  "count": 0
+                }
+              },
+              "metadata": {}
+            }
+          },
+          {
+            "agent": "ecommerce_agent",
+            "capability": "listing_create",
+            "target": "etsy",
+            "result": {
+              "success": true,
+              "error": "",
+              "output": {
+                "platform": "etsy",
+                "status": "prepared",
+                "mode": "browser_only",
+                "url": "https://www.etsy.com/your/shops/me/listing-editor/create#details",
+                "screenshot_path": "/home/vito/vito-agent/runtime/etsy_browser_publish.png",
+                "note": "Draft editor opened and fields filled; listing_id not detected yet."
+              },
+              "metadata": {}
+            }
+          },
+          {
+            "agent": "ecommerce_agent",
+            "capability": "listing_create",
+            "target": "kofi",
+            "result": {
+              "success": true,
+              "error": "",
+              "output": {
+                "platform": "kofi",
+                "status": "prepared",
+                "title": "VITO Agent Audit Product 20260305-180130",
+                "price": 1,
+                "description": "VITO Agent Audit Product 20260305-180130. Practical digital product focused on clear outcomes, fast onboarding, and repeatable execution workflow. Includes: vito, agent, audit, product, 20260305-180130, live, probe. Suitable for creators, solo founders, and automation-first teams.",
+                "shop_url": "https://ko-fi.com/s/C0C71UMWP4",
+                "note": "Ko-fi has no public product API. Use browser automation or manual upload."
+              },
+              "metadata": {}
+            }
+          },
+          {
+            "agent": "publisher_agent",
+            "capability": "publish",
+            "target": "wordpress",
+            "result": {
+              "success": true,
+              "error": "",
+              "output": {
+                "platform": "wordpress",
+                "status": "not_configured",
+                "error": "Set WORDPRESS_URL and WORDPRESS_APP_PASSWORD in .env"
+              },
+              "metadata": {}
+            }
+          }
+        ],
+        "direct_platform_probes": [
+          {
+            "platform": "twitter",
+            "auth_ok": false,
+            "auth_error": ""
+          },
+          {
+            "platform": "reddit",
+            "auth_ok": false,
+            "auth_error": ""
+          },
+          {
+            "platform": "etsy",
+            "auth_ok": true,
+            "auth_error": ""
+          },
+          {
+            "platform": "gumroad",
+            "auth_ok": true,
+            "auth_error": ""
+          },
+          {
+            "platform": "kofi",
+            "auth_ok": true,
+            "auth_error": ""
+          },
+          {
+            "platform": "printful",
+            "auth_ok": true,
+            "auth_error": ""
+          },
+          {
+            "platform": "wordpress",
+            "auth_ok": false,
+            "auth_error": ""
+          }
+        ],
+        "summary": {
+          "total_agent_checks": 7,
+          "combat_path_responding": 5,
+          "responding_percent": 71.43
+        }
+      }
+    },
+    {
+      "cmd": "python3 scripts/social_live_probe.py",
+      "rc": 0,
+      "report_path": "/home/vito/vito-agent/reports/VITO_SOCIAL_LIVE_PROBE_2026-03-05_1804UTC.json",
+      "stdout_tail": "/home/vito/vito-agent/reports/VITO_SOCIAL_LIVE_PROBE_2026-03-05_1804UTC.json",
+      "payload": {
+        "timestamp": "2026-03-05T18:04:21.715010+00:00",
+        "steps": [
+          {
+            "platform": "threads",
+            "auth_ok": false
+          },
+          {
+            "platform": "reddit",
+            "auth_ok": false
+          },
+          {
+            "platform": "tiktok",
+            "auth_ok": false
+          },
+          {
+            "platform": "twitter",
+            "skipped": true,
+            "reason": "not_configured_or_not_allowed"
+          }
+        ]
+      }
+    }
+  ],
+  "summary": {
+    "tg_smoke_passed": true,
+    "tg_platform_context_passed": true,
+    "publish_matrix_ready": {
+      "twitter": {
+        "auth_ok": false,
+        "status": "not_authenticated",
+        "error": ""
+      },
+      "reddit": {
+        "auth_ok": false,
+        "status": "not_authenticated",
+        "error": ""
+      },
+      "etsy": {
+        "auth_ok": true,
+        "status": "prepared",
+        "error": ""
+      },
+      "printful": {
+        "auth_ok": true,
+        "status": "needs_browser_flow",
+        "error": "Store type 'etsy' does not support create via /store/products API. Use browser flow in Printful dashboard (linked Etsy store)."
+      },
+      "kofi": {
+        "auth_ok": true,
+        "status": "prepared",
+        "error": ""
+      },
+      "wordpress": {
+        "auth_ok": false,
+        "status": "not_configured",
+        "error": "Set WORDPRESS_URL and WORDPRESS_APP_PASSWORD in .env"
+      }
+    },
+    "agent_audit_responding_percent": 71.43,
+    "social_auth": {
+      "threads": {
+        "auth_ok": false,
+        "skipped": false
+      },
+      "reddit": {
+        "auth_ok": false,
+        "skipped": false
+      },
+      "tiktok": {
+        "auth_ok": false,
+        "skipped": false
+      },
+      "twitter": {
+        "auth_ok": false,
+        "skipped": true
+      }
+    }
+  }
+}
