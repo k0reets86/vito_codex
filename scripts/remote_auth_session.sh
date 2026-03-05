@@ -104,6 +104,9 @@ capture_cmd_for_service() {
     kofi)
       echo "DISPLAY=$DISPLAY_NUM python3 $ROOT_DIR/scripts/kofi_auth_helper.py browser-capture --timeout-sec 1200 --storage-path $ROOT_DIR/runtime/kofi_storage_state.json --auto-submit"
       ;;
+    printful)
+      echo "DISPLAY=$DISPLAY_NUM python3 $ROOT_DIR/scripts/printful_auth_helper.py browser-capture --timeout-sec 1200 --storage-path $ROOT_DIR/runtime/printful_storage_state.json --auto-submit"
+      ;;
     *)
       exit 2
       ;;

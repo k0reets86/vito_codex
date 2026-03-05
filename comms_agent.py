@@ -1165,6 +1165,8 @@ class CommsAgent:
             raw = str(getattr(settings, "ETSY_STORAGE_STATE_FILE", "runtime/etsy_storage_state.json") or "runtime/etsy_storage_state.json")
         elif svc == "kofi":
             raw = str(getattr(settings, "KOFI_STORAGE_STATE_FILE", "runtime/kofi_storage_state.json") or "runtime/kofi_storage_state.json")
+        elif svc == "printful":
+            raw = str(getattr(settings, "PRINTFUL_STORAGE_STATE_FILE", "runtime/printful_storage_state.json") or "runtime/printful_storage_state.json")
         if not raw:
             return None
         p = Path(raw)
@@ -1222,7 +1224,12 @@ class CommsAgent:
                 p = PrintfulPlatform()
                 ok = await p.authenticate()
                 await p.close()
-                return ok, ("Printful авторизация подтверждена." if ok else "Printful авторизация не подтверждена.")
+                if ok:
+                    return True, "Printful авторизация подтверждена."
+                has_storage, _ = self._has_cookie_storage_state("printful")
+                if has_storage:
+                    return True, "Printful: browser storage_state зафиксирован."
+                return False, "Printful авторизация не подтверждена."
             except Exception:
                 return False, "Ошибка проверки Printful."
         if svc == "gumroad":
@@ -1325,7 +1332,7 @@ class CommsAgent:
             # Всегда продолжаем в полноценный auth flow.
 
         # Browser-capture remote flow for key platforms with server-side session files.
-        if svc in {"etsy", "amazon_kdp", "kofi"}:
+        if svc in {"etsy", "amazon_kdp", "kofi", "printful"}:
             rc, out = await self._run_remote_auth_session(svc, "start")
             if rc == 0:
                 kv = self._parse_remote_kv(out)
@@ -4410,9 +4417,9 @@ class CommsAgent:
             return
 
         if action == "remote":
-            if service not in {"etsy", "amazon_kdp", "kofi"}:
+            if service not in {"etsy", "amazon_kdp", "kofi", "printful"}:
                 await update.message.reply_text(
-                    "Remote browser-сессия сейчас поддержана для Etsy/Amazon KDP/Ko-fi.",
+                    "Remote browser-сессия сейчас поддержана для Etsy/Amazon KDP/Ko-fi/Printful.",
                     reply_markup=self._main_keyboard(),
                 )
                 return

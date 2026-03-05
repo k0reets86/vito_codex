@@ -55,6 +55,7 @@ class TestPrintfulPublish:
     async def test_publish_store_restriction_returns_needs_browser_flow(self, printful):
         printful._authenticated = True
         printful._store_id = "1"
+        printful._store_type = "api"
 
         class _Resp:
             status = 400
@@ -79,6 +80,16 @@ class TestPrintfulPublish:
         printful._get_session = AsyncMock(return_value=_Sess())
         result = await printful.publish({"sync_product": {"name": "VITO Probe"}})
         assert result["status"] == "needs_browser_flow"
+
+    @pytest.mark.asyncio
+    async def test_publish_non_api_store_type_requires_browser_flow(self, printful):
+        printful._authenticated = True
+        printful._store_id = "17803130"
+        printful._store_type = "etsy"
+        printful._sync_products_probe = AsyncMock(return_value={"ok": True, "count": 0})
+        result = await printful.publish({"sync_product": {"name": "VITO Probe"}})
+        assert result["status"] == "needs_browser_flow"
+        assert result["store_type"] == "etsy"
 
 
 class TestPrintfulAnalytics:

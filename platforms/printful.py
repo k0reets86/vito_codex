@@ -1,10 +1,13 @@
 """PrintfulPlatform — интеграция с Printful REST API (print-on-demand)."""
 
+import json
 from typing import Any
+from pathlib import Path
 
 import aiohttp
 
 from config.logger import get_logger
+from config.paths import PROJECT_ROOT
 from config.settings import settings
 from platforms.base_platform import BasePlatform
 from modules.execution_facts import ExecutionFacts
@@ -18,6 +21,13 @@ class PrintfulPlatform(BasePlatform):
         super().__init__(name="printful", **kwargs)
         self._api_key = getattr(settings, "PRINTFUL_API_KEY", "")
         self._store_id = str(getattr(settings, "PRINTFUL_STORE_ID", "") or "")
+        self._mode: str = str(getattr(settings, "PRINTFUL_MODE", "api") or "api").strip().lower()
+        self._storage_state_path = Path(
+            str(getattr(settings, "PRINTFUL_STORAGE_STATE_FILE", "runtime/printful_storage_state.json") or "runtime/printful_storage_state.json")
+        )
+        if not self._storage_state_path.is_absolute():
+            self._storage_state_path = PROJECT_ROOT / self._storage_state_path
+        self._store_type: str = ""
         self._session: aiohttp.ClientSession | None = None
 
     def _headers(self) -> dict[str, str]:
@@ -33,6 +43,18 @@ class PrintfulPlatform(BasePlatform):
 
     async def authenticate(self) -> bool:
         """GET /stores — проверка токена и доступных stores."""
+        if self._mode in {"browser", "browser_only"}:
+            if not self._storage_state_path.exists():
+                self._authenticated = False
+                return False
+            try:
+                data = json.loads(self._storage_state_path.read_text(encoding="utf-8"))
+                cookies = data.get("cookies") if isinstance(data, dict) else None
+                self._authenticated = bool(isinstance(cookies, list) and cookies)
+                return self._authenticated
+            except Exception:
+                self._authenticated = False
+                return False
         if not self._api_key:
             self._authenticated = False
             return False
@@ -49,10 +71,16 @@ class PrintfulPlatform(BasePlatform):
                     sid = first.get("id")
                     if sid is not None:
                         self._store_id = str(sid)
+                for st in stores:
+                    if not isinstance(st, dict):
+                        continue
+                    if str(st.get("id", "")) == str(self._store_id):
+                        self._store_type = str(st.get("type", "") or "")
+                        break
                 self._authenticated = True
                 logger.info(
                     "Printful авторизация успешна",
-                    extra={"event": "printful_auth_ok", "context": {"stores": len(stores), "store_id": self._store_id}},
+                    extra={"event": "printful_auth_ok", "context": {"stores": len(stores), "store_id": self._store_id, "store_type": self._store_type}},
                 )
                 return True
         except Exception as e:
@@ -60,8 +88,29 @@ class PrintfulPlatform(BasePlatform):
             self._authenticated = False
             return False
 
+    async def _sync_products_probe(self) -> dict[str, Any]:
+        if not self._store_id:
+            return {"ok": False, "error": "no_store_id"}
+        try:
+            session = await self._get_session()
+            async with session.get(f"{API_BASE}/sync/products", params={"store_id": self._store_id}) as resp:
+                data = await resp.json()
+                if resp.status != 200:
+                    return {"ok": False, "status": resp.status, "error": str((data or {}).get("error", {}))}
+                result = (data or {}).get("result", []) if isinstance(data, dict) else []
+                return {"ok": True, "count": len(result) if isinstance(result, list) else 0}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     async def publish(self, content: dict) -> dict:
         """POST /store/products — создание продукта."""
+        if self._mode in {"browser", "browser_only"}:
+            return {
+                "platform": "printful",
+                "status": "needs_browser_flow",
+                "error": "Printful browser publish path requires dedicated UI runner. Auth can be captured via scripts/printful_auth_helper.py.",
+                "storage_state": str(self._storage_state_path),
+            }
         if content.get("dry_run"):
             name = (content.get("sync_product", {}) or {}).get("name", "printful_dryrun")
             try:
@@ -86,6 +135,18 @@ class PrintfulPlatform(BasePlatform):
             return {"platform": "printful", "status": "not_authenticated"}
         if not self._store_id:
             return {"platform": "printful", "status": "error", "error": "no_store_connected"}
+        if self._store_type and self._store_type != "api":
+            probe = await self._sync_products_probe()
+            return {
+                "platform": "printful",
+                "status": "needs_browser_flow",
+                "error": (
+                    f"Store type '{self._store_type}' does not support create via /store/products API. "
+                    "Use browser flow in Printful dashboard (linked Etsy store)."
+                ),
+                "store_type": self._store_type,
+                "sync_probe": probe,
+            }
         try:
             session = await self._get_session()
             async with session.post(f"{API_BASE}/store/products", params={"store_id": self._store_id}, json=content) as resp:
