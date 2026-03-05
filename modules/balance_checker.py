@@ -241,67 +241,47 @@ class BalanceChecker:
         return ServiceBalance(name="perplexity", details={"status": "active", "note": "no balance endpoint"})
 
     async def _check_gumroad(self) -> ServiceBalance:
-        try:
-            from platforms.gumroad import GumroadPlatform
-            p = GumroadPlatform()
-            ok = await p.authenticate()
-            return ServiceBalance(name="gumroad", details={"status": "active" if ok else "not_authenticated"})
-        except Exception as e:
-            return ServiceBalance(name="gumroad", error=str(e))
+        from platforms.gumroad import GumroadPlatform
+        return await self._check_platform_auth("gumroad", GumroadPlatform)
 
     async def _check_kofi(self) -> ServiceBalance:
-        try:
-            from platforms.kofi import KofiPlatform
-            p = KofiPlatform()
-            ok = await p.authenticate()
-            return ServiceBalance(name="kofi", details={"status": "active" if ok else "not_authenticated"})
-        except Exception as e:
-            return ServiceBalance(name="kofi", error=str(e))
+        from platforms.kofi import KofiPlatform
+        return await self._check_platform_auth("kofi", KofiPlatform)
 
     async def _check_etsy(self) -> ServiceBalance:
-        try:
-            from platforms.etsy import EtsyPlatform
-            p = EtsyPlatform()
-            ok = await p.authenticate()
-            return ServiceBalance(name="etsy", details={"status": "active" if ok else "not_authenticated"})
-        except Exception as e:
-            return ServiceBalance(name="etsy", error=str(e))
+        from platforms.etsy import EtsyPlatform
+        return await self._check_platform_auth("etsy", EtsyPlatform)
 
     async def _check_printful(self) -> ServiceBalance:
-        try:
-            from platforms.printful import PrintfulPlatform
-            p = PrintfulPlatform()
-            ok = await p.authenticate()
-            return ServiceBalance(name="printful", details={"status": "active" if ok else "not_authenticated"})
-        except Exception as e:
-            return ServiceBalance(name="printful", error=str(e))
+        from platforms.printful import PrintfulPlatform
+        return await self._check_platform_auth("printful", PrintfulPlatform)
 
     async def _check_medium(self) -> ServiceBalance:
-        try:
-            from platforms.medium import MediumPlatform
-            p = MediumPlatform()
-            ok = await p.authenticate()
-            return ServiceBalance(name="medium", details={"status": "active" if ok else "not_authenticated"})
-        except Exception as e:
-            return ServiceBalance(name="medium", error=str(e))
+        from platforms.medium import MediumPlatform
+        return await self._check_platform_auth("medium", MediumPlatform)
 
     async def _check_wordpress(self) -> ServiceBalance:
-        try:
-            from platforms.wordpress import WordPressPlatform
-            p = WordPressPlatform()
-            ok = await p.authenticate()
-            return ServiceBalance(name="wordpress", details={"status": "active" if ok else "not_authenticated"})
-        except Exception as e:
-            return ServiceBalance(name="wordpress", error=str(e))
+        from platforms.wordpress import WordPressPlatform
+        return await self._check_platform_auth("wordpress", WordPressPlatform)
 
     async def _check_twitter(self) -> ServiceBalance:
+        from platforms.twitter import TwitterPlatform
+        return await self._check_platform_auth("twitter", TwitterPlatform)
+
+    async def _check_platform_auth(self, service_name: str, platform_cls) -> ServiceBalance:
+        p = None
         try:
-            from platforms.twitter import TwitterPlatform
-            p = TwitterPlatform()
+            p = platform_cls()
             ok = await p.authenticate()
-            return ServiceBalance(name="twitter", details={"status": "active" if ok else "not_authenticated"})
+            return ServiceBalance(name=service_name, details={"status": "active" if ok else "not_authenticated"})
         except Exception as e:
-            return ServiceBalance(name="twitter", error=str(e))
+            return ServiceBalance(name=service_name, error=str(e))
+        finally:
+            try:
+                if p and hasattr(p, "close"):
+                    await p.close()
+            except Exception:
+                pass
 
     async def _check_cloudinary(self) -> ServiceBalance:
         # No simple validation without signed request

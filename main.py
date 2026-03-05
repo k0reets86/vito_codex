@@ -1415,16 +1415,62 @@ class VITO:
 
     async def shutdown(self) -> None:
         """Корректное завершение всех подсистем."""
-        if not self.running:
-            return
+        was_running = bool(self.running)
         self.running = False
-        logger.info("VITO завершает работу...", extra={"event": "shutdown_start"})
-        self.decision_loop.stop()
-        await self.registry.stop_all()
-        await self.comms.stop()
-        self.finance.close()
-        await self.memory.close()
+        logger.info("VITO завершает работу...", extra={"event": "shutdown_start", "context": {"was_running": was_running}})
+        try:
+            self.decision_loop.stop()
+        except Exception:
+            pass
+        try:
+            await self.registry.stop_all()
+        except Exception:
+            pass
+        try:
+            await self.comms.stop()
+        except Exception:
+            pass
+        try:
+            await self._close_platform_sessions()
+        except Exception:
+            pass
+        try:
+            self.finance.close()
+        except Exception:
+            pass
+        try:
+            await self.memory.close()
+        except Exception:
+            pass
         logger.info("VITO остановлен", extra={"event": "shutdown_complete"})
+
+    async def _close_platform_sessions(self) -> None:
+        """Close aiohttp-backed platform sessions to avoid leaked connectors."""
+        candidates = []
+        for name in ("_platforms_commerce", "_platforms_social"):
+            m = getattr(self, name, None)
+            if isinstance(m, dict):
+                candidates.extend(list(m.values()))
+        for name in ("_image_generator", "_youtube", "_twitter"):
+            obj = getattr(self, name, None)
+            if obj is not None:
+                candidates.append(obj)
+
+        seen: set[int] = set()
+        for obj in candidates:
+            try:
+                oid = id(obj)
+                if oid in seen:
+                    continue
+                seen.add(oid)
+                close_fn = getattr(obj, "close", None)
+                if close_fn is None:
+                    continue
+                res = close_fn()
+                if asyncio.iscoroutine(res):
+                    await res
+            except Exception:
+                continue
 
 
 async def main() -> None:

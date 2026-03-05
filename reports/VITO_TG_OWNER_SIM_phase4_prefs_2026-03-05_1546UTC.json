@@ -1,0 +1,28 @@
+{
+  "timestamp": "2026-03-05T15:46:22.809531+00:00",
+  "scenario": "phase4_prefs",
+  "mode": "local_owner_simulator",
+  "steps": [
+    {
+      "id": "PREF01",
+      "input": "/prefs",
+      "reply_text": "Предпочтения владельца: пока нет записей. Используй /pref ключ=значение.",
+      "pass": true,
+      "reasons": [],
+      "at": "2026-03-05T15:46:22.831971+00:00"
+    },
+    {
+      "id": "PREF02",
+      "input": "/prefs_metrics",
+      "reply_text": "Метрики предпочтений:\n- active_prefs: 0\n- set_events: 0\n- use_events: 0\n- deactivate_events: 0\n- auto_detect_events: 0\n- explicit_events: 0\n- correction_events: 0\n- last_updated:",
+      "pass": true,
+      "reasons": [],
+      "at": "2026-03-05T15:46:22.833705+00:00"
+    }
+  ],
+  "summary": {
+    "passed": 2,
+    "failed": 0,
+    "total": 2
+  }
+}

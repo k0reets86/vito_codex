@@ -66,6 +66,46 @@ def _builtin(name: str) -> list[Step]:
             Step("F07", "создай пост в твиттер с анонсом продукта", [], ["traceback", "exception"]),
             Step("F08", "собери аналитику по аккаунтам", [], ["traceback", "exception"]),
         ]
+    if key == "phase2_lifecycle":
+        return [
+            Step("L01", "/goal test goal from simulator", ["цель создана"], ["traceback", "exception"]),
+            Step("L02", "/status", ["vito", "статус"], ["traceback", "exception"]),
+            Step("L03", "/report", ["report", "цели"], ["traceback", "exception"]),
+            Step("L04", "/task_current", ["текущая задача", "не зафиксирована"], ["traceback", "exception"]),
+            Step("L05", "/task_replace run lifecycle check", ["заменена"], ["traceback", "exception"]),
+            Step("L06", "/task_current", ["текущая задача", "run lifecycle check"], ["traceback", "exception"]),
+            Step("L07", "/task_done", ["выполн"], ["traceback", "exception"]),
+            Step("L08", "/cancel", ["приостанов", "отменено"], ["traceback", "exception"]),
+            Step("L09", "/resume", ["возобновл", "уже работает"], ["traceback", "exception"]),
+        ]
+    if key == "phase3_approvals":
+        return [
+            Step("A00", "__seed_approval__", ["seeded"], ["traceback", "exception"]),
+            Step("A01", "/approve", ["одобрено"], ["traceback", "exception"]),
+            Step("A02", "__seed_approval__", ["seeded"], ["traceback", "exception"]),
+            Step("A03", "/reject", ["отклонено"], ["traceback", "exception"]),
+            Step("A04", "/approve", ["нет запросов"], ["traceback", "exception"]),
+            Step("A05", "/reject", ["нет запросов"], ["traceback", "exception"]),
+        ]
+    if key == "phase4_prefs":
+        return [
+            Step("PREF01", "/prefs", ["предпочтения владельца", "используй /pref"], ["traceback", "exception"]),
+            Step("PREF02", "/prefs_metrics", ["метрики предпочтений", "active_prefs"], ["traceback", "exception"]),
+        ]
+    if key == "phase6_webop":
+        return [
+            Step("W01", "/webop list", ["webop scenarios", "generic_email_signup"], ["traceback", "exception"]),
+            Step("W02", "/webop run generic_email_signup", ["webop run", "status="], ["traceback", "exception"]),
+        ]
+    if key == "phase7_observability":
+        return [
+            Step("O01", "/status", ["vito", "статус"], ["traceback", "exception"]),
+            Step("O02", "/report", ["report", "цели"], ["traceback", "exception"]),
+            Step("O03", "/health", ["health", "memory", "goals"], ["traceback", "exception"]),
+            Step("O04", "/errors", ["ошиб", "неподдерж", "модуль"], ["traceback", "exception"]),
+            Step("O05", "/balances", ["баланс", "telegram", "openrouter"], ["traceback", "exception"]),
+            Step("O06", "/logs", ["логи", "ошиб"], ["traceback", "exception"]),
+        ]
     raise ValueError(f"Unknown scenario: {name}")
 
 
@@ -82,6 +122,10 @@ def _check(text: str, expect_any: list[str], reject_any: list[str]) -> tuple[boo
 
 async def _run_step(comms, owner_id: int, text: str) -> list[str]:
     replies: list[str] = []
+    if str(text).strip() == "__seed_approval__":
+        fut = asyncio.get_running_loop().create_future()
+        comms._pending_approvals["simulated_approval"] = fut
+        return ["seeded approval request"]
 
     async def _reply_text(msg: str, **kwargs) -> None:
         replies.append(str(msg or ""))
@@ -112,6 +156,21 @@ async def _run_step(comms, owner_id: int, text: str) -> list[str]:
             "tasks": comms._cmd_tasks,
             "report": comms._cmd_report,
             "goal": comms._cmd_goal,
+            "cancel": comms._cmd_cancel,
+            "resume": comms._cmd_resume,
+            "task_current": comms._cmd_task_current,
+            "task_done": comms._cmd_task_done,
+            "task_cancel": comms._cmd_task_cancel,
+            "task_replace": comms._cmd_task_replace,
+            "approve": comms._cmd_approve,
+            "reject": comms._cmd_reject,
+            "prefs": comms._cmd_prefs,
+            "prefs_metrics": comms._cmd_prefs_metrics,
+            "webop": comms._cmd_webop,
+            "health": comms._cmd_health,
+            "errors": comms._cmd_errors,
+            "balances": comms._cmd_balances,
+            "logs": comms._cmd_logs,
         }
         handler = command_map.get(cmd)
         if handler is not None:
@@ -160,26 +219,32 @@ async def _amain() -> int:
         "summary": {"passed": 0, "failed": 0, "total": len(steps)},
     }
 
-    for st in steps:
-        replies = await _run_step(comms, owner_id, st.text)
-        joined = "\n\n".join(replies).strip()
-        ok, reasons = _check(joined, st.expect_any, st.reject_any)
-        row = {
-            "id": st.id,
-            "input": st.text,
-            "reply_text": joined,
-            "pass": bool(joined and ok),
-            "reasons": reasons if not (joined and ok) else [],
-            "at": _utc_now(),
-        }
-        if not joined:
-            row["pass"] = False
-            row["reasons"] = ["no reply"]
-        report["steps"].append(row)
-        if row["pass"]:
-            report["summary"]["passed"] += 1
-        else:
-            report["summary"]["failed"] += 1
+    try:
+        for st in steps:
+            replies = await _run_step(comms, owner_id, st.text)
+            joined = "\n\n".join(replies).strip()
+            ok, reasons = _check(joined, st.expect_any, st.reject_any)
+            row = {
+                "id": st.id,
+                "input": st.text,
+                "reply_text": joined,
+                "pass": bool(joined and ok),
+                "reasons": reasons if not (joined and ok) else [],
+                "at": _utc_now(),
+            }
+            if not joined:
+                row["pass"] = False
+                row["reasons"] = ["no reply"]
+            report["steps"].append(row)
+            if row["pass"]:
+                report["summary"]["passed"] += 1
+            else:
+                report["summary"]["failed"] += 1
+    finally:
+        try:
+            await vito.shutdown()
+        except Exception:
+            pass
 
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%MUTC")
     out = Path(args.out) if args.out else Path(root_path(f"reports/VITO_TG_OWNER_SIM_{args.scenario}_{ts}.json"))

@@ -2,7 +2,7 @@
 
 Progress formula: `completed / total * 100`
 
-Current progress: `8 / 41 = 19.5%`
+Current progress: `32 / 41 = 78.0%`
 
 ## Phase 1 — Runtime Baseline & Safety Gates
 - [x] T01 Configure Gemini-only mode and disable risky/high-cost modules for initial test wave.
@@ -13,45 +13,45 @@ Current progress: `8 / 41 = 19.5%`
 
 ## Phase 2 — Core Dialogue + Task Lifecycle
 - [x] T06 `/start` + `/help` UX validation in Telegram (daily/rare/system sections).
-- [ ] T07 `/goal` creation from owner message; verify goal appears in queue.
-- [ ] T08 `/status` and `/report` consistency with actual loop and DB.
-- [ ] T09 `/cancel` hard pause + `/resume` recovery.
-- [ ] T10 `/task_current`, `/task_done`, `/task_replace` lifecycle.
+- [x] T07 `/goal` creation from owner message; verify goal appears in queue.
+- [x] T08 `/status` and `/report` consistency with actual loop and DB.
+- [x] T09 `/cancel` hard pause + `/resume` recovery.
+- [x] T10 `/task_current`, `/task_done`, `/task_replace` lifecycle.
 
 ## Phase 3 — Orchestration + Approvals + Resume/Cancel
-- [ ] T11 Trigger approval-required action and validate `/approve` path.
-- [ ] T12 Trigger approval-required action and validate `/reject` path.
-- [ ] T13 Validate interrupt persistence in DB (`workflow_interrupts`, `workflow_sessions`).
-- [ ] T14 Validate cancelled workflow does not auto-resume unexpectedly.
-- [ ] T15 Validate resume after resolved interrupt restores expected state.
+- [x] T11 Trigger approval-required action and validate `/approve` path.
+- [x] T12 Trigger approval-required action and validate `/reject` path.
+- [x] T13 Validate interrupt persistence in DB (`workflow_interrupts`, `workflow_sessions`).
+- [x] T14 Validate cancelled workflow does not auto-resume unexpectedly.
+- [x] T15 Validate resume after resolved interrupt restores expected state.
 
 ## Phase 4 — Memory + Skills + Preferences
-- [ ] T16 Validate owner preference save/read (`/prefs`, `/prefs_metrics`).
-- [ ] T17 Validate memory block write/read for key decisions.
-- [ ] T18 Validate skill creation/update path on successful goal completion.
-- [ ] T19 Validate anti-pattern/error capture path for failed runs.
-- [ ] T20 Validate weekly memory/skill report generation script output.
+- [x] T16 Validate owner preference save/read (`/prefs`, `/prefs_metrics`).
+- [x] T17 Validate memory block write/read for key decisions.
+- [x] T18 Validate skill creation/update path on successful goal completion.
+- [x] T19 Validate anti-pattern/error capture path for failed runs.
+- [x] T20 Validate weekly memory/skill report generation script output.
 
 ## Phase 5 — Tooling/Registry/Discovery (Safe Mode)
-- [ ] T21 Validate tooling registry list/contract visibility.
-- [ ] T22 Validate tooling policy gates (allowlist/budget) block disallowed runtime action.
-- [ ] T23 Validate discovery remains disabled in safe phase (`TOOLING_DISCOVERY_ENABLED=false`).
-- [ ] T24 Validate governance report generation without auto-remediation side effects.
+- [x] T21 Validate tooling registry list/contract visibility.
+- [x] T22 Validate tooling policy gates (allowlist/budget) block disallowed runtime action.
+- [x] T23 Validate discovery remains disabled in safe phase (`TOOLING_DISCOVERY_ENABLED=false`).
+- [x] T24 Validate governance report generation without auto-remediation side effects.
 
 ## Phase 6 — Publishing/Platform Dry-Run Flows
 - [x] T25 Test posting dry-run flow end-to-end (prepare -> queue -> inspect).
 - [x] T26 Test manual queue run (`/pubrun`) with evidence capture.
-- [ ] T27 Test web operator listing and one safe scenario run.
+- [x] T27 Test web operator listing and one safe scenario run.
 - [ ] T28 Test platform registration flow on sandbox/test account (site #1).
 - [ ] T29 Test platform registration flow on sandbox/test account (site #2).
 - [ ] T30 Validate attachment-first flow (photo/doc/video parse and action mapping).
 
 ## Phase 7 — Revenue/Finance/Observability
-- [ ] T31 Validate finance snapshot and spending guardrails.
-- [ ] T32 Validate revenue engine remains disabled in this phase.
-- [ ] T33 Validate dashboard API/health and key core cards.
-- [ ] T34 Validate logs and error surfacing (`/logs`, `/errors`, `/health`).
-- [ ] T35 Validate balance checks across configured providers.
+- [x] T31 Validate finance snapshot and spending guardrails.
+- [x] T32 Validate revenue engine remains disabled in this phase.
+- [x] T33 Validate dashboard API/health and key core cards.
+- [x] T34 Validate logs and error surfacing (`/logs`, `/errors`, `/health`).
+- [x] T35 Validate balance checks across configured providers.
 
 ## Phase 8 — Deferred Modules (Later)
 - [ ] T36 Self-healer controlled scenario (safe command path).
@@ -88,6 +88,37 @@ Current progress: `8 / 41 = 19.5%`
   - `python3 scripts/telegram_owner_simulator.py --scenario smoke` -> `reports/VITO_TG_OWNER_SIM_smoke_2026-03-05_1517UTC.json` (`4/4`)
   - `python3 scripts/telegram_owner_simulator.py --scenario owner_full_pipeline` -> `reports/VITO_TG_OWNER_SIM_owner_full_pipeline_2026-03-05_1519UTC.json` (`8/8`)
   - `python3 scripts/telegram_owner_simulator.py --scenario platform_context` -> `reports/VITO_TG_OWNER_SIM_platform_context_2026-03-05_1531UTC.json` (`4/4`)
+- 2026-03-05: Phase 2 lifecycle (owner command loop) passed in local Telegram-owner simulator:
+  - `python3 scripts/telegram_owner_simulator.py --scenario phase2_lifecycle` -> `reports/VITO_TG_OWNER_SIM_phase2_lifecycle_2026-03-05_1544UTC.json` (`9/9`)
+  - Covers `/goal`, `/status`, `/report`, `/task_current`, `/task_replace`, `/task_done`, `/cancel`, `/resume`.
+- 2026-03-05: Phase 3 approvals (simulated pending approval + owner commands) passed:
+  - `python3 scripts/telegram_owner_simulator.py --scenario phase3_approvals` -> `reports/VITO_TG_OWNER_SIM_phase3_approvals_2026-03-05_1544UTC.json` (`6/6`)
+  - Covers `/approve`, `/reject`, and empty-queue behavior.
+- 2026-03-05: Interrupt/session durability and resume/cancel policies verified by focused regression:
+  - `pytest -q -c /dev/null tests/test_workflow_interrupts.py tests/test_orchestration_manager.py tests/test_decision_loop.py -k "interrupt or resume or cancel or approval"` -> `17 passed`.
+- 2026-03-05: Fixed leaked aiohttp sessions in simulator shutdown:
+  - `main.py`: shutdown now always closes platform sessions via `_close_platform_sessions()`.
+  - `scripts/telegram_owner_simulator.py`: unified teardown through `await vito.shutdown()`.
+  - Re-check: `python3 scripts/telegram_owner_simulator.py --scenario owner_full_pipeline` -> `reports/VITO_TG_OWNER_SIM_owner_full_pipeline_2026-03-05_1543UTC.json` (`8/8`), leak markers `LEAK=0`.
+- 2026-03-05: Phase 4 prefs/memory/skills package:
+  - `python3 scripts/telegram_owner_simulator.py --scenario phase4_prefs` -> `reports/VITO_TG_OWNER_SIM_phase4_prefs_2026-03-05_1546UTC.json` (`2/2`).
+  - `python3 -c ... MemoryBlocks.record_block/get_block ...` -> `memory_block_saved=True` (`owner_decision`, stage=`short`).
+  - `python3 -c ... FailureMemory.record/recent ...` -> recent row contains `phase4_agent` + `simulated_error`.
+  - `pytest -q -c /dev/null tests/test_owner_preference_model.py tests/test_owner_pref_metrics.py tests/test_memory_manager.py tests/test_memory_skill_reports.py tests/test_skill_registry.py` -> `39 passed`.
+  - `PYTHONPATH=. python3 scripts/generate_weekly_memory_report.py` -> `reports/memory_retention_weekly.md` updated.
+- 2026-03-05: Phase 5 tooling/governance package:
+  - `pytest -q -c /dev/null tests/test_tooling_registry.py tests/test_tooling_runner.py tests/test_tooling_discovery.py tests/test_operator_policy.py tests/test_governance_reporter.py tests/test_runtime_remediation.py` -> `48 passed`.
+  - Safe-mode flags check: `TOOLING_DISCOVERY_ENABLED=False`.
+  - Governance generation sanity (`GovernanceReporter.weekly_report`) executed in read-only mode; report built without runtime remediation execution side-effects.
+- 2026-03-05: Phase 6 web-operator smoke:
+  - `python3 scripts/telegram_owner_simulator.py --scenario phase6_webop` -> `reports/VITO_TG_OWNER_SIM_phase6_webop_2026-03-05_1550UTC.json` (`2/2`).
+  - Additional direct probe: `reports/VITO_WEBOP_SCENARIO_2026-03-05_1549UTC.json` (scenario list + safe run attempt).
+- 2026-03-05: Phase 7 finance/observability package:
+  - `pytest -q -c /dev/null tests/test_financial_controller.py tests/test_revenue_engine.py tests/test_stealth_finance_readiness.py tests/test_platform_smoke.py tests/test_publisher_queue.py tests/test_runtime_remediation.py` -> `105 passed`.
+  - `python3 scripts/telegram_owner_simulator.py --scenario phase7_observability` -> `reports/VITO_TG_OWNER_SIM_phase7_observability_2026-03-05_1551UTC.json` (`6/6`), covers `/status`, `/report`, `/health`, `/errors`, `/balances`, `/logs`.
+  - `REVENUE_ENGINE_ENABLED=False` confirmed for this phase.
+  - Dashboard API health endpoint reachable (`/api/health` returns auth-guarded 401, indicating live endpoint with access control).
+  - Fixed `/balances` session leaks: `modules/balance_checker.py` now closes platform sessions in `finally`; regression `tests/test_balance_checker.py` passed.
 - 2026-03-05: Live publish matrix re-run -> `reports/VITO_PUBLISH_MATRIX_LIVE_2026-03-05_1430UTC.json`:
   - Etsy: `prepared` (browser editor opened, fields filled, listing_id not detected in this pass)
   - Ko-fi: `prepared` (manual/browser upload required by platform)

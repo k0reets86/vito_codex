@@ -1,0 +1,12 @@
+{
+  "listed": [
+    "generic_email_signup"
+  ],
+  "result": {
+    "status": "failed",
+    "scenario": "generic_email_signup",
+    "task_type": "register_with_email",
+    "output": null,
+    "error": "All agents failed"
+  }
+}
