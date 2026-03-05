@@ -198,6 +198,7 @@ async def _amain() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--scenario", default="smoke", help="smoke | platform_context")
     ap.add_argument("--out", default="", help="Optional output report path")
+    ap.add_argument("--step-timeout", type=float, default=35.0, help="Max seconds per step")
     args = ap.parse_args()
 
     steps = _builtin(args.scenario)
@@ -225,7 +226,15 @@ async def _amain() -> int:
 
     try:
         for st in steps:
-            replies = await _run_step(comms, owner_id, st.text)
+            try:
+                replies = await asyncio.wait_for(
+                    _run_step(comms, owner_id, st.text),
+                    timeout=max(3.0, float(args.step_timeout or 35.0)),
+                )
+                timed_out = False
+            except asyncio.TimeoutError:
+                replies = []
+                timed_out = True
             joined = "\n\n".join(replies).strip()
             ok, reasons = _check(joined, st.expect_any, st.reject_any)
             row = {
@@ -234,9 +243,13 @@ async def _amain() -> int:
                 "reply_text": joined,
                 "pass": bool(joined and ok),
                 "reasons": reasons if not (joined and ok) else [],
+                "timeout": timed_out,
                 "at": _utc_now(),
             }
-            if not joined:
+            if timed_out:
+                row["pass"] = False
+                row["reasons"] = ["step timeout"]
+            elif not joined:
                 row["pass"] = False
                 row["reasons"] = ["no reply"]
             report["steps"].append(row)

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -21,18 +22,28 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def _run(cmd: list[str], timeout: int = 1200) -> tuple[int, str]:
-    p = subprocess.run(
-        cmd,
-        cwd=str(ROOT),
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
-    out = (p.stdout or "").strip()
-    err = (p.stderr or "").strip()
-    merged = (out + ("\n" + err if err else "")).strip()
-    return int(p.returncode), merged
+def _run(cmd: list[str], timeout: int = 420) -> tuple[int, str, bool]:
+    try:
+        p = subprocess.run(
+            cmd,
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        out = (p.stdout or "").strip()
+        err = (p.stderr or "").strip()
+        merged = (out + ("\n" + err if err else "")).strip()
+        return int(p.returncode), merged, False
+    except subprocess.TimeoutExpired as e:
+        tail = str((e.stdout or "")[-3000:] if isinstance(e.stdout, str) else "")
+        etail = str((e.stderr or "")[-3000:] if isinstance(e.stderr, str) else "")
+        merged = (
+            f"timeout after {timeout}s\n"
+            + (tail or "")
+            + (("\n" + etail) if etail else "")
+        ).strip()
+        return 124, merged, True
 
 
 def _find_report_path(output: str) -> str:
@@ -56,8 +67,13 @@ def _load_json(path: str) -> dict[str, Any]:
 
 
 def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--out", default="", help="Output report path")
+    ap.add_argument("--timeout", type=int, default=420, help="Per-command timeout in seconds")
+    args = ap.parse_args()
+
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%MUTC")
-    report_path = ROOT / "reports" / f"VITO_TG_GLOBAL_COMBAT_{ts}.json"
+    report_path = Path(args.out) if args.out else (ROOT / "reports" / f"VITO_TG_GLOBAL_COMBAT_{ts}.json")
 
     steps: list[dict[str, Any]] = []
 
@@ -70,13 +86,14 @@ def main() -> int:
     ]
 
     for cmd in commands:
-        rc, output = _run(cmd)
+        rc, output, timed_out = _run(cmd, timeout=max(30, int(args.timeout or 420)))
         rpath = _find_report_path(output)
         payload = _load_json(rpath)
         steps.append(
             {
                 "cmd": " ".join(cmd),
                 "rc": rc,
+                "timeout": bool(timed_out),
                 "report_path": rpath,
                 "stdout_tail": "\n".join(output.splitlines()[-30:]),
                 "payload": payload,
@@ -89,10 +106,13 @@ def main() -> int:
         "publish_matrix_ready": {},
         "agent_audit_responding_percent": 0.0,
         "social_auth": {},
+        "timeouts": 0,
     }
 
     # Parse TG scenarios
     for st in steps:
+        if st.get("timeout"):
+            summary["timeouts"] += 1
         p = st.get("payload") or {}
         scenario = str(p.get("scenario") or "")
         sm = p.get("summary") or {}
@@ -152,4 +172,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
