@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from telegram.error import BadRequest as TgBadRequest
 
+from agents.base_agent import TaskResult
 from comms_agent import CommsAgent
 from config.settings import settings
 from modules.owner_task_state import OwnerTaskState
@@ -90,6 +91,95 @@ async def test_reject_bot_sender_even_in_owner_chat(comms, mock_update):
     mock_update.effective_user.is_bot = True
     result = await comms._reject_stranger(mock_update)
     assert result is True
+
+
+@pytest.mark.asyncio
+async def test_on_attachment_document_routes_document_parse(comms, mock_update, tmp_path):
+    async def _download(custom_path: str):
+        Path(custom_path).write_text("doc body", encoding="utf-8")
+
+    tg_file = MagicMock()
+    tg_file.download_to_drive = AsyncMock(side_effect=_download)
+    doc = MagicMock()
+    doc.file_name = "sample.txt"
+    doc.file_unique_id = "doc123"
+    doc.get_file = AsyncMock(return_value=tg_file)
+
+    mock_update.message.document = doc
+    mock_update.message.photo = None
+    mock_update.message.video = None
+    mock_update.message.caption = ""
+
+    comms._agent_registry = MagicMock()
+    comms._agent_registry.dispatch = AsyncMock(return_value=TaskResult(success=True, output={"text": "parsed doc"}))
+    comms._conversation_engine = MagicMock()
+    comms._conversation_engine.process_message = AsyncMock(return_value={"intent": "question"})
+    comms._maybe_brainstorm_from_text = AsyncMock(return_value=False)
+
+    await comms._on_attachment(mock_update, MagicMock())
+
+    comms._agent_registry.dispatch.assert_awaited_once()
+    args = comms._agent_registry.dispatch.await_args
+    assert args.args[0] == "document_parse"
+    assert "sample.txt" in str(args.kwargs.get("path", ""))
+
+
+@pytest.mark.asyncio
+async def test_on_attachment_photo_routes_image_ocr(comms, mock_update):
+    async def _download(custom_path: str):
+        Path(custom_path).write_text("fake image bytes", encoding="utf-8")
+
+    tg_file = MagicMock()
+    tg_file.download_to_drive = AsyncMock(side_effect=_download)
+    photo = MagicMock()
+    photo.file_unique_id = "photo123"
+    photo.get_file = AsyncMock(return_value=tg_file)
+
+    mock_update.message.document = None
+    mock_update.message.photo = [photo]
+    mock_update.message.video = None
+    mock_update.message.caption = ""
+
+    comms._agent_registry = MagicMock()
+    comms._agent_registry.dispatch = AsyncMock(return_value=TaskResult(success=True, output={"text": "ocr text"}))
+    comms._conversation_engine = MagicMock()
+    comms._conversation_engine.process_message = AsyncMock(return_value={"intent": "question"})
+    comms._maybe_brainstorm_from_text = AsyncMock(return_value=False)
+
+    await comms._on_attachment(mock_update, MagicMock())
+
+    args = comms._agent_registry.dispatch.await_args
+    assert args.args[0] == "image_ocr"
+    assert "photo_photo123.jpg" in str(args.kwargs.get("path", ""))
+
+
+@pytest.mark.asyncio
+async def test_on_attachment_video_routes_video_extract(comms, mock_update):
+    async def _download(custom_path: str):
+        Path(custom_path).write_text("fake video bytes", encoding="utf-8")
+
+    tg_file = MagicMock()
+    tg_file.download_to_drive = AsyncMock(side_effect=_download)
+    video = MagicMock()
+    video.file_unique_id = "video123"
+    video.get_file = AsyncMock(return_value=tg_file)
+
+    mock_update.message.document = None
+    mock_update.message.photo = None
+    mock_update.message.video = video
+    mock_update.message.caption = ""
+
+    comms._agent_registry = MagicMock()
+    comms._agent_registry.dispatch = AsyncMock(return_value=TaskResult(success=True, output={"text": "video text"}))
+    comms._conversation_engine = MagicMock()
+    comms._conversation_engine.process_message = AsyncMock(return_value={"intent": "question"})
+    comms._maybe_brainstorm_from_text = AsyncMock(return_value=False)
+
+    await comms._on_attachment(mock_update, MagicMock())
+
+    args = comms._agent_registry.dispatch.await_args
+    assert args.args[0] == "video_extract"
+    assert "video_video123.mp4" in str(args.kwargs.get("path", ""))
 
 
 # ── Команды ──

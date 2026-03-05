@@ -106,6 +106,10 @@ def _builtin(name: str) -> list[Step]:
             Step("O05", "/balances", ["баланс", "telegram", "openrouter"], ["traceback", "exception"]),
             Step("O06", "/logs", ["логи", "ошиб"], ["traceback", "exception"]),
         ]
+    if key == "phase8_brainstorm":
+        return [
+            Step("B01", "/brainstorm digital planner for Etsy", ["brainstorm", "роль", "иде"], ["traceback", "exception"]),
+        ]
     raise ValueError(f"Unknown scenario: {name}")
 
 

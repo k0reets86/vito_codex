@@ -1,0 +1,107 @@
+{
+  "avg": 9.29,
+  "blocks": [
+    {
+      "name": "Оркестрация агентов",
+      "score": 10.0,
+      "note": "feedback/facts/checklist"
+    },
+    {
+      "name": "Память и навыки",
+      "score": 9.0,
+      "note": "skills/playbooks/tests_coverage"
+    },
+    {
+      "name": "Диалог с владельцем",
+      "score": 9.0,
+      "note": "telegram stability + facts"
+    },
+    {
+      "name": "Самообучение",
+      "score": 10.0,
+      "note": "playbooks/failure loop"
+    },
+    {
+      "name": "Публикации/коммерция",
+      "score": 8.46,
+      "note": "platform readiness score"
+    },
+    {
+      "name": "Безопасность/контроль расходов",
+      "score": 9.0,
+      "note": "guards/policy/facts"
+    },
+    {
+      "name": "Соответствие ТЗ",
+      "score": 9.6,
+      "note": "checklist done ratio"
+    }
+  ],
+  "metrics": {
+    "skills": 66,
+    "playbooks": 35,
+    "execution_facts": 2394,
+    "failure_memory": 124,
+    "agent_feedback": 2152,
+    "avg_skill_coverage": 0.678,
+    "checklist_done_ratio": 0.96,
+    "platform_readiness_avg": 89.17,
+    "telegram_conflict_signal": false
+  },
+  "platform_scorecard": [
+    {
+      "platform": "etsy",
+      "configured": true,
+      "evidence_count_30d": 16,
+      "success_count_30d": 26,
+      "fail_count_30d": 0,
+      "readiness_score": 100,
+      "note": "ready"
+    },
+    {
+      "platform": "twitter",
+      "configured": true,
+      "evidence_count_30d": 18,
+      "success_count_30d": 31,
+      "fail_count_30d": 0,
+      "readiness_score": 100,
+      "note": "ready"
+    },
+    {
+      "platform": "kofi",
+      "configured": true,
+      "evidence_count_30d": 40,
+      "success_count_30d": 50,
+      "fail_count_30d": 0,
+      "readiness_score": 100,
+      "note": "ready"
+    },
+    {
+      "platform": "printful",
+      "configured": true,
+      "evidence_count_30d": 15,
+      "success_count_30d": 25,
+      "fail_count_30d": 0,
+      "readiness_score": 100,
+      "note": "ready"
+    },
+    {
+      "platform": "wordpress",
+      "configured": false,
+      "evidence_count_30d": 15,
+      "success_count_30d": 25,
+      "fail_count_30d": 0,
+      "readiness_score": 70,
+      "note": "ready"
+    },
+    {
+      "platform": "gumroad",
+      "configured": true,
+      "evidence_count_30d": 50,
+      "success_count_30d": 46,
+      "fail_count_30d": 14,
+      "readiness_score": 65,
+      "note": "partial"
+    }
+  ]
+}

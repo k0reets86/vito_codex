@@ -1,0 +1,44 @@
+{
+  "timestamp": "2026-03-05T15:59:13.570172+00:00",
+  "scenario": "platform_context",
+  "mode": "local_owner_simulator",
+  "steps": [
+    {
+      "id": "P01",
+      "input": "зайди на амазон",
+      "reply_text": "Amazon KDP: активная сессия уже подтверждена, повторный логин не требуется.",
+      "pass": true,
+      "reasons": [],
+      "at": "2026-03-05T15:59:18.250394+00:00"
+    },
+    {
+      "id": "P02",
+      "input": "статус аккаунта",
+      "reply_text": "Amazon KDP: состояние аккаунта\n- Товаров/книг: 3\n- Примеры:\n  - Edit paperback content\n  - Edit paperback rights & pricing\n  - Continue setup",
+      "pass": true,
+      "reasons": [],
+      "at": "2026-03-05T15:59:28.189242+00:00"
+    },
+    {
+      "id": "P03",
+      "input": "проверь есть ли там товары",
+      "reply_text": "Amazon KDP: состояние аккаунта\n- Товаров/книг: 3\n- Примеры:\n  - Edit paperback content\n  - Edit paperback rights & pricing\n  - Continue setup",
+      "pass": true,
+      "reasons": [],
+      "at": "2026-03-05T15:59:38.476177+00:00"
+    },
+    {
+      "id": "P04",
+      "input": "зайди на укр нет",
+      "reply_text": "Открой вход в Сайт ukr.net, авторизуйся, затем нажми «Я вошел».",
+      "pass": true,
+      "reasons": [],
+      "at": "2026-03-05T15:59:38.889639+00:00"
+    }
+  ],
+  "summary": {
+    "passed": 4,
+    "failed": 0,
+    "total": 4
+  }
+}

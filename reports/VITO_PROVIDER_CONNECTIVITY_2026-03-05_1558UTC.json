@@ -1,0 +1,28 @@
+{
+  "ok": [
+    "anti_captcha",
+    "openai",
+    "replicate",
+    "gemini",
+    "openrouter",
+    "perplexity",
+    "gumroad",
+    "kofi",
+    "etsy",
+    "printful",
+    "medium",
+    "wordpress",
+    "twitter",
+    "cloudinary",
+    "bfl",
+    "wavespeed",
+    "anticaptcha",
+    "telegram",
+    "gmail",
+    "google"
+  ],
+  "errors": [
+    "anthropic"
+  ],
+  "total": 21
+}
