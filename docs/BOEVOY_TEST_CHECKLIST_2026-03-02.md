@@ -2,7 +2,7 @@
 
 Progress formula: `completed / total * 100`
 
-Current progress: `40 / 41 = 97.6%`
+Current progress: `41 / 41 = 100.0%`
 
 ## Phase 1 — Runtime Baseline & Safety Gates
 - [x] T01 Configure Gemini-only mode and disable risky/high-cost modules for initial test wave.
@@ -61,7 +61,7 @@ Current progress: `40 / 41 = 97.6%`
 ## Phase 9 — Provider Expansion + Final Combat Mode
 - [x] T39 Connect remaining provider keys/services and verify connectivity.
 - [x] T40 Disable Gemini-only force and restore full router strategy.
-- [ ] T41 Final full regression + live smoke sequence + release readiness report.
+- [x] T41 Final full regression + live smoke sequence + release readiness report.
 
 ## Evidence Notes
 - For each task store: command, short output, key log line, DB proof (if relevant), pass/fail.
@@ -145,4 +145,4 @@ Current progress: `40 / 41 = 97.6%`
 - 2026-03-05: Final combat artifacts generated:
   - `python3 scripts/tg_global_combat_suite.py` -> `reports/VITO_TG_GLOBAL_COMBAT_2026-03-05_1559UTC.json`.
   - `python3 scripts/final_scorecard_report.py` -> `reports/VITO_FINAL_SCORECARD_2026-03-05_1559UTC.md`.
-  - Full `pytest -q -c /dev/null` is currently blocked by backup-tree collection/import mismatch and missing modules (`modules.listing_optimizer`, `modules.research_url_context`), so T41 remains open.
+  - Final full regression completed with project root config: `PYTHONPATH=. pytest -q --maxfail=1` -> `1054 passed, 1 skipped, 1 warning` (warning: asyncio subprocess transport cleanup in `tests/test_comms_agent.py::test_cmd_prefs`).
