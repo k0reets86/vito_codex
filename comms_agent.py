@@ -2058,6 +2058,7 @@ class CommsAgent:
         self._app.add_handler(CommandHandler("skills_fix", self._cmd_skills_fix))
         self._app.add_handler(CommandHandler("playbooks", self._cmd_playbooks))
         self._app.add_handler(CommandHandler("recipes", self._cmd_recipes))
+        self._app.add_handler(CommandHandler("recipe_run", self._cmd_recipe_run))
         self._app.add_handler(CommandHandler("workflow", self._cmd_workflow))
         self._app.add_handler(CommandHandler("handoffs", self._cmd_handoffs))
         self._app.add_handler(CommandHandler("prefs", self._cmd_prefs))
@@ -3311,6 +3312,58 @@ class CommsAgent:
             await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
         except Exception as e:
             await update.message.reply_text(f"Recipes error: {e}", reply_markup=self._main_keyboard())
+
+    async def _cmd_recipe_run(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Execute a workflow recipe through PublisherQueue with acceptance gate.
+
+        Usage:
+          /recipe_run <recipe_name> [live]
+        """
+        if await self._reject_stranger(update):
+            return
+        if not self._publisher_queue:
+            await update.message.reply_text("PublisherQueue не подключён.", reply_markup=self._main_keyboard())
+            return
+        args = list(getattr(context, "args", None) or [])
+        if not args:
+            await update.message.reply_text(
+                "Использование: /recipe_run <recipe_name> [live]",
+                reply_markup=self._main_keyboard(),
+            )
+            return
+        recipe_name = str(args[0] or "").strip().lower()
+        live = any(str(a).strip().lower() == "live" for a in args[1:])
+        dry_run = not live
+        # Safe generic payloads; platform adapters normalize extra fields.
+        payload = {
+            "dry_run": dry_run,
+            "title": "VITO Recipe Test",
+            "name": "VITO Recipe Test",
+            "content": "VITO recipe test content",
+            "text": "VITO recipe test post",
+            "description": "VITO recipe test description",
+            "summary": "VITO recipe summary",
+            "price": 5,
+            "subreddit": "test",
+        }
+        try:
+            from modules.workflow_recipe_executor import WorkflowRecipeExecutor
+            exe = WorkflowRecipeExecutor(self._publisher_queue)
+            out = await exe.run_once(recipe_name, payload, trace_id=f"tg_recipe_{recipe_name}")
+        except Exception as e:
+            await update.message.reply_text(f"Recipe run error: {e}", reply_markup=self._main_keyboard())
+            return
+        st = str(out.get("status") or "")
+        if st == "accepted":
+            await update.message.reply_text(
+                f"Recipe accepted: {recipe_name} ({out.get('platform')})",
+                reply_markup=self._main_keyboard(),
+            )
+        else:
+            await update.message.reply_text(
+                f"Recipe failed: {recipe_name}\nПричина: {out.get('error', 'unknown')}",
+                reply_markup=self._main_keyboard(),
+            )
 
     async def _cmd_workflow(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Показать здоровье workflow и последние события по цели."""
