@@ -8,18 +8,21 @@ from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from config.settings import settings
 from modules.listing_optimizer import optimize_listing_payload
+from modules.platform_artifact_pack import build_platform_bundle
+from modules.platform_rules_sync import configured_services, sync_platform_rules
 
 logger = get_logger("ecommerce_agent", agent="ecommerce_agent")
 
 
 class ECommerceAgent(BaseAgent):
-    def __init__(self, platforms: dict = None, **kwargs):
+    def __init__(self, platforms: dict = None, registry=None, **kwargs):
         super().__init__(name="ecommerce_agent", description="Управление листингами (Gumroad, Etsy, Ko-fi)", **kwargs)
         self.platforms = platforms or {}
+        self.registry = registry
 
     @property
     def capabilities(self) -> list[str]:
-        return ["listing_create", "sales_check", "ecommerce"]
+        return ["listing_create", "sales_check", "ecommerce", "publish_package_build", "platform_rules_sync"]
 
     async def execute_task(self, task_type: str, **kwargs) -> TaskResult:
         self._status = AgentStatus.RUNNING
@@ -27,6 +30,10 @@ class ECommerceAgent(BaseAgent):
         try:
             if task_type in ("listing_create", "ecommerce"):
                 result = await self.create_listing(kwargs.get("platform", "gumroad"), kwargs.get("data", kwargs))
+            elif task_type == "publish_package_build":
+                result = await self.build_publish_package(kwargs.get("platform", "gumroad"), kwargs.get("data", kwargs))
+            elif task_type == "platform_rules_sync":
+                result = await self.sync_platform_rules(kwargs.get("services"))
             elif task_type == "sales_check":
                 result = await self.check_sales(kwargs.get("platform"))
             elif task_type == "update_listing":
@@ -41,7 +48,107 @@ class ECommerceAgent(BaseAgent):
         finally:
             self._status = AgentStatus.IDLE
 
+    async def _dispatch_registry(self, capability: str, **kwargs) -> Optional[TaskResult]:
+        if not self.registry:
+            return None
+        try:
+            return await self.registry.dispatch(capability, **kwargs)
+        except Exception:
+            return None
+
+    async def build_publish_package(self, platform: str, data: dict) -> TaskResult:
+        """Build full package via responsible collaborators (content+seo+marketing+smm)."""
+        platform = str(platform or "gumroad").strip().lower()
+        seed = build_platform_bundle(platform, data or {})
+        package: dict[str, Any] = {
+            "platform": platform,
+            "payload": dict(seed),
+            "contributors": [],
+            "notes": [],
+        }
+        topic = str(seed.get("title") or seed.get("name") or "VITO Digital Product").strip()
+        price = int(seed.get("price", 9) or 9)
+
+        # 1) Content package (texts + files)
+        turnkey = await self._dispatch_registry("product_turnkey", topic=topic, platform=platform, price=price)
+        if turnkey and turnkey.success and isinstance(turnkey.output, dict):
+            package["contributors"].append("content_creator")
+            out = turnkey.output
+            files = out.get("files") if isinstance(out.get("files"), dict) else {}
+            listing = out.get("listing") if isinstance(out.get("listing"), dict) else {}
+            payload = package["payload"]
+            payload["title"] = str(listing.get("title") or payload.get("title") or topic)
+            payload["name"] = payload["title"]
+            payload["short_description"] = str(listing.get("short_description") or payload.get("short_description") or "")
+            if files.get("pdf_path"):
+                payload["pdf_path"] = str(files.get("pdf_path"))
+            if files.get("cover_path"):
+                payload["cover_path"] = str(files.get("cover_path"))
+            if files.get("thumb_path"):
+                payload["thumb_path"] = str(files.get("thumb_path"))
+            if listing.get("tags"):
+                payload["tags"] = list(listing.get("tags") or payload.get("tags") or [])
+            if listing.get("category"):
+                payload["category"] = str(listing.get("category"))
+        else:
+            package["notes"].append("content_creator_unavailable_or_failed")
+
+        # 2) SEO pack (keywords/meta score)
+        seo = await self._dispatch_registry(
+            "listing_seo_pack",
+            platform=platform,
+            title=str(package["payload"].get("title") or topic),
+            description=str(package["payload"].get("description") or ""),
+            tags=package["payload"].get("tags") or [],
+        )
+        if seo and seo.success and isinstance(seo.output, dict):
+            package["contributors"].append("seo_agent")
+            so = seo.output
+            payload = package["payload"]
+            if so.get("tags"):
+                payload["tags"] = list(so.get("tags"))
+            if so.get("category"):
+                payload["category"] = str(so.get("category"))
+            payload["seo_title"] = str(so.get("seo_title") or payload.get("seo_title") or "")
+            payload["seo_description"] = str(so.get("seo_description") or payload.get("seo_description") or "")
+            payload["seo_score"] = int(so.get("seo_score") or payload.get("seo_score") or 0)
+        else:
+            package["notes"].append("seo_agent_unavailable_or_failed")
+
+        # 3) Marketing + social launch notes
+        mkt = await self._dispatch_registry(
+            "marketing_strategy",
+            product=topic,
+            target_audience="US/EU digital buyers",
+            budget_usd=100,
+        )
+        if mkt and mkt.success:
+            package["contributors"].append("marketing_agent")
+            package["marketing_strategy"] = mkt.output
+        else:
+            package["notes"].append("marketing_agent_unavailable_or_failed")
+
+        smm = await self._dispatch_registry("campaign_plan", platform="twitter", content=topic)
+        if smm and smm.success:
+            package["contributors"].append("smm_agent")
+            package["campaign_plan"] = smm.output
+        else:
+            package["notes"].append("smm_agent_unavailable_or_failed")
+
+        package["payload"] = optimize_listing_payload(platform, package["payload"])
+        package["payload"]["_package_ready"] = True
+        return TaskResult(success=True, output=package)
+
     async def create_listing(self, platform: str, data: dict) -> TaskResult:
+        platform = str(platform or "gumroad").strip().lower()
+        # Responsible agent behavior: always prepare full publish package first.
+        if not bool((data or {}).get("_package_ready")):
+            pkg = await self.build_publish_package(platform, data or {})
+            if pkg and pkg.success and isinstance(pkg.output, dict):
+                data = dict(pkg.output.get("payload") or {})
+                data["_publish_contributors"] = list(pkg.output.get("contributors") or [])
+            else:
+                data = dict(data or {})
         data = optimize_listing_payload(platform, data or {})
         if data.get("allow_existing_update"):
             target_id = str(data.get("target_product_id") or data.get("target_listing_id") or data.get("target_slug") or "").strip()
@@ -122,6 +229,8 @@ class ECommerceAgent(BaseAgent):
                 f"Листинг создан на {platform}",
                 extra={"event": "listing_created", "context": {"platform": platform}},
             )
+            if isinstance(result, dict) and data.get("_publish_contributors"):
+                result["contributors"] = list(data.get("_publish_contributors") or [])
             return TaskResult(success=True, output=result)
         except Exception as e:
             return TaskResult(success=False, error=f"Ошибка создания листинга на {platform}: {e}")
@@ -152,3 +261,19 @@ class ECommerceAgent(BaseAgent):
                 except Exception as e:
                     results[p_name] = {"error": str(e)}
         return TaskResult(success=True, output=results)
+
+    async def sync_platform_rules(self, services: list[str] | None = None) -> TaskResult:
+        """Track official platform rule changes, update KB, notify owner in TG."""
+        try:
+            svc = services or configured_services() or ["gumroad", "etsy", "kofi", "printful", "reddit", "pinterest", "amazon_kdp", "twitter"]
+            report = sync_platform_rules(services=list(svc))
+            changed = int(report.get("changed_count", 0) or 0)
+            if changed > 0 and self.comms:
+                lines = ["Обнаружены изменения правил платформ:"]
+                for ch in list(report.get("changes") or [])[:8]:
+                    lines.append(f"- {ch.get('service')}: {ch.get('url')}")
+                lines.append("Знания обновлены в platform_knowledge и platform_rules_updates.md")
+                await self.comms.send_message("\n".join(lines), level="warning")
+            return TaskResult(success=True, output=report)
+        except Exception as e:
+            return TaskResult(success=False, error=f"platform_rules_sync_failed: {e}")

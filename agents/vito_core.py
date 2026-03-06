@@ -24,6 +24,10 @@ _KEYWORD_CAPABILITY_RAW = {
     # Specific multi-word/long keywords FIRST
     "unit_economics": "unit_economics",
     "юнит-экономик": "unit_economics",
+    "правила платформ": "platform_rules_sync",
+    "изменения правил": "platform_rules_sync",
+    "platform rules": "platform_rules_sync",
+    "rules update": "platform_rules_sync",
     "knowledge_base": "knowledge_base",
     "key_rotation": "key_rotation",
     "конкурент": "competitor_analysis",

@@ -87,6 +87,7 @@ class DecisionLoop:
         self._last_self_learning_maintenance_tick = 0
         self._last_tooling_governance_tick = 0
         self._last_tooling_discovery_tick = 0
+        self._last_platform_rules_sync_tick = 0
         self._last_memory_weekly_report_tick = 0
         self._last_weekly_governance_tick = 0
         self._last_autonomous_improvement_tick = 0
@@ -208,6 +209,7 @@ class DecisionLoop:
         await self._maybe_run_self_learning_maintenance()
         await self._maybe_run_tooling_discovery_intake()
         await self._maybe_run_tooling_governance_check()
+        await self._maybe_run_platform_rules_sync()
         await self._maybe_run_weekly_governance_report()
         await self._maybe_run_autonomous_improvement()
         await self._maybe_run_kdp_session_watchdog()
@@ -598,6 +600,37 @@ class DecisionLoop:
                 if hasattr(self, "_comms") and self._comms:
                     await self._comms.send_message(msg, level="warning")
             self._last_tooling_governance_tick = self._tick_count
+        except Exception:
+            pass
+
+    async def _maybe_run_platform_rules_sync(self) -> None:
+        try:
+            if not bool(getattr(settings, "PLATFORM_RULES_SYNC_ENABLED", False)):
+                return
+            interval = max(12, int(getattr(settings, "PLATFORM_RULES_SYNC_INTERVAL_TICKS", 288) or 288))
+            if self._tick_count - int(self._last_platform_rules_sync_tick or 0) < interval:
+                return
+            if not self.agent_registry:
+                return
+            payload: dict[str, Any] = {}
+            services_raw = str(getattr(settings, "PLATFORM_RULES_SYNC_SERVICES", "") or "").strip()
+            if services_raw:
+                payload["services"] = [s.strip().lower() for s in services_raw.split(",") if s.strip()]
+            result = await self.agent_registry.dispatch("platform_rules_sync", **payload)
+            if result and result.success:
+                logger.info(
+                    "Platform rules sync tick completed",
+                    extra={"event": "platform_rules_sync_tick", "context": {"tick": self._tick_count}},
+                )
+            else:
+                logger.warning(
+                    "Platform rules sync tick failed",
+                    extra={
+                        "event": "platform_rules_sync_tick_failed",
+                        "context": {"tick": self._tick_count, "error": getattr(result, "error", None)},
+                    },
+                )
+            self._last_platform_rules_sync_tick = self._tick_count
         except Exception:
             pass
 

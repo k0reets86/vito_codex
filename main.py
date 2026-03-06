@@ -342,7 +342,7 @@ class VITO:
             ContentCreator(quality_judge=quality_judge, **deps),               # 02
             SMMAgent(platforms=social_platforms, **deps),                       # 03
             MarketingAgent(**deps),                                            # 04
-            ECommerceAgent(platforms=platforms_commerce, **deps),               # 05
+            ECommerceAgent(platforms=platforms_commerce, registry=self.registry, **deps),  # 05
             SEOAgent(**deps),                                                  # 06
             EmailAgent(**deps),                                                # 07
             TranslationAgent(**deps),                                          # 08

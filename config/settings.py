@@ -176,6 +176,12 @@ class Settings:
     TELEGRAM_CRON_ENABLED: bool = os.getenv("TELEGRAM_CRON_ENABLED", "false").lower() in ("1", "true", "yes", "on")
     TELEGRAM_STRICT_COMMANDS: bool = os.getenv("TELEGRAM_STRICT_COMMANDS", "true").lower() in ("1", "true", "yes", "on")
     OWNER_AUTO_APPROVE_GOALS: bool = os.getenv("OWNER_AUTO_APPROVE_GOALS", "true").lower() in ("1", "true", "yes", "on")
+    PLATFORM_RULES_SYNC_ENABLED: bool = os.getenv("PLATFORM_RULES_SYNC_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+    PLATFORM_RULES_SYNC_INTERVAL_TICKS: int = int(os.getenv("PLATFORM_RULES_SYNC_INTERVAL_TICKS", "288") or 288)
+    PLATFORM_RULES_SYNC_SERVICES: str = os.getenv(
+        "PLATFORM_RULES_SYNC_SERVICES",
+        "gumroad,etsy,kofi,printful,reddit,pinterest,amazon_kdp,twitter",
+    )
 
     # Browser behavior
     BROWSER_DEFAULT_ON_URL: bool = os.getenv("BROWSER_DEFAULT_ON_URL", "true").lower() in ("1", "true", "yes", "on")

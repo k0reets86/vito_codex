@@ -98,3 +98,28 @@ class TestECommerceAgent:
         )
         result = await agent.create_listing("printful", {"sync_product": {"name": "VITO POD"}})
         assert result.success is False
+
+    @pytest.mark.asyncio
+    async def test_platform_rules_sync_success(self, agent, monkeypatch):
+        from agents import ecommerce_agent as module_under_test
+
+        monkeypatch.setattr(
+            module_under_test,
+            "sync_platform_rules",
+            lambda services=None: {"checked_count": 2, "changed_count": 1, "changes": [{"service": "etsy", "url": "https://www.etsy.com/seller-handbook"}]},
+        )
+        result = await agent.execute_task("platform_rules_sync", services=["etsy"])
+        assert result.success is True
+        assert result.output["changed_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_platform_rules_sync_failure(self, agent, monkeypatch):
+        from agents import ecommerce_agent as module_under_test
+
+        def _raise(_services=None):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(module_under_test, "sync_platform_rules", _raise)
+        result = await agent.execute_task("platform_rules_sync", services=["etsy"])
+        assert result.success is False
+        assert "platform_rules_sync_failed" in str(result.error)
