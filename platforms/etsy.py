@@ -259,6 +259,16 @@ class EtsyPlatform(BasePlatform):
                             break
                     except Exception:
                         continue
+                # Upload at least one image to satisfy listing publish requirements.
+                image_path = str(content.get("cover_path") or content.get("image_path") or "").strip()
+                if image_path and os.path.isfile(image_path):
+                    try:
+                        fi = page.locator("input[type='file']")
+                        if await fi.count():
+                            await fi.first.set_input_files(image_path, timeout=4000)
+                            await page.wait_for_timeout(1800)
+                    except Exception:
+                        pass
                 if tags:
                     tags_text = ", ".join(str(t)[:20] for t in tags[:13])
                     for sel in ("input[name='tags']", "input[id*='tag']"):
@@ -269,6 +279,22 @@ class EtsyPlatform(BasePlatform):
                                 break
                         except Exception:
                             continue
+
+                # If category dialog appears, pick a frequent category and continue.
+                try:
+                    if await page.locator("#category-field-search").count():
+                        cb = page.locator("input[id^='category-']")
+                        if await cb.count():
+                            await cb.first.check(timeout=2500)
+                            await page.wait_for_timeout(700)
+                        for txt in ("Продолжить", "Continue", "Save category"):
+                            btn = page.get_by_role("button", name=txt)
+                            if await btn.count():
+                                await btn.first.click(timeout=2500)
+                                await page.wait_for_timeout(1200)
+                                break
+                except Exception:
+                    pass
 
                 # Try draft/save actions if visible
                 for txt in ("Save as draft", "Save and continue", "Save"):
@@ -282,12 +308,33 @@ class EtsyPlatform(BasePlatform):
                         continue
 
                 # Try publish action explicitly (for fully filled test listing flow).
+                publish_clicked = False
+                try:
+                    pub = page.locator("#shop-manager--listing-publish")
+                    if await pub.count():
+                        await pub.first.click(timeout=2500)
+                        await page.wait_for_timeout(1600)
+                        publish_clicked = True
+                except Exception:
+                    pass
                 for txt in ("Publish", "Publish listing", "Publish now", "Опубликовать"):
                     try:
                         btn = page.get_by_role("button", name=txt)
                         if await btn.count():
                             await btn.first.click(timeout=2500)
                             await page.wait_for_timeout(1800)
+                            publish_clicked = True
+                            break
+                    except Exception:
+                        continue
+                # Etsy may show warning dialog like "Добавить больше фото" with skip option.
+                for txt in ("Пропустить и продолжить", "Skip and continue", "Continue anyway"):
+                    try:
+                        btn = page.get_by_role("button", name=txt)
+                        if await btn.count():
+                            await btn.first.click(timeout=2500)
+                            await page.wait_for_timeout(1800)
+                            publish_clicked = True
                             break
                     except Exception:
                         continue
@@ -314,6 +361,14 @@ class EtsyPlatform(BasePlatform):
                             mm = re.search(r"/listing/(\d+)", href)
                             if mm:
                                 listing_id = mm.group(1)
+                    except Exception:
+                        pass
+                if not listing_id:
+                    try:
+                        html_now = await page.content()
+                        mm = re.search(r'"listingId"\s*:\s*(\d+)', html_now)
+                        if mm and mm.group(1) != "0":
+                            listing_id = mm.group(1)
                     except Exception:
                         pass
                 if listing_id:
@@ -344,6 +399,7 @@ class EtsyPlatform(BasePlatform):
                     "url": page.url,
                     "screenshot_path": shot,
                     "note": "Draft editor opened and fields filled; listing_id not detected yet.",
+                    "publish_clicked": bool(publish_clicked),
                 }
         except Exception as e:
             return {"platform": "etsy", "status": "error", "error": str(e), "screenshot_path": shot}

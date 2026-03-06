@@ -43,8 +43,9 @@ async def run_etsy(args) -> dict:
 
     checks = {
         "has_session": result.get("status") != "needs_browser_login",
-        "editor_reached": result.get("status") in {"prepared", "created"},
+        "editor_reached": result.get("status") in {"prepared", "created", "published"},
         "has_listing_id": bool(result.get("listing_id")),
+        "live_created": result.get("status") in {"created", "published"},
     }
     return {
         "payload": payload,
@@ -54,7 +55,7 @@ async def run_etsy(args) -> dict:
             "html": str(html) if html.exists() else "",
         },
         "checks": checks,
-        "pass": checks["has_session"] and checks["editor_reached"],
+        "pass": checks["has_session"] and checks["editor_reached"] and checks["has_listing_id"] and checks["live_created"],
     }
 
 
@@ -73,7 +74,7 @@ async def run_kofi(args) -> dict:
     checks = {
         "has_session": result.get("status") != "needs_browser_login",
         "action_executed": result.get("status") in {"prepared", "created"},
-        "live_created": result.get("status") == "created",
+        "live_created": result.get("status") in {"created", "published"},
     }
     return {
         "payload": payload,
@@ -83,7 +84,7 @@ async def run_kofi(args) -> dict:
             "html": str(html) if html.exists() else "",
         },
         "checks": checks,
-        "pass": checks["has_session"] and checks["action_executed"],
+        "pass": checks["has_session"] and checks["live_created"],
     }
 
 
