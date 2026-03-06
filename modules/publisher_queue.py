@@ -163,8 +163,11 @@ class PublisherQueue:
 
     @staticmethod
     def _extract_evidence(result: dict | None) -> str:
-        normalized = normalize_platform_result(result or {}, platform=str((result or {}).get("platform", "")))
-        ev = normalized.get("evidence") if isinstance(normalized, dict) else {}
+        if isinstance(result, dict) and isinstance(result.get("evidence"), dict):
+            ev = result.get("evidence") or {}
+        else:
+            normalized = normalize_platform_result(result or {}, platform=str((result or {}).get("platform", "")))
+            ev = normalized.get("evidence") if isinstance(normalized, dict) else {}
         if not isinstance(ev, dict):
             return ""
         for key in ("url", "id", "path", "screenshot"):

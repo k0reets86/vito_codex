@@ -2,7 +2,7 @@
 
 Progress formula: `completed / total * 100`
 
-Current progress: `41 / 41 = 100.0%`
+Current progress: `41 / 49 = 83.7%`
 
 ## Phase 1 — Runtime Baseline & Safety Gates
 - [x] T01 Configure Gemini-only mode and disable risky/high-cost modules for initial test wave.
@@ -62,6 +62,16 @@ Current progress: `41 / 41 = 100.0%`
 - [x] T39 Connect remaining provider keys/services and verify connectivity.
 - [x] T40 Disable Gemini-only force and restore full router strategy.
 - [x] T41 Final full regression + live smoke sequence + release readiness report.
+
+## Phase 10 — Real Platform Publish Closure (Owner Hard Requirement)
+- [ ] T42 X/Twitter: TG recipe publishes live post with public URL evidence and editable follow-up.
+- [ ] T43 Reddit: TG recipe publishes live post (or deterministic platform block proof with bypass runbook).
+- [ ] T44 Gumroad: TG flow updates existing test listing with full attributes (title/description/tags/category/assets) and publish evidence.
+- [ ] T45 Etsy: TG flow creates/updates test listing with full required attributes + evidence URL/ID.
+- [ ] T46 Ko-fi: TG flow publishes/updates test product/post with full fields and evidence URL.
+- [ ] T47 Amazon KDP: TG flow updates one test draft/book with required metadata/assets and visible bookshelf proof.
+- [ ] T48 Printful + Etsy linked flow: create/update test product via Printful path and verify listing reflection.
+- [ ] T49 Pinterest (and optional WordPress if configured): publish pin/post with evidence URL + screenshot.
 
 ## Evidence Notes
 - For each task store: command, short output, key log line, DB proof (if relevant), pass/fail.

@@ -116,10 +116,26 @@ class AmazonKDPPlatform(BasePlatform):
                 url="https://kdp.amazon.com/bookshelf",
                 form_data=content,
             )
+            out = result.output if result else None
+            evidence_url = ""
+            evidence_id = ""
+            evidence_path = ""
+            if isinstance(out, dict):
+                evidence_url = str(out.get("url") or out.get("book_url") or "").strip()
+                evidence_id = str(out.get("id") or out.get("book_id") or "").strip()
+                evidence_path = str(out.get("screenshot_path") or out.get("path") or "").strip()
+            # Contract rule: "published" requires evidence fields; otherwise degrade to prepared.
+            status = "failed"
+            if result and result.success:
+                has_evidence = bool(evidence_url or evidence_id or evidence_path)
+                status = "published" if has_evidence else "prepared"
             return {
                 "platform": "amazon_kdp",
-                "status": "published" if result and result.success else "failed",
-                "output": result.output if result else None,
+                "status": status,
+                "url": evidence_url,
+                "id": evidence_id,
+                "screenshot_path": evidence_path,
+                "output": out,
             }
         except Exception as e:
             logger.error(f"KDP publish error: {e}", extra={"event": "kdp_publish_error"})

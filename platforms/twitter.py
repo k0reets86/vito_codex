@@ -9,6 +9,7 @@ import os
 import time
 import urllib.parse
 import uuid
+from pathlib import Path
 from typing import Any
 
 import aiohttp
@@ -34,6 +35,9 @@ class TwitterPlatform(BasePlatform):
         self._access_token = settings.TWITTER_ACCESS_TOKEN
         self._access_secret = settings.TWITTER_ACCESS_SECRET
         self._bearer_token = settings.TWITTER_BEARER_TOKEN
+        self._storage_state_path = Path(str(getattr(settings, "TWITTER_STORAGE_STATE_FILE", "runtime/twitter_storage_state.json") or "runtime/twitter_storage_state.json"))
+        if not self._storage_state_path.is_absolute():
+            self._storage_state_path = PROJECT_ROOT / self._storage_state_path
         self._session: aiohttp.ClientSession | None = None
         self._user_id: str = ""
 
@@ -84,8 +88,18 @@ class TwitterPlatform(BasePlatform):
     async def authenticate(self) -> bool:
         """Verify credentials via GET /2/users/me."""
         if self._mode in {"browser", "browser_only"}:
-            self._authenticated = False
-            return False
+            if not self._storage_state_path.exists():
+                self._authenticated = False
+                return False
+            try:
+                import json as _json
+                data = _json.loads(self._storage_state_path.read_text(encoding="utf-8"))
+                cookies = data.get("cookies") if isinstance(data, dict) else None
+                self._authenticated = bool(isinstance(cookies, list) and cookies)
+                return self._authenticated
+            except Exception:
+                self._authenticated = False
+                return False
         if not all([self._consumer_key, self._consumer_secret, self._access_token, self._access_secret]):
             self._authenticated = False
             return False
@@ -145,18 +159,13 @@ class TwitterPlatform(BasePlatform):
             }
 
         if self._mode in {"browser", "browser_only"}:
-            text = str(content.get("text", "") or "")
-            return {
-                "platform": "twitter",
-                "status": "needs_browser_flow",
-                "mode": "browser_only",
-                "text_preview": text[:280],
-                "error": "Twitter API disabled for current mode; use browser posting flow.",
-            }
+            return await self._publish_via_browser(content or {})
 
         if not self._authenticated:
             auth_ok = await self.authenticate()
             if not auth_ok:
+                if self._storage_state_path.exists():
+                    return await self._publish_via_browser(content or {})
                 return {"platform": "twitter", "status": "not_authenticated"}
 
         text = content.get("text", "")
@@ -199,6 +208,12 @@ class TwitterPlatform(BasePlatform):
                 if resp.status in (200, 201):
                     tweet = data.get("data", {})
                     tweet_id = tweet.get("id", "")
+                    if not str(tweet_id or "").strip():
+                        # API acknowledged but no tweet id -> cannot satisfy evidence contract.
+                        # Try browser fallback if we have a valid storage state.
+                        if self._storage_state_path.exists():
+                            return await self._publish_via_browser(content or {})
+                        return {"platform": "twitter", "status": "error", "error": "tweet_id_missing_in_api_response"}
                     tweet_url = f"https://x.com/i/status/{tweet_id}" if tweet_id else ""
                     logger.info(
                         f"Tweet posted: {tweet_id}",
@@ -235,6 +250,169 @@ class TwitterPlatform(BasePlatform):
         except Exception as e:
             logger.error(f"Twitter publish error: {e}", exc_info=True)
             return {"platform": "twitter", "status": "error", "error": str(e)}
+
+    async def _publish_via_browser(self, content: dict) -> dict:
+        if not self._storage_state_path.exists():
+            return {
+                "platform": "twitter",
+                "status": "needs_browser_login",
+                "error": "Twitter browser session required.",
+                "storage_state": str(self._storage_state_path),
+            }
+        try:
+            from playwright.async_api import async_playwright
+        except Exception:
+            return {"platform": "twitter", "status": "error", "error": "playwright_not_installed"}
+
+        text = str(content.get("text", "") or "").strip()
+        if not text:
+            return {"platform": "twitter", "status": "error", "error": "No text provided"}
+        if len(text) > 280:
+            text = text[:277] + "..."
+        image_path = str(content.get("image_path") or "").strip()
+        shot = str(PROJECT_ROOT / "runtime" / "twitter_browser_publish.png")
+
+        browser = None
+        context = None
+        page = None
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(
+                    headless=os.getenv("VITO_BROWSER_HEADLESS", "1").lower() not in {"0", "false", "no"},
+                    args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
+                )
+                context = await browser.new_context(
+                    storage_state=str(self._storage_state_path),
+                    viewport={"width": 1366, "height": 900},
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
+                )
+                page = await context.new_page()
+                await page.goto("https://x.com/compose/post", wait_until="domcontentloaded", timeout=90000)
+                await page.wait_for_timeout(1500)
+                current = (page.url or "").lower()
+                if any(x in current for x in ("/login", "/i/flow/login", "/signup")):
+                    return {
+                        "platform": "twitter",
+                        "status": "needs_browser_login",
+                        "error": "Stored Twitter/X session expired.",
+                        "storage_state": str(self._storage_state_path),
+                    }
+
+                textbox = None
+                compose_selectors = (
+                    "div[data-testid='tweetTextarea_0']",
+                    "div[role='textbox'][data-testid='tweetTextarea_0']",
+                    "div[aria-label='Post text']",
+                    "div[role='textbox']",
+                )
+                for sel in compose_selectors:
+                    loc = page.locator(sel)
+                    if await loc.count():
+                        textbox = loc.first
+                        break
+                if textbox is None:
+                    try:
+                        new_btn = page.locator("[data-testid='SideNav_NewTweet_Button']")
+                        if await new_btn.count():
+                            await new_btn.first.click(timeout=2500)
+                            await page.wait_for_timeout(1200)
+                    except Exception:
+                        pass
+                    for sel in compose_selectors:
+                        loc = page.locator(sel)
+                        if await loc.count():
+                            textbox = loc.first
+                            break
+                if textbox is None:
+                    return {"platform": "twitter", "status": "error", "error": "tweet_textbox_not_found"}
+                await textbox.click(timeout=2000)
+                await page.keyboard.type(text, delay=6)
+
+                if image_path and os.path.isfile(image_path):
+                    try:
+                        fi = page.locator("input[type='file']")
+                        if await fi.count():
+                            await fi.first.set_input_files(image_path)
+                            await page.wait_for_timeout(1200)
+                    except Exception:
+                        pass
+
+                posted = False
+                for sel in ("button[data-testid='tweetButtonInline']", "button[data-testid='tweetButton']"):
+                    try:
+                        btn = page.locator(sel)
+                        if await btn.count():
+                            await btn.first.click(timeout=2500)
+                            posted = True
+                            break
+                    except Exception:
+                        continue
+                if not posted:
+                    try:
+                        btn = page.get_by_role("button", name="Post")
+                        if await btn.count():
+                            await btn.first.click(timeout=2500)
+                            posted = True
+                    except Exception:
+                        pass
+
+                await page.wait_for_timeout(2500)
+                tweet_url = ""
+                try:
+                    href = await page.locator("a[href*='/status/']").first.get_attribute("href")
+                    if href:
+                        tweet_url = f"https://x.com{href}" if href.startswith("/") else href
+                except Exception:
+                    pass
+                if not tweet_url:
+                    try:
+                        cur = str(page.url or "")
+                        if "/status/" in cur:
+                            tweet_url = cur
+                    except Exception:
+                        pass
+                try:
+                    await page.screenshot(path=shot, full_page=True)
+                except Exception:
+                    pass
+
+                status = "published" if (posted and tweet_url) else "prepared"
+                try:
+                    ExecutionFacts().record(
+                        action="platform:publish",
+                        status=status,
+                        detail=f"twitter browser {status}",
+                        evidence=tweet_url or "https://x.com/home",
+                        source="twitter.publish.browser",
+                        evidence_dict={"platform": "twitter", "status": status, "url": tweet_url},
+                    )
+                except Exception:
+                    pass
+                return {
+                    "platform": "twitter",
+                    "status": status,
+                    "url": tweet_url or "https://x.com/home",
+                    "mode": "browser_only",
+                    "screenshot_path": shot,
+                }
+        except Exception as e:
+            return {"platform": "twitter", "status": "error", "error": str(e), "screenshot_path": shot}
+        finally:
+            try:
+                if page is not None:
+                    await page.close()
+            except Exception:
+                pass
+            try:
+                if context is not None:
+                    await context.close()
+            except Exception:
+                pass
+            try:
+                if browser is not None:
+                    await browser.close()
+            except Exception:
+                pass
 
     async def _upload_media(self, image_path: str) -> dict:
         if not image_path:

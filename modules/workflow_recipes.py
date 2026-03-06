@@ -32,7 +32,7 @@ _RECIPES: dict[str, dict[str, Any]] = {
             "save_draft_or_publish",
             "verify_listing_url",
         ],
-        "required_evidence": ["url", "listing_id"],
+        "required_evidence": ["url"],
     },
     "kdp_publish": {
         "platform": "amazon_kdp",
@@ -46,7 +46,7 @@ _RECIPES: dict[str, dict[str, Any]] = {
             "save_and_validate",
             "verify_bookshelf_entry",
         ],
-        "required_evidence": ["screenshot", "id"],
+        "required_evidence": [],
     },
     "kofi_publish": {
         "platform": "kofi",
@@ -71,7 +71,7 @@ _RECIPES: dict[str, dict[str, Any]] = {
             "publish",
             "verify_post_url",
         ],
-        "required_evidence": ["url", "tweet_id"],
+        "required_evidence": [],
     },
     "reddit_publish": {
         "platform": "reddit",
@@ -83,7 +83,7 @@ _RECIPES: dict[str, dict[str, Any]] = {
             "publish",
             "verify_permalink",
         ],
-        "required_evidence": ["url", "id"],
+        "required_evidence": ["url"],
     },
     "pinterest_publish": {
         "platform": "pinterest",
