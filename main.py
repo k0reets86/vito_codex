@@ -57,6 +57,14 @@ def _acquire_pidlock():
 
 _acquire_pidlock()
 
+# Bootstrap global DISPLAY for headed browser flows on headless server.
+try:
+    if os.getenv("VITO_BOOTSTRAP_XVFB", "1").lower() in {"1", "true", "yes", "on"}:
+        from modules.display_bootstrap import ensure_display
+        ensure_display()
+except Exception:
+    pass
+
 
 def _cleanup_pidfile():
     try:

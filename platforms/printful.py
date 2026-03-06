@@ -102,15 +102,42 @@ class PrintfulPlatform(BasePlatform):
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    async def _create_via_sync_api(self, content: dict) -> dict:
+        """Fallback for non-API stores (Etsy/Shopify connected): try Sync API create path."""
+        if not self._store_id:
+            return {"platform": "printful", "status": "error", "error": "no_store_connected"}
+        sync_product = dict((content or {}).get("sync_product") or {})
+        if not sync_product.get("name"):
+            sync_product["name"] = "VITO Sync Product"
+        payload = {
+            "sync_product": sync_product,
+            "sync_variants": list((content or {}).get("sync_variants") or []),
+        }
+        try:
+            session = await self._get_session()
+            async with session.post(f"{API_BASE}/store/products", params={"store_id": self._store_id}, json=payload) as resp:
+                data = await resp.json()
+                code = int((data or {}).get("code", 0) or 0) if isinstance(data, dict) else 0
+                if resp.status >= 400 or code >= 400:
+                    return {"platform": "printful", "status": "error", "error": str(data)[:500], "data": data}
+                result = (data or {}).get("result", {}) if isinstance(data, dict) else {}
+                pid = str(result.get("id") or "")
+                url = f"https://www.printful.com/dashboard/store/products/{pid}" if pid else ""
+                return {"platform": "printful", "status": "created", "id": pid, "url": url, "data": data}
+        except Exception as e:
+            return {"platform": "printful", "status": "error", "error": str(e)}
+
     async def publish(self, content: dict) -> dict:
         """POST /store/products — создание продукта."""
         if self._mode in {"browser", "browser_only"}:
-            return {
-                "platform": "printful",
-                "status": "needs_browser_flow",
-                "error": "Printful browser publish path requires dedicated UI runner. Auth can be captured via scripts/printful_auth_helper.py.",
-                "storage_state": str(self._storage_state_path),
-            }
+            # If API key is available, prefer trying API path first even in browser mode.
+            if not self._api_key:
+                return {
+                    "platform": "printful",
+                    "status": "needs_browser_flow",
+                    "error": "Printful browser publish path requires dedicated UI runner. Auth can be captured via scripts/printful_auth_helper.py.",
+                    "storage_state": str(self._storage_state_path),
+                }
         if content.get("dry_run"):
             name = (content.get("sync_product", {}) or {}).get("name", "printful_dryrun")
             try:
@@ -137,15 +164,20 @@ class PrintfulPlatform(BasePlatform):
             return {"platform": "printful", "status": "error", "error": "no_store_connected"}
         if self._store_type and self._store_type != "api":
             probe = await self._sync_products_probe()
+            # Attempt Sync API path first; only fallback to browser flow if denied.
+            via_sync = await self._create_via_sync_api(content)
+            if str(via_sync.get("status") or "") == "created":
+                return via_sync
             return {
                 "platform": "printful",
                 "status": "needs_browser_flow",
                 "error": (
-                    f"Store type '{self._store_type}' does not support create via /store/products API. "
+                    f"Store type '{self._store_type}' does not support create via current API path. "
                     "Use browser flow in Printful dashboard (linked Etsy store)."
                 ),
                 "store_type": self._store_type,
                 "sync_probe": probe,
+                "sync_attempt": via_sync,
             }
         try:
             session = await self._get_session()

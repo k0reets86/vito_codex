@@ -6,10 +6,14 @@ import os
 import re
 from pathlib import Path
 
+from config.logger import get_logger
 from config.paths import PROJECT_ROOT
 from config.settings import settings
 from modules.execution_facts import ExecutionFacts
+from modules.xvfb_session import XvfbSession
 from platforms.base_platform import BasePlatform
+
+logger = get_logger("pinterest", agent="pinterest")
 
 
 class PinterestPlatform(BasePlatform):
@@ -64,33 +68,139 @@ class PinterestPlatform(BasePlatform):
         browser = None
         context = None
         page = None
+        xvfb = None
         try:
             async with async_playwright() as p:
-                browser = await p.chromium.launch(
-                    headless=os.getenv("VITO_BROWSER_HEADLESS", "1").lower() not in {"0", "false", "no"},
-                    args=[
-                        "--no-sandbox",
-                        "--disable-dev-shm-usage",
-                        "--disable-blink-features=AutomationControlled",
-                    ],
-                )
+                # Pinterest anti-bot is stricter in headless. Prefer headed mode unless forced.
+                force_headless = os.getenv("VITO_FORCE_HEADLESS", "0").lower() in {"1", "true", "yes", "on"}
+                launch_args = [
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-blink-features=AutomationControlled",
+                ]
+                xvfb = XvfbSession(enabled=not force_headless)
+                xvfb.start()
+                launched_headed = False
+                if not force_headless:
+                    try:
+                        browser = await p.chromium.launch(
+                            headless=False,
+                            args=["--no-sandbox", "--disable-dev-shm-usage"],
+                        )
+                        launched_headed = True
+                    except Exception as e2:
+                        logger.warning(f"Pinterest headed launch failed, fallback headless: {e2}")
+                        browser = await p.chromium.launch(headless=True, args=launch_args)
+                        launched_headed = False
+                else:
+                    browser = await p.chromium.launch(headless=True, args=launch_args)
+                    launched_headed = False
                 context = await browser.new_context(
                     storage_state=str(self._storage_state_path),
                     viewport={"width": 1366, "height": 900},
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
                 )
                 page = await context.new_page()
+                # Warm-up home first, then open creation tool (reduces challenge frequency).
+                await page.goto("https://www.pinterest.com/", wait_until="domcontentloaded", timeout=90000)
+                await page.wait_for_timeout(3200)
+                try:
+                    await page.mouse.move(240, 220)
+                    await page.wait_for_timeout(500)
+                    await page.mouse.wheel(0, 360)
+                    await page.wait_for_timeout(900)
+                    await page.mouse.move(980, 520)
+                    await page.wait_for_timeout(700)
+                except Exception:
+                    pass
                 await page.goto("https://www.pinterest.com/pin-creation-tool/", wait_until="domcontentloaded", timeout=90000)
-                await page.wait_for_timeout(1500)
+                await page.wait_for_timeout(3200)
                 current = (page.url or "").lower()
                 title_now = (await page.title() or "").lower()
                 body_now = (await page.text_content("body") or "").lower()
-                if "recaptcha" in body_now or "resource fetch timed out" in body_now or "just a moment" in title_now:
+                challenge_signals = (
+                    "cf_chl_opt",
+                    "turnstile",
+                    "attention required",
+                    "checking your browser before accessing",
+                )
+                challenge_like = any(x in body_now for x in challenge_signals) or "/cdn-cgi/challenge" in (page.url or "").lower()
+                # Prevent false positives on normal localized pages: if editor controls exist, do not treat as challenge.
+                try:
+                    editor_controls = (
+                        await page.locator("input[type='file'], textarea, div[contenteditable='true']").count()
+                    )
+                except Exception:
+                    editor_controls = 0
+                if editor_controls > 0 and "/pin-creation-tool" in current:
+                    challenge_like = False
+                if challenge_like or "just a moment" in title_now:
+                    # In headed mode challenge can resolve automatically after a short wait.
+                    await page.wait_for_timeout(4500)
+                    title_now = (await page.title() or "").lower()
+                    body_now = (await page.text_content("body") or "").lower()
+                    challenge_like = any(x in body_now for x in challenge_signals) or "/cdn-cgi/challenge" in (page.url or "").lower()
+                    try:
+                        editor_controls = (
+                            await page.locator("input[type='file'], textarea, div[contenteditable='true']").count()
+                        )
+                    except Exception:
+                        editor_controls = 0
+                    if editor_controls > 0 and "/pin-creation-tool" in (page.url or "").lower():
+                        challenge_like = False
+                if challenge_like or "just a moment" in title_now:
+                    # Attempt Turnstile solve via Anti-Captcha if sitekey present.
+                    try:
+                        sitekey = await page.evaluate("""() => {
+                            const el = document.querySelector('[data-sitekey]');
+                            if (el) return el.getAttribute('data-sitekey') || '';
+                            const ifr = document.querySelector("iframe[src*='challenges.cloudflare.com']");
+                            if (ifr && ifr.src) {
+                                const m = ifr.src.match(/[?&]sitekey=([^&]+)/i);
+                                if (m) return m[1];
+                            }
+                            return '';
+                        }""")
+                        if sitekey:
+                            from modules.captcha_solver import CaptchaSolver
+                            token = CaptchaSolver.get_instance().solve_turnstile(str(sitekey), page.url)
+                            if token:
+                                await page.evaluate(
+                                    """(tk) => {
+                                        const fields = document.querySelectorAll(
+                                            "input[name='cf-turnstile-response'], textarea[name='cf-turnstile-response']"
+                                        );
+                                        fields.forEach((f) => { f.value = tk; f.dispatchEvent(new Event('input', {bubbles:true})); });
+                                    }""",
+                                    token,
+                                )
+                                await page.wait_for_timeout(1600)
+                    except Exception:
+                        pass
+                    try:
+                        await page.reload(wait_until="domcontentloaded", timeout=90000)
+                        await page.wait_for_timeout(2200)
+                        title_now = (await page.title() or "").lower()
+                        body_now = (await page.text_content("body") or "").lower()
+                        challenge_like = any(x in body_now for x in challenge_signals) or "/cdn-cgi/challenge" in (page.url or "").lower()
+                        try:
+                            editor_controls = (
+                                await page.locator("input[type='file'], textarea, div[contenteditable='true']").count()
+                            )
+                        except Exception:
+                            editor_controls = 0
+                        if editor_controls > 0 and "/pin-creation-tool" in (page.url or "").lower():
+                            challenge_like = False
+                    except Exception:
+                        pass
+                if challenge_like or "just a moment" in title_now:
                     return {
                         "platform": "pinterest",
                         "status": "blocked",
                         "error": "anti_bot_challenge_or_timeout",
                         "url": page.url,
+                        "launch_mode": "headed" if launched_headed else "headless",
+                        "display": str(os.getenv("DISPLAY", "")),
                     }
                 if any(x in current for x in ("/login", "session/new", "signup", "authenticate")):
                     return {
@@ -197,6 +307,11 @@ class PinterestPlatform(BasePlatform):
         except Exception as e:
             return {"platform": "pinterest", "status": "error", "error": str(e), "screenshot_path": shot}
         finally:
+            try:
+                if xvfb is not None:
+                    xvfb.stop()
+            except Exception:
+                pass
             try:
                 if page is not None:
                     await page.close()

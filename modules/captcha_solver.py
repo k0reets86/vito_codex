@@ -173,6 +173,28 @@ class CaptchaSolver:
             logger.error(f"hCaptcha failed: {err}")
             return None
 
+    def solve_turnstile(self, site_key: str, page_url: str) -> Optional[str]:
+        """Solve Cloudflare Turnstile and return the token."""
+        from anticaptchaofficial.turnstileproxyless import turnstileProxyless
+
+        solver = turnstileProxyless()
+        solver.set_verbose(0)
+        solver.set_key(self._api_key)
+        solver.set_website_url(page_url)
+        solver.set_website_key(site_key)
+
+        logger.info(f"Solving Turnstile for {page_url}")
+        token = solver.solve_and_return_solution()
+        if token:
+            cost = solver.task_cost if hasattr(solver, "task_cost") else 0.003
+            self._log("turnstile", page_url, True, cost)
+            logger.info(f"Turnstile solved, token={token[:40]}...")
+            return token
+        err = solver.err_string
+        self._log("turnstile", page_url, False, 0.0, err)
+        logger.error(f"Turnstile failed: {err}")
+        return None
+
     def solve_image_captcha(self, image_path: str) -> Optional[str]:
         """Solve an image captcha and return the text."""
         from anticaptchaofficial.imagecaptcha import imagecaptcha

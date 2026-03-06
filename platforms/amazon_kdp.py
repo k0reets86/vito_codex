@@ -2,6 +2,10 @@
 
 from pathlib import Path
 from typing import Any
+import asyncio
+import json
+import os
+import shlex
 
 from config.logger import get_logger
 from config.settings import settings
@@ -129,7 +133,7 @@ class AmazonKDPPlatform(BasePlatform):
             if result and result.success:
                 has_evidence = bool(evidence_url or evidence_id or evidence_path)
                 status = "published" if has_evidence else "prepared"
-            return {
+            result_payload = {
                 "platform": "amazon_kdp",
                 "status": status,
                 "url": evidence_url,
@@ -137,9 +141,71 @@ class AmazonKDPPlatform(BasePlatform):
                 "screenshot_path": evidence_path,
                 "output": out,
             }
+            if status == "prepared" and self._state_file.exists():
+                helper = await self._publish_via_kdp_helper(content or {})
+                if helper.get("status") == "published":
+                    return helper
+            return result_payload
         except Exception as e:
             logger.error(f"KDP publish error: {e}", extra={"event": "kdp_publish_error"})
             return {"platform": "amazon_kdp", "status": "error", "error": str(e)}
+
+    async def _publish_via_kdp_helper(self, content: dict) -> dict:
+        """Fallback to dedicated KDP draft helper with strict bookshelf verification."""
+        helper_script = Path("scripts/kdp_create_draft_test.py")
+        if not helper_script.exists():
+            return {"platform": "amazon_kdp", "status": "prepared", "error": "kdp_helper_missing"}
+        title = str(content.get("title") or "VITO TEST DRAFT").strip() or "VITO TEST DRAFT"
+        cmd = [
+            "python3",
+            str(helper_script),
+            "--storage-path",
+            str(self._state_file),
+            "--debug-dir",
+            "runtime/remote_auth",
+        ]
+        if str(os.getenv("VITO_BROWSER_HEADLESS", "1")).lower() in {"1", "true", "yes", "on"}:
+            cmd.append("--headless")
+        env = dict(os.environ)
+        env["KDP_TEST_DRAFT_TITLE"] = title
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+            )
+            out_b, err_b = await asyncio.wait_for(proc.communicate(), timeout=240)
+            stdout = (out_b or b"").decode("utf-8", errors="ignore").strip()
+            stderr = (err_b or b"").decode("utf-8", errors="ignore").strip()
+            lines = [ln for ln in stdout.splitlines() if ln.strip()]
+            payload = {}
+            if lines:
+                try:
+                    payload = json.loads(lines[-1])
+                except Exception:
+                    payload = {}
+            if bool(payload.get("ok")):
+                return {
+                    "platform": "amazon_kdp",
+                    "status": "published",
+                    "url": "https://kdp.amazon.com/bookshelf",
+                    "id": "",
+                    "screenshot_path": str(payload.get("bookshelf_screenshot") or payload.get("screenshot") or ""),
+                    "output": payload,
+                    "method": "kdp_helper",
+                }
+            return {
+                "platform": "amazon_kdp",
+                "status": "prepared",
+                "url": "https://kdp.amazon.com/bookshelf",
+                "id": "",
+                "screenshot_path": str(payload.get("screenshot") or ""),
+                "output": payload or {"stdout": stdout[-1200:], "stderr": stderr[-1200:], "cmd": " ".join(shlex.quote(x) for x in cmd)},
+                "method": "kdp_helper",
+            }
+        except Exception as e:
+            return {"platform": "amazon_kdp", "status": "prepared", "error": str(e), "method": "kdp_helper"}
 
     async def get_analytics(self) -> dict:
         """Получение аналитики через BrowserAgent (KDP Reports page)."""

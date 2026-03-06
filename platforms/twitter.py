@@ -325,8 +325,43 @@ class TwitterPlatform(BasePlatform):
                             break
                 if textbox is None:
                     return {"platform": "twitter", "status": "error", "error": "tweet_textbox_not_found"}
-                await textbox.click(timeout=2000)
-                await page.keyboard.type(text, delay=6)
+                typed_ok = False
+                # Robust composer write: click+type, then fill, then JS fallback.
+                try:
+                    await textbox.click(timeout=5000)
+                    await page.keyboard.type(text, delay=8)
+                    typed_ok = True
+                except Exception:
+                    typed_ok = False
+                if not typed_ok:
+                    try:
+                        await textbox.fill(text[:280], timeout=5000)
+                        typed_ok = True
+                    except Exception:
+                        typed_ok = False
+                if not typed_ok:
+                    try:
+                        await page.evaluate(
+                            """(value) => {
+                                const el = document.querySelector("div[data-testid='tweetTextarea_0']")
+                                    || document.querySelector("div[role='textbox']");
+                                if (!el) return false;
+                                el.focus();
+                                const sel = window.getSelection();
+                                const range = document.createRange();
+                                range.selectNodeContents(el);
+                                range.deleteContents();
+                                el.textContent = value;
+                                el.dispatchEvent(new InputEvent('input', {bubbles:true, data:value, inputType:'insertText'}));
+                                return true;
+                            }""",
+                            text[:280],
+                        )
+                        typed_ok = True
+                    except Exception:
+                        typed_ok = False
+                if not typed_ok:
+                    return {"platform": "twitter", "status": "error", "error": "compose_input_failed"}
 
                 if image_path and os.path.isfile(image_path):
                     try:

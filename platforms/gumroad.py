@@ -108,6 +108,13 @@ class GumroadPlatform(BasePlatform):
         )
         self._session: aiohttp.ClientSession | None = None
 
+    @staticmethod
+    def _storage_state_path() -> Path:
+        p = Path(str(getattr(settings, "GUMROAD_STORAGE_STATE_FILE", "runtime/gumroad_storage_state.json") or "runtime/gumroad_storage_state.json"))
+        if not p.is_absolute():
+            p = PROJECT_ROOT / p
+        return p
+
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession()
@@ -396,10 +403,29 @@ class GumroadPlatform(BasePlatform):
                         await br.close()
                         logger.warning("Gumroad login requires 2FA/OTP")
                         return False
+                # Verify authenticated session before persisting cookie/state.
+                try:
+                    await page.goto("https://gumroad.com/settings/profile", wait_until="domcontentloaded")
+                    await asyncio.sleep(2)
+                    cur = (page.url or "").lower()
+                    if "login" in cur or "sign_in" in cur:
+                        await page.screenshot(path=str(LOGIN_SHOT), full_page=True)
+                        await br.close()
+                        logger.warning("Gumroad login verification failed")
+                        return False
+                except Exception:
+                    pass
                 cookies = await ctx.cookies()
                 session_cookie = next((c for c in cookies if c.get("name") == "_gumroad_app_session"), None)
                 if session_cookie:
                     COOKIE_FILE.write_text(session_cookie.get("value", "").strip())
+                    # Persist full authenticated storage state for browser-only publish flow.
+                    try:
+                        storage_state = self._storage_state_path()
+                        storage_state.parent.mkdir(parents=True, exist_ok=True)
+                        await ctx.storage_state(path=str(storage_state))
+                    except Exception:
+                        pass
                     await page.screenshot(path=str(LOGIN_SHOT), full_page=True)
                     await br.close()
                     logger.info("Gumroad session cookie saved", extra={"event": "gumroad_cookie_saved"})
@@ -420,12 +446,27 @@ class GumroadPlatform(BasePlatform):
         cookie = ""
         if COOKIE_FILE.exists():
             cookie = COOKIE_FILE.read_text().strip()
-        if not cookie:
-            logger.warning("No Gumroad session cookie. Owner must provide _gumroad_app_session.")
+        storage_state = self._storage_state_path()
+        has_storage = False
+        if storage_state.exists():
+            try:
+                parsed = json.loads(storage_state.read_text(encoding="utf-8"))
+                cookies = parsed.get("cookies") if isinstance(parsed, dict) else None
+                has_storage = bool(isinstance(cookies, list) and cookies)
+            except Exception:
+                has_storage = False
+        if not cookie and not has_storage:
+            # Try to refresh session automatically before hard-failing.
+            ok = await self._ensure_session_cookie()
+            if ok and COOKIE_FILE.exists():
+                cookie = COOKIE_FILE.read_text().strip()
+                has_storage = STORAGE_STATE_FILE.exists()
+        if not cookie and not has_storage:
+            logger.warning("No Gumroad session cookie/storage state.")
             return {
                 "platform": "gumroad",
                 "status": "need_cookie",
-                "error": "No session cookie. Ask owner for _gumroad_app_session from browser.",
+                "error": "No session cookie or storage_state.",
             }
 
         allow_existing_update = bool(content.get("allow_existing_update")) and bool(content.get("owner_edit_confirmed"))
@@ -475,17 +516,9 @@ class GumroadPlatform(BasePlatform):
         try:
             async with async_playwright() as p:
                 br = await _launch_browser(p)
-                has_storage = False
-                if STORAGE_STATE_FILE.exists():
-                    try:
-                        parsed = json.loads(STORAGE_STATE_FILE.read_text(encoding="utf-8"))
-                        cookies = parsed.get("cookies") if isinstance(parsed, dict) else None
-                        has_storage = bool(isinstance(cookies, list) and cookies)
-                    except Exception:
-                        has_storage = False
                 if has_storage:
                     ctx = await br.new_context(
-                        storage_state=str(STORAGE_STATE_FILE),
+                        storage_state=str(storage_state),
                         viewport={"width": 1280, "height": 1400},
                         user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
                     )
@@ -494,7 +527,8 @@ class GumroadPlatform(BasePlatform):
                         viewport={"width": 1280, "height": 1400},
                         user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
                     )
-                if cookie:
+                # Avoid overriding valid storage-state session with possibly stale cookie.
+                if cookie and not has_storage:
                     await ctx.add_cookies([{
                         "name": "_gumroad_app_session", "value": cookie,
                         "domain": ".gumroad.com", "path": "/", "httpOnly": True,
@@ -529,10 +563,10 @@ class GumroadPlatform(BasePlatform):
                                 short = prod.get("short_url", "") or prod.get("url", "")
                                 if "/l/" in short:
                                     slug_from_api = short.split("/l/")[-1].split("?")[0]
-                                    target_edit_url = short.rstrip("/") + "/edit"
+                                    target_edit_url = f"https://gumroad.com/products/{slug_from_api}/edit"
                                 elif "gum.co/" in short:
                                     slug_from_api = short.rsplit("/", 1)[-1]
-                                    target_edit_url = f"https://gumroad.com/l/{slug_from_api}/edit"
+                                    target_edit_url = f"https://gumroad.com/products/{slug_from_api}/edit"
                                 break
                     except Exception:
                         slug_from_api = ""
@@ -559,7 +593,7 @@ class GumroadPlatform(BasePlatform):
                                 slug_local = slug_candidate
                                 break
                         if slug_local:
-                            edit_url = target_edit_url or f"https://gumroad.com/l/{slug_local}/edit"
+                            edit_url = target_edit_url or f"https://gumroad.com/products/{slug_local}/edit"
                             await page.goto(edit_url, wait_until="domcontentloaded")
                             await asyncio.sleep(2)
                         return slug_local
@@ -681,7 +715,7 @@ class GumroadPlatform(BasePlatform):
                     return "", ""
 
                 if slug_from_api:
-                    await page.goto(target_edit_url or f"https://gumroad.com/l/{slug_from_api}/edit", wait_until="domcontentloaded")
+                    await page.goto(target_edit_url or f"https://gumroad.com/products/{slug_from_api}/edit", wait_until="domcontentloaded")
                     await asyncio.sleep(2)
                 else:
                     # Step 1: Create product (may hit daily limit)

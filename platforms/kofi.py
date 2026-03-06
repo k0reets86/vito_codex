@@ -19,6 +19,7 @@ from config.paths import PROJECT_ROOT
 from config.settings import settings
 from modules.execution_facts import ExecutionFacts
 from modules.listing_optimizer import optimize_listing_payload
+from modules.xvfb_session import XvfbSession
 from platforms.base_platform import BasePlatform
 
 logger = get_logger("kofi", agent="kofi")
@@ -138,24 +139,51 @@ class KofiPlatform(BasePlatform):
         browser = None
         context = None
         page = None
+        xvfb = None
         try:
             async with async_playwright() as p:
-                browser = await p.chromium.launch(
-                    headless=os.getenv("VITO_BROWSER_HEADLESS", "1").lower() not in {"0", "false", "no"},
-                    args=[
-                        "--no-sandbox",
-                        "--disable-dev-shm-usage",
-                        "--disable-gpu",
-                        "--disable-software-rasterizer",
-                        "--disable-blink-features=AutomationControlled",
-                    ],
-                )
+                # Ko-fi challenge pages are significantly more frequent in headless mode.
+                # Prefer headed mode (under Xvfb on server) unless explicitly forced.
+                force_headless = os.getenv("VITO_FORCE_HEADLESS", "0").lower() in {"1", "true", "yes", "on"}
+                launch_args = [
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--disable-software-rasterizer",
+                    "--disable-blink-features=AutomationControlled",
+                ]
+                xvfb = XvfbSession(enabled=not force_headless)
+                xvfb.start()
+                launched_headed = False
+                if not force_headless:
+                    try:
+                        browser = await p.chromium.launch(
+                            headless=False,
+                            args=["--no-sandbox", "--disable-dev-shm-usage"],
+                        )
+                        launched_headed = True
+                    except Exception as e2:
+                        logger.warning(f"Ko-fi headed launch failed, fallback headless: {e2}")
+                        browser = await p.chromium.launch(headless=True, args=launch_args)
+                        launched_headed = False
+                else:
+                    browser = await p.chromium.launch(headless=True, args=launch_args)
+                    launched_headed = False
                 context = await browser.new_context(
                     storage_state=str(self._storage_state_path),
                     viewport={"width": 1366, "height": 900},
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
                 )
                 page = await context.new_page()
+                try:
+                    await page.goto("https://ko-fi.com/", wait_until="domcontentloaded", timeout=90000)
+                    await page.wait_for_timeout(3200)
+                    await page.mouse.move(200, 250)
+                    await page.wait_for_timeout(600)
+                    await page.mouse.move(980, 420)
+                    await page.wait_for_timeout(700)
+                except Exception:
+                    pass
                 landing_urls = [
                     "https://ko-fi.com/shop/settings?productType=0",
                     "https://ko-fi.com/shop/settings?src=sidemenu&productType=0",
@@ -163,18 +191,71 @@ class KofiPlatform(BasePlatform):
                 ]
                 for u in landing_urls:
                     await page.goto(u, wait_until="domcontentloaded", timeout=90000)
-                    await page.wait_for_timeout(1800)
+                    await page.wait_for_timeout(3800)
                     if "/404" not in (page.url or ""):
                         break
                 current = page.url.lower()
                 page_title = (await page.title()).strip().lower()
                 body_text = (await page.text_content("body") or "").strip().lower()
-                if "just a moment" in page_title or "cloudflare" in body_text or "cf-chl" in body_text:
+                challenge_signals = (
+                    "checking your browser before accessing",
+                    "attention required",
+                    "verify you are human",
+                    "cf_chl_opt",
+                    "turnstile",
+                )
+                challenge_like = any(x in body_text for x in challenge_signals) or "/cdn-cgi/challenge" in (page.url or "").lower()
+                if "just a moment" in page_title or challenge_like:
+                    # Cloudflare may auto-resolve in headed mode after a short delay.
+                    await page.wait_for_timeout(12000)
+                    page_title = (await page.title()).strip().lower()
+                    body_text = (await page.text_content("body") or "").strip().lower()
+                    challenge_like = any(x in body_text for x in challenge_signals) or "/cdn-cgi/challenge" in (page.url or "").lower()
+                if "just a moment" in page_title or challenge_like:
+                    # Attempt Turnstile solve via Anti-Captcha if sitekey is present.
+                    try:
+                        sitekey = await page.evaluate("""() => {
+                            const el = document.querySelector('[data-sitekey]');
+                            if (el) return el.getAttribute('data-sitekey') || '';
+                            const ifr = document.querySelector("iframe[src*='challenges.cloudflare.com']");
+                            if (ifr && ifr.src) {
+                                const m = ifr.src.match(/[?&]sitekey=([^&]+)/i);
+                                if (m) return m[1];
+                            }
+                            return '';
+                        }""")
+                        if sitekey:
+                            from modules.captcha_solver import CaptchaSolver
+                            token = CaptchaSolver.get_instance().solve_turnstile(str(sitekey), page.url)
+                            if token:
+                                await page.evaluate(
+                                    """(tk) => {
+                                        const fields = document.querySelectorAll(
+                                            "input[name='cf-turnstile-response'], textarea[name='cf-turnstile-response']"
+                                        );
+                                        fields.forEach((f) => { f.value = tk; f.dispatchEvent(new Event('input', {bubbles:true})); });
+                                    }""",
+                                    token,
+                                )
+                                await page.wait_for_timeout(1800)
+                    except Exception:
+                        pass
+                    # One reload retry before hard fail.
+                    try:
+                        await page.reload(wait_until="domcontentloaded", timeout=90000)
+                        await page.wait_for_timeout(8000)
+                        body_text = (await page.text_content("body") or "").strip().lower()
+                        challenge_like = any(x in body_text for x in challenge_signals) or "/cdn-cgi/challenge" in (page.url or "").lower()
+                    except Exception:
+                        pass
+                if "just a moment" in page_title or challenge_like:
                     return {
                         "platform": "kofi",
                         "status": "blocked",
                         "error": "cloudflare_challenge",
                         "url": page.url,
+                        "launch_mode": "headed" if launched_headed else "headless",
+                        "display": str(os.getenv("DISPLAY", "")),
                     }
                 if "/login" in current or "/signin" in current:
                     return {
@@ -342,6 +423,11 @@ class KofiPlatform(BasePlatform):
         except Exception as e:
             return {"platform": "kofi", "status": "error", "error": str(e), "screenshot_path": shot}
         finally:
+            try:
+                if xvfb is not None:
+                    xvfb.stop()
+            except Exception:
+                pass
             try:
                 if page is not None:
                     await page.close()

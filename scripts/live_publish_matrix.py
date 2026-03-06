@@ -10,6 +10,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
+import base64
 from datetime import datetime, timezone
 from pathlib import Path
 import sys
@@ -34,6 +36,27 @@ from modules.platform_artifact_pack import build_platform_bundle
 def _payloads(live: bool) -> dict[str, dict]:
     tag = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     common_img_url = "https://via.placeholder.com/1200x630.png?text=VITO+Probe"
+    gumroad_slug = (os.getenv("GUMROAD_TEST_SLUG", "yupwt") or "yupwt").strip()
+    img_path = ROOT / "runtime" / "probe_image.png"
+    if not img_path.exists():
+        img_path.parent.mkdir(parents=True, exist_ok=True)
+        # 1x1 PNG
+        raw = b"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/w8AAgMBgN4n3S8AAAAASUVORK5CYII="
+        img_path.write_bytes(base64.b64decode(raw))
+    pdf_path = ROOT / "runtime" / "probe_asset.pdf"
+    if not pdf_path.exists():
+        raw_pdf = (
+            b"JVBERi0xLjEKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoK"
+            b"PDwgL1R5cGUgL1BhZ2VzIC9Db3VudCAxIC9LaWRzIFsgMyAwIFIgXSA+PgplbmRvYmoKMyAwIG9iago8PCAvVHlw"
+            b"ZSAvUGFnZSAvUGFyZW50IDIgMCBSIC9NZWRpYUJveCBbMCAwIDMwMCAxNDRdIC9Db250ZW50cyA0IDAgUiAvUmVz"
+            b"b3VyY2VzIDw8IC9Gb250IDw8IC9GMSA1IDAgUiA+PiA+PiA+PgplbmRvYmoKNCAwIG9iago8PCAvTGVuZ3RoIDQ0"
+            b"ID4+CnN0cmVhbQpCVCAvRjEgMjQgVGYgNzIgNzIgVGQgKFZJVE8gUFJPQkUpIFRqIEVUCmVuZHN0cmVhbQplbmRv"
+            b"YmoKNSAwIG9iago8PCAvVHlwZSAvRm9udCAvU3VidHlwZSAvVHlwZTEgL0Jhc2VGb250IC9IZWx2ZXRpY2EgPj4K"
+            b"ZW5kb2JqCnhyZWYKMCA2CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAxMCAwMDAwMCBuIAowMDAwMDAwMDYw"
+            b"IDAwMDAwIG4gCjAwMDAwMDAxMTcgMDAwMDAgbiAKMDAwMDAwMDI0MSAwMDAwMCBuIAowMDAwMDAwMzM1IDAwMDAw"
+            b"IG4gCnRyYWlsZXIKPDwgL1NpemUgNiAvUm9vdCAxIDAgUiA+PgpzdGFydHhyZWYKNDI1CiUlRU9GCg=="
+        )
+        pdf_path.write_bytes(base64.b64decode(raw_pdf))
     return {
         "twitter": build_platform_bundle("twitter", {
             "dry_run": not live,
@@ -61,6 +84,15 @@ def _payloads(live: bool) -> dict[str, dict]:
             "description": "Automated probe listing for controlled Gumroad flow",
             "price": 5,
             "tags": ["vito", "probe", "digital", "ai", "automation"],
+            # Avoid draft-spam and daily limits: edit one controlled test listing.
+            "allow_existing_update": True,
+            "owner_edit_confirmed": True,
+            "target_slug": gumroad_slug,
+            "keep_unpublished": True,
+            "operation": "update",
+            "pdf_path": str(pdf_path),
+            "cover_path": str(img_path),
+            "thumb_path": str(img_path),
         }),
         "amazon_kdp": build_platform_bundle("amazon_kdp", {
             "dry_run": not live,
@@ -84,6 +116,7 @@ def _payloads(live: bool) -> dict[str, dict]:
             "title": f"VITO pin probe {tag}",
             "description": "Probe pin for browser automation flow check.",
             "url": "https://example.com/vito-probe",
+            "image_path": str(img_path),
         }),
         "wordpress": {
             "dry_run": not live,
