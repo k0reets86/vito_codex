@@ -253,6 +253,118 @@ class RedditPlatform(BasePlatform):
                             post_url = candidate if candidate.startswith("http") else f"https://www.reddit.com{candidate}"
                     except Exception:
                         pass
+                # Fallback verify: check owner's "submitted" page for recently created title.
+                if "/comments/" not in post_url:
+                    try:
+                        profile_user = str(getattr(settings, "REDDIT_USERNAME", "") or "").strip()
+                        if profile_user:
+                            await page.goto(
+                                f"https://www.reddit.com/user/{profile_user}/submitted/",
+                                wait_until="domcontentloaded",
+                                timeout=90000,
+                            )
+                            await page.wait_for_timeout(2200)
+                            matched = await page.evaluate(
+                                """(needle) => {
+                                    const key = String(needle || '').trim().toLowerCase();
+                                    if (!key) return "";
+                                    const links = Array.from(document.querySelectorAll("a[href*='/comments/']"));
+                                    for (const a of links) {
+                                        const href = a.getAttribute('href') || '';
+                                        if (!href.includes('/comments/')) continue;
+                                        const card = a.closest('article,shreddit-post,div');
+                                        const txt = ((card && card.textContent) || a.textContent || '').toLowerCase();
+                                        if (txt.includes(key)) {
+                                            return href.startsWith('http') ? href : `https://www.reddit.com${href}`;
+                                        }
+                                    }
+                                    return "";
+                                }""",
+                                title[:120],
+                            )
+                            if matched:
+                                post_url = str(matched)
+                    except Exception:
+                        pass
+                # Legacy fallback: old.reddit submit form is often less fragile than new UI.
+                if "/comments/" not in post_url:
+                    try:
+                        await page.goto("https://old.reddit.com/submit", wait_until="domcontentloaded", timeout=90000)
+                        await page.wait_for_timeout(1500)
+                        # choose text/self post
+                        try:
+                            await page.check("input#kind-self", timeout=1500)
+                        except Exception:
+                            pass
+                        try:
+                            await page.check("input[name='kind'][value='self']", timeout=1500)
+                        except Exception:
+                            pass
+                        for sel in ("#text-button", "a:has-text('text')", "button:has-text('text')"):
+                            try:
+                                loc = page.locator(sel)
+                                if await loc.count():
+                                    await loc.first.click(timeout=1500)
+                                    await page.wait_for_timeout(500)
+                                    break
+                            except Exception:
+                                continue
+                        try:
+                            await page.fill("input[name='sr']", subreddit, timeout=2000)
+                        except Exception:
+                            pass
+                        await page.fill("textarea[name='title']", title[:300], timeout=2500)
+                        if body:
+                            try:
+                                await page.fill("textarea[name='text']", body[:40000], timeout=2500)
+                            except Exception:
+                                pass
+                        # Solve old.reddit reCAPTCHA if present.
+                        try:
+                            has_captcha = await page.evaluate(
+                                """() => !!(
+                                    document.querySelector('[data-sitekey]') ||
+                                    document.querySelector('iframe[src*=\"recaptcha\"]') ||
+                                    document.querySelector('.g-recaptcha')
+                                )"""
+                            )
+                        except Exception:
+                            has_captcha = False
+                        if has_captcha:
+                            try:
+                                from modules.captcha_solver import CaptchaSolver
+                                token = await CaptchaSolver.get_instance().solve_playwright_recaptcha(page)
+                                if not token:
+                                    return {
+                                        "platform": "reddit",
+                                        "status": "blocked",
+                                        "error": "captcha_required",
+                                        "url": page.url,
+                                        "screenshot_path": shot,
+                                    }
+                            except Exception:
+                                return {
+                                    "platform": "reddit",
+                                    "status": "blocked",
+                                    "error": "captcha_required",
+                                    "url": page.url,
+                                    "screenshot_path": shot,
+                                }
+                        for sel in ("button[type='submit']", "button:has-text('submit')", "input[type='submit']"):
+                            btn = page.locator(sel)
+                            if await btn.count():
+                                try:
+                                    await btn.first.click(timeout=2500)
+                                    posted = True
+                                    break
+                                except Exception:
+                                    continue
+                        await page.wait_for_timeout(2600)
+                        current2 = str(page.url or "")
+                        if "/comments/" in current2:
+                            post_url = current2
+                    except Exception:
+                        pass
                 try:
                     await page.screenshot(path=shot, full_page=True)
                 except Exception:

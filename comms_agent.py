@@ -17,6 +17,7 @@
 
 import asyncio
 import json
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -3371,7 +3372,16 @@ class CommsAgent:
         recipe_name = str(args[0] or "").strip().lower()
         live = any(str(a).strip().lower() == "live" for a in args[1:])
         dry_run = not live
-        # Safe generic payloads; platform adapters normalize extra fields.
+        from modules.workflow_recipes import get_workflow_recipe
+        from modules.platform_artifact_pack import build_platform_bundle
+
+        rec = get_workflow_recipe(recipe_name)
+        if not rec:
+            await update.message.reply_text(f"Recipe не найден: {recipe_name}", reply_markup=self._main_keyboard())
+            return
+        platform = str(rec.get("platform") or "").strip().lower()
+
+        # Baseline payload, then platform-specific normalization.
         payload = {
             "dry_run": dry_run,
             "title": "VITO Recipe Test: AI Digital Product Kit",
@@ -3389,8 +3399,36 @@ class CommsAgent:
             "seo_title": "AI Digital Product Kit for Creators",
             "seo_description": "SEO-optimized test listing for marketplace publish flow validation.",
             "url": "https://example.com/vito-test",
-            "subreddit": "test",
         }
+        if platform == "reddit":
+            uname = str(getattr(settings, "REDDIT_USERNAME", "") or "").strip()
+            payload["subreddit"] = str(os.getenv("REDDIT_TEST_SUBREDDIT", f"u_{uname}" if uname else "test"))
+        if platform == "gumroad":
+            payload.update(
+                {
+                    "allow_existing_update": True,
+                    "owner_edit_confirmed": True,
+                    "target_slug": str(os.getenv("GUMROAD_TEST_SLUG", "yupwt") or "yupwt").strip(),
+                    "operation": "update",
+                    "keep_unpublished": False if live else True,
+                }
+            )
+        if platform == "etsy":
+            target_listing_id = str(os.getenv("ETSY_TEST_LISTING_ID", "") or "").strip()
+            if target_listing_id:
+                payload.update(
+                    {
+                        "allow_existing_update": True,
+                        "owner_edit_confirmed": True,
+                        "target_listing_id": target_listing_id,
+                        "operation": "update",
+                    }
+                )
+            # Owner requirement: for Etsy prefer draft creation/editing in tests.
+            payload["draft_only"] = True
+        if platform == "amazon_kdp":
+            payload["operation"] = "create_or_update_draft"
+        payload = build_platform_bundle(platform, payload)
         try:
             from modules.workflow_recipe_executor import WorkflowRecipeExecutor
             exe = WorkflowRecipeExecutor(self._publisher_queue)
@@ -3400,13 +3438,19 @@ class CommsAgent:
             return
         st = str(out.get("status") or "")
         if st == "accepted":
+            res = out.get("result") if isinstance(out.get("result"), dict) else {}
+            status = str(res.get("status") or "")
+            url = str(res.get("url") or "")
+            rid = str(res.get("listing_id") or res.get("product_id") or res.get("post_id") or res.get("tweet_id") or res.get("id") or "")
             await update.message.reply_text(
-                f"Recipe accepted: {recipe_name} ({out.get('platform')})",
+                f"Recipe accepted: {recipe_name} ({out.get('platform')})\nstatus={status}\nurl={url or '-'}\nid={rid or '-'}",
                 reply_markup=self._main_keyboard(),
             )
         else:
+            result = out.get("result") if isinstance(out.get("result"), dict) else {}
+            status = str(result.get("status") or "")
             await update.message.reply_text(
-                f"Recipe failed: {recipe_name}\nПричина: {out.get('error', 'unknown')}",
+                f"Recipe failed: {recipe_name}\nПричина: {out.get('error', 'unknown')}\nstatus={status or '-'}",
                 reply_markup=self._main_keyboard(),
             )
 

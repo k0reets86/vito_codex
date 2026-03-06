@@ -18,6 +18,7 @@ from config.logger import get_logger
 from config.paths import PROJECT_ROOT
 from config.settings import settings
 from modules.execution_facts import ExecutionFacts
+from modules.display_bootstrap import ensure_display
 from modules.listing_optimizer import optimize_listing_payload
 from modules.xvfb_session import XvfbSession
 from platforms.base_platform import BasePlatform
@@ -145,6 +146,14 @@ class KofiPlatform(BasePlatform):
                 # Ko-fi challenge pages are significantly more frequent in headless mode.
                 # Prefer headed mode (under Xvfb on server) unless explicitly forced.
                 force_headless = os.getenv("VITO_FORCE_HEADLESS", "0").lower() in {"1", "true", "yes", "on"}
+                if not force_headless:
+                    disp = ensure_display()
+                    if not disp:
+                        xvfb = XvfbSession(enabled=True)
+                        xvfb.start()
+                        disp = str(os.getenv("DISPLAY", "")).strip()
+                    if not disp:
+                        force_headless = True
                 launch_args = [
                     "--no-sandbox",
                     "--disable-dev-shm-usage",
@@ -152,8 +161,6 @@ class KofiPlatform(BasePlatform):
                     "--disable-software-rasterizer",
                     "--disable-blink-features=AutomationControlled",
                 ]
-                xvfb = XvfbSession(enabled=not force_headless)
-                xvfb.start()
                 launched_headed = False
                 if not force_headless:
                     try:
@@ -172,7 +179,6 @@ class KofiPlatform(BasePlatform):
                 context = await browser.new_context(
                     storage_state=str(self._storage_state_path),
                     viewport={"width": 1366, "height": 900},
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
                 )
                 page = await context.new_page()
                 try:

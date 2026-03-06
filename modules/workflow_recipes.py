@@ -19,6 +19,8 @@ _RECIPES: dict[str, dict[str, Any]] = {
             "verify_public_url",
         ],
         "required_evidence": ["url", "id"],
+        "accepted_statuses": ["published", "created", "draft"],
+        "forbidden_url_contains": ["/products/", "/dashboard", "/library"],
     },
     "etsy_publish": {
         "platform": "etsy",
@@ -32,7 +34,9 @@ _RECIPES: dict[str, dict[str, Any]] = {
             "save_draft_or_publish",
             "verify_listing_url",
         ],
-        "required_evidence": ["url"],
+        "required_evidence": ["id"],
+        "accepted_statuses": ["created", "published", "draft"],
+        "forbidden_url_contains": ["/tools/listings", "/listing-editor"],
     },
     "kdp_publish": {
         "platform": "amazon_kdp",
@@ -47,6 +51,8 @@ _RECIPES: dict[str, dict[str, Any]] = {
             "verify_bookshelf_entry",
         ],
         "required_evidence": [],
+        "accepted_statuses": ["created", "published", "draft"],
+        "required_numeric_gt_zero": ["output.fields_filled"],
     },
     "kofi_publish": {
         "platform": "kofi",
@@ -60,6 +66,8 @@ _RECIPES: dict[str, dict[str, Any]] = {
             "verify_page_url",
         ],
         "required_evidence": ["url"],
+        "accepted_statuses": ["created", "published"],
+        "forbidden_url_contains": ["/shop/settings", "/manage"],
     },
     "twitter_publish": {
         "platform": "twitter",
@@ -71,7 +79,9 @@ _RECIPES: dict[str, dict[str, Any]] = {
             "publish",
             "verify_post_url",
         ],
-        "required_evidence": [],
+        "required_evidence": ["url"],
+        "accepted_statuses": ["published", "created"],
+        "forbidden_url_contains": ["/compose", "/i/flow"],
     },
     "reddit_publish": {
         "platform": "reddit",
@@ -84,6 +94,8 @@ _RECIPES: dict[str, dict[str, Any]] = {
             "verify_permalink",
         ],
         "required_evidence": ["url"],
+        "accepted_statuses": ["published", "created"],
+        "required_url_contains": ["/comments/"],
     },
     "pinterest_publish": {
         "platform": "pinterest",
@@ -97,6 +109,8 @@ _RECIPES: dict[str, dict[str, Any]] = {
             "verify_pin_url",
         ],
         "required_evidence": ["url"],
+        "accepted_statuses": ["published", "created"],
+        "forbidden_url_contains": ["pin-creation-tool", "/login"],
     },
 }
 

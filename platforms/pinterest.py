@@ -9,6 +9,7 @@ from pathlib import Path
 from config.logger import get_logger
 from config.paths import PROJECT_ROOT
 from config.settings import settings
+from modules.display_bootstrap import ensure_display
 from modules.execution_facts import ExecutionFacts
 from modules.xvfb_session import XvfbSession
 from platforms.base_platform import BasePlatform
@@ -73,13 +74,19 @@ class PinterestPlatform(BasePlatform):
             async with async_playwright() as p:
                 # Pinterest anti-bot is stricter in headless. Prefer headed mode unless forced.
                 force_headless = os.getenv("VITO_FORCE_HEADLESS", "0").lower() in {"1", "true", "yes", "on"}
+                if not force_headless:
+                    disp = ensure_display()
+                    if not disp:
+                        xvfb = XvfbSession(enabled=True)
+                        xvfb.start()
+                        disp = str(os.getenv("DISPLAY", "")).strip()
+                    if not disp:
+                        force_headless = True
                 launch_args = [
                     "--no-sandbox",
                     "--disable-dev-shm-usage",
                     "--disable-blink-features=AutomationControlled",
                 ]
-                xvfb = XvfbSession(enabled=not force_headless)
-                xvfb.start()
                 launched_headed = False
                 if not force_headless:
                     try:
@@ -98,7 +105,6 @@ class PinterestPlatform(BasePlatform):
                 context = await browser.new_context(
                     storage_state=str(self._storage_state_path),
                     viewport={"width": 1366, "height": 900},
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
                 )
                 page = await context.new_page()
                 # Warm-up home first, then open creation tool (reduces challenge frequency).

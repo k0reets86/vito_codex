@@ -149,6 +149,7 @@ class EtsyPlatform(BasePlatform):
         allow_existing_update = bool(content.get("allow_existing_update"))
         owner_edit_confirmed = bool(content.get("owner_edit_confirmed"))
         target_listing_id = str(content.get("target_listing_id") or "").strip()
+        draft_only = bool(content.get("draft_only"))
         if bool(getattr(settings, "PUBLISH_CREATE_GUARD_ENABLED", True)):
             if operation in {"create", "new"} and allow_existing_update:
                 return {
@@ -270,6 +271,24 @@ class EtsyPlatform(BasePlatform):
                                 break
                 except Exception:
                     pass
+                # Close/continue blocking onboarding dialogs if present.
+                for txt in (
+                    "Continue",
+                    "Продолжить",
+                    "Skip",
+                    "Пропустить",
+                    "Got it",
+                    "Понятно",
+                    "Done",
+                    "Готово",
+                ):
+                    try:
+                        btn = page.get_by_role("button", name=txt)
+                        if await btn.count():
+                            await btn.first.click(timeout=1800)
+                            await page.wait_for_timeout(700)
+                    except Exception:
+                        continue
 
                 # Best-effort field fill; Etsy UI may vary by locale/account state.
                 for sel in (
@@ -337,6 +356,48 @@ class EtsyPlatform(BasePlatform):
                     )
                 except Exception:
                     pass
+                # Common required attributes for draft creation.
+                for sel, val in (
+                    ("select[name='who_made']", "i_did"),
+                    ("select[name='when_made']", "made_to_order"),
+                    ("select[name='is_supply']", "false"),
+                    ("input[name='quantity']", "1"),
+                ):
+                    try:
+                        loc = page.locator(sel)
+                        if await loc.count():
+                            tag = await loc.first.evaluate("el => (el.tagName || '').toLowerCase()")
+                            if tag == "select":
+                                await loc.first.select_option(value=val, timeout=1500)
+                            else:
+                                await loc.first.fill(val, timeout=1500)
+                    except Exception:
+                        continue
+                # React fallback for required selects.
+                try:
+                    await page.evaluate(
+                        """() => {
+                            const set = (sel, val) => {
+                                const el = document.querySelector(sel);
+                                if (!el) return false;
+                                el.value = val;
+                                el.dispatchEvent(new Event('input', { bubbles: true }));
+                                el.dispatchEvent(new Event('change', { bubbles: true }));
+                                return true;
+                            };
+                            set("select[name='who_made']", "i_did");
+                            set("select[name='when_made']", "made_to_order");
+                            set("select[name='is_supply']", "false");
+                            const q = document.querySelector("input[name='quantity']");
+                            if (q) {
+                                q.value = "1";
+                                q.dispatchEvent(new Event('input', { bubbles: true }));
+                                q.dispatchEvent(new Event('change', { bubbles: true }));
+                            }
+                        }"""
+                    )
+                except Exception:
+                    pass
                 # Upload at least one image to satisfy listing publish requirements.
                 image_path = str(content.get("cover_path") or content.get("image_path") or "").strip()
                 if image_path and os.path.isfile(image_path):
@@ -399,71 +460,72 @@ class EtsyPlatform(BasePlatform):
                     except Exception:
                         continue
 
-                # Try publish action explicitly (for fully filled test listing flow).
+                # Try publish action explicitly unless owner asked draft-only flow.
                 publish_clicked = False
-                try:
-                    forced = await page.evaluate(
-                        """() => {
-                            const labels = ["опубликовать","publish","publish listing","publish now"];
-                            const buttons = Array.from(document.querySelectorAll("button"));
-                            for (const b of buttons) {
-                                const t = (b.textContent || "").trim().toLowerCase();
-                                if (labels.some(x => t.includes(x)) && !b.disabled) {
-                                    b.click();
-                                    return true;
+                if not draft_only:
+                    try:
+                        forced = await page.evaluate(
+                            """() => {
+                                const labels = ["опубликовать","publish","publish listing","publish now"];
+                                const buttons = Array.from(document.querySelectorAll("button"));
+                                for (const b of buttons) {
+                                    const t = (b.textContent || "").trim().toLowerCase();
+                                    if (labels.some(x => t.includes(x)) && !b.disabled) {
+                                        b.click();
+                                        return true;
+                                    }
                                 }
-                            }
-                            return false;
-                        }"""
-                    )
-                    if forced:
-                        await page.wait_for_timeout(1600)
-                        publish_clicked = True
-                except Exception:
-                    pass
-                try:
-                    pub = page.locator("button[data-testid='publish']")
-                    if await pub.count():
-                        await pub.first.click(timeout=2500)
-                        await page.wait_for_timeout(1600)
-                        publish_clicked = True
-                except Exception:
-                    pass
-                try:
-                    pub = page.locator("#shop-manager--listing-publish")
-                    if await pub.count():
-                        await pub.first.click(timeout=2500)
-                        await page.wait_for_timeout(1600)
-                        publish_clicked = True
-                except Exception:
-                    pass
-                for txt in ("Publish", "Publish listing", "Publish now", "Опубликовать"):
-                    try:
-                        btn = page.get_by_role("button", name=txt)
-                        if await btn.count():
-                            await btn.first.click(timeout=2500)
-                            await page.wait_for_timeout(1800)
+                                return false;
+                            }"""
+                        )
+                        if forced:
+                            await page.wait_for_timeout(1600)
                             publish_clicked = True
-                            break
                     except Exception:
-                        continue
-                # Etsy may show warning dialog like "Добавить больше фото" with skip option.
-                for txt in (
-                    "Пропустить и продолжить",
-                    "Skip and continue",
-                    "Continue anyway",
-                    "Да",
-                    "Все равно изменить категорию",
-                ):
+                        pass
                     try:
-                        btn = page.get_by_role("button", name=txt)
-                        if await btn.count():
-                            await btn.first.click(timeout=2500)
-                            await page.wait_for_timeout(1800)
+                        pub = page.locator("button[data-testid='publish']")
+                        if await pub.count():
+                            await pub.first.click(timeout=2500)
+                            await page.wait_for_timeout(1600)
                             publish_clicked = True
-                            break
                     except Exception:
-                        continue
+                        pass
+                    try:
+                        pub = page.locator("#shop-manager--listing-publish")
+                        if await pub.count():
+                            await pub.first.click(timeout=2500)
+                            await page.wait_for_timeout(1600)
+                            publish_clicked = True
+                    except Exception:
+                        pass
+                    for txt in ("Publish", "Publish listing", "Publish now", "Опубликовать"):
+                        try:
+                            btn = page.get_by_role("button", name=txt)
+                            if await btn.count():
+                                await btn.first.click(timeout=2500)
+                                await page.wait_for_timeout(1800)
+                                publish_clicked = True
+                                break
+                        except Exception:
+                            continue
+                    # Etsy may show warning dialog like "Добавить больше фото" with skip option.
+                    for txt in (
+                        "Пропустить и продолжить",
+                        "Skip and continue",
+                        "Continue anyway",
+                        "Да",
+                        "Все равно изменить категорию",
+                    ):
+                        try:
+                            btn = page.get_by_role("button", name=txt)
+                            if await btn.count():
+                                await btn.first.click(timeout=2500)
+                                await page.wait_for_timeout(1800)
+                                publish_clicked = True
+                                break
+                        except Exception:
+                            continue
 
                 try:
                     await page.screenshot(path=shot, full_page=True)
@@ -477,7 +539,7 @@ class EtsyPlatform(BasePlatform):
                     pass
 
                 listing_id = ""
-                m = re.search(r"/listing/(\d+)", page.url)
+                m = re.search(r"/listing/(\d+)", page.url) or re.search(r"/listing-editor/(\d+)", page.url)
                 if m:
                     listing_id = m.group(1)
                 if not listing_id:
@@ -487,44 +549,63 @@ class EtsyPlatform(BasePlatform):
                             mm = re.search(r"/listing/(\d+)", href)
                             if mm:
                                 listing_id = mm.group(1)
+                            else:
+                                mm2 = re.search(r"/listing-editor/(\d+)", href)
+                                if mm2:
+                                    listing_id = mm2.group(1)
                     except Exception:
                         pass
                 # If editor URL still does not expose listing_id, verify by searching newest shop listing
                 # with exact title in Listings manager (Drafts/Active).
                 if not listing_id:
+                    found_by_diff = False
                     try:
                         await page.goto("https://www.etsy.com/your/shops/me/tools/listings", wait_until="domcontentloaded", timeout=90000)
                         await page.wait_for_timeout(2200)
-                        for qsel in (
-                            "input[type='search']",
-                            "input[placeholder*='Search']",
-                            "input[aria-label*='Search']",
-                        ):
-                            q = page.locator(qsel)
-                            if await q.count():
-                                await q.first.fill(title[:80], timeout=1800)
-                                await page.keyboard.press("Enter")
-                                await page.wait_for_timeout(2400)
-                                break
-                        matched_href = await page.evaluate(
-                            """(needle) => {
-                                const key = String(needle || '').trim().toLowerCase();
-                                const links = Array.from(document.querySelectorAll("a[href*='/listing/']"));
-                                for (const a of links) {
-                                    const href = a.getAttribute('href') || '';
-                                    if (!href.includes('/listing/')) continue;
-                                    const card = a.closest('li,article,div');
-                                    const txt = ((card && card.textContent) || a.textContent || '').toLowerCase();
-                                    if (key && txt.includes(key)) return href;
-                                }
-                                return '';
-                            }""",
-                            title[:80],
+                        # Fast path: detect new listing by id-diff against initial snapshot.
+                        hrefs2 = await page.evaluate(
+                            """() => Array.from(document.querySelectorAll("a[href*='/listing/'],a[href*='/listing-editor/']"))
+                            .map(a => a.getAttribute('href') || '')
+                            .filter(Boolean)
+                            .slice(0, 800)"""
                         )
-                        if matched_href:
-                            mm = re.search(r"/listing/(\d+)", matched_href)
-                            if mm:
-                                listing_id = mm.group(1)
+                        for h2 in hrefs2 or []:
+                            mm0 = re.search(r"/listing/(\\d+)", str(h2)) or re.search(r"/listing-editor/(\\d+)", str(h2))
+                            if mm0 and mm0.group(1) not in existing_ids:
+                                listing_id = mm0.group(1)
+                                found_by_diff = True
+                                break
+                        if not found_by_diff:
+                            for qsel in (
+                                "input[type='search']",
+                                "input[placeholder*='Search']",
+                                "input[aria-label*='Search']",
+                            ):
+                                q = page.locator(qsel)
+                                if await q.count():
+                                    await q.first.fill(title[:80], timeout=1800)
+                                    await page.keyboard.press("Enter")
+                                    await page.wait_for_timeout(2400)
+                                    break
+                            matched_href = await page.evaluate(
+                                """(needle) => {
+                                    const key = String(needle || '').trim().toLowerCase();
+                                    const links = Array.from(document.querySelectorAll("a[href*='/listing/'],a[href*='/listing-editor/']"));
+                                    for (const a of links) {
+                                        const href = a.getAttribute('href') || '';
+                                        if (!href.includes('/listing/') && !href.includes('/listing-editor/')) continue;
+                                        const card = a.closest('li,article,div');
+                                        const txt = ((card && card.textContent) || a.textContent || '').toLowerCase();
+                                        if (key && txt.includes(key)) return href;
+                                    }
+                                    return '';
+                                }""",
+                                title[:80],
+                            )
+                            if matched_href:
+                                mm = re.search(r"/listing/(\d+)", matched_href) or re.search(r"/listing-editor/(\d+)", matched_href)
+                                if mm:
+                                    listing_id = mm.group(1)
                     except Exception:
                         pass
                 if listing_id:
@@ -552,11 +633,12 @@ class EtsyPlatform(BasePlatform):
                         pass
                     return {
                         "platform": "etsy",
-                        "status": "created",
+                        "status": "draft" if draft_only and not publish_clicked else "created",
                         "listing_id": listing_id,
                         "url": url,
                         "mode": "browser_only",
                         "screenshot_path": shot,
+                        "draft_only": bool(draft_only),
                     }
                 return {
                     "platform": "etsy",
@@ -566,6 +648,7 @@ class EtsyPlatform(BasePlatform):
                     "screenshot_path": shot,
                     "note": "Draft editor opened and fields filled; listing_id not detected yet.",
                     "publish_clicked": bool(publish_clicked),
+                    "draft_only": bool(draft_only),
                 }
         except Exception as e:
             return {"platform": "etsy", "status": "error", "error": str(e), "screenshot_path": shot}

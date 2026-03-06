@@ -37,10 +37,56 @@ class _QueueFail:
         return [{"id": self._id, "status": "failed", "last_error": "boom", "evidence": ""}]
 
 
+class _QueuePreparedReddit:
+    def __init__(self):
+        self._id = 0
+
+    def enqueue(self, platform, payload, max_attempts=1, trace_id=""):
+        self._id += 1
+        return self._id
+
+    async def process_once(self):
+        return {
+            "job_id": self._id,
+            "status": "done",
+            "result": {
+                "status": "prepared",
+                "platform": "reddit",
+                "url": "https://www.reddit.com/user/demo/submit/?type=TEXT",
+            },
+        }
+
+    def list_jobs(self, limit=20):
+        return [{"id": self._id, "status": "done", "evidence": "https://www.reddit.com/user/demo/submit/?type=TEXT"}]
+
+
+class _QueueKdpPrepared:
+    def __init__(self):
+        self._id = 0
+
+    def enqueue(self, platform, payload, max_attempts=1, trace_id=""):
+        self._id += 1
+        return self._id
+
+    async def process_once(self):
+        return {
+            "job_id": self._id,
+            "status": "done",
+            "result": {
+                "status": "prepared",
+                "platform": "amazon_kdp",
+                "output": {"fields_filled": 0},
+            },
+        }
+
+    def list_jobs(self, limit=20):
+        return [{"id": self._id, "status": "done", "evidence": ""}]
+
+
 @pytest.mark.asyncio
 async def test_workflow_recipe_executor_accepts_on_required_evidence():
     exe = WorkflowRecipeExecutor(_QueueOk())
-    out = await exe.run_once("twitter_publish", {"dry_run": True}, trace_id="t1")
+    out = await exe.run_once("twitter_publish", {"dry_run": False}, trace_id="t1")
     assert out["status"] == "accepted"
     assert out["platform"] == "twitter"
 
@@ -52,3 +98,18 @@ async def test_workflow_recipe_executor_fails_when_job_failed():
     assert out["status"] == "failed"
     assert "boom" in out["error"]
 
+
+@pytest.mark.asyncio
+async def test_workflow_recipe_executor_rejects_prepared_reddit_submit_url():
+    exe = WorkflowRecipeExecutor(_QueuePreparedReddit())
+    out = await exe.run_once("reddit_publish", {"dry_run": False}, trace_id="t3")
+    assert out["status"] == "failed"
+    assert "status_not_accepted" in out["error"]
+
+
+@pytest.mark.asyncio
+async def test_workflow_recipe_executor_rejects_kdp_when_no_fields_filled():
+    exe = WorkflowRecipeExecutor(_QueueKdpPrepared())
+    out = await exe.run_once("kdp_publish", {"dry_run": False}, trace_id="t4")
+    assert out["status"] == "failed"
+    assert ("status_not_accepted" in out["error"]) or ("numeric_not_gt_zero" in out["error"])
