@@ -90,6 +90,10 @@ class PinterestPlatform(BasePlatform):
                 launched_headed = False
                 if not force_headless:
                     try:
+                        logger.info(
+                            "Pinterest headed launch attempt",
+                            extra={"event": "pinterest_headed_launch_attempt", "context": {"display": str(os.getenv("DISPLAY", ""))}},
+                        )
                         browser = await p.chromium.launch(
                             headless=False,
                             args=["--no-sandbox", "--disable-dev-shm-usage"],

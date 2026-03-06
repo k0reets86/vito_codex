@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import aiohttp
+import hashlib
 import os
 import re
+import time
 from pathlib import Path
 
 from config.logger import get_logger
@@ -35,6 +37,36 @@ class RedditPlatform(BasePlatform):
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession()
         return self._session
+
+    async def _upload_image_to_cloudinary(self, image_path: str) -> str:
+        """Upload local image and return public URL, or empty string on failure."""
+        p = Path(str(image_path or "").strip())
+        if not p.exists() or not p.is_file():
+            return ""
+        cloud = str(getattr(settings, "CLOUDINARY_CLOUD_NAME", "") or "").strip()
+        api_key = str(getattr(settings, "CLOUDINARY_API_KEY", "") or "").strip()
+        api_secret = str(getattr(settings, "CLOUDINARY_API_SECRET", "") or "").strip()
+        if not cloud or not api_key or not api_secret:
+            return ""
+        ts = int(time.time())
+        sig_src = f"folder=vito_reddit&timestamp={ts}{api_secret}"
+        signature = hashlib.sha1(sig_src.encode("utf-8")).hexdigest()
+        url = f"https://api.cloudinary.com/v1_1/{cloud}/image/upload"
+        try:
+            sess = await self._get_session()
+            data = aiohttp.FormData()
+            data.add_field("file", p.read_bytes(), filename=p.name, content_type="image/png")
+            data.add_field("folder", "vito_reddit")
+            data.add_field("timestamp", str(ts))
+            data.add_field("api_key", api_key)
+            data.add_field("signature", signature)
+            async with sess.post(url, data=data, timeout=aiohttp.ClientTimeout(total=45)) as resp:
+                body = await resp.json(content_type=None)
+                if resp.status in (200, 201):
+                    return str(body.get("secure_url") or body.get("url") or "").strip()
+        except Exception:
+            return ""
+        return ""
 
     async def authenticate(self) -> bool:
         if bool(getattr(settings, "REDDIT_API_DISABLED", False)) or self._mode == "browser_only":
@@ -107,6 +139,8 @@ class RedditPlatform(BasePlatform):
         body = str(content.get("text", "")).strip()
         link_url = str(content.get("url", "") or content.get("image_url", "")).strip()
         image_path = str(content.get("image_path", "")).strip()
+        if image_path and not link_url:
+            link_url = await self._upload_image_to_cloudinary(image_path)
         if not subreddit or not title:
             return {"platform": "reddit", "status": "error", "error": "subreddit/title required"}
         if image_path and not link_url:
@@ -166,6 +200,9 @@ class RedditPlatform(BasePlatform):
         title = str(content.get("title", "")).strip()
         body = str(content.get("text", "")).strip()
         link_url = str(content.get("url", "") or content.get("image_url", "")).strip()
+        image_path = str(content.get("image_path", "")).strip()
+        if image_path and not link_url:
+            link_url = await self._upload_image_to_cloudinary(image_path)
         if not title:
             return {"platform": "reddit", "status": "error", "error": "title required"}
 
@@ -190,6 +227,12 @@ class RedditPlatform(BasePlatform):
                 current = (page.url or "").lower()
                 body_text = (await page.text_content("body") or "").lower()
                 try:
+                    if "/comments/" in post_url:
+                        try:
+                            await page.goto(post_url, wait_until="domcontentloaded", timeout=90000)
+                            await page.wait_for_timeout(1500)
+                        except Exception:
+                            pass
                     await page.screenshot(path=shot, full_page=True)
                 except Exception:
                     pass
@@ -291,30 +334,54 @@ class RedditPlatform(BasePlatform):
                     try:
                         await page.goto("https://old.reddit.com/submit", wait_until="domcontentloaded", timeout=90000)
                         await page.wait_for_timeout(1500)
-                        # choose text/self post
-                        try:
-                            await page.check("input#kind-self", timeout=1500)
-                        except Exception:
-                            pass
-                        try:
-                            await page.check("input[name='kind'][value='self']", timeout=1500)
-                        except Exception:
-                            pass
-                        for sel in ("#text-button", "a:has-text('text')", "button:has-text('text')"):
+                        # choose post type based on payload: link post for image/url, otherwise self text post.
+                        if link_url:
                             try:
-                                loc = page.locator(sel)
-                                if await loc.count():
-                                    await loc.first.click(timeout=1500)
-                                    await page.wait_for_timeout(500)
-                                    break
+                                await page.check("input#kind-link", timeout=1500)
                             except Exception:
-                                continue
+                                pass
+                            try:
+                                await page.check("input[name='kind'][value='link']", timeout=1500)
+                            except Exception:
+                                pass
+                            for sel in ("#link-button", "a:has-text('link')", "button:has-text('link')"):
+                                try:
+                                    loc = page.locator(sel)
+                                    if await loc.count():
+                                        await loc.first.click(timeout=1500)
+                                        await page.wait_for_timeout(500)
+                                        break
+                                except Exception:
+                                    continue
+                        else:
+                            try:
+                                await page.check("input#kind-self", timeout=1500)
+                            except Exception:
+                                pass
+                            try:
+                                await page.check("input[name='kind'][value='self']", timeout=1500)
+                            except Exception:
+                                pass
+                            for sel in ("#text-button", "a:has-text('text')", "button:has-text('text')"):
+                                try:
+                                    loc = page.locator(sel)
+                                    if await loc.count():
+                                        await loc.first.click(timeout=1500)
+                                        await page.wait_for_timeout(500)
+                                        break
+                                except Exception:
+                                    continue
                         try:
                             await page.fill("input[name='sr']", subreddit, timeout=2000)
                         except Exception:
                             pass
                         await page.fill("textarea[name='title']", title[:300], timeout=2500)
-                        if body:
+                        if link_url:
+                            try:
+                                await page.fill("input[name='url']", link_url, timeout=2500)
+                            except Exception:
+                                pass
+                        elif body:
                             try:
                                 await page.fill("textarea[name='text']", body[:40000], timeout=2500)
                             except Exception:
