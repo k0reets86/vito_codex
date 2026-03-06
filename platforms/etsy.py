@@ -208,7 +208,12 @@ class EtsyPlatform(BasePlatform):
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
                 )
                 page = await context.new_page()
-                await page.goto("https://www.etsy.com/your/shops/me/tools/listings/create", wait_until="domcontentloaded", timeout=90000)
+                target_url = (
+                    f"https://www.etsy.com/your/shops/me/listing-editor/{target_listing_id}/edit#details"
+                    if allow_existing_update and target_listing_id
+                    else "https://www.etsy.com/your/shops/me/tools/listings/create#details"
+                )
+                await page.goto(target_url, wait_until="domcontentloaded", timeout=90000)
                 await page.wait_for_timeout(2000)
                 current = page.url.lower()
                 if "/signin" in current or "/oauth" in current:
@@ -234,8 +239,29 @@ class EtsyPlatform(BasePlatform):
                             "url": page.url,
                         }
 
+                # If category modal is open at landing, resolve it first.
+                try:
+                    if await page.locator("input[id^='category-'][type='checkbox']").count():
+                        cb0 = page.locator("input[id^='category-'][type='checkbox']").first
+                        await cb0.check(timeout=2500)
+                        await page.wait_for_timeout(700)
+                        for txt in ("Продолжить", "Continue"):
+                            btn = page.get_by_role("button", name=txt)
+                            if await btn.count():
+                                await btn.first.click(timeout=2500)
+                                await page.wait_for_timeout(1200)
+                                break
+                except Exception:
+                    pass
+
                 # Best-effort field fill; Etsy UI may vary by locale/account state.
-                for sel in ("input[name='title']", "input[data-test-id='listing-title-input']", "input[id*='title']"):
+                for sel in (
+                    "textarea[name='title']",
+                    "textarea#listing-title-input",
+                    "input[name='title']",
+                    "input[data-test-id='listing-title-input']",
+                    "input[id*='title']",
+                ):
                     try:
                         loc = page.locator(sel)
                         if await loc.count():
@@ -243,6 +269,21 @@ class EtsyPlatform(BasePlatform):
                             break
                     except Exception:
                         continue
+                # Force-set title via JS as fallback for React-controlled fields.
+                try:
+                    await page.evaluate(
+                        """(val) => {
+                            const el = document.querySelector("textarea[name='title'], textarea#listing-title-input, input[name='title']");
+                            if (!el) return false;
+                            el.value = val;
+                            el.dispatchEvent(new Event('input', { bubbles: true }));
+                            el.dispatchEvent(new Event('change', { bubbles: true }));
+                            return true;
+                        }""",
+                        title[:140],
+                    )
+                except Exception:
+                    pass
                 for sel in ("textarea[name='description']", "textarea[id*='description']", "textarea"):
                     try:
                         loc = page.locator(sel)
@@ -251,7 +292,12 @@ class EtsyPlatform(BasePlatform):
                             break
                     except Exception:
                         continue
-                for sel in ("input[name='price']", "input[id*='price']"):
+                for sel in (
+                    "input[data-testid='price-input'][name='variations.configuration.price']",
+                    "input#listing-price-input",
+                    "input[name='price']",
+                    "input[id*='price']",
+                ):
                     try:
                         loc = page.locator(sel)
                         if await loc.count():
@@ -259,6 +305,21 @@ class EtsyPlatform(BasePlatform):
                             break
                     except Exception:
                         continue
+                # Force-set price via JS fallback.
+                try:
+                    await page.evaluate(
+                        """(val) => {
+                            const el = document.querySelector("input#listing-price-input, input[name='variations.configuration.price'], input[name='price']");
+                            if (!el) return false;
+                            el.value = val;
+                            el.dispatchEvent(new Event('input', { bubbles: true }));
+                            el.dispatchEvent(new Event('change', { bubbles: true }));
+                            return true;
+                        }""",
+                        str(price),
+                    )
+                except Exception:
+                    pass
                 # Upload at least one image to satisfy listing publish requirements.
                 image_path = str(content.get("cover_path") or content.get("image_path") or "").strip()
                 if image_path and os.path.isfile(image_path):
@@ -295,6 +356,20 @@ class EtsyPlatform(BasePlatform):
                                 break
                 except Exception:
                     pass
+                # Force category checkbox (first frequent category) as fallback.
+                try:
+                    await page.evaluate(
+                        """() => {
+                            const cb = document.querySelector("input[id^='category-'][type='checkbox']");
+                            if (!cb) return false;
+                            cb.checked = true;
+                            cb.dispatchEvent(new Event('input', { bubbles: true }));
+                            cb.dispatchEvent(new Event('change', { bubbles: true }));
+                            return true;
+                        }"""
+                    )
+                except Exception:
+                    pass
 
                 # Try draft/save actions if visible
                 for txt in ("Save as draft", "Save and continue", "Save"):
@@ -309,6 +384,34 @@ class EtsyPlatform(BasePlatform):
 
                 # Try publish action explicitly (for fully filled test listing flow).
                 publish_clicked = False
+                try:
+                    forced = await page.evaluate(
+                        """() => {
+                            const labels = ["опубликовать","publish","publish listing","publish now"];
+                            const buttons = Array.from(document.querySelectorAll("button"));
+                            for (const b of buttons) {
+                                const t = (b.textContent || "").trim().toLowerCase();
+                                if (labels.some(x => t.includes(x)) && !b.disabled) {
+                                    b.click();
+                                    return true;
+                                }
+                            }
+                            return false;
+                        }"""
+                    )
+                    if forced:
+                        await page.wait_for_timeout(1600)
+                        publish_clicked = True
+                except Exception:
+                    pass
+                try:
+                    pub = page.locator("button[data-testid='publish']")
+                    if await pub.count():
+                        await pub.first.click(timeout=2500)
+                        await page.wait_for_timeout(1600)
+                        publish_clicked = True
+                except Exception:
+                    pass
                 try:
                     pub = page.locator("#shop-manager--listing-publish")
                     if await pub.count():
@@ -328,7 +431,13 @@ class EtsyPlatform(BasePlatform):
                     except Exception:
                         continue
                 # Etsy may show warning dialog like "Добавить больше фото" with skip option.
-                for txt in ("Пропустить и продолжить", "Skip and continue", "Continue anyway"):
+                for txt in (
+                    "Пропустить и продолжить",
+                    "Skip and continue",
+                    "Continue anyway",
+                    "Да",
+                    "Все равно изменить категорию",
+                ):
                     try:
                         btn = page.get_by_role("button", name=txt)
                         if await btn.count():

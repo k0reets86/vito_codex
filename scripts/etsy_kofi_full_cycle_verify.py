@@ -33,6 +33,8 @@ async def run_etsy(args) -> dict:
         "price": args.etsy_price,
         "tags": [t.strip() for t in (args.etsy_tags or "").split(",") if t.strip()],
         "allow_existing_update": bool(target_listing_id),
+        "operation": "update" if target_listing_id else "create",
+        "owner_edit_confirmed": bool(target_listing_id),
         "target_listing_id": target_listing_id,
     }
     result = await etsy.publish(payload)

@@ -159,6 +159,15 @@ class KofiPlatform(BasePlatform):
                 await page.goto("https://ko-fi.com/manage/shop", wait_until="domcontentloaded", timeout=90000)
                 await page.wait_for_timeout(2000)
                 current = page.url.lower()
+                page_title = (await page.title()).strip().lower()
+                body_text = (await page.text_content("body") or "").strip().lower()
+                if "just a moment" in page_title or "cloudflare" in body_text or "cf-chl" in body_text:
+                    return {
+                        "platform": "kofi",
+                        "status": "blocked",
+                        "error": "cloudflare_challenge",
+                        "url": page.url,
+                    }
                 if "/login" in current or "/signin" in current:
                     return {
                         "platform": "kofi",
@@ -191,6 +200,23 @@ class KofiPlatform(BasePlatform):
                             break
                     except Exception:
                         continue
+
+                # If editor controls are not present, treat as blocked/challenge instead of prepared.
+                try:
+                    title_inputs = await page.locator("input[name='title'], input[type='text']").count()
+                    desc_areas = await page.locator("textarea[name='description'], textarea").count()
+                    action_buttons = await page.locator(
+                        "button:has-text('Publish'), button:has-text('Save'), button:has-text('Create'), button[type='submit']"
+                    ).count()
+                    if title_inputs == 0 and desc_areas == 0 and action_buttons == 0:
+                        return {
+                            "platform": "kofi",
+                            "status": "blocked",
+                            "error": "editor_controls_not_available",
+                            "url": page.url,
+                        }
+                except Exception:
+                    pass
 
                 clicked = False
                 for txt in ("Publish", "Save", "Create", "Create product", "Post"):
