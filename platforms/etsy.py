@@ -281,6 +281,17 @@ class EtsyPlatform(BasePlatform):
                     except Exception:
                         continue
 
+                # Try publish action explicitly (for fully filled test listing flow).
+                for txt in ("Publish", "Publish listing", "Publish now", "Опубликовать"):
+                    try:
+                        btn = page.get_by_role("button", name=txt)
+                        if await btn.count():
+                            await btn.first.click(timeout=2500)
+                            await page.wait_for_timeout(1800)
+                            break
+                    except Exception:
+                        continue
+
                 try:
                     await page.screenshot(path=shot, full_page=True)
                 except Exception:
@@ -296,6 +307,15 @@ class EtsyPlatform(BasePlatform):
                 m = re.search(r"/listing/(\d+)", page.url)
                 if m:
                     listing_id = m.group(1)
+                if not listing_id:
+                    try:
+                        href = await page.locator("a[href*='/listing/']").first.get_attribute("href")
+                        if href:
+                            mm = re.search(r"/listing/(\d+)", href)
+                            if mm:
+                                listing_id = mm.group(1)
+                    except Exception:
+                        pass
                 if listing_id:
                     url = f"https://www.etsy.com/listing/{listing_id}"
                     try:

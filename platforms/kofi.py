@@ -203,6 +203,34 @@ class KofiPlatform(BasePlatform):
                             break
                     except Exception:
                         continue
+                if not clicked:
+                    for sel in (
+                        "button:has-text('Publish')",
+                        "button:has-text('Save')",
+                        "button:has-text('Create')",
+                        "button[type='submit']",
+                        "input[type='submit']",
+                    ):
+                        try:
+                            loc = page.locator(sel)
+                            if await loc.count():
+                                await loc.first.click(timeout=2500)
+                                await page.wait_for_timeout(1500)
+                                clicked = True
+                                break
+                        except Exception:
+                            continue
+
+                # Try extracting created shop-item URL if visible.
+                detected_url = ""
+                try:
+                    href = await page.locator("a[href*='ko-fi.com/s/']").first.get_attribute("href")
+                    if href:
+                        detected_url = href if href.startswith("http") else f"https://ko-fi.com{href}"
+                except Exception:
+                    pass
+                if not detected_url:
+                    detected_url = created_url
 
                 try:
                     await page.screenshot(path=shot, full_page=True)
@@ -221,9 +249,9 @@ class KofiPlatform(BasePlatform):
                         action="platform:publish",
                         status=status,
                         detail=f"kofi browser title={title[:80]}",
-                        evidence=created_url,
+                        evidence=detected_url,
                         source="kofi.publish.browser",
-                        evidence_dict={"platform": "kofi", "title": title, "mode": "browser_only", "url": created_url},
+                        evidence_dict={"platform": "kofi", "title": title, "mode": "browser_only", "url": detected_url},
                     )
                 except Exception:
                     pass
@@ -233,7 +261,7 @@ class KofiPlatform(BasePlatform):
                     "title": title,
                     "price": price,
                     "mode": "browser_only",
-                    "url": created_url,
+                    "url": detected_url,
                     "screenshot_path": shot,
                 }
         except Exception as e:
