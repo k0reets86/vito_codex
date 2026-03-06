@@ -8,6 +8,7 @@
   - Диспетчеризация задач к подходящему агенту
 """
 
+import json
 import time
 from enum import Enum
 from typing import Optional
@@ -121,7 +122,13 @@ class AgentRegistry:
 
     async def dispatch(self, task_type: str, **kwargs) -> Optional[TaskResult]:
         """Диспетчеризует задачу к подходящему агенту (с lazy start)."""
+        orchestration_depth = int(kwargs.pop("__orchestration_depth", 0) or 0)
+        orchestrated_by = str(kwargs.pop("__orchestrated_by", "") or "").strip() or None
+        exclude_agents_raw = kwargs.pop("__exclude_agents", [])
+        exclude_agents = set(exclude_agents_raw or [])
         agents = self.find_by_capability(task_type)
+        if exclude_agents:
+            agents = [a for a in agents if a.name not in exclude_agents]
         if not agents:
             if task_type.startswith("tooling:"):
                 try:
@@ -183,7 +190,55 @@ class AgentRegistry:
                 extra={"event": "dispatch", "context": {"task_type": task_type, "agent_name": agent.name}},
             )
             try:
-                result = await agent.execute_task(task_type, **kwargs)
+                task_kwargs = dict(kwargs)
+                orchestration_plan = {}
+                try:
+                    orchestration_plan = agent.build_task_orchestration(task_type, **task_kwargs) or {}
+                except Exception:
+                    orchestration_plan = {}
+
+                delegations = orchestration_plan.get("delegations", []) if isinstance(orchestration_plan, dict) else []
+                delegation_results: list[dict] = []
+                if delegations and orchestration_depth < 2:
+                    for item in delegations:
+                        cap = ""
+                        d_kwargs: dict = {}
+                        if isinstance(item, str):
+                            cap = item.strip()
+                        elif isinstance(item, dict):
+                            cap = str(item.get("capability") or "").strip()
+                            if isinstance(item.get("kwargs"), dict):
+                                d_kwargs = dict(item.get("kwargs") or {})
+                        if not cap:
+                            continue
+                        delegated = await self.dispatch(
+                            cap,
+                            __orchestration_depth=orchestration_depth + 1,
+                            __orchestrated_by=agent.name,
+                            __exclude_agents=list(exclude_agents | {agent.name}),
+                            **d_kwargs,
+                        )
+                        delegation_results.append(
+                            {
+                                "capability": cap,
+                                "success": bool(delegated and delegated.success),
+                                "output": getattr(delegated, "output", None),
+                                "error": getattr(delegated, "error", None),
+                            }
+                        )
+                    try:
+                        task_kwargs = agent.consume_delegation_results(task_type, task_kwargs, delegation_results)
+                    except Exception:
+                        task_kwargs["__delegations"] = delegation_results
+
+                # Trace orchestration context for every agent execution
+                task_kwargs["__owner_orchestrator"] = orchestrated_by
+                task_kwargs["__orchestration_depth"] = orchestration_depth
+                task_kwargs["__responsible_agent"] = agent.name
+                if isinstance(orchestration_plan, dict) and orchestration_plan:
+                    task_kwargs["__orchestration_plan"] = orchestration_plan
+
+                result = await agent.execute_task(task_type, **task_kwargs)
                 contract_ok = True
                 contract_errors: list[str] = []
                 if result and result.success:
@@ -201,11 +256,67 @@ class AgentRegistry:
                         md = result.metadata or {}
                         md.setdefault("task_type", task_type)
                         md.setdefault("contract_ok", contract_ok)
+                        md.setdefault("responsible_agent", agent.name)
+                        if orchestrated_by:
+                            md.setdefault("orchestrated_by", orchestrated_by)
+                        if delegation_results:
+                            md.setdefault("delegations", delegation_results)
+                        if isinstance(orchestration_plan, dict) and orchestration_plan.get("resources"):
+                            md.setdefault("resources", list(orchestration_plan.get("resources") or []))
                         if contract_errors:
                             md["contract_errors"] = contract_errors
                         result.metadata = md
                 except Exception:
                     pass
+                # Owner-level verification step (optional)
+                verify_cap = ""
+                if isinstance(orchestration_plan, dict):
+                    verify_cap = str(orchestration_plan.get("verify_with") or "").strip()
+                if not verify_cap and task_type in {"listing_create", "publish", "ecommerce", "product_turnkey"}:
+                    verify_cap = "quality_review"
+                if (
+                    result
+                    and result.success
+                    and verify_cap
+                    and orchestration_depth == 0
+                    and verify_cap != task_type
+                ):
+                    verify_content = result.output
+                    if not isinstance(verify_content, str):
+                        try:
+                            verify_content = json.dumps(verify_content, ensure_ascii=False)
+                        except Exception:
+                            verify_content = str(verify_content)
+                    verify_input = {
+                        "content": verify_content,
+                        "content_type": task_type,
+                        "responsible_agent": agent.name,
+                    }
+                    vr = await self.dispatch(
+                        verify_cap,
+                        __orchestration_depth=orchestration_depth + 1,
+                        __orchestrated_by=agent.name,
+                        __exclude_agents=list(exclude_agents | {agent.name}),
+                        **verify_input,
+                    )
+                    if not vr or not vr.success:
+                        result.success = False
+                        result.error = f"verification_failed:{verify_cap}"
+                    else:
+                        approved = True
+                        if isinstance(vr.output, dict) and "approved" in vr.output:
+                            approved = bool(vr.output.get("approved"))
+                        if not approved:
+                            result.success = False
+                            result.error = f"verification_rejected:{verify_cap}"
+                        md = result.metadata or {}
+                        md["verification"] = {
+                            "capability": verify_cap,
+                            "success": bool(vr and vr.success),
+                            "approved": approved,
+                            "output": vr.output,
+                        }
+                        result.metadata = md
                 agent._track_result(result)
                 # Record execution facts for verified actions
                 try:

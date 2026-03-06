@@ -34,6 +34,59 @@ class FakeBadPublishAgent(BaseAgent):
         return TaskResult(success=True, output={"status": "published", "platform": "threads"})
 
 
+class FakeHelperAgent(BaseAgent):
+    def __init__(self, name, caps, **kwargs):
+        super().__init__(name=name, description=f"Fake helper {name}", **kwargs)
+        self._caps = caps
+
+    @property
+    def capabilities(self) -> list[str]:
+        return self._caps
+
+    async def execute_task(self, task_type: str, **kwargs) -> TaskResult:
+        return TaskResult(success=True, output={"helper": self.name, "task": task_type})
+
+
+class FakeVerifierAgent(BaseAgent):
+    def __init__(self, name, caps, approved=True, **kwargs):
+        super().__init__(name=name, description=f"Fake verifier {name}", **kwargs)
+        self._caps = caps
+        self._approved = approved
+
+    @property
+    def capabilities(self) -> list[str]:
+        return self._caps
+
+    async def execute_task(self, task_type: str, **kwargs) -> TaskResult:
+        return TaskResult(success=True, output={"approved": self._approved, "score": 9 if self._approved else 3})
+
+
+class FakeOwnerOrchestratingAgent(BaseAgent):
+    def __init__(self, name, caps, **kwargs):
+        super().__init__(name=name, description=f"Fake owner {name}", **kwargs)
+        self._caps = caps
+
+    @property
+    def capabilities(self) -> list[str]:
+        return self._caps
+
+    def build_task_orchestration(self, task_type: str, **kwargs) -> dict:
+        return {
+            "resources": ["memory", "llm_router"],
+            "delegations": ["helper_cap"],
+            "verify_with": "quality_review",
+        }
+
+    def consume_delegation_results(self, task_type: str, task_kwargs: dict, delegation_results: list[dict]) -> dict:
+        merged = dict(task_kwargs)
+        merged["delegated"] = delegation_results
+        return merged
+
+    async def execute_task(self, task_type: str, **kwargs) -> TaskResult:
+        delegated = kwargs.get("delegated", [])
+        return TaskResult(success=True, output={"status": "ok", "delegations_seen": len(delegated)})
+
+
 class TestRegistryRegister:
     def test_register(self):
         registry = AgentRegistry()
@@ -125,6 +178,41 @@ class TestRegistryDispatch:
         assert result.success is True
         assert isinstance(result.output, dict)
         assert result.output.get("status") in {"dry_run", "prepared", "ok"}
+
+    @pytest.mark.asyncio
+    async def test_dispatch_owner_orchestration_with_delegation_and_verification(self):
+        registry = AgentRegistry()
+        owner = FakeOwnerOrchestratingAgent("owner", ["main_cap"])
+        helper = FakeHelperAgent("helper", ["helper_cap"])
+        verifier = FakeVerifierAgent("judge", ["quality_review"], approved=True)
+        registry.register(owner)
+        registry.register(helper)
+        registry.register(verifier)
+
+        result = await registry.dispatch("main_cap")
+        assert result is not None
+        assert result.success is True
+        assert isinstance(result.output, dict)
+        assert result.output.get("delegations_seen") == 1
+        assert isinstance(result.metadata, dict)
+        assert result.metadata.get("responsible_agent") == "owner"
+        assert isinstance(result.metadata.get("verification"), dict)
+        assert result.metadata["verification"].get("approved") is True
+
+    @pytest.mark.asyncio
+    async def test_dispatch_owner_orchestration_verification_rejects(self):
+        registry = AgentRegistry()
+        owner = FakeOwnerOrchestratingAgent("owner", ["main_cap"])
+        helper = FakeHelperAgent("helper", ["helper_cap"])
+        verifier = FakeVerifierAgent("judge", ["quality_review"], approved=False)
+        registry.register(owner)
+        registry.register(helper)
+        registry.register(verifier)
+
+        result = await registry.dispatch("main_cap")
+        assert result is not None
+        assert result.success is False
+        assert "verification_rejected:quality_review" in (result.error or "")
 
 
 class TestRegistryLifecycle:

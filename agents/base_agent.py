@@ -85,6 +85,27 @@ class BaseAgent(ABC):
         """Выполняет задачу. Реализуется каждым агентом."""
         ...
 
+    def build_task_orchestration(self, task_type: str, **kwargs) -> dict:
+        """Optional owner-level orchestration plan for this task.
+
+        Supported keys:
+          - resources: list[str]
+          - delegations: list[str|dict(capability, kwargs)]
+          - verify_with: str (capability, e.g. quality_review)
+        """
+        return {}
+
+    def consume_delegation_results(
+        self,
+        task_type: str,
+        task_kwargs: dict[str, Any],
+        delegation_results: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Merge delegated outputs back into owner task kwargs."""
+        merged = dict(task_kwargs or {})
+        merged["__delegations"] = delegation_results
+        return merged
+
     async def start(self) -> None:
         """Запускает агента."""
         self._status = AgentStatus.IDLE

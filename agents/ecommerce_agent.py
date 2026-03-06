@@ -24,6 +24,15 @@ class ECommerceAgent(BaseAgent):
     def capabilities(self) -> list[str]:
         return ["listing_create", "sales_check", "ecommerce", "publish_package_build", "platform_rules_sync"]
 
+    def build_task_orchestration(self, task_type: str, **kwargs) -> dict:
+        task = str(task_type or "").strip().lower()
+        if task in {"listing_create", "ecommerce", "publish_package_build"}:
+            return {
+                "resources": ["platform_adapter", "content_creator", "seo_agent", "marketing_agent", "smm_agent"],
+                "verify_with": "quality_review",
+            }
+        return {}
+
     async def execute_task(self, task_type: str, **kwargs) -> TaskResult:
         self._status = AgentStatus.RUNNING
         start = time.monotonic()
