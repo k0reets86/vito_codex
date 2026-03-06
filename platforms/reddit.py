@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import aiohttp
 import os
+import re
 from pathlib import Path
 
 from config.logger import get_logger
@@ -184,7 +185,7 @@ class RedditPlatform(BasePlatform):
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
                 )
                 page = await context.new_page()
-                await page.goto(f"https://old.reddit.com/r/{subreddit}/submit", wait_until="domcontentloaded", timeout=90000)
+                await page.goto(f"https://www.reddit.com/r/{subreddit}/submit/?type=TEXT", wait_until="domcontentloaded", timeout=90000)
                 await page.wait_for_timeout(1200)
                 current = (page.url or "").lower()
                 body_text = (await page.text_content("body") or "").lower()
@@ -206,10 +207,10 @@ class RedditPlatform(BasePlatform):
                         "error": "Stored Reddit session expired.",
                         "storage_state": str(self._storage_state_path),
                     }
-                title_selector = "input[name='title']"
+                title_selector = "textarea[name='title']"
                 if not await page.locator(title_selector).count():
                     # Fallback for newer compose variants.
-                    for candidate in ("textarea[name='title']", "textarea[placeholder*='Title']", "h3 + div textarea"):
+                    for candidate in ("textarea[placeholder*='Title']", "input[name='title']", "h3 + div textarea"):
                         if await page.locator(candidate).count():
                             title_selector = candidate
                             break
@@ -225,7 +226,7 @@ class RedditPlatform(BasePlatform):
                     except Exception:
                         pass
                 posted = False
-                for sel in ("button[name='submit']", "button[type='submit']", "input[type='submit']"):
+                for sel in ("button:has-text('Post')", "button[name='submit']", "button[type='submit']", "input[type='submit']"):
                     try:
                         btn = page.locator(sel)
                         if await btn.count():
@@ -236,6 +237,22 @@ class RedditPlatform(BasePlatform):
                         continue
                 await page.wait_for_timeout(2500)
                 post_url = str(page.url or "")
+                if "/comments/" not in post_url:
+                    try:
+                        html_now = await page.content()
+                        m = None
+                        for pat in (
+                            r'https://www\.reddit\.com/r/[^"\']+/comments/[a-z0-9]+/[^"\']*/',
+                            r'/r/[^"\']+/comments/[a-z0-9]+/[^"\']*/',
+                        ):
+                            m = re.search(pat, html_now, re.IGNORECASE)
+                            if m:
+                                break
+                        if m:
+                            candidate = m.group(0)
+                            post_url = candidate if candidate.startswith("http") else f"https://www.reddit.com{candidate}"
+                    except Exception:
+                        pass
                 try:
                     await page.screenshot(path=shot, full_page=True)
                 except Exception:

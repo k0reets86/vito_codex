@@ -7,6 +7,7 @@ See memory/gumroad_publishing.md for full experience log.
 
 import asyncio
 import os
+import json
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,7 @@ API_BASE = "https://api.gumroad.com/v2"
 COOKIE_FILE = Path("/tmp/gumroad_cookie.txt")
 LOGIN_SHOT = Path("/tmp/gumroad_login.png")
 PUBLISH_SHOT = Path("/tmp/gumroad_publish.png")
+STORAGE_STATE_FILE = PROJECT_ROOT / "runtime" / "gumroad_storage_state.json"
 
 
 async def _launch_browser(p):
@@ -451,6 +453,7 @@ class GumroadPlatform(BasePlatform):
         if not tags_cfg:
             tags_cfg = ["automation", "ai", "productivity", "workflow"]
         keep_unpublished = bool(content.get("keep_unpublished")) or bool(content.get("draft_only"))
+        auth_retry = int(content.get("_auth_retry", 0) or 0)
         gallery_paths_cfg = content.get("gallery_paths", []) or []
         if not isinstance(gallery_paths_cfg, list):
             gallery_paths_cfg = [str(gallery_paths_cfg)]
@@ -472,15 +475,31 @@ class GumroadPlatform(BasePlatform):
         try:
             async with async_playwright() as p:
                 br = await _launch_browser(p)
-                ctx = await br.new_context(
-                    viewport={"width": 1280, "height": 1400},
-                    user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-                )
-                await ctx.add_cookies([{
-                    "name": "_gumroad_app_session", "value": cookie,
-                    "domain": ".gumroad.com", "path": "/", "httpOnly": True,
-                    "secure": True, "sameSite": "Lax",
-                }])
+                has_storage = False
+                if STORAGE_STATE_FILE.exists():
+                    try:
+                        parsed = json.loads(STORAGE_STATE_FILE.read_text(encoding="utf-8"))
+                        cookies = parsed.get("cookies") if isinstance(parsed, dict) else None
+                        has_storage = bool(isinstance(cookies, list) and cookies)
+                    except Exception:
+                        has_storage = False
+                if has_storage:
+                    ctx = await br.new_context(
+                        storage_state=str(STORAGE_STATE_FILE),
+                        viewport={"width": 1280, "height": 1400},
+                        user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+                    )
+                else:
+                    ctx = await br.new_context(
+                        viewport={"width": 1280, "height": 1400},
+                        user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+                    )
+                if cookie:
+                    await ctx.add_cookies([{
+                        "name": "_gumroad_app_session", "value": cookie,
+                        "domain": ".gumroad.com", "path": "/", "httpOnly": True,
+                        "secure": True, "sameSite": "Lax",
+                    }])
                 page = await ctx.new_page()
                 page.set_default_timeout(20000)
                 if keep_unpublished:
@@ -669,6 +688,18 @@ class GumroadPlatform(BasePlatform):
                     logger.info("Gumroad: open new product page", extra={"event": "gumroad_new_product"})
                     await page.goto("https://gumroad.com/products/new", wait_until="domcontentloaded")
                     await asyncio.sleep(2)
+                    # Explicitly detect expired auth before daily-limit heuristics.
+                    if "gumroad.com/login" in (page.url or ""):
+                        if auth_retry >= 2:
+                            await br.close()
+                            return {"platform": "gumroad", "status": "cookie_expired", "error": "Session refresh loop limit reached."}
+                        await br.close()
+                        ok = await self._ensure_session_cookie()
+                        if not ok:
+                            return {"platform": "gumroad", "status": "cookie_expired", "error": "Session cookie/storage_state expired."}
+                        retried = dict(content or {})
+                        retried["_auth_retry"] = auth_retry + 1
+                        return await self._publish_via_browser(retried)
                     # Recover flaky redirects until new-product form is actually present.
                     if not await _has_new_product_form():
                         recovered_form = False

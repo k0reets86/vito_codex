@@ -208,6 +208,23 @@ class EtsyPlatform(BasePlatform):
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
                 )
                 page = await context.new_page()
+                existing_ids: set[str] = set()
+                if not allow_existing_update:
+                    try:
+                        await page.goto("https://www.etsy.com/your/shops/me/tools/listings", wait_until="domcontentloaded", timeout=90000)
+                        await page.wait_for_timeout(1800)
+                        hrefs = await page.evaluate(
+                            """() => Array.from(document.querySelectorAll("a[href*='/listing/']"))
+                            .map(a => a.getAttribute('href') || '')
+                            .filter(Boolean)
+                            .slice(0, 500)"""
+                        )
+                        for h in hrefs or []:
+                            m0 = re.search(r"/listing/(\\d+)", str(h))
+                            if m0:
+                                existing_ids.add(m0.group(1))
+                    except Exception:
+                        existing_ids = set()
                 target_url = (
                     f"https://www.etsy.com/your/shops/me/listing-editor/{target_listing_id}/edit#details"
                     if allow_existing_update and target_listing_id
@@ -472,15 +489,55 @@ class EtsyPlatform(BasePlatform):
                                 listing_id = mm.group(1)
                     except Exception:
                         pass
+                # If editor URL still does not expose listing_id, verify by searching newest shop listing
+                # with exact title in Listings manager (Drafts/Active).
                 if not listing_id:
                     try:
-                        html_now = await page.content()
-                        mm = re.search(r'"listingId"\s*:\s*(\d+)', html_now)
-                        if mm and mm.group(1) != "0":
-                            listing_id = mm.group(1)
+                        await page.goto("https://www.etsy.com/your/shops/me/tools/listings", wait_until="domcontentloaded", timeout=90000)
+                        await page.wait_for_timeout(2200)
+                        for qsel in (
+                            "input[type='search']",
+                            "input[placeholder*='Search']",
+                            "input[aria-label*='Search']",
+                        ):
+                            q = page.locator(qsel)
+                            if await q.count():
+                                await q.first.fill(title[:80], timeout=1800)
+                                await page.keyboard.press("Enter")
+                                await page.wait_for_timeout(2400)
+                                break
+                        matched_href = await page.evaluate(
+                            """(needle) => {
+                                const key = String(needle || '').trim().toLowerCase();
+                                const links = Array.from(document.querySelectorAll("a[href*='/listing/']"));
+                                for (const a of links) {
+                                    const href = a.getAttribute('href') || '';
+                                    if (!href.includes('/listing/')) continue;
+                                    const card = a.closest('li,article,div');
+                                    const txt = ((card && card.textContent) || a.textContent || '').toLowerCase();
+                                    if (key && txt.includes(key)) return href;
+                                }
+                                return '';
+                            }""",
+                            title[:80],
+                        )
+                        if matched_href:
+                            mm = re.search(r"/listing/(\d+)", matched_href)
+                            if mm:
+                                listing_id = mm.group(1)
                     except Exception:
                         pass
                 if listing_id:
+                    if (not allow_existing_update) and listing_id in existing_ids:
+                        return {
+                            "platform": "etsy",
+                            "status": "prepared",
+                            "mode": "browser_only",
+                            "url": page.url,
+                            "screenshot_path": shot,
+                            "error": "existing_listing_reused_in_create_mode",
+                            "listing_id": listing_id,
+                        }
                     url = f"https://www.etsy.com/listing/{listing_id}"
                     try:
                         ExecutionFacts().record(

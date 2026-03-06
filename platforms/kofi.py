@@ -156,8 +156,16 @@ class KofiPlatform(BasePlatform):
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
                 )
                 page = await context.new_page()
-                await page.goto("https://ko-fi.com/manage/shop", wait_until="domcontentloaded", timeout=90000)
-                await page.wait_for_timeout(2000)
+                landing_urls = [
+                    "https://ko-fi.com/shop/settings?productType=0",
+                    "https://ko-fi.com/shop/settings?src=sidemenu&productType=0",
+                    "https://ko-fi.com/manage",
+                ]
+                for u in landing_urls:
+                    await page.goto(u, wait_until="domcontentloaded", timeout=90000)
+                    await page.wait_for_timeout(1800)
+                    if "/404" not in (page.url or ""):
+                        break
                 current = page.url.lower()
                 page_title = (await page.title()).strip().lower()
                 body_text = (await page.text_content("body") or "").strip().lower()
@@ -175,8 +183,44 @@ class KofiPlatform(BasePlatform):
                         "error": "Stored Ko-fi session expired.",
                         "storage_state": str(self._storage_state_path),
                     }
+                if "/404" in current:
+                    return {
+                        "platform": "kofi",
+                        "status": "blocked",
+                        "error": "kofi_manage_path_not_available",
+                        "url": page.url,
+                    }
 
-                for sel in ("input[name='title']", "input[placeholder*='Title']", "input[type='text']"):
+                # Cookie banner can block form interactions.
+                for txt in ("Accept All", "Save My Preferences", "I accept", "Accept"):
+                    try:
+                        btn = page.get_by_role("button", name=txt)
+                        if await btn.count():
+                            await btn.first.click(timeout=1200)
+                            await page.wait_for_timeout(800)
+                            break
+                    except Exception:
+                        continue
+
+                # If payment providers are not connected, product creation is blocked by Ko-fi UI.
+                try:
+                    provider_connect = await page.locator("a:has-text('Connect')").count()
+                except Exception:
+                    provider_connect = 0
+                if provider_connect >= 1 and "/shop/settings" in (page.url or "").lower():
+                    return {
+                        "platform": "kofi",
+                        "status": "blocked",
+                        "error": "payments_not_connected",
+                        "url": page.url,
+                    }
+
+                for sel in (
+                    "input[name='postImageTitle']",
+                    "input[name='title']",
+                    "input[placeholder*='Title']",
+                    "input[type='text']",
+                ):
                     try:
                         loc = page.locator(sel)
                         if await loc.count():
@@ -184,7 +228,12 @@ class KofiPlatform(BasePlatform):
                             break
                     except Exception:
                         continue
-                for sel in ("textarea[name='description']", "textarea[placeholder*='Description']", "textarea"):
+                for sel in (
+                    "textarea[name='postImageDescription']",
+                    "textarea[name='description']",
+                    "textarea[placeholder*='Description']",
+                    "textarea",
+                ):
                     try:
                         loc = page.locator(sel)
                         if await loc.count():

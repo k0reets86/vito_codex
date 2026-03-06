@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 from config.paths import PROJECT_ROOT
@@ -82,6 +83,15 @@ class PinterestPlatform(BasePlatform):
                 await page.goto("https://www.pinterest.com/pin-creation-tool/", wait_until="domcontentloaded", timeout=90000)
                 await page.wait_for_timeout(1500)
                 current = (page.url or "").lower()
+                title_now = (await page.title() or "").lower()
+                body_now = (await page.text_content("body") or "").lower()
+                if "recaptcha" in body_now or "resource fetch timed out" in body_now or "just a moment" in title_now:
+                    return {
+                        "platform": "pinterest",
+                        "status": "blocked",
+                        "error": "anti_bot_challenge_or_timeout",
+                        "url": page.url,
+                    }
                 if any(x in current for x in ("/login", "session/new", "signup", "authenticate")):
                     return {
                         "platform": "pinterest",
@@ -147,6 +157,14 @@ class PinterestPlatform(BasePlatform):
                 now_url = str(page.url or "")
                 if "/pin/" in now_url:
                     pin_url = now_url
+                if not pin_url:
+                    try:
+                        html = await page.content()
+                        m = re.search(r"https://(?:[a-z]{2}\.)?pinterest\.com/pin/\d+/?", html, re.IGNORECASE)
+                        if m:
+                            pin_url = m.group(0)
+                    except Exception:
+                        pass
                 try:
                     await page.screenshot(path=shot, full_page=True)
                 except Exception:
