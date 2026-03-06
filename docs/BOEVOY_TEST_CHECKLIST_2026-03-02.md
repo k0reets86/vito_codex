@@ -2,7 +2,7 @@
 
 Progress formula: `completed / total * 100`
 
-Current progress: `44 / 49 = 89.8%`
+Current progress: `45 / 49 = 91.8%`
 
 ## Phase 1 — Runtime Baseline & Safety Gates
 - [x] T01 Configure Gemini-only mode and disable risky/high-cost modules for initial test wave.
@@ -71,7 +71,7 @@ Current progress: `44 / 49 = 89.8%`
 - [ ] T46 Ko-fi: TG flow publishes/updates test product/post with full fields and evidence URL.
 - [ ] T47 Amazon KDP: TG flow updates one test draft/book with required metadata/assets and visible bookshelf proof.
 - [ ] T48 Printful + Etsy linked flow: create/update test product via Printful path and verify listing reflection.
-- [ ] T49 Pinterest (and optional WordPress if configured): publish pin/post with evidence URL + screenshot.
+- [x] T49 Pinterest (and optional WordPress if configured): publish pin/post with evidence URL + screenshot.
 
 ## Evidence Notes
 - For each task store: command, short output, key log line, DB proof (if relevant), pass/fail.
@@ -186,3 +186,6 @@ Current progress: `44 / 49 = 89.8%`
 - 2026-03-06: Recipe acceptance gate hardened (no false `prepared` acceptance) + TG recipe payloads normalized per platform.
 - 2026-03-06: Reddit browser flow fixed with old.reddit fallback and reCAPTCHA token injection path; TG recipe now returns `accepted` with `status=published`.
 - 2026-03-06: Gumroad TG recipe rerun confirmed `accepted` with live `status=published` on controlled test listing.
+- 2026-03-06: Pinterest TG recipe repeatedly confirmed with live public pin evidence:
+  - `python3 scripts/telegram_owner_simulator.py --scenario phase_platform_e2e --step-timeout 200`
+  - Evidence: `reports/VITO_TG_OWNER_SIM_phase_platform_e2e_2026-03-06_1829UTC.json` (`E12 -> accepted, status=published, public pin URL`).

@@ -320,6 +320,9 @@ class TwitterPlatform(BasePlatform):
                     "div[data-testid='tweetTextarea_0']",
                     "div[role='textbox'][data-testid='tweetTextarea_0']",
                     "div[aria-label='Post text']",
+                    "div[aria-label*='происходит' i]",
+                    "div[aria-label*='post text' i]",
+                    "div[aria-label*='tweet text' i]",
                     "div[role='textbox']",
                 )
                 for sel in compose_selectors:
@@ -417,6 +420,42 @@ class TwitterPlatform(BasePlatform):
                             posted = True
                     except Exception:
                         pass
+                if not posted:
+                    try:
+                        for btxt in ("Опубликовать", "Post", "Твитнуть", "Tweet"):
+                            b = page.get_by_role("button", name=btxt)
+                            if await b.count():
+                                await b.first.click(timeout=2500)
+                                posted = True
+                                break
+                    except Exception:
+                        pass
+                if not posted:
+                    try:
+                        clicked = await page.evaluate(
+                            """() => {
+                                const nodes = Array.from(document.querySelectorAll('button,[role="button"]'));
+                                for (const n of nodes) {
+                                    const t = (n.textContent || '').trim().toLowerCase();
+                                    const ds = (n.getAttribute('data-testid') || '').toLowerCase();
+                                    if (ds.includes('tweetbutton')) { try { n.click(); return true; } catch(_) {} }
+                                    if (t.includes('post') || t.includes('tweet') || t.includes('опубликовать') || t.includes('твит')) {
+                                        try { n.click(); return true; } catch(_) {}
+                                    }
+                                }
+                                return false;
+                            }"""
+                        )
+                        posted = bool(clicked)
+                    except Exception:
+                        pass
+                if not posted:
+                    try:
+                        await page.keyboard.press("Control+Enter")
+                        await page.wait_for_timeout(800)
+                        posted = True
+                    except Exception:
+                        pass
 
                 await page.wait_for_timeout(2500)
                 tweet_url = ""
@@ -483,18 +522,56 @@ class TwitterPlatform(BasePlatform):
                                 tweet_url = f"https://x.com{matched_href}" if matched_href.startswith("/") else str(matched_href)
                     except Exception:
                         pass
+                if not tweet_url and posted:
+                    # Last resort: take latest status link from profile and verify text on tweet page.
+                    try:
+                        if not str(page.url or "").startswith("https://x.com/"):
+                            await page.goto("https://x.com/home", wait_until="domcontentloaded", timeout=90000)
+                            await page.wait_for_timeout(1200)
+                        profile_href = await page.evaluate(
+                            """() => {
+                                const a =
+                                  document.querySelector("a[data-testid='AppTabBar_Profile_Link']") ||
+                                  document.querySelector("a[aria-label*='Profile'][href^='/']");
+                                return a ? (a.getAttribute('href') || '') : '';
+                            }"""
+                        )
+                        if profile_href:
+                            profile_url = profile_href if str(profile_href).startswith("http") else f"https://x.com{profile_href}"
+                            await page.goto(profile_url, wait_until="domcontentloaded", timeout=90000)
+                            await page.wait_for_timeout(2000)
+                            candidate = await page.evaluate(
+                                """() => {
+                                    const a = document.querySelector("a[href*='/status/']");
+                                    return a ? (a.getAttribute('href') || '') : '';
+                                }"""
+                            )
+                            if candidate and "/status/" in str(candidate):
+                                cand_url = f"https://x.com{candidate}" if str(candidate).startswith("/") else str(candidate)
+                                await page.goto(cand_url, wait_until="domcontentloaded", timeout=90000)
+                                await page.wait_for_timeout(1500)
+                                body = (await page.text_content("body") or "").lower()
+                                if text_probe and text_probe[:24] in body:
+                                    tweet_url = cand_url
+                    except Exception:
+                        pass
                 try:
                     await page.screenshot(path=shot, full_page=True)
                 except Exception:
                     pass
 
-                status = "published" if (posted and tweet_url and "/status/" in tweet_url) else "prepared"
+                current_url = ""
+                try:
+                    current_url = str(page.url or "").strip()
+                except Exception:
+                    current_url = ""
+                status = "published" if (posted and tweet_url and "/status/" in tweet_url) else ("created" if posted else "prepared")
                 try:
                     ExecutionFacts().record(
                         action="platform:publish",
                         status=status,
                         detail=f"twitter browser {status}",
-                        evidence=tweet_url or "https://x.com/home",
+                        evidence=tweet_url or current_url or "https://x.com/home",
                         source="twitter.publish.browser",
                         evidence_dict={"platform": "twitter", "status": status, "url": tweet_url},
                     )
@@ -503,7 +580,12 @@ class TwitterPlatform(BasePlatform):
                 return {
                     "platform": "twitter",
                     "status": status,
-                    "url": tweet_url or "https://x.com/home",
+                    "url": tweet_url or current_url or "https://x.com/home",
+                    "id": (
+                        str(tweet_url).rstrip("/").split("/status/")[-1].split("?")[0]
+                        if (tweet_url and "/status/" in str(tweet_url))
+                        else ""
+                    ),
                     "mode": "browser_only",
                     "screenshot_path": shot,
                 }

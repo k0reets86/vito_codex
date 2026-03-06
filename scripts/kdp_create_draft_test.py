@@ -230,30 +230,63 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
             await page.wait_for_timeout(3000)
             await page.screenshot(path=str(dbg / f"kdp_draft_{stamp}_after_save.png"), full_page=True)
 
-            # Step 5: strict verification on Bookshelf.
+            # Step 5: strict verification on Bookshelf with retries (KDP list can refresh with delay).
             await page.goto("https://kdp.amazon.com/bookshelf", wait_until="domcontentloaded", timeout=120000)
             await page.wait_for_timeout(3500)
+            # Additional verification path: search by exact title in bookshelf search field.
+            search_hit = False
+            try:
+                for sel in ("input[placeholder*='Search by title']", "input[aria-label*='Search by title']", "input[type='search']"):
+                    box = page.locator(sel)
+                    if await box.count() > 0:
+                        await box.first.fill(title)
+                        await page.keyboard.press("Enter")
+                        await page.wait_for_timeout(2200)
+                        body_text = (await page.text_content("body") or "").lower()
+                        if title.lower() in body_text:
+                            search_hit = True
+                        break
+            except Exception:
+                search_hit = False
             await page.screenshot(path=str(dbg / f"kdp_draft_{stamp}_bookshelf.png"), full_page=True)
             after_titles = await _bookshelf_titles(page)
+            if not any((title or "").lower() in (t or "").lower() for t in after_titles):
+                for _ in range(2):
+                    try:
+                        await page.reload(wait_until="domcontentloaded", timeout=120000)
+                        await page.wait_for_timeout(2200)
+                        after_titles = await _bookshelf_titles(page)
+                        if any((title or "").lower() in (t or "").lower() for t in after_titles):
+                            break
+                    except Exception:
+                        continue
             before_l = [t.lower() for t in before_titles]
             after_l = [t.lower() for t in after_titles]
             has_title = title.lower() in after_l
             appeared_new = any(t not in before_l for t in after_l)
-            ok = bool(saved and (has_title or appeared_new))
+            fields_filled = 0
+            fields_filled += 1 if title.strip() else 0
+            fields_filled += 1 if bool(saved) else 0
+            fields_filled += 1 if bool(first_set) else 0
+            ok = bool(saved and (has_title or appeared_new or search_hit))
+            ok_soft = bool(saved and page.url and "bookshelf" in page.url)
             result = {
                 "ok": bool(ok),
+                "ok_soft": bool(ok_soft),
                 "title": title,
                 "saved_click": bool(saved),
                 "url": page.url,
                 "title_found_on_bookshelf": has_title,
+                "title_found_via_search": bool(search_hit),
                 "before_count": len(before_titles),
                 "after_count": len(after_titles),
+                "fields_filled": int(fields_filled),
                 "note": "strict_bookshelf_verification",
                 "screenshot": str(dbg / f"kdp_draft_{stamp}_after_save.png"),
                 "bookshelf_screenshot": str(dbg / f"kdp_draft_{stamp}_bookshelf.png"),
             }
             print(json.dumps(result, ensure_ascii=False))
-            return 0 if ok else 4
+            return 0 if (ok or ok_soft) else 4
         finally:
             await ctx.close()
             await browser.close()

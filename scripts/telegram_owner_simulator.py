@@ -129,6 +129,7 @@ def _builtin(name: str) -> list[Step]:
             Step("E10", "/recipe_run twitter_publish live", ["recipe", "twitter"], ["traceback", "exception"]),
             Step("E11", "/recipe_run reddit_publish live", ["recipe", "reddit"], ["traceback", "exception"]),
             Step("E12", "/recipe_run pinterest_publish live", ["recipe", "pinterest"], ["traceback", "exception"]),
+            Step("E13", "/recipe_run printful_publish live", ["recipe", "printful"], ["traceback", "exception"]),
         ]
     raise ValueError(f"Unknown scenario: {name}")
 

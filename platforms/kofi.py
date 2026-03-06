@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -147,11 +149,32 @@ class KofiPlatform(BasePlatform):
                 # Prefer headed mode (under Xvfb on server) unless explicitly forced.
                 force_headless = os.getenv("VITO_FORCE_HEADLESS", "0").lower() in {"1", "true", "yes", "on"}
                 if not force_headless:
-                    disp = ensure_display()
+                    # Always request a fresh/validated display via Xvfb helper.
+                    xvfb = XvfbSession(enabled=True)
+                    xvfb.start()
+                    disp = str(os.getenv("DISPLAY", "")).strip()
+                    if disp:
+                        ok = False
+                        checker = "xdpyinfo"
+                        for _ in range(5):
+                            try:
+                                rc = subprocess.run(
+                                    [checker, "-display", disp],
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL,
+                                    timeout=1.5,
+                                    check=False,
+                                ).returncode
+                                if rc == 0:
+                                    ok = True
+                                    break
+                            except Exception:
+                                pass
+                            await asyncio.sleep(0.35)
+                        if not ok:
+                            disp = ""
                     if not disp:
-                        xvfb = XvfbSession(enabled=True)
-                        xvfb.start()
-                        disp = str(os.getenv("DISPLAY", "")).strip()
+                        disp = ensure_display()
                     if not disp:
                         force_headless = True
                 launch_args = [
@@ -168,9 +191,11 @@ class KofiPlatform(BasePlatform):
                             "Ko-fi headed launch attempt",
                             extra={"event": "kofi_headed_launch_attempt", "context": {"display": str(os.getenv("DISPLAY", ""))}},
                         )
+                        env = dict(os.environ)
                         browser = await p.chromium.launch(
                             headless=False,
                             args=["--no-sandbox", "--disable-dev-shm-usage"],
+                            env=env,
                         )
                         launched_headed = True
                     except Exception as e2:

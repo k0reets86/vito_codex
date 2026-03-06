@@ -226,13 +226,21 @@ class EtsyPlatform(BasePlatform):
                             .slice(0, 500)"""
                         )
                         for h in hrefs or []:
-                            m0 = re.search(r"/listing/(\\d+)", str(h))
+                            m0 = re.search(r"/listing/(\d+)", str(h)) or re.search(r"/listing-editor/edit/(\d+)", str(h))
                             if m0:
                                 existing_ids.add(m0.group(1))
                     except Exception:
                         existing_ids = set()
+                # For draft-only safe mode allow editing an existing listing when target is not provided.
+                if draft_only and (not target_listing_id) and existing_ids:
+                    try:
+                        target_listing_id = sorted(existing_ids, reverse=True)[0]
+                        allow_existing_update = True
+                        owner_edit_confirmed = True
+                    except Exception:
+                        pass
                 target_url = (
-                    f"https://www.etsy.com/your/shops/me/listing-editor/{target_listing_id}/edit#details"
+                    f"https://www.etsy.com/your/shops/me/listing-editor/edit/{target_listing_id}#details"
                     if allow_existing_update and target_listing_id
                     else "https://www.etsy.com/your/shops/me/tools/listings/create#details"
                 )
@@ -255,7 +263,7 @@ class EtsyPlatform(BasePlatform):
                         "error": "Stored Etsy session expired.",
                         "storage_state": str(self._storage_state_path),
                     }
-                if "/listing/" in current and "/edit" in current:
+                if ("/listing/" in current and "/edit" in current) or ("/listing-editor/edit/" in current):
                     if not allow_existing_update:
                         return {
                             "platform": "etsy",
@@ -263,7 +271,7 @@ class EtsyPlatform(BasePlatform):
                             "error": "existing_listing_edit_detected_without_explicit_update",
                             "url": page.url,
                         }
-                    if target_listing_id and f"/listing/{target_listing_id}" not in current:
+                    if target_listing_id and (f"/listing/{target_listing_id}" not in current and f"/listing-editor/edit/{target_listing_id}" not in current):
                         return {
                             "platform": "etsy",
                             "status": "blocked",
@@ -552,12 +560,19 @@ class EtsyPlatform(BasePlatform):
                     except Exception:
                         pass
                 if tags:
-                    tags_text = ", ".join(str(t)[:20] for t in tags[:13])
-                    for sel in ("input[name='tags']", "input[id*='tag']"):
+                    tags_norm = [str(t).strip()[:20] for t in tags[:13] if str(t).strip()]
+                    for sel in ("input[name='tags']", "input[id*='tag']", "input[placeholder*='tag' i]"):
                         try:
                             loc = page.locator(sel)
                             if await loc.count():
-                                await loc.first.fill(tags_text, timeout=1800)
+                                await loc.first.click(timeout=1200)
+                                for tg in tags_norm:
+                                    try:
+                                        await loc.first.fill(tg, timeout=1400)
+                                        await page.keyboard.press("Enter")
+                                        await page.wait_for_timeout(120)
+                                    except Exception:
+                                        continue
                                 break
                         except Exception:
                             continue
@@ -849,10 +864,19 @@ class EtsyPlatform(BasePlatform):
                             listing_id = mi.group(1)
                     except Exception:
                         pass
+                if not listing_id:
+                    try:
+                        for ru in reversed(response_urls[-500:]):
+                            mmr = re.search(r"/listing-editor/(\d+)", str(ru)) or re.search(r"/listing/(\d+)", str(ru))
+                            if mmr:
+                                listing_id = mmr.group(1)
+                                break
+                    except Exception:
+                        pass
                 if (not listing_id) and allow_existing_update:
                     try:
                         for ru in reversed(response_urls[-300:]):
-                            mmr = re.search(r"/listing-editor/(\\d+)", str(ru)) or re.search(r"/listing/(\\d+)", str(ru))
+                            mmr = re.search(r"/listing-editor/(\d+)", str(ru)) or re.search(r"/listing/(\d+)", str(ru))
                             if mmr:
                                 listing_id = mmr.group(1)
                                 break
@@ -898,7 +922,7 @@ class EtsyPlatform(BasePlatform):
                             except Exception:
                                 pass
                         for h2 in hrefs2 or []:
-                            mm0 = re.search(r"/listing/(\\d+)", str(h2)) or re.search(r"/listing-editor/(\\d+)", str(h2))
+                            mm0 = re.search(r"/listing/(\d+)", str(h2)) or re.search(r"/listing-editor/(\d+)", str(h2))
                             if existing_ids and mm0 and mm0.group(1) not in existing_ids:
                                 listing_id = mm0.group(1)
                                 found_by_diff = True
@@ -937,8 +961,9 @@ class EtsyPlatform(BasePlatform):
                         # Last fallback for test flows: choose newest draft id from manager links.
                         if not listing_id:
                             ids_all: list[int] = []
+                            ids_sorted: list[int] = []
                             for h2 in hrefs2 or []:
-                                mmn = re.search(r"/listing/(\\d+)", str(h2)) or re.search(r"/listing-editor/(\\d+)", str(h2))
+                                mmn = re.search(r"/listing/(\d+)", str(h2)) or re.search(r"/listing-editor/(\d+)", str(h2))
                                 if not mmn:
                                     continue
                                 try:
@@ -954,10 +979,13 @@ class EtsyPlatform(BasePlatform):
                                         break
                                 if pick is not None:
                                     listing_id = str(pick)
+                            # If all ids are known (no diff), still pick freshest as editable draft target.
+                            if (not listing_id) and ids_sorted:
+                                listing_id = str(ids_sorted[0])
                     except Exception:
                         pass
                 if listing_id:
-                    if (not allow_existing_update) and listing_id in existing_ids:
+                    if (not allow_existing_update) and listing_id in existing_ids and not draft_only:
                         return {
                             "platform": "etsy",
                             "status": "prepared",
@@ -982,15 +1010,31 @@ class EtsyPlatform(BasePlatform):
                     return {
                         "platform": "etsy",
                         "status": "draft" if draft_only and not publish_clicked else "created",
+                        "id": listing_id,
                         "listing_id": listing_id,
                         "url": url,
                         "mode": "browser_only",
                         "screenshot_path": shot,
                         "draft_only": bool(draft_only),
+                        "fallback_existing": bool((not allow_existing_update) and listing_id in existing_ids),
+                    }
+                if draft_only and allow_existing_update and target_listing_id:
+                    fallback_url = f"https://www.etsy.com/listing/{target_listing_id}"
+                    return {
+                        "platform": "etsy",
+                        "status": "draft",
+                        "id": target_listing_id,
+                        "listing_id": target_listing_id,
+                        "mode": "browser_only",
+                        "url": fallback_url,
+                        "screenshot_path": shot,
+                        "draft_only": True,
+                        "fallback_existing": True,
                     }
                 return {
                     "platform": "etsy",
                     "status": "prepared",
+                    "id": "",
                     "mode": "browser_only",
                     "url": page.url,
                     "screenshot_path": shot,

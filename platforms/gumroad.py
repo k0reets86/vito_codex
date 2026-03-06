@@ -515,7 +515,9 @@ class GumroadPlatform(BasePlatform):
 
         try:
             async with async_playwright() as p:
-                br = await _launch_browser(p)
+                # Use stable publish launcher for Gumroad wizard (single-process constrained mode
+                # can break /products/new React flow and bounce to affiliated page).
+                br = await _launch_gumroad_publish_browser(p)
                 if has_storage:
                     ctx = await br.new_context(
                         storage_state=str(storage_state),
@@ -551,6 +553,12 @@ class GumroadPlatform(BasePlatform):
                 if allow_existing_update:
                     try:
                         existing = await self.get_products()
+                        if not existing:
+                            # Targeted update requested but no products exist anymore.
+                            # Fallback to create flow in this run.
+                            allow_existing_update = False
+                            target_product_id = ""
+                            target_slug = ""
                         for prod in existing:
                             pid = str(prod.get("id") or "")
                             short = prod.get("short_url", "") or prod.get("url", "")
@@ -600,14 +608,16 @@ class GumroadPlatform(BasePlatform):
                     except Exception:
                         return ""
 
-                async def _open_product_from_products_page(preferred_name: str = "") -> str:
+                async def _open_product_from_products_page(preferred_name: str = "", strict_name_match: bool = False) -> str:
                     """On /products listing page, open first matching product edit page.
 
                     This is needed because Gumroad can bounce to /products after create flow.
                     """
                     try:
                         href = await page.evaluate(
-                            """(preferredName) => {
+                            """(payload) => {
+                                const preferredName = String(payload?.preferredName || '');
+                                const strict = !!payload?.strict;
                                 const anchors = Array.from(document.querySelectorAll('a[href*="/products/"]'));
                                 const filtered = anchors
                                   .map(a => ({href: a.getAttribute('href') || '', text: (a.textContent || '').trim()}))
@@ -616,12 +626,14 @@ class GumroadPlatform(BasePlatform):
                                 if (preferredName) {
                                   const m = filtered.find(x => x.text && x.text.toLowerCase().includes(preferredName.toLowerCase()));
                                   if (m) return m.href;
+                                  if (strict) return '';
                                 }
+                                if (strict) return '';
                                 const edit = filtered.find(x => x.href.includes('/edit'));
                                 if (edit) return edit.href;
                                 return filtered[0].href;
                             }""",
-                            preferred_name or "",
+                            {"preferredName": preferred_name or "", "strict": bool(strict_name_match)},
                         )
                     except Exception:
                         href = ""
@@ -661,21 +673,49 @@ class GumroadPlatform(BasePlatform):
                                 href = f"https://gumroad.com{href}"
                             await page.goto(href, wait_until="domcontentloaded")
                             await asyncio.sleep(2)
-                            if "/products/new" in page.url or "/products/" in page.url:
+                            if "/products/affiliated" in page.url:
+                                for sel2 in (
+                                    'button:has-text("Create Gum")',
+                                    'a:has-text("Create Gum")',
+                                    'button:has-text("Create")',
+                                    'a:has-text("Create")',
+                                ):
+                                    try:
+                                        b2 = page.locator(sel2).first
+                                        if await b2.is_visible(timeout=1800):
+                                            await b2.click(timeout=2000)
+                                            await asyncio.sleep(2)
+                                            break
+                                    except Exception:
+                                        continue
+                            if "/products/new" in page.url or await _has_new_product_form():
                                 return True
                         # Button fallback
                         for sel in [
                             'a:has-text("New product")',
                             'button:has-text("New product")',
-                            'a:has-text("Create")',
-                            'button:has-text("Create")',
                         ]:
                             try:
                                 loc = page.locator(sel).first
                                 if await loc.is_visible(timeout=1500):
                                     await loc.click()
                                     await asyncio.sleep(2)
-                                    if "/products/new" in page.url or "/products/" in page.url:
+                                    if "/products/affiliated" in page.url:
+                                        for sel2 in (
+                                            'button:has-text("Create Gum")',
+                                            'a:has-text("Create Gum")',
+                                            'button:has-text("Create")',
+                                            'a:has-text("Create")',
+                                        ):
+                                            try:
+                                                b2 = page.locator(sel2).first
+                                                if await b2.is_visible(timeout=1800):
+                                                    await b2.click(timeout=2000)
+                                                    await asyncio.sleep(2)
+                                                    break
+                                            except Exception:
+                                                continue
+                                    if "/products/new" in page.url or await _has_new_product_form():
                                         return True
                             except Exception:
                                 continue
@@ -683,12 +723,41 @@ class GumroadPlatform(BasePlatform):
                         return False
                     return False
 
+                async def _open_new_product_via_products_tab() -> bool:
+                    """Force open '/products/new' from '/products' tab (avoids affiliated detour)."""
+                    try:
+                        await page.goto("https://gumroad.com/products", wait_until="domcontentloaded")
+                        await asyncio.sleep(1.5)
+                        href = await page.evaluate("""() => {
+                            const a = Array.from(document.querySelectorAll('a[href*="/products/new"]')).find(Boolean);
+                            return a ? (a.getAttribute('href') || '') : '';
+                        }""")
+                        if href:
+                            if href.startswith("/"):
+                                href = f"https://gumroad.com{href}"
+                            await page.goto(href, wait_until="domcontentloaded")
+                        else:
+                            # direct fallback if anchor not detected
+                            await page.goto("https://gumroad.com/products/new", wait_until="domcontentloaded")
+                        await asyncio.sleep(2)
+                        return bool("/products/new" in (page.url or "") or await _has_new_product_form())
+                    except Exception:
+                        return False
+
                 async def _has_new_product_form() -> bool:
                     try:
+                        cur_url = str(page.url or "").lower()
                         name_ok = await page.locator('input[id^="name-"], input[placeholder^="Name"], input[name="name"]').count() > 0
                         price_ok = await page.locator('input[id^="price-"], input[placeholder*="Price"], input[name="price"]').count() > 0
                         next_ok = await page.locator('button[type="submit"][form^="new-product-form"], button:has-text("Next: Customize"), button:has-text("Next")').count() > 0
-                        return bool(name_ok and (price_ok or next_ok))
+                        # New Gumroad UI often starts at product-type chooser on /products/new
+                        # (without visible name/price inputs yet).
+                        type_chooser_ok = False
+                        if "/products/new" in cur_url:
+                            type_chooser_ok = await page.locator(
+                                'button:has-text("Digital product"), button:has-text("Bundle"), [data-type="digital"], [data-type="ebook"]'
+                            ).count() > 0
+                        return bool((name_ok and (price_ok or next_ok)) or type_chooser_ok)
                     except Exception:
                         return False
 
@@ -714,28 +783,67 @@ class GumroadPlatform(BasePlatform):
                         return "", ""
                     return "", ""
 
+                async def _fast_create_draft() -> str:
+                    """Fast create path for current Gumroad /products/new UI."""
+                    try:
+                        await page.goto("https://gumroad.com/products/new", wait_until="domcontentloaded")
+                        await asyncio.sleep(1.5)
+                    except Exception:
+                        return ""
+                    for sel, val in (
+                        ('input[id^="name-"], input[placeholder^="Name"], input[name="name"]', name),
+                        ('input[id^="price-"], input[placeholder*="Price"], input[name="price"]', price),
+                    ):
+                        try:
+                            el = page.locator(sel).first
+                            if await el.count() > 0:
+                                await el.click(timeout=2000)
+                                await el.fill(str(val), timeout=2500)
+                        except Exception:
+                            continue
+                    clicked = False
+                    for sel in NEXT_SELECTORS:
+                        try:
+                            btn = page.locator(sel).first
+                            if await btn.count() > 0 and await btn.is_visible(timeout=1500):
+                                await btn.click(timeout=2500)
+                                clicked = True
+                                break
+                        except Exception:
+                            continue
+                    if not clicked:
+                        return ""
+                    await asyncio.sleep(2.0)
+                    cur = str(page.url or "")
+                    if "/products/" in cur and "/edit" in cur and "/products/affiliated" not in cur:
+                        return cur.split("/products/")[-1].split("/")[0]
+                    return ""
+
                 if slug_from_api:
                     await page.goto(target_edit_url or f"https://gumroad.com/products/{slug_from_api}/edit", wait_until="domcontentloaded")
                     await asyncio.sleep(2)
                 else:
+                    # Fast path first: simple create is often more stable than full recovery flow.
+                    try:
+                        fast_slug = await _fast_create_draft()
+                    except Exception:
+                        fast_slug = ""
+                    if fast_slug:
+                        slug_from_api = fast_slug
+                        await page.goto(f"https://gumroad.com/products/{fast_slug}/edit", wait_until="domcontentloaded")
+                        await asyncio.sleep(1.2)
+                    else:
                     # Step 1: Create product (may hit daily limit)
-                    logger.info("Gumroad: open new product page", extra={"event": "gumroad_new_product"})
-                    await page.goto("https://gumroad.com/products/new", wait_until="domcontentloaded")
-                    await asyncio.sleep(2)
+                        logger.info("Gumroad: open new product page", extra={"event": "gumroad_new_product"})
+                        await page.goto("https://gumroad.com/products/new", wait_until="domcontentloaded")
+                        await asyncio.sleep(2)
                     # New Gumroad flow may land on /products/affiliated chooser; continue into real draft editor.
                     try:
                         if "/products/affiliated" in (page.url or ""):
-                            for sel in (
-                                "button:has-text('Create Gum')",
-                                "a:has-text('Create Gum')",
-                                "button:has-text('Create')",
-                                "a:has-text('Create')",
-                            ):
-                                btn = page.locator(sel).first
-                                if await btn.is_visible(timeout=2500):
-                                    await btn.click(timeout=2500)
-                                    await asyncio.sleep(2)
-                                    break
+                            opened = await _open_new_product_via_products_tab()
+                            if not opened:
+                                await page.goto("https://gumroad.com/products/new", wait_until="domcontentloaded")
+                                await asyncio.sleep(2)
                     except Exception:
                         pass
                     # Explicitly detect expired auth before daily-limit heuristics.
@@ -817,11 +925,67 @@ class GumroadPlatform(BasePlatform):
                     # If we got redirected to the products list, open an existing product
                     try:
                         if page.url.rstrip("/").endswith("/products"):
-                            slug_from_api = await _open_existing_product(name, allow_update=allow_existing_update)
-                            if not slug_from_api:
-                                return {"platform": "gumroad", "status": "daily_limit", "error": "redirected_to_products_list_update_not_allowed", "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else ""}
+                            # If inline creation form is available, continue creation instead of falling back to existing products.
+                            if not await _has_new_product_form():
+                                slug_from_api = await _open_existing_product(name, allow_update=allow_existing_update)
+                                if not slug_from_api:
+                                    return {"platform": "gumroad", "status": "daily_limit", "error": "redirected_to_products_list_update_not_allowed", "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else ""}
                     except Exception:
                         pass
+
+                # Bootstrap new-product wizard when form is shown on /products/new (or inline).
+                try:
+                    if await _has_new_product_form() or "/products/new" in (page.url or ""):
+                        await page.evaluate(
+                            """(payload) => {
+                                const nm = String(payload?.name || '').trim();
+                                const pr = String(payload?.price || '').trim();
+                                const nameEl =
+                                  document.querySelector('input[id^="name-"]') ||
+                                  document.querySelector('input[placeholder^="Name"]') ||
+                                  document.querySelector('input[name="name"]');
+                                if (nameEl && nm) {
+                                  nameEl.focus();
+                                  nameEl.value = nm;
+                                  nameEl.dispatchEvent(new Event('input', { bubbles: true }));
+                                  nameEl.dispatchEvent(new Event('change', { bubbles: true }));
+                                }
+                                const digitalCard =
+                                  document.querySelector('[data-type="digital"]') ||
+                                  Array.from(document.querySelectorAll('button,div,a')).find((n) => {
+                                    const t = (n.textContent || '').toLowerCase();
+                                    return t.includes('digital product');
+                                  });
+                                if (digitalCard) {
+                                  try { digitalCard.click(); } catch(_) {}
+                                }
+                                const priceEl =
+                                  document.querySelector('input[id^="price-"]') ||
+                                  document.querySelector('input[placeholder*="Price"]') ||
+                                  document.querySelector('input[name="price"]');
+                                if (priceEl && pr) {
+                                  priceEl.focus();
+                                  priceEl.value = pr;
+                                  priceEl.dispatchEvent(new Event('input', { bubbles: true }));
+                                  priceEl.dispatchEvent(new Event('change', { bubbles: true }));
+                                }
+                                const nextBtn =
+                                  document.querySelector('button[type="submit"][form^="new-product-form"]') ||
+                                  Array.from(document.querySelectorAll('button,a')).find((n) => {
+                                    const t = (n.textContent || '').toLowerCase();
+                                    return t.includes('next: customize') || t === 'next';
+                                  });
+                                if (nextBtn) {
+                                  try { nextBtn.click(); } catch(_) {}
+                                  return true;
+                                }
+                                return false;
+                            }""",
+                            {"name": name, "price": price},
+                        )
+                        await asyncio.sleep(2)
+                except Exception:
+                    pass
 
                 # Ensure we are on Product tab before filling fields
                 try:
@@ -930,24 +1094,40 @@ class GumroadPlatform(BasePlatform):
                 # Ensure we're on a specific product edit page, not products list.
                 # Never fallback to existing listings unless owner explicitly allowed update.
                 try:
+                    if "/products/affiliated" in (page.url or ""):
+                        # Wrong branch (affiliate editor), return to product creation flow.
+                        await page.goto("https://gumroad.com/products/new", wait_until="domcontentloaded")
+                        await asyncio.sleep(2)
                     if page.url.rstrip("/").endswith("/products"):
                         if allow_existing_update:
                             slug_from_api = await _open_product_from_products_page(name) or await _open_existing_product(name, allow_update=True)
                         else:
-                            new_pid, new_slug = await _find_newly_created_draft()
-                            if new_slug:
-                                product_id = new_pid
-                                slug_from_api = new_slug
-                                await page.goto(f"https://gumroad.com/products/{new_slug}/edit", wait_until="domcontentloaded")
-                                await asyncio.sleep(2)
-                                logger.info("Gumroad: adopted draft after submit redirect", extra={"event": "gumroad_adopt_new_draft", "context": {"product_id": new_pid}})
-                            else:
-                                return {
-                                    "platform": "gumroad",
-                                    "status": "daily_limit",
-                                    "error": "new_draft_not_created_no_existing_update_allowed",
-                                    "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
-                                }
+                                new_pid, new_slug = await _find_newly_created_draft()
+                                if new_slug:
+                                    product_id = new_pid
+                                    slug_from_api = new_slug
+                                    await page.goto(f"https://gumroad.com/products/{new_slug}/edit", wait_until="domcontentloaded")
+                                    await asyncio.sleep(2)
+                                    logger.info("Gumroad: adopted draft after submit redirect", extra={"event": "gumroad_adopt_new_draft", "context": {"product_id": new_pid}})
+                                else:
+                                    # API tokens may be unavailable in browser-only mode; try strict name match in UI.
+                                    ui_slug = await _open_product_from_products_page(name, strict_name_match=True)
+                                    if ui_slug:
+                                        slug_from_api = ui_slug
+                                        await page.goto(f"https://gumroad.com/products/{ui_slug}/edit", wait_until="domcontentloaded")
+                                        await asyncio.sleep(2)
+                                    else:
+                                        # One more recovery pass: reopen creator and continue current flow.
+                                        recovered_new = await _open_new_product_via_products_tab()
+                                        if not recovered_new:
+                                            return {
+                                                "platform": "gumroad",
+                                                "status": "daily_limit",
+                                                "error": "new_draft_not_created_no_existing_update_allowed",
+                                                "url": str(page.url or ""),
+                                                "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
+                                            }
+                                        logger.info("Gumroad: recovered create form after products redirect", extra={"event": "gumroad_recovered_after_redirect"})
                     elif "/products/" not in page.url:
                         if allow_existing_update:
                             slug_from_api = await _open_existing_product(name, allow_update=True)
@@ -1560,7 +1740,7 @@ class GumroadPlatform(BasePlatform):
                                     pass
 
                         after_files = await _existing_files_live()
-                        upload_done = bool(after_files and len(after_files) >= len(before_files))
+                        upload_done = bool(after_files and len(after_files) > len(before_files))
                         if upload_done:
                             logger.info("Gumroad: content files uploaded", extra={"event": "gumroad_content_files_uploaded", "context": {"count": len(files_for_upload)}})
                             # Save directly on Content tab.
@@ -1634,6 +1814,8 @@ class GumroadPlatform(BasePlatform):
                                 if current_name and attached_name and attached_name != current_name:
                                     continue
                                 ext = str(f.get("extension") or "").strip().lower()
+                                if (not ext) and fname and "." in fname:
+                                    ext = fname.rsplit(".", 1)[-1].lower()
                                 if ext == "pdf":
                                     product_pdf_count += 1
                                 if ext in {"png", "jpg", "jpeg", "webp", "gif", "svg"}:
@@ -1678,6 +1860,8 @@ class GumroadPlatform(BasePlatform):
                                         if current_name2 and attached_name and attached_name != current_name2:
                                             continue
                                         ext = str(f.get("extension") or "").strip().lower()
+                                        if (not ext) and fname and "." in fname:
+                                            ext = fname.rsplit(".", 1)[-1].lower()
                                         if ext == "pdf":
                                             product_pdf_count += 1
                                         if ext in {"png", "jpg", "jpeg", "webp", "gif", "svg"}:
@@ -1754,10 +1938,28 @@ class GumroadPlatform(BasePlatform):
                                     break
                         except Exception:
                             pass
+                    if "/products/affiliated" in (page.url or "").lower():
+                        return {
+                            "platform": "gumroad",
+                            "status": "error",
+                            "error": "wrong_editor_route_affiliated",
+                            "url": str(page.url or ""),
+                            "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
+                        }
+                    if not draft_confirmed:
+                        return {
+                            "platform": "gumroad",
+                            "status": "error",
+                            "error": "draft_not_confirmed",
+                            "id": product_id or slug or generated_slug,
+                            "url": public_url,
+                            "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
+                        }
                     return {
                         "platform": "gumroad",
                         "status": "draft",
                         "product_id": product_id,
+                        "id": product_id or slug or generated_slug,
                         "url": public_url,
                         "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
                         "draft_confirmed": draft_confirmed,
@@ -1906,6 +2108,7 @@ class GumroadPlatform(BasePlatform):
                     "platform": "gumroad",
                     "status": "draft",
                     "product_id": product_id,
+                    "id": product_id or slug or generated_slug,
                     "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
                     "error": enable_result.get("error", "enable_failed"),
                 }
@@ -1942,6 +2145,7 @@ class GumroadPlatform(BasePlatform):
                             "platform": "gumroad",
                             "status": "draft",
                             "product_id": pid,
+                            "id": pid or slug or generated_slug,
                             "url": prod.get("short_url", ""),
                             "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
                         }
@@ -1968,6 +2172,7 @@ class GumroadPlatform(BasePlatform):
                         "platform": "gumroad",
                         "status": "draft",
                         "product_id": pid,
+                        "id": pid or slug or generated_slug,
                         "url": prod.get("short_url", ""),
                         "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
                         "error": enable_result.get("error", "enable_failed"),

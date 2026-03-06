@@ -22,4 +22,7 @@ reports/CAPABILITY_PACK_REPORT_*.md
 reports/CAPABILITY_PACK_MATRIX_*.md
 reports/OWNER_PREFS_*.md
 reports/SKILL_ACCEPTANCE_*.md
+reports/*.json
+reports/*.txt
+reports/tz19_extracted/
 runtime/

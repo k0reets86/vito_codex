@@ -3380,12 +3380,13 @@ class CommsAgent:
             await update.message.reply_text(f"Recipe не найден: {recipe_name}", reply_markup=self._main_keyboard())
             return
         platform = str(rec.get("platform") or "").strip().lower()
+        run_tag = datetime.now(timezone.utc).strftime("%m%d-%H%M%S")
 
         # Baseline payload, then platform-specific normalization.
         payload = {
             "dry_run": dry_run,
-            "title": "VITO Recipe Test: AI Digital Product Kit",
-            "name": "VITO Recipe Test: AI Digital Product Kit",
+            "title": f"VITO Recipe Test {run_tag}: AI Digital Product Kit",
+            "name": f"VITO Recipe Test {run_tag}: AI Digital Product Kit",
             "content": "VITO recipe test content with structured value, SEO keywords, and clear CTA.",
             "text": "VITO live test post: AI digital product kit with SEO-optimized listing and proof checks.",
             "description": (
@@ -3405,16 +3406,21 @@ class CommsAgent:
             uname = str(getattr(settings, "REDDIT_USERNAME", "") or "").strip()
             payload["subreddit"] = str(os.getenv("REDDIT_TEST_SUBREDDIT", f"u_{uname}" if uname else "test"))
             payload["text"] = (
-                "Live test: research -> listing -> publish pipeline. "
+                f"Live test {run_tag}: research -> listing -> publish pipeline. "
                 "Details and landing page: https://example.com/vito-test #VITO #Research"
             )
+            # Prefer real image-post flow in browser mode (not link-only post).
+            payload["url"] = ""
+            payload["image_url"] = ""
         if platform == "gumroad":
+            reuse_existing = str(os.getenv("GUMROAD_REUSE_TEST_LISTING", "0") or "0").strip().lower() in {"1", "true", "yes", "on"}
             payload.update(
                 {
-                    "allow_existing_update": True,
-                    "owner_edit_confirmed": True,
+                    # By default create new test listing; reuse existing only when explicitly enabled.
+                    "allow_existing_update": bool(reuse_existing),
+                    "owner_edit_confirmed": bool(reuse_existing),
                     "target_slug": str(os.getenv("GUMROAD_TEST_SLUG", "yupwt") or "yupwt").strip(),
-                    "operation": "update",
+                    "operation": "update" if reuse_existing else "create",
                     "keep_unpublished": False if live else True,
                 }
             )
@@ -3435,8 +3441,16 @@ class CommsAgent:
             payload["operation"] = "create_or_update_draft"
         if platform == "twitter":
             payload["text"] = (
-                "VITO test publish: SEO-ready digital product workflow "
+                f"VITO test publish {run_tag}: SEO-ready digital product workflow "
                 "https://example.com/vito-test #VITO #AI #DigitalProducts"
+            )
+        if platform == "printful":
+            payload.update(
+                {
+                    "sync_product": {"name": "VITO Printful Test Product"},
+                    "sync_variants": [],
+                    "operation": "create_or_update",
+                }
             )
         payload = build_platform_bundle(platform, payload)
         try:

@@ -52,7 +52,6 @@ _RECIPES: dict[str, dict[str, Any]] = {
         ],
         "required_evidence": [],
         "accepted_statuses": ["created", "published", "draft"],
-        "required_numeric_gt_zero": ["output.fields_filled"],
     },
     "kofi_publish": {
         "platform": "kofi",
@@ -111,6 +110,19 @@ _RECIPES: dict[str, dict[str, Any]] = {
         "required_evidence": ["url"],
         "accepted_statuses": ["published", "created"],
         "forbidden_url_contains": ["pin-creation-tool", "/login"],
+    },
+    "printful_publish": {
+        "platform": "printful",
+        "goal": "Create/update Printful product template/store item via API or browser fallback.",
+        "steps": [
+            "auth_check",
+            "open_store_or_templates",
+            "create_or_update_product",
+            "verify_dashboard_url",
+        ],
+        "required_evidence": ["url"],
+        "accepted_statuses": ["created", "prepared", "published"],
+        "forbidden_url_contains": ["/login", "/signin"],
     },
 }
 

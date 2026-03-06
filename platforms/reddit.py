@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import aiohttp
 import hashlib
 import os
@@ -159,7 +160,35 @@ class RedditPlatform(BasePlatform):
 
         if self._mode == "browser_only":
             res = await self._publish_via_browser(content or {})
+            # Retry browser flow for transient Reddit anti-bot/captcha states.
             if str(res.get("status") or "").strip().lower() in {"prepared", "blocked"}:
+                for attempt in range(2):
+                    await asyncio.sleep(2.0 + attempt * 2.0)
+                    probe = await self._publish_via_browser(content or {})
+                    if str(probe.get("status") or "").strip().lower() == "published":
+                        return probe
+                    # keep the latest result details for reporting/fallbacks
+                    res = probe
+            if str(res.get("status") or "").strip().lower() in {"prepared", "blocked"}:
+                # If IMAGE submit path hits captcha/challenge, retry as LINK post with uploaded image URL.
+                image_path = str((content or {}).get("image_path", "")).strip()
+                err = str(res.get("error") or "").lower()
+                if image_path and ("captcha" in err or "submit_rejected" in err):
+                    img_url = await self._upload_image_to_cloudinary(image_path)
+                    if img_url:
+                        retry_payload = dict(content or {})
+                        retry_payload["url"] = img_url
+                        retry_payload["image_url"] = img_url
+                        retry_payload["image_path"] = ""
+                        retry_res = await self._publish_via_browser(retry_payload)
+                        if str(retry_res.get("status") or "").strip().lower() in {"prepared", "blocked"}:
+                            await asyncio.sleep(2.0)
+                            retry_res2 = await self._publish_via_browser(retry_payload)
+                            if str(retry_res2.get("status") or "").strip().lower() == "published":
+                                return retry_res2
+                            retry_res = retry_res2
+                        if str(retry_res.get("status") or "").strip().lower() == "published":
+                            return retry_res
                 # Last fallback: API submit to avoid browser captcha/overlay issues.
                 subreddit = str(content.get("subreddit", "")).strip() or "test"
                 title = str(content.get("title", "")).strip()
@@ -230,8 +259,7 @@ class RedditPlatform(BasePlatform):
         body = str(content.get("text", "")).strip()
         link_url = str(content.get("url", "") or content.get("image_url", "")).strip()
         image_path = str(content.get("image_path", "")).strip()
-        if image_path and not link_url:
-            link_url = await self._upload_image_to_cloudinary(image_path)
+        prefer_image_post = bool(image_path and Path(image_path).is_file() and not link_url)
         if not title:
             return {"platform": "reddit", "status": "error", "error": "title required"}
 
@@ -251,7 +279,12 @@ class RedditPlatform(BasePlatform):
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
                 )
                 page = await context.new_page()
-                await page.goto(f"https://www.reddit.com/r/{subreddit}/submit/?type=TEXT", wait_until="domcontentloaded", timeout=90000)
+                submit_type = "IMAGE" if prefer_image_post else "TEXT"
+                await page.goto(
+                    f"https://www.reddit.com/r/{subreddit}/submit/?type={submit_type}",
+                    wait_until="domcontentloaded",
+                    timeout=90000,
+                )
                 await page.wait_for_timeout(1200)
                 current = (page.url or "").lower()
                 body_text = (await page.text_content("body") or "").lower()
@@ -278,7 +311,29 @@ class RedditPlatform(BasePlatform):
                             title_selector = candidate
                             break
                 await page.fill(title_selector, title[:300], timeout=2500)
-                if link_url:
+                if prefer_image_post:
+                    uploaded = False
+                    for sel in (
+                        "input[type='file']",
+                        "input[accept*='image']",
+                    ):
+                        try:
+                            fi = page.locator(sel)
+                            if await fi.count():
+                                await fi.first.set_input_files(image_path)
+                                await page.wait_for_timeout(2200)
+                                uploaded = True
+                                break
+                        except Exception:
+                            continue
+                    if not uploaded:
+                        return {
+                            "platform": "reddit",
+                            "status": "blocked",
+                            "error": "image_upload_control_not_found",
+                            "url": page.url,
+                        }
+                elif link_url:
                     try:
                         await page.fill("input[name='url']", link_url, timeout=2500)
                     except Exception:
@@ -369,8 +424,8 @@ class RedditPlatform(BasePlatform):
                                     break
                             except Exception:
                                 continue
-                        # choose post type based on payload: link post for image/url, otherwise self text post.
-                        if link_url:
+                        # choose post type based on payload: image/link when image/url is present, otherwise self text post.
+                        if prefer_image_post or link_url:
                             try:
                                 await page.check("input#kind-link", timeout=1500)
                             except Exception:
@@ -411,7 +466,12 @@ class RedditPlatform(BasePlatform):
                         except Exception:
                             pass
                         await page.fill("textarea[name='title']", title[:300], timeout=2500)
-                        if link_url:
+                        if prefer_image_post:
+                            try:
+                                await page.fill("input[name='url']", await self._upload_image_to_cloudinary(image_path), timeout=2500)
+                            except Exception:
+                                pass
+                        elif link_url:
                             try:
                                 await page.fill("input[name='url']", link_url, timeout=2500)
                             except Exception:

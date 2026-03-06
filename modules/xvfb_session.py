@@ -40,7 +40,15 @@ class XvfbSession:
                     pass
                 os.environ.pop("DISPLAY", None)
             else:
-                return
+                # If xdpyinfo is unavailable, validate by X socket presence.
+                try:
+                    dnum = str(current_display).split(":")[-1].split(".")[0]
+                    sock = Path(f"/tmp/.X11-unix/X{dnum}")
+                    if sock.exists():
+                        return
+                except Exception:
+                    pass
+                os.environ.pop("DISPLAY", None)
         if shutil.which("Xvfb") is None:
             return
         for n in range(90, 140):

@@ -7,7 +7,6 @@ NEXT_SELECTORS = [
     'button[type="submit"][form^="new-product-form"]',
     'button:has-text("Next: Customize")',
     'button:has-text("Next")',
-    'button:has-text("Create")',
 ]
 
 SAVE_SELECTORS = [
@@ -40,4 +39,3 @@ SHARE_TAB_SELECTORS = [
     'button:has-text("Share")',
     'a:has-text("Share")',
 ]
-

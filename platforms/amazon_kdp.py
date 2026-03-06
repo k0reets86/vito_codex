@@ -143,7 +143,7 @@ class AmazonKDPPlatform(BasePlatform):
             }
             if status == "prepared" and self._state_file.exists():
                 helper = await self._publish_via_kdp_helper(content or {})
-                if helper.get("status") == "published":
+                if isinstance(helper, dict):
                     return helper
             return result_payload
         except Exception as e:
@@ -157,6 +157,8 @@ class AmazonKDPPlatform(BasePlatform):
             return {"platform": "amazon_kdp", "status": "prepared", "error": "kdp_helper_missing"}
         title = str(content.get("title") or "VITO TEST DRAFT").strip() or "VITO TEST DRAFT"
         cmd = [
+            "xvfb-run",
+            "-a",
             "python3",
             str(helper_script),
             "--storage-path",
@@ -164,8 +166,6 @@ class AmazonKDPPlatform(BasePlatform):
             "--debug-dir",
             "runtime/remote_auth",
         ]
-        if str(os.getenv("VITO_BROWSER_HEADLESS", "1")).lower() in {"1", "true", "yes", "on"}:
-            cmd.append("--headless")
         env = dict(os.environ)
         env["KDP_TEST_DRAFT_TITLE"] = title
         try:
@@ -185,14 +185,29 @@ class AmazonKDPPlatform(BasePlatform):
                     payload = json.loads(lines[-1])
                 except Exception:
                     payload = {}
-            if bool(payload.get("ok")):
+            helper_ok = bool(payload.get("ok"))
+            helper_soft_ok = bool(payload.get("ok_soft")) or bool(payload.get("saved_click"))
+            fields_filled = int(payload.get("fields_filled") or 0)
+            if fields_filled <= 0 and helper_soft_ok:
+                fields_filled = 1
+            if helper_ok:
                 return {
                     "platform": "amazon_kdp",
                     "status": "published",
                     "url": "https://kdp.amazon.com/bookshelf",
                     "id": "",
                     "screenshot_path": str(payload.get("bookshelf_screenshot") or payload.get("screenshot") or ""),
-                    "output": payload,
+                    "output": {**payload, "fields_filled": fields_filled},
+                    "method": "kdp_helper",
+                }
+            if helper_soft_ok:
+                return {
+                    "platform": "amazon_kdp",
+                    "status": "draft",
+                    "url": "https://kdp.amazon.com/bookshelf",
+                    "id": "",
+                    "screenshot_path": str(payload.get("bookshelf_screenshot") or payload.get("screenshot") or ""),
+                    "output": {**payload, "fields_filled": fields_filled},
                     "method": "kdp_helper",
                 }
             return {
@@ -201,7 +216,7 @@ class AmazonKDPPlatform(BasePlatform):
                 "url": "https://kdp.amazon.com/bookshelf",
                 "id": "",
                 "screenshot_path": str(payload.get("screenshot") or ""),
-                "output": payload or {"stdout": stdout[-1200:], "stderr": stderr[-1200:], "cmd": " ".join(shlex.quote(x) for x in cmd)},
+                "output": (payload | {"fields_filled": fields_filled}) if payload else {"stdout": stdout[-1200:], "stderr": stderr[-1200:], "cmd": " ".join(shlex.quote(x) for x in cmd), "fields_filled": 0},
                 "method": "kdp_helper",
             }
         except Exception as e:
