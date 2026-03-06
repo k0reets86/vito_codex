@@ -3399,10 +3399,15 @@ class CommsAgent:
             "seo_title": "AI Digital Product Kit for Creators",
             "seo_description": "SEO-optimized test listing for marketplace publish flow validation.",
             "url": "https://example.com/vito-test",
+            "hashtags": ["#VITO", "#AITools", "#DigitalProduct"],
         }
         if platform == "reddit":
             uname = str(getattr(settings, "REDDIT_USERNAME", "") or "").strip()
             payload["subreddit"] = str(os.getenv("REDDIT_TEST_SUBREDDIT", f"u_{uname}" if uname else "test"))
+            payload["text"] = (
+                "Live test: research -> listing -> publish pipeline. "
+                "Details and landing page: https://example.com/vito-test #VITO #Research"
+            )
         if platform == "gumroad":
             payload.update(
                 {
@@ -3428,6 +3433,11 @@ class CommsAgent:
             payload["draft_only"] = True
         if platform == "amazon_kdp":
             payload["operation"] = "create_or_update_draft"
+        if platform == "twitter":
+            payload["text"] = (
+                "VITO test publish: SEO-ready digital product workflow "
+                "https://example.com/vito-test #VITO #AI #DigitalProducts"
+            )
         payload = build_platform_bundle(platform, payload)
         try:
             from modules.workflow_recipe_executor import WorkflowRecipeExecutor
@@ -3440,8 +3450,17 @@ class CommsAgent:
         if st == "accepted":
             res = out.get("result") if isinstance(out.get("result"), dict) else {}
             status = str(res.get("status") or "")
-            url = str(res.get("url") or "")
-            rid = str(res.get("listing_id") or res.get("product_id") or res.get("post_id") or res.get("tweet_id") or res.get("id") or "")
+            evidence = res.get("evidence") if isinstance(res.get("evidence"), dict) else {}
+            url = str(res.get("url") or evidence.get("url") or "")
+            rid = str(
+                res.get("listing_id")
+                or res.get("product_id")
+                or res.get("post_id")
+                or res.get("tweet_id")
+                or res.get("id")
+                or evidence.get("id")
+                or ""
+            )
             await update.message.reply_text(
                 f"Recipe accepted: {recipe_name} ({out.get('platform')})\nstatus={status}\nurl={url or '-'}\nid={rid or '-'}",
                 reply_markup=self._main_keyboard(),

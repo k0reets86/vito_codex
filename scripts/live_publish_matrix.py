@@ -88,13 +88,16 @@ def _payloads(live: bool) -> dict[str, dict]:
     return {
         "twitter": build_platform_bundle("twitter", {
             "dry_run": not live,
-            "text": f"VITO publish probe {tag}",
+            "text": f"VITO publish probe {tag} https://example.com/vito-test #VITO #AI #DigitalProducts",
+            "hashtags": ["#VITO", "#AI", "#DigitalProducts"],
+            "url": "https://example.com/vito-test",
         }),
         "reddit": build_platform_bundle("reddit", {
             "dry_run": not live,
             "subreddit": "u_Few_Garage_3659",
             "title": f"VITO probe {tag}",
-            "text": "Live probe post from VITO",
+            "text": "Live probe post from VITO. Link: https://example.com/vito-test #VITO #Research",
+            "url": "https://example.com/vito-test",
         }),
         "etsy": build_platform_bundle("etsy", {
             "dry_run": not live,

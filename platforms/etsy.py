@@ -515,6 +515,42 @@ class EtsyPlatform(BasePlatform):
                             await page.wait_for_timeout(1800)
                     except Exception:
                         pass
+                # Upload extra gallery images when available (thumb/preview).
+                gallery_files: list[str] = []
+                for key in ("thumb_path", "preview_path", "gallery_path"):
+                    gp = str(content.get(key) or "").strip()
+                    if gp and os.path.isfile(gp):
+                        gallery_files.append(gp)
+                if gallery_files:
+                    try:
+                        fi = page.locator("input[type='file']")
+                        if await fi.count():
+                            merged: list[str] = []
+                            if image_path and os.path.isfile(image_path):
+                                merged.append(image_path)
+                            merged.extend(gallery_files[:3])
+                            await fi.first.set_input_files(merged[:4], timeout=5000)
+                            await page.wait_for_timeout(2200)
+                    except Exception:
+                        pass
+                # Attach downloadable file for digital listing if input is present.
+                digital_file = str(content.get("pdf_path") or content.get("file_path") or "").strip()
+                if digital_file and os.path.isfile(digital_file):
+                    try:
+                        fi = page.locator("input[type='file']")
+                        cfi = await fi.count()
+                        for i in range(cfi):
+                            loc = fi.nth(i)
+                            acc = str((await loc.get_attribute("accept")) or "").lower()
+                            if any(x in acc for x in ("pdf", "zip", "application")):
+                                try:
+                                    await loc.set_input_files(digital_file, timeout=7000)
+                                    await page.wait_for_timeout(2000)
+                                    break
+                                except Exception:
+                                    continue
+                    except Exception:
+                        pass
                 if tags:
                     tags_text = ", ".join(str(t)[:20] for t in tags[:13])
                     for sel in ("input[name='tags']", "input[id*='tag']"):
@@ -1199,6 +1235,11 @@ class EtsyPlatform(BasePlatform):
 
     async def publish(self, content: dict) -> dict:
         """Create a draft listing (requires OAuth2 token for write)."""
+        if self._mode in {"browser", "browser_only"}:
+            # Safety default for tests: keep listing as draft unless explicitly confirmed.
+            if not bool((content or {}).get("publish_confirmed")):
+                content = dict(content or {})
+                content["draft_only"] = True
         if content.get("dry_run"):
             title = content.get("title", "")
             try:

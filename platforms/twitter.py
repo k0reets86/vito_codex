@@ -393,10 +393,26 @@ class TwitterPlatform(BasePlatform):
 
                 await page.wait_for_timeout(2500)
                 tweet_url = ""
+                text_probe = text[:60].strip().lower()
+                # Strict extraction: find status URL for the just posted text, not arbitrary timeline link.
                 try:
-                    href = await page.locator("a[href*='/status/']").first.get_attribute("href")
-                    if href:
-                        tweet_url = f"https://x.com{href}" if href.startswith("/") else href
+                    matched_href = await page.evaluate(
+                        """(needle) => {
+                            const key = String(needle || '').trim().toLowerCase();
+                            const anchors = Array.from(document.querySelectorAll("a[href*='/status/']"));
+                            for (const a of anchors) {
+                                const href = a.getAttribute('href') || '';
+                                if (!href.includes('/status/')) continue;
+                                const article = a.closest('article,div[data-testid=\"cellInnerDiv\"],div');
+                                const txt = ((article && article.textContent) || '').toLowerCase();
+                                if (key && txt.includes(key)) return href;
+                            }
+                            return '';
+                        }""",
+                        text_probe,
+                    )
+                    if matched_href:
+                        tweet_url = f"https://x.com{matched_href}" if matched_href.startswith("/") else str(matched_href)
                 except Exception:
                     pass
                 if not tweet_url:
@@ -406,12 +422,46 @@ class TwitterPlatform(BasePlatform):
                             tweet_url = cur
                     except Exception:
                         pass
+                if not tweet_url:
+                    # Fallback: open profile and look for tweet containing the same text probe.
+                    try:
+                        profile_href = await page.evaluate(
+                            """() => {
+                                const a =
+                                  document.querySelector("a[data-testid='AppTabBar_Profile_Link']") ||
+                                  document.querySelector("a[aria-label*='Profile'][href^='/']");
+                                return a ? (a.getAttribute('href') || '') : '';
+                            }"""
+                        )
+                        if profile_href:
+                            profile_url = profile_href if str(profile_href).startswith("http") else f"https://x.com{profile_href}"
+                            await page.goto(profile_url, wait_until="domcontentloaded", timeout=90000)
+                            await page.wait_for_timeout(1800)
+                            matched_href = await page.evaluate(
+                                """(needle) => {
+                                    const key = String(needle || '').trim().toLowerCase();
+                                    const anchors = Array.from(document.querySelectorAll("a[href*='/status/']"));
+                                    for (const a of anchors) {
+                                        const href = a.getAttribute('href') || '';
+                                        if (!href.includes('/status/')) continue;
+                                        const article = a.closest('article,div[data-testid=\"cellInnerDiv\"],div');
+                                        const txt = ((article && article.textContent) || '').toLowerCase();
+                                        if (key && txt.includes(key)) return href;
+                                    }
+                                    return '';
+                                }""",
+                                text_probe,
+                            )
+                            if matched_href:
+                                tweet_url = f"https://x.com{matched_href}" if matched_href.startswith("/") else str(matched_href)
+                    except Exception:
+                        pass
                 try:
                     await page.screenshot(path=shot, full_page=True)
                 except Exception:
                     pass
 
-                status = "published" if (posted and tweet_url) else "prepared"
+                status = "published" if (posted and tweet_url and "/status/" in tweet_url) else "prepared"
                 try:
                     ExecutionFacts().record(
                         action="platform:publish",
