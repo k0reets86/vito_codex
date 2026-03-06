@@ -230,6 +230,9 @@ class PinterestPlatform(BasePlatform):
                         pass
 
                 for sel in (
+                    "input[aria-label*='Название' i]",
+                    "input[placeholder*='Название' i]",
+                    "input[name*='title' i]",
                     "textarea[aria-label*='title' i]",
                     "textarea[data-test-id*='pin-title' i]",
                     "div[contenteditable='true'][aria-label*='title' i]",
@@ -243,6 +246,9 @@ class PinterestPlatform(BasePlatform):
                         continue
 
                 for sel in (
+                    "textarea[aria-label*='Описание' i]",
+                    "textarea[placeholder*='Описание' i]",
+                    "textarea[name*='description' i]",
                     "textarea[aria-label*='description' i]",
                     "div[contenteditable='true'][aria-label*='description' i]",
                 ):
@@ -263,6 +269,33 @@ class PinterestPlatform(BasePlatform):
                                 break
                         except Exception:
                             continue
+                # Select board (required in many Pinterest UIs before publish).
+                try:
+                    for sel in (
+                        "[aria-label*='Доска' i]",
+                        "[aria-label*='Board' i]",
+                        "div[role='combobox']",
+                        "button[aria-haspopup='listbox']",
+                    ):
+                        box = page.locator(sel)
+                        if await box.count():
+                            await box.first.click(timeout=2000)
+                            await page.wait_for_timeout(700)
+                            break
+                    # Pick first available board option.
+                    for opt_sel in (
+                        "div[role='option']",
+                        "button[role='option']",
+                        "[data-test-id*='board']",
+                        "div:has-text('Работа с Профиль')",
+                    ):
+                        opt = page.locator(opt_sel)
+                        if await opt.count():
+                            await opt.first.click(timeout=2000)
+                            await page.wait_for_timeout(800)
+                            break
+                except Exception:
+                    pass
 
                 pin_url = ""
                 for btxt in ("Publish", "Опубликовать", "Save", "Сохранить"):
@@ -277,6 +310,38 @@ class PinterestPlatform(BasePlatform):
                 now_url = str(page.url or "")
                 if "/pin/" in now_url:
                     pin_url = now_url
+                # Pinterest can show success toast without redirect; capture it and extract URL.
+                published_toast = False
+                try:
+                    body_txt = (await page.text_content("body") or "").lower()
+                    if ("ваш пин опубликован" in body_txt) or ("your pin was published" in body_txt):
+                        published_toast = True
+                except Exception:
+                    published_toast = False
+                if published_toast and not pin_url:
+                    try:
+                        for sel in (
+                            "a:has-text('Просмотреть')",
+                            "a:has-text('View')",
+                            "button:has-text('Просмотреть')",
+                            "button:has-text('View')",
+                        ):
+                            act = page.locator(sel)
+                            if await act.count():
+                                href = await act.first.get_attribute("href")
+                                if href:
+                                    pin_url = f"https://www.pinterest.com{href}" if href.startswith("/") else href
+                                    break
+                                try:
+                                    await act.first.click(timeout=1800)
+                                    await page.wait_for_timeout(1200)
+                                    if "/pin/" in (page.url or ""):
+                                        pin_url = str(page.url or "")
+                                        break
+                                except Exception:
+                                    continue
+                    except Exception:
+                        pass
                 if not pin_url:
                     try:
                         html = await page.content()
@@ -295,7 +360,7 @@ class PinterestPlatform(BasePlatform):
                 except Exception:
                     pass
 
-                status = "published" if pin_url else "prepared"
+                status = "published" if (pin_url or published_toast) else "prepared"
                 try:
                     ExecutionFacts().record(
                         action="platform:publish",

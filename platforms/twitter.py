@@ -298,6 +298,23 @@ class TwitterPlatform(BasePlatform):
                         "storage_state": str(self._storage_state_path),
                     }
 
+                # Fallback: if compose route doesn't expose editor, open composer from side button.
+                try:
+                    if "/compose" not in current:
+                        for sel in (
+                            "[data-testid='SideNav_NewTweet_Button']",
+                            "a[aria-label*='Post']",
+                            "button:has-text('Опубликовать пост')",
+                            "button:has-text('Post')",
+                        ):
+                            loc = page.locator(sel)
+                            if await loc.count():
+                                await loc.first.click(timeout=2500)
+                                await page.wait_for_timeout(1200)
+                                break
+                except Exception:
+                    pass
+
                 textbox = None
                 compose_selectors = (
                     "div[data-testid='tweetTextarea_0']",
@@ -318,6 +335,16 @@ class TwitterPlatform(BasePlatform):
                             await page.wait_for_timeout(1200)
                     except Exception:
                         pass
+                    if textbox is None:
+                        try:
+                            for sel in ("button:has-text('Опубликовать пост')", "button:has-text('Post')"):
+                                btn2 = page.locator(sel)
+                                if await btn2.count():
+                                    await btn2.first.click(timeout=2500)
+                                    await page.wait_for_timeout(1200)
+                                    break
+                        except Exception:
+                            pass
                     for sel in compose_selectors:
                         loc = page.locator(sel)
                         if await loc.count():

@@ -722,6 +722,22 @@ class GumroadPlatform(BasePlatform):
                     logger.info("Gumroad: open new product page", extra={"event": "gumroad_new_product"})
                     await page.goto("https://gumroad.com/products/new", wait_until="domcontentloaded")
                     await asyncio.sleep(2)
+                    # New Gumroad flow may land on /products/affiliated chooser; continue into real draft editor.
+                    try:
+                        if "/products/affiliated" in (page.url or ""):
+                            for sel in (
+                                "button:has-text('Create Gum')",
+                                "a:has-text('Create Gum')",
+                                "button:has-text('Create')",
+                                "a:has-text('Create')",
+                            ):
+                                btn = page.locator(sel).first
+                                if await btn.is_visible(timeout=2500):
+                                    await btn.click(timeout=2500)
+                                    await asyncio.sleep(2)
+                                    break
+                    except Exception:
+                        pass
                     # Explicitly detect expired auth before daily-limit heuristics.
                     if "gumroad.com/login" in (page.url or ""):
                         if auth_retry >= 2:
@@ -757,24 +773,28 @@ class GumroadPlatform(BasePlatform):
                     # If redirected to products list and updates are not allowed, stop immediately
                     try:
                         if page.url.rstrip("/").endswith("/products") and not content.get("allow_existing_update"):
-                            # Sometimes Gumroad creates draft but returns to list; detect and attach to that draft.
-                            new_pid, new_slug = await _find_newly_created_draft()
-                            if new_slug:
-                                slug_from_api = new_slug
-                                product_id = new_pid
-                                await page.goto(f"https://gumroad.com/products/{new_slug}/edit", wait_until="domcontentloaded")
-                                await asyncio.sleep(2)
-                                logger.info("Gumroad: adopted newly created draft after list redirect", extra={"event": "gumroad_adopt_new_draft", "context": {"product_id": new_pid}})
+                            # Some Gumroad layouts render new-product form inline on /products.
+                            if await _has_new_product_form():
+                                logger.info("Gumroad: inline new-product form detected on /products", extra={"event": "gumroad_inline_new_form"})
                             else:
-                                recovered = await _reopen_new_product_from_products_page()
-                                if not recovered or page.url.rstrip("/").endswith("/products"):
-                                    return {
-                                        "platform": "gumroad",
-                                        "status": "daily_limit",
-                                        "error": "redirected_to_products_list_update_not_allowed",
-                                        "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
-                                    }
-                                logger.info("Gumroad: create flow recovered from /products redirect", extra={"event": "gumroad_recover_new_flow"})
+                            # Sometimes Gumroad creates draft but returns to list; detect and attach to that draft.
+                                new_pid, new_slug = await _find_newly_created_draft()
+                                if new_slug:
+                                    slug_from_api = new_slug
+                                    product_id = new_pid
+                                    await page.goto(f"https://gumroad.com/products/{new_slug}/edit", wait_until="domcontentloaded")
+                                    await asyncio.sleep(2)
+                                    logger.info("Gumroad: adopted newly created draft after list redirect", extra={"event": "gumroad_adopt_new_draft", "context": {"product_id": new_pid}})
+                                else:
+                                    recovered = await _reopen_new_product_from_products_page()
+                                    if not recovered or (page.url.rstrip("/").endswith("/products") and not await _has_new_product_form()):
+                                        return {
+                                            "platform": "gumroad",
+                                            "status": "daily_limit",
+                                            "error": "redirected_to_products_list_update_not_allowed",
+                                            "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
+                                        }
+                                    logger.info("Gumroad: create flow recovered from /products redirect", extra={"event": "gumroad_recover_new_flow"})
                     except Exception:
                         pass
                     if "login" in page.url:
