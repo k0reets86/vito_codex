@@ -239,3 +239,87 @@ Stub response: operational output.
 - Источники:
   - https://developer.x.com/en/docs
   - https://www.reddit.com/dev/api/
+
+## Mega test task
+
+## Executive Summary
+Stub response: operational output.
+
+## Sources
+- google_trends, reddit
+
+## Confidence Score (0-100)
+- 80 (based on available live sources and evidence density)
+- Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: 38c64845d0ea -> cb718551a234.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"7484da3c2b944da4a658c5bae24f7d01","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## Mega test task
+
+## Executive Summary
+Stub response: operational output.
+
+## Sources
+- reddit
+
+## Confidence Score (0-100)
+- 60 (based on available live sources and evidence density)
+- Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: cb718551a234 -> 9572182ab292.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"643fd914910c4f8ca12272c11bc3f9ba","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## Mega test task
+
+## Executive Summary
+Stub response: operational output.
+
+## Sources
+- reddit
+
+## Confidence Score (0-100)
+- 60 (based on available live sources and evidence density)
+- Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: 9572182ab292 -> ca0b9dbf4bde.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"422e767f6647460cbcba2e75ddd758be","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## Mega test task
+
+## Executive Summary
+Stub response: operational output.
+
+## Sources
+- reddit
+
+## Confidence Score (0-100)
+- 60 (based on available live sources and evidence density)
+- Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: ca0b9dbf4bde -> 2deaff64f3e4.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"14ad3b449b2a4983984ae911a363c0ff","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## Mega test task
+
+## Executive Summary
+Stub response: operational output.
+
+## Sources
+- product_hunt, reddit
+
+## Confidence Score (0-100)
+- 80 (based on available live sources and evidence density)
+- Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.

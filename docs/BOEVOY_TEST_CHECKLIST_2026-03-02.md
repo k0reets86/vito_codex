@@ -171,3 +171,15 @@ Current progress: `42 / 49 = 85.7%`
 - 2026-03-06: Social live probe re-run with Pinterest auth probe:
   - `python3 scripts/social_live_probe.py`
   - Evidence: `reports/VITO_SOCIAL_LIVE_PROBE_2026-03-06_0054UTC.json`.
+- 2026-03-06: Full regression rerun after platform-status normalization fixes:
+  - `PYTHONPATH=. pytest -q --maxfail=1`
+  - Result: `1093 passed, 1 skipped, 1 warning`.
+- 2026-03-06: Owner-style Telegram simulation rerun:
+  - `python3 scripts/telegram_owner_simulator.py --scenario owner_full_pipeline` -> `reports/VITO_TG_OWNER_SIM_owner_full_pipeline_2026-03-06_1023UTC.json` (`6/8`, two timeouts on long research/posting step).
+  - `python3 scripts/telegram_owner_simulator.py --scenario phase_platform_e2e --step-timeout 180` -> `reports/VITO_TG_OWNER_SIM_phase_platform_e2e_2026-03-06_1023UTC.json` (`12/12`).
+- 2026-03-06: Global combat and live platform rerun:
+  - `python3 scripts/tg_global_combat_suite.py --timeout 420` -> `reports/VITO_TG_GLOBAL_COMBAT_2026-03-06_1024UTC.json`.
+  - `python3 scripts/live_publish_matrix.py --live` -> `reports/VITO_PUBLISH_MATRIX_LIVE_2026-03-06_1034UTC.json`.
+  - `python3 scripts/live_agent_platform_audit.py` -> `reports/VITO_AGENT_PLATFORM_LIVE_AUDIT_2026-03-06_1036UTC.json`.
+  - `python3 scripts/social_live_probe.py` -> `reports/VITO_SOCIAL_LIVE_PROBE_2026-03-06_1036UTC.json`.
+  - Deterministic blockers unchanged: Gumroad `cookie_expired`, Ko-fi `cloudflare_challenge`, Pinterest `anti_bot_challenge_or_timeout`, Printful `needs_browser_flow`.

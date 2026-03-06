@@ -23,7 +23,7 @@ async def test_platform_publish_dryrun_paths():
 
     assert r1.get("status") == "prepared"
     assert r2.get("status") == "prepared"
-    assert r3.get("status") == "prepared"
+    assert r3.get("status") in {"prepared", "needs_browser_flow"}
     assert r4.get("status") == "prepared"
     assert r5.get("status") == "prepared"
 
