@@ -2024,7 +2024,8 @@ class DecisionLoop:
                     )
                     from modules.listing_optimizer import optimize_listing_payload
 
-                    publish_payload = {
+                    from modules.platform_artifact_pack import build_platform_bundle
+                    publish_payload = build_platform_bundle("gumroad", {
                         "name": goal.title[:100],
                         "description": (goal.description or goal.title)[:2000],
                         "price": 5,
@@ -2036,7 +2037,7 @@ class DecisionLoop:
                         "draft_only": any(w in s for w in ("черновик", "превью", "preview", "draft")),
                         "allow_existing_update": bool(getattr(settings, "AUTONOMY_ALLOW_EXISTING_PRODUCT_UPDATE", False)),
                         "owner_edit_confirmed": bool(getattr(settings, "AUTONOMY_ALLOW_EXISTING_PRODUCT_UPDATE", False)),
-                    }
+                    })
                     publish_payload = optimize_listing_payload("gumroad", publish_payload)
                     ok_payload, payload_errors, _norm = validate_publish_payload("gumroad", publish_payload)
                     if not ok_payload:

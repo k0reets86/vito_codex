@@ -28,24 +28,25 @@ from platforms.printful import PrintfulPlatform
 from platforms.reddit import RedditPlatform
 from platforms.twitter import TwitterPlatform
 from platforms.wordpress import WordPressPlatform
+from modules.platform_artifact_pack import build_platform_bundle
 
 
 def _payloads(live: bool) -> dict[str, dict]:
     tag = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     common_img_url = "https://via.placeholder.com/1200x630.png?text=VITO+Probe"
     return {
-        "twitter": {
+        "twitter": build_platform_bundle("twitter", {
             "dry_run": not live,
             "text": f"VITO publish probe {tag}",
-        },
-        "reddit": {
+        }),
+        "reddit": build_platform_bundle("reddit", {
             "dry_run": not live,
-            "subreddit": "test",
+            "subreddit": "u_Few_Garage_3659",
             "title": f"VITO probe {tag}",
             "text": "Live probe post from VITO",
             "image_url": common_img_url,
-        },
-        "etsy": {
+        }),
+        "etsy": build_platform_bundle("etsy", {
             "dry_run": not live,
             "title": f"VITO Probe Listing {tag}",
             "description": "Automated probe listing",
@@ -53,37 +54,37 @@ def _payloads(live: bool) -> dict[str, dict]:
             "quantity": 1,
             "taxonomy_id": 1,
             "tags": ["vito", "probe", "digital", "ai", "productivity"],
-        },
-        "gumroad": {
+        }),
+        "gumroad": build_platform_bundle("gumroad", {
             "dry_run": not live,
             "title": f"VITO Probe Gumroad {tag}",
             "description": "Automated probe listing for controlled Gumroad flow",
             "price": 5,
             "tags": ["vito", "probe", "digital", "ai", "automation"],
-        },
-        "amazon_kdp": {
+        }),
+        "amazon_kdp": build_platform_bundle("amazon_kdp", {
             "dry_run": not live,
             "title": f"VITO Probe Book {tag}",
             "description": "Automated KDP probe draft",
             "keywords": ["vito", "probe", "automation"],
-        },
-        "printful": {
+        }),
+        "printful": build_platform_bundle("printful", {
             "dry_run": not live,
             "sync_product": {"name": f"VITO Probe {tag}"},
             "sync_variants": [],
-        },
-        "kofi": {
+        }),
+        "kofi": build_platform_bundle("kofi", {
             "dry_run": not live,
             "title": f"VITO Probe {tag}",
             "description": "Automated probe product",
             "price": 1,
-        },
-        "pinterest": {
+        }),
+        "pinterest": build_platform_bundle("pinterest", {
             "dry_run": not live,
             "title": f"VITO pin probe {tag}",
             "description": "Probe pin for browser automation flow check.",
             "url": "https://example.com/vito-probe",
-        },
+        }),
         "wordpress": {
             "dry_run": not live,
             "title": f"VITO Probe Post {tag}",
