@@ -2,7 +2,7 @@
 
 Progress formula: `completed / total * 100`
 
-Current progress: `41 / 49 = 83.7%`
+Current progress: `42 / 49 = 85.7%`
 
 ## Phase 1 — Runtime Baseline & Safety Gates
 - [x] T01 Configure Gemini-only mode and disable risky/high-cost modules for initial test wave.
@@ -64,7 +64,7 @@ Current progress: `41 / 49 = 83.7%`
 - [x] T41 Final full regression + live smoke sequence + release readiness report.
 
 ## Phase 10 — Real Platform Publish Closure (Owner Hard Requirement)
-- [ ] T42 X/Twitter: TG recipe publishes live post with public URL evidence and editable follow-up.
+- [x] T42 X/Twitter: TG recipe publishes live post with public URL evidence and editable follow-up.
 - [ ] T43 Reddit: TG recipe publishes live post (or deterministic platform block proof with bypass runbook).
 - [ ] T44 Gumroad: TG flow updates existing test listing with full attributes (title/description/tags/category/assets) and publish evidence.
 - [ ] T45 Etsy: TG flow creates/updates test listing with full required attributes + evidence URL/ID.
