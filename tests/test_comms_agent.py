@@ -1655,6 +1655,11 @@ def test_detect_contextual_service_inventory_uses_pending_auth_when_no_fresh_con
     assert comms._detect_contextual_service_inventory_request("проверь товары там") == "etsy"
 
 
+def test_detect_service_from_reply_context(comms):
+    service = comms._detect_service_from_reply_context({"text": "Amazon KDP: вход подтверждён недавно"})
+    assert service == "amazon_kdp"
+
+
 @pytest.mark.asyncio
 async def test_on_message_auth_done_text_strict_remote_storage_fallback(comms, mock_update):
     mock_update.message.text = "я вошел"
@@ -1674,6 +1679,34 @@ async def test_on_message_auth_done_text_strict_remote_storage_fallback(comms, m
     assert "Вход подтверждён: Amazon KDP" in sent
     assert "amazon_kdp" in comms._service_auth_confirmed
     comms._conversation_engine.process_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_on_message_reply_context_updates_service_context(comms, mock_update):
+    conv = MagicMock()
+    conv.process_message = AsyncMock(return_value={"response": "ok"})
+    comms.set_modules(conversation_engine=conv)
+    parent = MagicMock()
+    parent.message_id = 77
+    parent.text = "Amazon KDP: вход подтверждён недавно."
+    mock_update.message.reply_to_message = parent
+    mock_update.message.text = "статус аккаунта"
+    await comms._on_message(mock_update, MagicMock())
+    assert comms._last_service_context == "amazon_kdp"
+
+
+def test_touch_service_context_enriches_owner_task_state(comms):
+    from modules.owner_task_state import OwnerTaskState
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as td:
+        state = OwnerTaskState(path=Path(td) / "owner_task_state.json")
+        state.set_active("check account", source="telegram", intent="goal_request")
+        comms.set_modules(owner_task_state=state)
+        comms._touch_service_context("amazon_kdp")
+        active = state.get_active()
+        assert active["service_context"] == "amazon_kdp"
 
 
 @pytest.mark.asyncio

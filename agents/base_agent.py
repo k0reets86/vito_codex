@@ -17,6 +17,7 @@ from typing import Any, Optional
 
 from config.agent_prompts import AGENT_PROMPTS
 from config.logger import get_logger
+from modules.agent_contracts import get_agent_contract
 
 AGENT_SYSTEM_PREAMBLE = (
     "CONTEXT: You are a specialized module inside VITO orchestrator.\n"
@@ -85,6 +86,14 @@ class BaseAgent(ABC):
         """Выполняет задачу. Реализуется каждым агентом."""
         ...
 
+    def get_contract(self) -> dict[str, Any]:
+        """Operational contract used by routing, memory and skill layers."""
+        return get_agent_contract(
+            agent_name=self.name,
+            capabilities=list(self.capabilities),
+            description=self.description,
+        )
+
     def build_task_orchestration(self, task_type: str, **kwargs) -> dict:
         """Optional owner-level orchestration plan for this task.
 
@@ -133,6 +142,14 @@ class BaseAgent(ABC):
         """Уведомляет владельца через CommsAgent."""
         if self.comms:
             await self.comms.send_message(f"[{self.name}] {message}")
+
+    def build_memory_context(self, task_type: str = "", limit: int = 5) -> dict[str, Any]:
+        if not self.memory or not hasattr(self.memory, "get_agent_memory_context"):
+            return {}
+        try:
+            return self.memory.get_agent_memory_context(self.name, task_type=task_type, limit=limit)
+        except Exception:
+            return {}
 
     def _record_expense(self, amount_usd: float, description: str = "", goal_id: str = "") -> None:
         """Записывает расход через FinancialController."""

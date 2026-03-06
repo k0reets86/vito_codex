@@ -37,8 +37,8 @@ PLATFORM_PACKS: dict[str, PlatformPack] = {
     "etsy": PlatformPack(
         platform="etsy",
         required_fields=("title", "description", "price", "category", "tags"),
-        optional_fields=("materials", "who_made", "when_made", "is_supply"),
-        required_artifacts=("cover_path",),
+        optional_fields=("materials", "who_made", "when_made", "is_supply", "short_description", "seo_title", "seo_description"),
+        required_artifacts=("cover_path", "pdf_path"),
         notes="Listing editor requires visual + mandatory taxonomy/profile fields in UI.",
     ),
     "kofi": PlatformPack(
@@ -51,7 +51,7 @@ PLATFORM_PACKS: dict[str, PlatformPack] = {
     "amazon_kdp": PlatformPack(
         platform="amazon_kdp",
         required_fields=("title", "description", "keywords"),
-        optional_fields=("author", "subtitle"),
+        optional_fields=("author", "subtitle", "categories", "short_description"),
         required_artifacts=("pdf_path", "cover_path"),
         notes="Draft requires manuscript/cover pipeline and bookshelf confirmation.",
     ),
@@ -160,6 +160,27 @@ def build_platform_bundle(platform: str, payload: dict[str, Any] | None = None) 
         }
         out = optimize_listing_payload(p, seed)
         out.update({k: v for k, v in base.items() if v is not None})
+        if not out.get("preview_paths"):
+            out["preview_paths"] = [x for x in [out.get("cover_path"), out.get("thumb_path")] if str(x or "").strip()]
+        if p == "etsy":
+            out.setdefault("materials", ["pdf", "digital download", "planner pages", "instant download"])
+            out.setdefault("who_made", "i_did")
+            out.setdefault("when_made", "made_to_order")
+            out.setdefault("is_supply", False)
+            out.setdefault("file_path", out.get("pdf_path") or "")
+        if p == "amazon_kdp":
+            author = str(base.get("author") or "VITO Studio").strip()
+            subtitle = str(base.get("subtitle") or "Practical AI workflow kit for creators").strip()
+            kw = list(out.get("keywords") or [])
+            out.setdefault("author", author)
+            out.setdefault("subtitle", subtitle)
+            out.setdefault(
+                "categories",
+                base.get("categories") or ["Business & Money", "Computers & Technology"],
+            )
+            out.setdefault("file_path", out.get("pdf_path") or "")
+            out.setdefault("manuscript_path", out.get("pdf_path") or "")
+            out.setdefault("keyword_slots", kw[:7])
         return out
 
     if p == "twitter":
@@ -189,12 +210,15 @@ def build_platform_bundle(platform: str, payload: dict[str, Any] | None = None) 
         }
 
     if p == "printful":
+        sync_product = dict(base.get("sync_product") or {})
+        if not sync_product.get("name"):
+            sync_product["name"] = title[:120]
+        sync_product.setdefault("thumbnail", str(base.get("image_path") or assets.get("image_path") or ""))
         return {
-            "sync_product": base.get("sync_product") or {"name": title[:120]},
+            "sync_product": sync_product,
             "sync_variants": base.get("sync_variants") or [],
             "image_path": str(base.get("image_path") or assets.get("image_path") or ""),
             **{k: v for k, v in base.items() if v is not None},
         }
 
     return dict(base)
-

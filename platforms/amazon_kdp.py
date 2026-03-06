@@ -168,6 +168,16 @@ class AmazonKDPPlatform(BasePlatform):
         ]
         env = dict(os.environ)
         env["KDP_TEST_DRAFT_TITLE"] = title
+        env["KDP_TEST_DRAFT_SUBTITLE"] = str(content.get("subtitle") or "")
+        env["KDP_TEST_DRAFT_AUTHOR"] = str(content.get("author") or "VITO Studio")
+        env["KDP_TEST_DRAFT_DESCRIPTION"] = str(content.get("description") or "")
+        kw = content.get("keyword_slots") or content.get("keywords") or []
+        if isinstance(kw, list):
+            env["KDP_TEST_DRAFT_KEYWORDS"] = "|".join(str(x).strip() for x in kw[:7] if str(x).strip())
+        else:
+            env["KDP_TEST_DRAFT_KEYWORDS"] = str(kw or "")
+        env["KDP_TEST_DRAFT_MANUSCRIPT"] = str(content.get("manuscript_path") or content.get("pdf_path") or content.get("file_path") or "")
+        env["KDP_TEST_DRAFT_COVER"] = str(content.get("cover_path") or content.get("image_path") or "")
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,

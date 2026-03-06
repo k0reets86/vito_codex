@@ -21,5 +21,5 @@ async def test_agent_registry_skill_matrix_v2():
     assert len(rows) == 1
     assert rows[0]["agent"] == "research_agent"
     assert rows[0]["valid"] is True
-    assert "recipe.research_pipeline" in rows[0]["recipe"]
-
+    assert "sources" in rows[0]["required_evidence"]
+    assert "research_report" in rows[0]["owned_outcomes"]

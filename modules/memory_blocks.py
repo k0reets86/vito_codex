@@ -208,3 +208,33 @@ class MemoryBlocks:
             return [dict(r) for r in rows]
         finally:
             conn.close()
+
+    def find_blocks(
+        self,
+        *,
+        agent: str = "",
+        block_types: Iterable[str] | None = None,
+        stage: Optional[str] = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        conn = self._get_conn()
+        try:
+            params: list[Any] = []
+            query = f"SELECT * FROM {self.TABLE} WHERE status = 'active'"
+            if block_types:
+                items = [str(x).strip() for x in block_types if str(x).strip()]
+                if items:
+                    query += f" AND block_type IN ({','.join('?' for _ in items)})"
+                    params.extend(items)
+            if stage:
+                query += " AND stage = ?"
+                params.append(stage)
+            if agent:
+                query += " AND (metadata_json LIKE ? OR doc_id LIKE ?)"
+                params.extend([f'%\"agent\": \"{agent}\"%', f"{agent}:%"])
+            query += " ORDER BY priority DESC, updated_at DESC LIMIT ?"
+            params.append(limit)
+            rows = conn.execute(query, tuple(params)).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()

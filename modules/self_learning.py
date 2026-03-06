@@ -9,6 +9,8 @@ import sqlite3
 from typing import Optional
 
 from config.settings import settings
+from modules.failure_memory import FailureMemory
+from modules.playbook_registry import PlaybookRegistry
 
 
 class SelfLearningEngine:
@@ -36,6 +38,8 @@ class SelfLearningEngine:
                     notes TEXT DEFAULT '',
                     candidate_skill TEXT DEFAULT '',
                     task_family TEXT DEFAULT '',
+                    source_agent TEXT DEFAULT '',
+                    evidence_json TEXT DEFAULT '{}',
                     created_at TEXT DEFAULT (datetime('now'))
                 );
                 CREATE TABLE IF NOT EXISTS self_learning_candidates (
@@ -45,6 +49,9 @@ class SelfLearningEngine:
                     confidence REAL DEFAULT 0,
                     source TEXT DEFAULT 'reflection',
                     task_family TEXT DEFAULT '',
+                    source_agent TEXT DEFAULT '',
+                    domain_role TEXT DEFAULT '',
+                    evidence_json TEXT DEFAULT '{}',
                     notes TEXT DEFAULT '',
                     status TEXT DEFAULT 'pending',
                     optimized_confidence REAL DEFAULT 0,
@@ -91,6 +98,10 @@ class SelfLearningEngine:
                 conn.execute("ALTER TABLE self_learning_lessons ADD COLUMN candidate_skill TEXT DEFAULT ''")
             if "task_family" not in lesson_cols:
                 conn.execute("ALTER TABLE self_learning_lessons ADD COLUMN task_family TEXT DEFAULT ''")
+            if "source_agent" not in lesson_cols:
+                conn.execute("ALTER TABLE self_learning_lessons ADD COLUMN source_agent TEXT DEFAULT ''")
+            if "evidence_json" not in lesson_cols:
+                conn.execute("ALTER TABLE self_learning_lessons ADD COLUMN evidence_json TEXT DEFAULT '{}'")
             cand_cols = {r["name"] for r in conn.execute("PRAGMA table_info(self_learning_candidates)").fetchall()}
             if "optimized_confidence" not in cand_cols:
                 conn.execute("ALTER TABLE self_learning_candidates ADD COLUMN optimized_confidence REAL DEFAULT 0")
@@ -100,6 +111,12 @@ class SelfLearningEngine:
                 conn.execute("ALTER TABLE self_learning_candidates ADD COLUMN pass_rate REAL DEFAULT 0")
             if "task_family" not in cand_cols:
                 conn.execute("ALTER TABLE self_learning_candidates ADD COLUMN task_family TEXT DEFAULT ''")
+            if "source_agent" not in cand_cols:
+                conn.execute("ALTER TABLE self_learning_candidates ADD COLUMN source_agent TEXT DEFAULT ''")
+            if "domain_role" not in cand_cols:
+                conn.execute("ALTER TABLE self_learning_candidates ADD COLUMN domain_role TEXT DEFAULT ''")
+            if "evidence_json" not in cand_cols:
+                conn.execute("ALTER TABLE self_learning_candidates ADD COLUMN evidence_json TEXT DEFAULT '{}'")
             job_cols = {r["name"] for r in conn.execute("PRAGMA table_info(self_learning_test_jobs)").fetchall()}
             if "attempts" not in job_cols:
                 conn.execute("ALTER TABLE self_learning_test_jobs ADD COLUMN attempts INTEGER DEFAULT 0")
@@ -128,13 +145,15 @@ class SelfLearningEngine:
         notes: str = "",
         candidate_skill: str = "",
         task_family: str = "",
+        source_agent: str = "",
+        evidence: dict | None = None,
     ) -> None:
         conn = self._get_conn()
         try:
             conn.execute(
                 """
-                INSERT INTO self_learning_lessons (goal_id, step_text, status, score, lesson, notes, candidate_skill, task_family)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO self_learning_lessons (goal_id, step_text, status, score, lesson, notes, candidate_skill, task_family, source_agent, evidence_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     goal_id[:120],
@@ -145,6 +164,8 @@ class SelfLearningEngine:
                     notes[:1000],
                     candidate_skill[:140],
                     task_family[:60],
+                    source_agent[:80],
+                    json.dumps(evidence or {}, ensure_ascii=False)[:2000],
                 ),
             )
             conn.commit()
@@ -158,20 +179,35 @@ class SelfLearningEngine:
         notes: str,
         category: str = "self_learning",
         task_family: str = "",
+        source_agent: str = "",
+        domain_role: str = "",
+        evidence: dict | None = None,
     ) -> None:
         conn = self._get_conn()
         try:
             conn.execute(
                 """
-                INSERT INTO self_learning_candidates (skill_name, category, confidence, task_family, notes, status, updated_at)
-                VALUES (?, ?, ?, ?, ?, 'pending', datetime('now'))
+                INSERT INTO self_learning_candidates (skill_name, category, confidence, task_family, source_agent, domain_role, evidence_json, notes, status, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now'))
                 ON CONFLICT(skill_name) DO UPDATE SET
                   confidence = excluded.confidence,
                   task_family = CASE WHEN excluded.task_family != '' THEN excluded.task_family ELSE task_family END,
+                  source_agent = CASE WHEN excluded.source_agent != '' THEN excluded.source_agent ELSE source_agent END,
+                  domain_role = CASE WHEN excluded.domain_role != '' THEN excluded.domain_role ELSE domain_role END,
+                  evidence_json = CASE WHEN excluded.evidence_json != '{}' THEN excluded.evidence_json ELSE evidence_json END,
                   notes = excluded.notes,
                   updated_at = datetime('now')
                 """,
-                (skill_name[:120], category[:80], float(confidence or 0), task_family[:60], notes[:1000]),
+                (
+                    skill_name[:120],
+                    category[:80],
+                    float(confidence or 0),
+                    task_family[:60],
+                    source_agent[:80],
+                    domain_role[:80],
+                    json.dumps(evidence or {}, ensure_ascii=False)[:2000],
+                    notes[:1000],
+                ),
             )
             conn.commit()
         finally:
@@ -182,7 +218,7 @@ class SelfLearningEngine:
         try:
             rows = conn.execute(
                 """
-                SELECT goal_id, step_text, status, score, lesson, notes, candidate_skill, task_family, created_at
+                SELECT goal_id, step_text, status, score, lesson, notes, candidate_skill, task_family, source_agent, evidence_json, created_at
                 FROM self_learning_lessons
                 ORDER BY id DESC
                 LIMIT ?
@@ -198,7 +234,7 @@ class SelfLearningEngine:
         try:
             rows = conn.execute(
                 """
-                SELECT skill_name, category, confidence, optimized_confidence, lessons_count, pass_rate, source, task_family, notes, status, created_at, updated_at
+                SELECT skill_name, category, confidence, optimized_confidence, lessons_count, pass_rate, source, task_family, source_agent, domain_role, evidence_json, notes, status, created_at, updated_at
                 FROM self_learning_candidates
                 ORDER BY updated_at DESC
                 LIMIT ?
@@ -361,7 +397,7 @@ class SelfLearningEngine:
         try:
             candidates = conn.execute(
                 """
-                SELECT skill_name, confidence, notes, status, task_family
+                SELECT skill_name, confidence, notes, status, task_family, source_agent, domain_role
                 FROM self_learning_candidates
                 WHERE status IN ('pending', 'optimized', 'ready')
                 ORDER BY updated_at DESC
@@ -372,6 +408,8 @@ class SelfLearningEngine:
                 skill = str(row["skill_name"] or "")
                 base_conf = float(row["confidence"] or 0.0)
                 task_family = str(row["task_family"] or "")
+                source_agent = str(row["source_agent"] or "")
+                domain_role = str(row["domain_role"] or "")
                 stem = skill.split(":")[-1].replace("selflearn_", "").replace("selflearn", "").strip("_")
                 pattern = f"%{stem}%"
                 lessons = conn.execute(
@@ -411,7 +449,17 @@ class SelfLearningEngine:
                 else:
                     family_pass_rate = pass_rate
                 family_bias = 0.03 if family_pass_rate >= 0.75 else (-0.03 if family_pass_rate <= 0.4 else 0.0)
-                optimized = (0.42 * base_conf) + (0.33 * avg_score) + (0.20 * pass_rate) + (0.05 * family_pass_rate) + family_bias
+                playbook_signal = self._agent_playbook_signal(source_agent, task_family)
+                failure_signal = self._agent_failure_signal(source_agent, task_family)
+                optimized = (
+                    (0.38 * base_conf)
+                    + (0.30 * avg_score)
+                    + (0.18 * pass_rate)
+                    + (0.05 * family_pass_rate)
+                    + (0.06 * playbook_signal)
+                    - (0.05 * failure_signal)
+                    + family_bias
+                )
                 optimized = max(0.0, min(1.0, optimized))
                 threshold = self.get_threshold_for_family(task_family, float(promote_confidence_min))
                 recommendation = "hold"
@@ -451,7 +499,11 @@ class SelfLearningEngine:
                         "lessons_count": lessons_count,
                         "pass_rate": round(pass_rate, 4),
                         "task_family": task_family,
+                        "source_agent": source_agent,
+                        "domain_role": domain_role,
                         "family_pass_rate": round(family_pass_rate, 4),
+                        "playbook_signal": round(playbook_signal, 4),
+                        "failure_signal": round(failure_signal, 4),
                         "recommendation": recommendation,
                         "threshold": round(threshold,4),
                     }
@@ -480,7 +532,7 @@ class SelfLearningEngine:
         try:
             candidates = conn.execute(
                 """
-                SELECT skill_name, optimized_confidence, lessons_count, pass_rate, task_family
+                SELECT skill_name, optimized_confidence, lessons_count, pass_rate, task_family, source_agent, domain_role
                 FROM self_learning_candidates
                 WHERE status = 'ready'
                 ORDER BY updated_at ASC
@@ -508,6 +560,8 @@ class SelfLearningEngine:
                 conf = float(row["optimized_confidence"] or 0.0)
                 lessons_count = int(row["lessons_count"] or 0)
                 pass_rate = float(row["pass_rate"] or 0.0)
+                source_agent = str(row["source_agent"] or "")
+                domain_role = str(row["domain_role"] or "")
                 gate_reason = f"cov={tests_cov:.2f},risk={risk:.2f},sec={security},conf={conf:.2f}"
                 gate_ok = (
                     tests_cov >= 0.75
@@ -570,7 +624,7 @@ class SelfLearningEngine:
                 reg.accept_skill(
                     name=skill_name,
                     tests_passed=True,
-                    evidence=f"self_learning_auto_promote conf={conf:.3f} lessons={lessons_count} pass_rate={pass_rate:.3f}",
+                    evidence=f"self_learning_auto_promote agent={source_agent} role={domain_role} conf={conf:.3f} lessons={lessons_count} pass_rate={pass_rate:.3f}",
                     validator="self_learning_optimizer",
                     notes="auto-promoted by safe gates",
                 )
@@ -1000,6 +1054,47 @@ class SelfLearningEngine:
         finally:
             conn.close()
 
+    def _agent_playbook_signal(self, source_agent: str, task_family: str) -> float:
+        agent = str(source_agent or "").strip().lower()
+        family = str(task_family or "").strip().lower()
+        if not agent:
+            return 0.5
+        try:
+            rows = PlaybookRegistry(sqlite_path=self.sqlite_path).find(agent=agent, task_type=family, limit=8)
+        except Exception:
+            return 0.5
+        if not rows:
+            return 0.5
+        weighted = 0.0
+        total = 0.0
+        for idx, row in enumerate(rows, start=1):
+            succ = float(row.get("success_count") or 0.0)
+            fail = float(row.get("fail_count") or 0.0)
+            runs = succ + fail
+            score = (succ / runs) if runs > 0 else 0.5
+            weight = 1.0 / idx
+            weighted += score * weight
+            total += weight
+        return max(0.0, min(1.0, (weighted / total) if total > 0 else 0.5))
+
+    def _agent_failure_signal(self, source_agent: str, task_family: str) -> float:
+        agent = str(source_agent or "").strip().lower()
+        family = str(task_family or "").strip().lower()
+        if not agent:
+            return 0.0
+        try:
+            rows = FailureMemory(sqlite_path=self.sqlite_path).recent(limit=60)
+        except Exception:
+            return 0.0
+        matched = [
+            row for row in rows
+            if str(row.get("agent", "")).strip().lower() == agent
+            and (not family or family in str(row.get("task_type", "")).strip().lower())
+        ]
+        if not matched:
+            return 0.0
+        return max(0.0, min(1.0, len(matched) / 8.0))
+
     @staticmethod
     def _clamp_threshold(value: float) -> float:
         return max(0.65, min(0.95, float(value or 0.0)))
@@ -1147,6 +1242,19 @@ class SelfLearningEngine:
                 LIMIT 12
                 """
             ).fetchall()
+            agent_rows = conn.execute(
+                """
+                SELECT source_agent,
+                       COUNT(*) AS n,
+                       AVG(CASE WHEN status = 'promoted' THEN 1.0 ELSE 0.0 END) AS promoted_rate,
+                       AVG(optimized_confidence) AS avg_conf
+                FROM self_learning_candidates
+                WHERE source_agent != ''
+                GROUP BY source_agent
+                ORDER BY n DESC, avg_conf DESC
+                LIMIT 12
+                """
+            ).fetchall()
             return {
                 "window_days": int(days or 30),
                 "lessons": lessons,
@@ -1181,6 +1289,15 @@ class SelfLearningEngine:
                     }
                     for r in threshold_rows
                 ],
+                "source_agents": [
+                    {
+                        "source_agent": str(r["source_agent"] or ""),
+                        "candidates": int(r["n"] or 0),
+                        "promoted_rate": round(float(r["promoted_rate"] or 0.0), 4),
+                        "avg_optimized_confidence": round(float(r["avg_conf"] or 0.0), 4),
+                    }
+                    for r in agent_rows
+                ],
             }
         finally:
             conn.close()
@@ -1193,11 +1310,35 @@ class SelfLearningEngine:
         step_text: str,
         step_result: dict,
         min_skill_score: float = 0.78,
+        responsible_agent: str = "",
+        execution_context: dict | None = None,
     ) -> dict:
         task_family = _task_family(task_type)
         status = str(step_result.get("status", "unknown"))
         output = step_result.get("output", "")
         error = step_result.get("error", "")
+        ctx = execution_context or {}
+        contract = ctx.get("contract") if isinstance(ctx, dict) else {}
+        memory_context = ctx.get("memory_context") if isinstance(ctx, dict) else {}
+        source_agent = str(
+            responsible_agent
+            or step_result.get("responsible_agent")
+            or (contract.get("agent") if isinstance(contract, dict) else "")
+            or ""
+        ).strip().lower()
+        evidence = {
+            "status": status,
+            "responsible_agent": source_agent,
+            "task_family": task_family,
+            "owned_outcomes": list((contract or {}).get("owned_outcomes", [])[:3]) if isinstance(contract, dict) else [],
+            "recent_fact_actions": [
+                str(x.get("action", "") or "")
+                for x in list((memory_context or {}).get("recent_facts", [])[:3])
+                if isinstance(x, dict)
+            ],
+            "recent_failures": len(list((memory_context or {}).get("recent_failures", []) or [])),
+            "playbooks": len(list((memory_context or {}).get("playbooks", []) or [])),
+        }
         prompt = (
             "You are a strict evaluator of agent execution steps.\n"
             "Return JSON only with keys: score, lesson, reusable_skill, skill_name, notes.\n"
@@ -1208,7 +1349,12 @@ class SelfLearningEngine:
             f"Step: {step_text[:400]}\n"
             f"Status: {status}\n"
             f"Output: {str(output)[:600]}\n"
-            f"Error: {str(error)[:300]}"
+            f"Error: {str(error)[:300]}\n"
+            f"Responsible agent: {source_agent[:80]}\n"
+            f"Agent role: {str((contract or {}).get('role', ''))[:80]}\n"
+            f"Owned outcomes: {', '.join(list((contract or {}).get('owned_outcomes', [])[:3]) if isinstance(contract, dict) else [])}\n"
+            f"Related playbooks: {len(list((memory_context or {}).get('playbooks', []) or []))}\n"
+            f"Recent failures: {len(list((memory_context or {}).get('recent_failures', []) or []))}"
         )
         parsed = None
         try:
@@ -1242,6 +1388,8 @@ class SelfLearningEngine:
             notes=notes,
             candidate_skill=candidate_skill_key,
             task_family=task_family,
+            source_agent=source_agent,
+            evidence=evidence,
         )
         candidate_name = ""
         if bool(parsed.get("reusable_skill", False)) and score >= float(min_skill_score):
@@ -1252,6 +1400,9 @@ class SelfLearningEngine:
                     confidence=score,
                     notes=f"{lesson}; {notes}"[:1000],
                     task_family=task_family,
+                    source_agent=source_agent,
+                    domain_role=str((contract or {}).get("role", "") or "")[:80],
+                    evidence=evidence,
                 )
         return {"score": score, "lesson": lesson, "candidate_name": candidate_name}
 

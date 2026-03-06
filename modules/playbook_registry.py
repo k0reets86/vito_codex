@@ -83,6 +83,38 @@ class PlaybookRegistry:
         conn.close()
         return [dict(r) for r in rows]
 
+    def find(self, agent: str = "", task_type: str = "", limit: int = 20) -> list[dict]:
+        conn = self._conn()
+        try:
+            params: list[object] = []
+            query = """
+                SELECT agent, task_type, action, strategy_json, success_count, fail_count, last_status, updated_at
+                FROM agent_playbooks
+                WHERE 1=1
+            """
+            if agent:
+                query += " AND agent = ?"
+                params.append(str(agent))
+            if task_type:
+                query += " AND task_type = ?"
+                params.append(str(task_type))
+            query += """
+                ORDER BY
+                    CASE
+                        WHEN (success_count + fail_count) > 0
+                        THEN CAST(success_count AS REAL) / (success_count + fail_count)
+                        ELSE 0
+                    END DESC,
+                    (success_count - fail_count) DESC,
+                    updated_at DESC
+                LIMIT ?
+            """
+            params.append(int(limit))
+            rows = conn.execute(query, tuple(params)).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
     def count(self) -> int:
         conn = self._conn()
         try:

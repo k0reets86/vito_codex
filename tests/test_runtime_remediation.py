@@ -6,6 +6,7 @@ from modules.runtime_remediation import (
     plan_safe_action_updates,
     rank_safe_action_suggestions,
     record_safe_action_outcome,
+    suggest_safe_actions_for_failure,
 )
 
 
@@ -78,3 +79,35 @@ def test_rank_safe_action_suggestions_uses_trust_bias(tmp_path):
     )
     assert ranked[0]["action"] == "set_notify_minimal"
     assert float(ranked[0]["effective_score"]) > float(ranked[1]["effective_score"])
+
+
+def test_record_safe_action_outcome_persists_context(tmp_path):
+    sqlite_path = str(tmp_path / "remediation.db")
+    record_safe_action_outcome(
+        "pause_self_learning_autopromote",
+        "applied",
+        reason="candidate instability",
+        source_agent="vito_core",
+        task_family="research",
+        source="self_healer",
+        sqlite_path=sqlite_path,
+    )
+    import sqlite3
+    conn = sqlite3.connect(sqlite_path)
+    row = conn.execute(
+        "SELECT source_agent, task_family, source FROM runtime_remediation_events ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    conn.close()
+    assert row == ("vito_core", "research", "self_healer")
+
+
+def test_suggest_safe_actions_for_failure_returns_relevant_actions():
+    ranked = suggest_safe_actions_for_failure(
+        agent="vito_core",
+        error_type="RuntimeError",
+        message="self_learning candidate auto_promote flaky and rate limit 429",
+        context={"task_family": "research"},
+    )
+    actions = [x["action"] for x in ranked]
+    assert "pause_self_learning_autopromote" in actions
+    assert "apply_profile_economy" in actions

@@ -37,6 +37,36 @@ async def _click_first(page, selectors: list[str], timeout_ms: int = 3500) -> bo
     return False
 
 
+async def _fill_first(page, selectors: list[str], value: str, timeout_ms: int = 3500) -> bool:
+    val = str(value or "").strip()
+    if not val:
+        return False
+    for sel in selectors:
+        try:
+            loc = page.locator(sel)
+            if await loc.count() > 0:
+                await loc.first.fill(val, timeout=timeout_ms)
+                return True
+        except Exception:
+            continue
+    return False
+
+
+async def _set_input_file(page, selectors: list[str], file_path: str, timeout_ms: int = 12000) -> bool:
+    fp = str(file_path or "").strip()
+    if not fp or not Path(fp).exists():
+        return False
+    for sel in selectors:
+        try:
+            loc = page.locator(sel)
+            if await loc.count() > 0:
+                await loc.first.set_input_files(fp, timeout=timeout_ms)
+                return True
+        except Exception:
+            continue
+    return False
+
+
 async def _bookshelf_titles(page) -> list[str]:
     try:
         items = await page.evaluate(
@@ -117,6 +147,20 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
 
     stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     title = str(os.getenv("KDP_TEST_DRAFT_TITLE", "VITO TEST DRAFT")).strip() or "VITO TEST DRAFT"
+    subtitle = str(os.getenv("KDP_TEST_DRAFT_SUBTITLE", "")).strip()
+    author = str(os.getenv("KDP_TEST_DRAFT_AUTHOR", "Vito Bot")).strip() or "Vito Bot"
+    description = str(
+        os.getenv(
+            "KDP_TEST_DRAFT_DESCRIPTION",
+            (
+                "Practical AI workflow playbook for creators and operators. "
+                "Includes reusable checklists, publishing system notes, and quick-start guidance."
+            ),
+        )
+    ).strip()
+    keywords = [x.strip() for x in str(os.getenv("KDP_TEST_DRAFT_KEYWORDS", "")).split("|") if x.strip()]
+    manuscript_path = str(os.getenv("KDP_TEST_DRAFT_MANUSCRIPT", "")).strip()
+    cover_path = str(os.getenv("KDP_TEST_DRAFT_COVER", "")).strip()
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=headless, args=_launch_args())
@@ -172,46 +216,87 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
             await page.wait_for_timeout(2200)
             await _kdp_relogin_if_needed(page)
 
-            # Step 3: fill minimal required fields on details page (best effort).
-            for sel in [
+            # Step 3: fill metadata on details page (best effort).
+            await _fill_first(
+                page,
+                [
                 "input[name='bookTitle']",
                 "input#bookTitle",
                 "input[aria-label*='Book title']",
                 "input[placeholder*='Book title']",
-            ]:
-                try:
-                    if await page.locator(sel).count() > 0:
-                        await page.locator(sel).first.fill(title)
-                        break
-                except Exception:
-                    continue
+                ],
+                title,
+            )
+            await _fill_first(
+                page,
+                [
+                    "input[name='bookSubtitle']",
+                    "input#bookSubtitle",
+                    "input[aria-label*='Subtitle']",
+                    "input[placeholder*='Subtitle']",
+                ],
+                subtitle,
+            )
 
             # author name
+            author_first, _, author_last = author.partition(" ")
+            author_last = author_last.strip() or "Bot"
             first_set = False
-            for sel in [
-                "input[name='authorFirstName']",
-                "input#authorFirstName",
-                "input[aria-label*='First name']",
-            ]:
-                try:
-                    if await page.locator(sel).count() > 0:
-                        await page.locator(sel).first.fill("Vito")
-                        first_set = True
-                        break
-                except Exception:
-                    continue
+            first_set = await _fill_first(
+                page,
+                [
+                    "input[name='authorFirstName']",
+                    "input#authorFirstName",
+                    "input[aria-label*='First name']",
+                ],
+                author_first or "Vito",
+            )
             if first_set:
-                for sel in [
-                    "input[name='authorLastName']",
-                    "input#authorLastName",
-                    "input[aria-label*='Last name']",
-                ]:
+                await _fill_first(
+                    page,
+                    [
+                        "input[name='authorLastName']",
+                        "input#authorLastName",
+                        "input[aria-label*='Last name']",
+                    ],
+                    author_last,
+                )
+
+            description_set = await _fill_first(
+                page,
+                [
+                    "textarea[name='description']",
+                    "textarea#description",
+                    "textarea[aria-label*='Description']",
+                    "textarea[placeholder*='Description']",
+                ],
+                description[:3800],
+                timeout_ms=5000,
+            )
+
+            keyword_slots_filled = 0
+            keyword_selectors = [
+                "input[name='keywords[0]']",
+                "input[id*='keyword']",
+                "input[aria-label*='keyword' i]",
+                "input[placeholder*='keyword' i]",
+            ]
+            for idx, kw in enumerate(keywords[:7]):
+                filled = False
+                for sel in keyword_selectors:
                     try:
-                        if await page.locator(sel).count() > 0:
-                            await page.locator(sel).first.fill("Bot")
-                            break
+                        loc = page.locator(sel)
+                        cnt = await loc.count()
+                        if cnt == 0:
+                            continue
+                        target = loc.nth(idx if cnt > idx else 0)
+                        await target.fill(kw[:50], timeout=2500)
+                        filled = True
+                        break
                     except Exception:
                         continue
+                if filled:
+                    keyword_slots_filled += 1
 
             await page.wait_for_timeout(800)
 
@@ -229,6 +314,60 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
             )
             await page.wait_for_timeout(3000)
             await page.screenshot(path=str(dbg / f"kdp_draft_{stamp}_after_save.png"), full_page=True)
+
+            # Step 4b: content/assets page, when flow advanced.
+            manuscript_uploaded = False
+            cover_uploaded = False
+            try:
+                await page.wait_for_timeout(2200)
+                manuscript_uploaded = await _set_input_file(
+                    page,
+                    [
+                        "input[type='file'][accept*='pdf' i]",
+                        "input[type='file'][name*='manuscript' i]",
+                        "input[type='file'][id*='manuscript' i]",
+                    ],
+                    manuscript_path,
+                )
+                if manuscript_uploaded:
+                    await page.wait_for_timeout(2500)
+                # If KDP asks to upload your own cover, try to enable that path.
+                await _click_first(
+                    page,
+                    [
+                        "label:has-text('Upload a cover you already have')",
+                        "label:has-text('Upload your cover file')",
+                        "input[value='UPLOAD_YOUR_COVER']",
+                    ],
+                    timeout_ms=2000,
+                )
+                cover_uploaded = await _set_input_file(
+                    page,
+                    [
+                        "input[type='file'][accept*='jpeg' i]",
+                        "input[type='file'][accept*='jpg' i]",
+                        "input[type='file'][name*='cover' i]",
+                        "input[type='file'][id*='cover' i]",
+                    ],
+                    cover_path,
+                )
+                if cover_uploaded:
+                    await page.wait_for_timeout(2500)
+                if manuscript_uploaded or cover_uploaded:
+                    await _click_first(
+                        page,
+                        [
+                            "button:has-text('Save and Continue')",
+                            "button:has-text('Save and continue')",
+                            "button:has-text('Save as draft')",
+                            "button:has-text('Save')",
+                        ],
+                        timeout_ms=4500,
+                    )
+                    await page.wait_for_timeout(2500)
+                    await page.screenshot(path=str(dbg / f"kdp_draft_{stamp}_after_assets.png"), full_page=True)
+            except Exception:
+                pass
 
             # Step 5: strict verification on Bookshelf with retries (KDP list can refresh with delay).
             await page.goto("https://kdp.amazon.com/bookshelf", wait_until="domcontentloaded", timeout=120000)
@@ -268,6 +407,10 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
             fields_filled += 1 if title.strip() else 0
             fields_filled += 1 if bool(saved) else 0
             fields_filled += 1 if bool(first_set) else 0
+            fields_filled += 1 if bool(description_set) else 0
+            fields_filled += int(keyword_slots_filled > 0)
+            fields_filled += 1 if bool(manuscript_uploaded) else 0
+            fields_filled += 1 if bool(cover_uploaded) else 0
             ok = bool(saved and (has_title or appeared_new or search_hit))
             ok_soft = bool(saved and page.url and "bookshelf" in page.url)
             result = {
@@ -281,6 +424,10 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
                 "before_count": len(before_titles),
                 "after_count": len(after_titles),
                 "fields_filled": int(fields_filled),
+                "description_set": bool(description_set),
+                "keyword_slots_filled": int(keyword_slots_filled),
+                "manuscript_uploaded": bool(manuscript_uploaded),
+                "cover_uploaded": bool(cover_uploaded),
                 "note": "strict_bookshelf_verification",
                 "screenshot": str(dbg / f"kdp_draft_{stamp}_after_save.png"),
                 "bookshelf_screenshot": str(dbg / f"kdp_draft_{stamp}_bookshelf.png"),

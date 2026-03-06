@@ -185,6 +185,8 @@ class EtsyPlatform(BasePlatform):
         description = str(content.get("description") or "").strip()
         price = str(content.get("price") or "5")
         tags = content.get("tags") or []
+        materials = content.get("materials") or []
+        preview_paths = [str(x).strip() for x in (content.get("preview_paths") or []) if str(x).strip()]
         shot = str(PROJECT_ROOT / "runtime" / "etsy_browser_publish.png")
         page_html = str(PROJECT_ROOT / "runtime" / "etsy_browser_publish.html")
 
@@ -231,23 +233,19 @@ class EtsyPlatform(BasePlatform):
                                 existing_ids.add(m0.group(1))
                     except Exception:
                         existing_ids = set()
-                # For draft-only safe mode allow editing an existing listing when target is not provided.
-                if draft_only and (not target_listing_id) and existing_ids:
-                    try:
-                        target_listing_id = sorted(existing_ids, reverse=True)[0]
-                        allow_existing_update = True
-                        owner_edit_confirmed = True
-                    except Exception:
-                        pass
                 target_url = (
                     f"https://www.etsy.com/your/shops/me/listing-editor/edit/{target_listing_id}#details"
                     if allow_existing_update and target_listing_id
                     else "https://www.etsy.com/your/shops/me/tools/listings/create#details"
                 )
                 await page.goto(target_url, wait_until="domcontentloaded", timeout=90000)
-                await page.wait_for_timeout(2000)
+                try:
+                    await page.wait_for_load_state("networkidle", timeout=12000)
+                except Exception:
+                    pass
+                await page.wait_for_timeout(3500)
                 # Close GDPR/cookie dialog if present (can block editor controls).
-                for txt in ("Принять", "Accept", "Continue", "Продолжить"):
+                for txt in ("Принять", "Принять все", "Accept", "Accept All", "Continue", "Продолжить"):
                     try:
                         btn = page.get_by_role("button", name=txt)
                         if await btn.count():
@@ -255,7 +253,65 @@ class EtsyPlatform(BasePlatform):
                             await page.wait_for_timeout(350)
                     except Exception:
                         continue
+                # Wait until editor inputs replace initial spinner shell.
+                try:
+                    await page.wait_for_function(
+                        """() => {
+                            const spinner = document.querySelector("[data-clg-id='WtSpinner'], .wt-spinner");
+                            const title = document.querySelector("textarea[name='title'], textarea#listing-title-input, input[name='title'], input[data-test-id='listing-title-input']");
+                            const price = document.querySelector("input#listing-price-input, input[name='variations.configuration.price'], input[name='price']");
+                            return (!spinner) || !!title || !!price;
+                        }""",
+                        timeout=20000,
+                    )
+                except Exception:
+                    pass
+                await page.wait_for_timeout(1500)
                 current = page.url.lower()
+                if (not allow_existing_update) and "/tools/listings" in current and "/listing-editor/" not in current and "/create" not in current:
+                    try:
+                        create_href = await page.evaluate(
+                            """() => {
+                                const a = document.querySelector("a[href*='/listing-editor/create'], a[href*='/your/shops/me/listing-editor/create']");
+                                return a ? (a.getAttribute('href') || '') : '';
+                            }"""
+                        )
+                        if create_href:
+                            if create_href.startswith("/"):
+                                create_href = f"https://www.etsy.com{create_href}"
+                            await page.goto(create_href, wait_until="domcontentloaded", timeout=90000)
+                            await page.wait_for_timeout(2500)
+                            try:
+                                await page.wait_for_load_state("networkidle", timeout=10000)
+                            except Exception:
+                                pass
+                            current = page.url.lower()
+                    except Exception:
+                        pass
+                    for sel in (
+                        "a[href*='/listing-editor/create']",
+                        "a[href*='/tools/listings/create']",
+                        "button:has-text('Add a listing')",
+                        "button:has-text('Create listing')",
+                        "a:has-text('Добавить товар')",
+                        "button:has-text('Добавить товар')",
+                        "button:has-text('Добавить объявление')",
+                        "a:has-text('Add a listing')",
+                    ):
+                        try:
+                            loc = page.locator(sel)
+                            if await loc.count():
+                                await loc.first.click(timeout=3000)
+                                await page.wait_for_timeout(2500)
+                                try:
+                                    await page.wait_for_load_state("networkidle", timeout=10000)
+                                except Exception:
+                                    pass
+                                current = page.url.lower()
+                                if "/listing-editor/" in current or "/create" in current:
+                                    break
+                        except Exception:
+                            continue
                 if "/signin" in current or "/oauth" in current:
                     return {
                         "platform": "etsy",
@@ -529,6 +585,9 @@ class EtsyPlatform(BasePlatform):
                     gp = str(content.get(key) or "").strip()
                     if gp and os.path.isfile(gp):
                         gallery_files.append(gp)
+                for gp in preview_paths:
+                    if gp and os.path.isfile(gp) and gp not in gallery_files and gp != image_path:
+                        gallery_files.append(gp)
                 if gallery_files:
                     try:
                         fi = page.locator("input[type='file']")
@@ -569,6 +628,23 @@ class EtsyPlatform(BasePlatform):
                                 for tg in tags_norm:
                                     try:
                                         await loc.first.fill(tg, timeout=1400)
+                                        await page.keyboard.press("Enter")
+                                        await page.wait_for_timeout(120)
+                                    except Exception:
+                                        continue
+                                break
+                        except Exception:
+                            continue
+                if materials:
+                    materials_norm = [str(t).strip()[:45] for t in materials[:10] if str(t).strip()]
+                    for sel in ("input[name='materials']", "input[id*='material']", "input[placeholder*='material' i]"):
+                        try:
+                            loc = page.locator(sel)
+                            if await loc.count():
+                                await loc.first.click(timeout=1200)
+                                for mt in materials_norm:
+                                    try:
+                                        await loc.first.fill(mt, timeout=1400)
                                         await page.keyboard.press("Enter")
                                         await page.wait_for_timeout(120)
                                     except Exception:
@@ -958,10 +1034,9 @@ class EtsyPlatform(BasePlatform):
                                 mm = re.search(r"/listing/(\d+)", matched_href) or re.search(r"/listing-editor/(\d+)", matched_href)
                                 if mm:
                                     listing_id = mm.group(1)
-                        # Last fallback for test flows: choose newest draft id from manager links.
+                        # Last fallback for test flows: choose only genuinely new id not seen before.
                         if not listing_id:
                             ids_all: list[int] = []
-                            ids_sorted: list[int] = []
                             for h2 in hrefs2 or []:
                                 mmn = re.search(r"/listing/(\d+)", str(h2)) or re.search(r"/listing-editor/(\d+)", str(h2))
                                 if not mmn:
@@ -971,21 +1046,14 @@ class EtsyPlatform(BasePlatform):
                                 except Exception:
                                     continue
                             if ids_all:
-                                ids_sorted = sorted(set(ids_all), reverse=True)
-                                pick = None
-                                for nid in ids_sorted:
+                                for nid in sorted(set(ids_all), reverse=True):
                                     if str(nid) not in existing_ids:
-                                        pick = nid
+                                        listing_id = str(nid)
                                         break
-                                if pick is not None:
-                                    listing_id = str(pick)
-                            # If all ids are known (no diff), still pick freshest as editable draft target.
-                            if (not listing_id) and ids_sorted:
-                                listing_id = str(ids_sorted[0])
                     except Exception:
                         pass
                 if listing_id:
-                    if (not allow_existing_update) and listing_id in existing_ids and not draft_only:
+                    if (not allow_existing_update) and listing_id in existing_ids:
                         return {
                             "platform": "etsy",
                             "status": "prepared",
@@ -1041,6 +1109,26 @@ class EtsyPlatform(BasePlatform):
                     "note": "Draft editor opened and fields filled; listing_id not detected yet.",
                     "publish_clicked": bool(publish_clicked),
                     "draft_only": bool(draft_only),
+                    "debug": await page.evaluate(
+                        """() => {
+                            const q = (sel) => document.querySelectorAll(sel).length;
+                            const val = (sel) => {
+                                const el = document.querySelector(sel);
+                                return el ? String(el.value || el.textContent || '').slice(0, 180) : '';
+                            };
+                            return {
+                                title_inputs: q("textarea[name='title'], textarea#listing-title-input, input[name='title'], input[data-test-id='listing-title-input']"),
+                                price_inputs: q("input#listing-price-input, input[name='variations.configuration.price'], input[name='price']"),
+                                file_inputs: q("input[type='file']"),
+                                tag_inputs: q("input[name='tags'], input[id*='tag'], input[placeholder*='tag' i]"),
+                                material_inputs: q("input[name='materials'], input[id*='material'], input[placeholder*='material' i]"),
+                                spinner_present: q("[data-clg-id='WtSpinner'], .wt-spinner") > 0,
+                                body_has_create: (document.body.innerText || '').toLowerCase().includes('создание объявления'),
+                                title_value: val("textarea[name='title'], textarea#listing-title-input, input[name='title'], input[data-test-id='listing-title-input']"),
+                                price_value: val("input#listing-price-input, input[name='variations.configuration.price'], input[name='price']"),
+                            };
+                        }"""
+                    ),
                 }
         except Exception as e:
             return {"platform": "etsy", "status": "error", "error": str(e), "screenshot_path": shot}

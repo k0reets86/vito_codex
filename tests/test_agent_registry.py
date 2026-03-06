@@ -87,6 +87,26 @@ class FakeOwnerOrchestratingAgent(BaseAgent):
         return TaskResult(success=True, output={"status": "ok", "delegations_seen": len(delegated)})
 
 
+class FakeMemoryAwareAgent(BaseAgent):
+    def __init__(self, name, caps, **kwargs):
+        super().__init__(name=name, description=f"Fake memory aware {name}", **kwargs)
+        self._caps = caps
+
+    @property
+    def capabilities(self) -> list[str]:
+        return self._caps
+
+    async def execute_task(self, task_type: str, **kwargs) -> TaskResult:
+        return TaskResult(
+            success=True,
+            output={
+                "status": "ok",
+                "contract_agent": (kwargs.get("__agent_contract") or {}).get("agent"),
+                "memory_agent": (kwargs.get("__agent_memory_context") or {}).get("agent"),
+            },
+        )
+
+
 class TestRegistryRegister:
     def test_register(self):
         registry = AgentRegistry()
@@ -243,6 +263,20 @@ class TestRegistryLifecycle:
         await registry.dispatch("test_cap")
         assert agent._status == AgentStatus.IDLE  # started by lazy start
 
+    @pytest.mark.asyncio
+    async def test_dispatch_injects_contract_and_memory_context(self):
+        class _Memory:
+            def get_agent_memory_context(self, agent_name, task_type="", limit=5):
+                return {"agent": agent_name, "task_type": task_type, "limit": limit}
+
+        registry = AgentRegistry()
+        agent = FakeMemoryAwareAgent("memory_agent", ["research"], memory=_Memory())
+        registry.register(agent)
+        result = await registry.dispatch("research")
+        assert result.success is True
+        assert result.output["contract_agent"] == "memory_agent"
+        assert result.output["memory_agent"] == "memory_agent"
+
     def test_get_all_statuses(self):
         registry = AgentRegistry()
         a1 = FakeAgent("a1", ["cap1"])
@@ -250,3 +284,12 @@ class TestRegistryLifecycle:
         statuses = registry.get_all_statuses()
         assert len(statuses) == 1
         assert statuses[0]["name"] == "a1"
+        assert "role" in statuses[0]
+        assert "workflow_roles" in statuses[0]
+
+    def test_get_workflow_map(self):
+        registry = AgentRegistry()
+        registry.register(FakeAgent("research_agent", ["research"]))
+        workflow_map = registry.get_workflow_map()
+        assert "research_pipeline" in workflow_map
+        assert "research_agent" in workflow_map["research_pipeline"]["lead"]

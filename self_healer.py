@@ -15,6 +15,7 @@ from typing import Any, Optional
 from config.logger import get_logger
 from config.settings import settings
 from llm_router import LLMRouter, TaskType
+from modules.runtime_remediation import suggest_safe_actions_for_failure
 
 logger = get_logger("self_healer", agent="self_healer")
 
@@ -84,6 +85,12 @@ class SelfHealer:
             },
         )
         snapshot = self._build_failure_snapshot(agent, error, context, attempt)
+        safe_actions = suggest_safe_actions_for_failure(
+            agent=agent,
+            error_type=type(error).__name__,
+            message=str(error),
+            context=context or {},
+        )
 
         # 1. Поиск похожих решённых ошибок
         similar = self._find_similar_errors(agent, type(error).__name__, str(error))
@@ -103,6 +110,7 @@ class SelfHealer:
                 "resolved": True,
                 "method": "database",
                 "description": similar["resolution"],
+                "safe_action_suggestions": safe_actions,
             }
 
         # 2. LLM-анализ + реальное применение fix (если не превышен лимит попыток)
@@ -126,6 +134,7 @@ class SelfHealer:
                     "method": "llm_fix_applied" if resolved else "llm_fix_failed",
                     "description": fix_desc,
                     "shell_output": fix_result["output"],
+                    "safe_action_suggestions": safe_actions,
                 }
 
         # 3. Эскалация владельцу
@@ -147,6 +156,7 @@ class SelfHealer:
                 "resolved": False,
                 "method": "escalated",
                 "description": f"Эскалировано владельцу после {attempt} попыток; quarantine={cooldown}s",
+                "safe_action_suggestions": safe_actions,
             }
 
         # Ещё есть попытки — просто логируем
@@ -159,6 +169,7 @@ class SelfHealer:
             "resolved": False,
             "method": "pending",
             "description": f"Попытка {attempt}/{MAX_AUTO_FIX_ATTEMPTS}, будет повтор",
+            "safe_action_suggestions": safe_actions,
         }
 
     @staticmethod
@@ -605,6 +616,18 @@ class SelfHealer:
             f"Попыток: {attempts}\n"
             f"Контекст: {json.dumps(context or {}, ensure_ascii=False)[:200]}"
         )
+        suggestions = suggest_safe_actions_for_failure(
+            agent=agent,
+            error_type=type(error).__name__,
+            message=str(error),
+            context=context or {},
+        )
+        if suggestions:
+            top = "\n".join(
+                f"- {str(item.get('action',''))}: {str(item.get('reason',''))[:120]}"
+                for item in suggestions[:3]
+            )
+            message += f"\nРекомендованные safe-actions:\n{top}"
         try:
             await self.comms.send_message(message)
             logger.info(

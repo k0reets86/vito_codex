@@ -31,6 +31,11 @@ async def test_self_learning_reflect_creates_candidate(tmp_path):
         step_text="Research competitors",
         step_result={"status": "completed", "output": "ok"},
         min_skill_score=0.8,
+        responsible_agent="research_agent",
+        execution_context={
+            "contract": {"agent": "research_agent", "role": "deep_research", "owned_outcomes": ["research_report"]},
+            "memory_context": {"playbooks": [{"action": "research_agent:research"}], "recent_failures": [], "recent_facts": []},
+        },
     )
     assert out["score"] >= 0.9
     candidates = sl.list_candidates(limit=10)
@@ -40,6 +45,9 @@ async def test_self_learning_reflect_creates_candidate(tmp_path):
     lessons = sl.list_lessons(limit=10)
     assert lessons
     assert lessons[0]["task_family"] == "research"
+    assert lessons[0]["source_agent"] == "research_agent"
+    assert candidates[0]["source_agent"] == "research_agent"
+    assert candidates[0]["domain_role"] == "deep_research"
 
 
 def test_self_learning_optimize_candidates(tmp_path):
@@ -61,6 +69,43 @@ def test_self_learning_optimize_candidates(tmp_path):
     rows = sl.list_candidates(limit=10)
     assert rows[0]["optimized_confidence"] >= 0.0
     assert rows[0]["lessons_count"] >= 1
+
+
+def test_self_learning_optimize_candidates_uses_agent_signals(tmp_path):
+    db = str(tmp_path / "sl.db")
+    sl = SelfLearningEngine(sqlite_path=db)
+    sl.register_candidate(
+        "selflearn:research_flow",
+        confidence=0.6,
+        notes="n",
+        task_family="research",
+        source_agent="research_agent",
+        domain_role="deep_research",
+    )
+    for i in range(4):
+        sl.record_lesson(
+            goal_id=f"g{i}",
+            step_text="research flow step",
+            status="completed",
+            score=0.9,
+            lesson="research lesson",
+            candidate_skill="selflearn:research_flow",
+            task_family="research",
+            source_agent="research_agent",
+        )
+    from modules.playbook_registry import PlaybookRegistry
+    PlaybookRegistry(sqlite_path=db).learn(
+        agent="research_agent",
+        task_type="research",
+        action="research_agent:research:good",
+        status="success",
+        strategy={"detail": "ok"},
+    )
+    out = sl.optimize_candidates(days=30, min_lessons=3, promote_confidence_min=0.7, auto_promote=False)
+    assert out["ok"] is True
+    decision = next(x for x in out["decisions"] if x["skill_name"] == "selflearn:research_flow")
+    assert decision["source_agent"] == "research_agent"
+    assert decision["playbook_signal"] > 0.5
 
 
 def test_self_learning_auto_promote_ready_with_skill_registry_gates(tmp_path):
@@ -124,12 +169,14 @@ def test_self_learning_generate_test_jobs_and_complete(tmp_path):
 def test_self_learning_summary_has_family_calibration(tmp_path):
     db = str(tmp_path / "sl.db")
     sl = SelfLearningEngine(sqlite_path=db)
-    sl.record_lesson("g1", "research step", "completed", 0.9, "ok", task_family="research")
-    sl.record_lesson("g2", "research step", "failed", 0.2, "fail", task_family="research")
+    sl.record_lesson("g1", "research step", "completed", 0.9, "ok", task_family="research", source_agent="research_agent")
+    sl.record_lesson("g2", "research step", "failed", 0.2, "fail", task_family="research", source_agent="research_agent")
+    sl.register_candidate("selflearn:summary_skill", confidence=0.8, notes="ok", task_family="research", source_agent="research_agent")
     summary = sl.summary(days=30)
     assert "family_calibration" in summary
     assert isinstance(summary["family_calibration"], list)
     assert "thresholds" in summary
+    assert "source_agents" in summary
 
 
 def test_self_learning_auto_promote_blocks_recent_flaky(tmp_path, monkeypatch):

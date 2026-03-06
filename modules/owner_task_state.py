@@ -31,7 +31,14 @@ class OwnerTaskState:
     def get_active(self) -> dict[str, Any] | None:
         return self._read().get("active")
 
-    def set_active(self, text: str, source: str = "owner", intent: str = "goal_request", force: bool = False) -> bool:
+    def set_active(
+        self,
+        text: str,
+        source: str = "owner",
+        intent: str = "goal_request",
+        force: bool = False,
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
         payload = self._read()
         if payload.get("active") and not force:
             return False
@@ -42,6 +49,33 @@ class OwnerTaskState:
             "status": "active",
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
+        if isinstance(metadata, dict):
+            for key, value in metadata.items():
+                if value in (None, ""):
+                    continue
+                active[str(key)[:80]] = value if isinstance(value, (int, float, bool)) else str(value)[:500]
+        payload["active"] = active
+        self._write(payload)
+        return True
+
+    def enrich_active(self, **metadata: Any) -> bool:
+        payload = self._read()
+        active = payload.get("active")
+        if not isinstance(active, dict):
+            return False
+        changed = False
+        for key, value in metadata.items():
+            if value in (None, ""):
+                continue
+            norm_key = str(key or "").strip()[:80]
+            norm_val = value if isinstance(value, (int, float, bool)) else str(value)[:500]
+            if active.get(norm_key) == norm_val:
+                continue
+            active[norm_key] = norm_val
+            changed = True
+        if not changed:
+            return False
+        active["updated_at"] = datetime.now(timezone.utc).isoformat()
         payload["active"] = active
         self._write(payload)
         return True

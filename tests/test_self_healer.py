@@ -100,7 +100,21 @@ class TestHandleError:
         result = await healer.handle_error("test_agent", ValueError("test error"))
         assert result["resolved"] is False
         assert result["method"] == "pending"
+        assert "safe_action_suggestions" in result
         mock_memory_with_sqlite.log_error.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_handle_error_returns_safe_action_suggestions(self, mock_llm_router, mock_comms, mock_memory_with_sqlite, mock_devops):
+        mock_llm_router.call_llm = AsyncMock(return_value=None)
+        healer = SelfHealer(mock_llm_router, mock_memory_with_sqlite, mock_comms, mock_devops)
+        result = await healer.handle_error(
+            "vito_core",
+            RuntimeError("self_learning candidate auto_promote flaky with 429 rate limit"),
+            context={"task_family": "research"},
+        )
+        actions = [x["action"] for x in result.get("safe_action_suggestions", [])]
+        assert "pause_self_learning_autopromote" in actions
+        assert "apply_profile_economy" in actions
 
     @pytest.mark.asyncio
     async def test_handle_error_found_in_db(self, mock_llm_router, mock_comms, mock_memory_with_sqlite, mock_devops):

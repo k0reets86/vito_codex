@@ -1,14 +1,12 @@
 from modules.playbook_registry import PlaybookRegistry
 
 
-def test_playbook_registry_learn_and_top(tmp_path):
-    db = str(tmp_path / "pb.db")
-    reg = PlaybookRegistry(sqlite_path=db)
-    reg.learn(agent="a1", task_type="publish", action="platform:publish", status="success", strategy={"k": "v"})
-    reg.learn(agent="a1", task_type="publish", action="platform:publish", status="failed", strategy={"k": "v2"})
-    rows = reg.top(limit=10)
-    assert len(rows) >= 1
-    r = rows[0]
-    assert r["action"] == "platform:publish"
-    assert r["success_count"] >= 1
-    assert r["fail_count"] >= 1
+def test_find_sorts_by_success_rate(tmp_path):
+    sqlite_path = tmp_path / "playbooks.sqlite"
+    reg = PlaybookRegistry(sqlite_path=str(sqlite_path))
+    reg.learn(agent="research_agent", task_type="research", action="research_agent:research:a", status="success")
+    reg.learn(agent="research_agent", task_type="research", action="research_agent:research:b", status="failed")
+    reg.learn(agent="research_agent", task_type="research", action="research_agent:research:a", status="success")
+    rows = reg.find(agent="research_agent", task_type="research", limit=10)
+    assert len(rows) >= 2
+    assert rows[0]["action"] == "research_agent:research:a"

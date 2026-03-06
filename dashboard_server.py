@@ -107,9 +107,16 @@ class DashboardServer:
                 if parsed.path == "/api/agents":
                     agents = []
                     if parent.registry:
-                        for a in parent.registry.list_agents():
-                            agents.append(a.get_status())
+                        agents = parent.registry.get_all_statuses()
                     self._json({"agents": agents})
+                    return
+                if parsed.path == "/api/agent_contracts":
+                    try:
+                        contracts = parent.registry.get_agent_contracts() if parent.registry else []
+                        workflows = parent.registry.get_workflow_map() if parent.registry else {}
+                    except Exception:
+                        contracts, workflows = [], {}
+                    self._json({"contracts": contracts, "workflow_map": workflows})
                     return
 
                 if parsed.path == "/api/goals":
@@ -257,6 +264,20 @@ class DashboardServer:
                     except Exception:
                         report = {}
                     self._json({"report": report})
+                    return
+                if parsed.path == "/api/agent_memory_context":
+                    agent_name = (query.get("agent", [""])[0] or "").strip().lower()
+                    task_type = (query.get("task_type", [""])[0] or "").strip().lower()
+                    limit = int(query.get("limit", ["5"])[0] or 5)
+                    payload = {"agent": agent_name, "task_type": task_type, "context": {}}
+                    try:
+                        if parent.registry and agent_name:
+                            agent = parent.registry.get(agent_name)
+                            if agent and getattr(agent, "memory", None) and hasattr(agent.memory, "get_agent_memory_context"):
+                                payload["context"] = agent.memory.get_agent_memory_context(agent_name, task_type=task_type, limit=limit)
+                    except Exception:
+                        payload["context"] = {}
+                    self._json(payload)
                     return
                 if parsed.path == "/api/workflow_threads":
                     try:

@@ -2399,12 +2399,16 @@ class ConversationEngine:
             try:
                 active = self.owner_task_state.get_active()
                 if active:
+                    extra = ""
+                    if active.get("service_context"):
+                        extra = f"\n  service_context: {str(active.get('service_context', ''))[:120]}"
                     parts.append(
                         "Активная задача владельца:\n"
                         f"  text: {str(active.get('text', ''))[:300]}\n"
                         f"  intent: {str(active.get('intent', ''))}\n"
                         f"  status: {str(active.get('status', 'active'))}\n"
                         f"  updated_at: {str(active.get('updated_at', ''))}"
+                        f"{extra}"
                     )
             except Exception:
                 pass
@@ -2541,7 +2545,8 @@ class ConversationEngine:
                 "Фокус владельца:\n"
                 f"- текущая задача: {str(active.get('text', ''))[:260]}\n"
                 f"- intent: {str(active.get('intent', ''))[:80]}\n"
-                f"- статус: {str(active.get('status', 'active'))[:40]}"
+                f"- статус: {str(active.get('status', 'active'))[:40]}\n"
+                f"- сервис: {str(active.get('service_context', ''))[:80] if active.get('service_context') else 'не зафиксирован'}"
             )
         except Exception:
             return "Фокус владельца: (не зафиксирован)"

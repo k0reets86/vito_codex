@@ -22,8 +22,14 @@ import chromadb
 
 from config.logger import get_logger
 from config.settings import settings
+from modules.agent_contracts import get_agent_contract
+from modules.execution_facts import ExecutionFacts
+from modules.failure_memory import FailureMemory
 from modules.memory_blocks import MemoryBlocks
 from modules.memory_policy import decide_save, retention_classes
+from modules.platform_knowledge import search_entries as search_platform_knowledge
+from modules.playbook_registry import PlaybookRegistry
+from modules.prompt_guard import has_prompt_injection_signals, sanitize_untrusted_text
 
 logger = get_logger("memory_manager", agent="memory_manager")
 
@@ -165,10 +171,11 @@ class MemoryManager:
     ) -> bool:
         """Сохраняет знание в ChromaDB для семантического поиска."""
         raw_meta = metadata or {}
-        decision = decide_save(doc_id=doc_id, text=text, metadata=raw_meta)
+        normalized_text = self._prepare_knowledge_text(text, raw_meta)
+        decision = decide_save(doc_id=doc_id, text=normalized_text, metadata=raw_meta)
         self._audit_memory_policy(
             doc_id=doc_id,
-            text=text,
+            text=normalized_text,
             metadata=raw_meta,
             action=decision.action,
             reason=decision.reason,
@@ -195,11 +202,11 @@ class MemoryManager:
             pass
         meta["policy_reason"] = decision.reason
         try:
-            embed = self._embed_texts([text])
+            embed = self._embed_texts([normalized_text])
             self._upsert_chroma_safe(
                 collection,
                 ids=[doc_id],
-                documents=[text],
+                documents=[normalized_text],
                 metadatas=[meta],
                 embeddings=embed,
             )
@@ -216,7 +223,7 @@ class MemoryManager:
                 self._memory_blocks.record_block(
                     doc_id=doc_id,
                     block_type=block_type,
-                    summary=text[:2048],
+                    summary=normalized_text[:2048],
                     metadata=meta,
                     retention_class=meta.get("retention_class", ""),
                     stage=stage,
@@ -231,6 +238,29 @@ class MemoryManager:
                 exc_info=True,
             )
             raise
+
+    @staticmethod
+    def _is_untrusted_external_knowledge(meta: dict[str, Any]) -> bool:
+        source = str((meta or {}).get("source", "") or "").strip().lower()
+        typ = str((meta or {}).get("type", "") or "").strip().lower()
+        if bool((meta or {}).get("untrusted_external")):
+            return True
+        risky_sources = {"web", "rss", "reddit", "browser", "scrape", "search", "external", "url_context"}
+        risky_types = {"research", "trend", "competitor", "document_extract", "web_page", "external_content"}
+        return source in risky_sources or typ in risky_types
+
+    def _prepare_knowledge_text(self, text: str, meta: dict[str, Any] | None = None) -> str:
+        raw = str(text or "")
+        metadata = meta or {}
+        if not raw:
+            return ""
+        if self._is_untrusted_external_knowledge(metadata):
+            cleaned = sanitize_untrusted_text(raw, max_chars=12000)
+            if has_prompt_injection_signals(raw):
+                metadata["guardrail_signal"] = "prompt_injection_suspected"
+                metadata["guardrail_sanitized"] = True
+            return cleaned
+        return raw
 
     def forget_knowledge(self, doc_id: str, reason: str = "manual_forget", metadata: dict[str, Any] | None = None) -> bool:
         """Удаляет знание из ChromaDB и пишет аудит forget-события."""
@@ -967,6 +997,104 @@ class MemoryManager:
         conn = self._get_sqlite()
         row = conn.execute("SELECT * FROM skills WHERE name = ?", (name,)).fetchone()
         return dict(row) if row else None
+
+    def get_agent_memory_context(self, agent_name: str, task_type: str = "", limit: int = 5) -> dict[str, Any]:
+        agent = str(agent_name or "").strip().lower()
+        task = str(task_type or "").strip().lower()
+        contract = get_agent_contract(agent)
+        query_parts = [agent]
+        if task:
+            query_parts.append(task)
+        query_parts.extend(list(contract.get("owned_outcomes", [])[:2]))
+        query = " ".join([x for x in query_parts if x]).strip() or agent
+
+        skills = []
+        try:
+            skill_rows = self.search_skills(query, limit=max(limit * 2, 6))
+            for row in skill_rows:
+                if str(row.get("agent", "")).strip().lower() == agent or f"{agent}:" in str(row.get("name", "")).lower():
+                    skills.append(row)
+            if len(skills) < limit:
+                for row in skill_rows:
+                    if row not in skills:
+                        skills.append(row)
+                    if len(skills) >= limit:
+                        break
+        except Exception:
+            skills = []
+
+        failures = []
+        try:
+            failures = [
+                row for row in FailureMemory().recent(limit=max(limit * 3, 10))
+                if str(row.get("agent", "")).strip().lower() == agent and (not task or str(row.get("task_type", "")).strip().lower() == task)
+            ][:limit]
+        except Exception:
+            failures = []
+
+        facts = []
+        try:
+            for fact in ExecutionFacts().recent_facts(limit=max(limit * 6, 20)):
+                action = str(getattr(fact, "action", "") or "")
+                if not action.startswith(f"{agent}:"):
+                    continue
+                if task and f":{task}" not in action:
+                    continue
+                facts.append(
+                    {
+                        "action": action,
+                        "status": str(getattr(fact, "status", "") or ""),
+                        "detail": str(getattr(fact, "detail", "") or ""),
+                        "evidence": str(getattr(fact, "evidence", "") or ""),
+                        "created_at": str(getattr(fact, "created_at", "") or ""),
+                    }
+                )
+                if len(facts) >= limit:
+                    break
+        except Exception:
+            facts = []
+
+        blocks = []
+        try:
+            blocks = self.memory_blocks.find_blocks(
+                agent=agent,
+                block_types=["skill", "playbook", "owner_preference", "knowledge", "failure"],
+                limit=limit,
+            )
+        except Exception:
+            blocks = []
+
+        playbooks = []
+        try:
+            playbooks = PlaybookRegistry().find(agent=agent, task_type=task, limit=limit)
+            for row in playbooks:
+                succ = int(row.get("success_count") or 0)
+                fail = int(row.get("fail_count") or 0)
+                total = succ + fail
+                row["success_rate"] = round((succ / total), 3) if total > 0 else 0.0
+        except Exception:
+            playbooks = []
+
+        platform_memory = []
+        try:
+            platform_terms = [task]
+            platform_terms.extend([x for x in contract.get("owned_outcomes", []) if "platform" in x or "listing" in x or "publish" in x])
+            query_text = " ".join([x for x in platform_terms if x]).strip() or agent
+            platform_memory = search_platform_knowledge(query_text, limit=limit)
+        except Exception:
+            platform_memory = []
+
+        return {
+            "agent": agent,
+            "task_type": task,
+            "contract": contract,
+            "skills": skills[:limit],
+            "playbooks": playbooks[:limit],
+            "recent_failures": failures[:limit],
+            "recent_facts": facts[:limit],
+            "memory_blocks": blocks[:limit],
+            "platform_memory": platform_memory[:limit],
+        }
 
     def search_skills(self, query: str, limit: int = 5) -> list[dict]:
         """Семантический поиск навыков: ChromaDB → обогащение из SQLite."""

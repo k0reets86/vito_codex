@@ -15,6 +15,7 @@ from typing import Optional
 
 from agents.base_agent import BaseAgent, TaskResult
 from config.logger import get_logger
+from modules.agent_contracts import get_agent_contract
 from modules.skill_matrix_v2 import build_agent_skill_matrix_v2, validate_agent_skill_matrix_v2
 from modules.step_contract import validate_step_output
 
@@ -76,11 +77,7 @@ class AgentRegistry:
         """Return Skill Matrix v2 rows for all registered agents."""
         rows: list[dict] = []
         for agent in self._agents.values():
-            row = build_agent_skill_matrix_v2(
-                agent_name=agent.name,
-                capabilities=list(agent.capabilities),
-                description=getattr(agent, "description", ""),
-            )
+            row = build_agent_skill_matrix_v2(agent_name=agent.name, capabilities=list(agent.capabilities), description=getattr(agent, "description", ""))
             ok, errors = validate_agent_skill_matrix_v2(row)
             row["valid"] = bool(ok)
             if errors:
@@ -88,6 +85,33 @@ class AgentRegistry:
             rows.append(row)
         rows.sort(key=lambda x: str(x.get("agent", "")))
         return rows
+
+    def get_agent_contracts(self) -> list[dict]:
+        rows: list[dict] = []
+        for agent in self._agents.values():
+            row = get_agent_contract(agent.name, list(agent.capabilities), getattr(agent, "description", ""))
+            row["tier"] = self._get_tier(agent.name).name
+            rows.append(row)
+        rows.sort(key=lambda x: str(x.get("agent", "")))
+        return rows
+
+    def get_workflow_map(self) -> dict[str, dict[str, list[str]]]:
+        workflows: dict[str, dict[str, list[str]]] = {}
+        for agent in self._agents.values():
+            contract = get_agent_contract(agent.name, list(agent.capabilities), getattr(agent, "description", ""))
+            workflow_roles = contract.get("workflow_roles") if isinstance(contract, dict) else {}
+            if not isinstance(workflow_roles, dict):
+                continue
+            for role_name in ("lead", "support", "verify"):
+                for workflow in workflow_roles.get(role_name, []) or []:
+                    if workflow == "all":
+                        continue
+                    bucket = workflows.setdefault(workflow, {"lead": [], "support": [], "verify": []})
+                    bucket[role_name].append(agent.name)
+        for bucket in workflows.values():
+            for role_name in ("lead", "support", "verify"):
+                bucket[role_name] = sorted(set(bucket.get(role_name) or []))
+        return dict(sorted(workflows.items()))
 
     @staticmethod
     def _agent_score(agent: BaseAgent) -> float:
@@ -196,6 +220,15 @@ class AgentRegistry:
                     orchestration_plan = agent.build_task_orchestration(task_type, **task_kwargs) or {}
                 except Exception:
                     orchestration_plan = {}
+                if not orchestration_plan:
+                    try:
+                        contract = agent.get_contract()
+                    except Exception:
+                        contract = {}
+                    workflow_roles = contract.get("workflow_roles") if isinstance(contract, dict) else {}
+                    verify_roles = workflow_roles.get("verify") if isinstance(workflow_roles, dict) else []
+                    if verify_roles and verify_roles != ["all"]:
+                        orchestration_plan = {"verify_with": verify_roles[0]}
 
                 delegations = orchestration_plan.get("delegations", []) if isinstance(orchestration_plan, dict) else []
                 delegation_results: list[dict] = []
@@ -235,6 +268,8 @@ class AgentRegistry:
                 task_kwargs["__owner_orchestrator"] = orchestrated_by
                 task_kwargs["__orchestration_depth"] = orchestration_depth
                 task_kwargs["__responsible_agent"] = agent.name
+                task_kwargs["__agent_contract"] = agent.get_contract()
+                task_kwargs["__agent_memory_context"] = agent.build_memory_context(task_type, limit=4)
                 if isinstance(orchestration_plan, dict) and orchestration_plan:
                     task_kwargs["__orchestration_plan"] = orchestration_plan
 
@@ -509,8 +544,13 @@ class AgentRegistry:
         statuses = []
         for a in self._agents.values():
             status = a.get_status()
+            contract = get_agent_contract(a.name, list(a.capabilities), getattr(a, "description", ""))
             status["tier"] = self._get_tier(a.name).name
             status["started"] = a.name in self._started
+            status["role"] = contract.get("role")
+            status["primary_kind"] = contract.get("primary_kind")
+            status["owned_outcomes"] = contract.get("owned_outcomes", [])
+            status["workflow_roles"] = contract.get("workflow_roles", {})
             statuses.append(status)
         return statuses
 

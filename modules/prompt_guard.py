@@ -7,20 +7,29 @@ import re
 
 SUSPICIOUS_PATTERNS = [
     r"ignore (all|previous|above) instructions",
+    r"ignore your instructions",
     r"system prompt",
     r"developer message",
+    r"assistant message",
+    r"hidden prompt",
     r"you are now",
     r"do not follow",
     r"override",
     r"jailbreak",
     r"execute shell",
     r"run this command",
+    r"reveal (the )?(prompt|instructions)",
+    r"print(env| environment| secrets?)",
+    r"tool call",
+    r"function call",
 ]
 
 _SCRIPT_TAG_RE = re.compile(r"<script\b[^>]*>.*?</script>", re.IGNORECASE | re.DOTALL)
 _STYLE_TAG_RE = re.compile(r"<style\b[^>]*>.*?</style>", re.IGNORECASE | re.DOTALL)
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 _CTRL_RE = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]+")
+_CODE_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
+_ROLE_PREFIX_RE = re.compile(r"(?im)^\s*(system|developer|assistant|tool)\s*:\s*")
 
 
 def sanitize_untrusted_text(text: str, max_chars: int = 6000) -> str:
@@ -31,7 +40,9 @@ def sanitize_untrusted_text(text: str, max_chars: int = 6000) -> str:
     cleaned = _SCRIPT_TAG_RE.sub(" ", raw)
     cleaned = _STYLE_TAG_RE.sub(" ", cleaned)
     cleaned = _HTML_TAG_RE.sub(" ", cleaned)
+    cleaned = _CODE_FENCE_RE.sub(" ", cleaned)
     cleaned = _CTRL_RE.sub(" ", cleaned)
+    cleaned = _ROLE_PREFIX_RE.sub("", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     if len(cleaned) > max(500, int(max_chars or 6000)):
         cleaned = cleaned[: int(max_chars)] + " …[truncated]"

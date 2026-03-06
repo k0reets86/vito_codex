@@ -1,5 +1,6 @@
 .env
 venv/
+.venv/
 __pycache__/
 *.pyc
 *.db
@@ -17,6 +18,7 @@ output/**/*.jpeg
 backups/
 input/
 logs/
+MagicMock/
 <MagicMock*/
 reports/CAPABILITY_PACK_REPORT_*.md
 reports/CAPABILITY_PACK_MATRIX_*.md
@@ -26,3 +28,4 @@ reports/*.json
 reports/*.txt
 reports/tz19_extracted/
 runtime/
+tmp_*.tsx

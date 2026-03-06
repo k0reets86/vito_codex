@@ -1,5 +1,6 @@
 """Platform knowledge manager for VITO."""
 
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -35,3 +36,20 @@ def append_entry(service: str, content: str) -> None:
         "Platform knowledge appended",
         extra={"event": "platform_kb_append", "context": {"service": service}},
     )
+
+
+def search_entries(query: str, limit: int = 5) -> list[dict]:
+    _ensure_header()
+    text = KB_PATH.read_text(encoding="utf-8")
+    sections = re.split(r"\n## ", text)
+    results: list[dict] = []
+    q = str(query or "").strip().lower()
+    for raw in sections[1:]:
+        title, _, body = raw.partition("\n\n")
+        hay = f"{title}\n{body}".lower()
+        if q and q not in hay:
+            continue
+        results.append({"service": title.strip(), "content": body.strip()[:4000]})
+        if len(results) >= limit:
+            break
+    return results

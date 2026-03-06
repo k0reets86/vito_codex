@@ -59,6 +59,7 @@ from modules.status_snapshot import build_status_snapshot, render_status_snapsho
 logger = get_logger("comms_agent", agent="comms_agent")
 
 _TELEGRAM_TRACE_DEFAULT = root_path("runtime/telegram_trace.jsonl")
+_WORKING_PLATFORM_TARGETS = PROJECT_ROOT / "runtime" / "working_platform_targets.json"
 
 
 def _append_telegram_trace_file(path: Path, direction: str, text: str, meta: dict[str, Any] | None = None) -> None:
@@ -107,6 +108,72 @@ def _install_reply_text_trace_patch(path: Path) -> None:
         setattr(TgMessage, "_vito_reply_trace_patched", True)
     except Exception:
         pass
+
+
+def _load_working_platform_targets() -> dict[str, dict[str, Any]]:
+    try:
+        if not _WORKING_PLATFORM_TARGETS.exists():
+            return {}
+        data = json.loads(_WORKING_PLATFORM_TARGETS.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_working_platform_targets(data: dict[str, dict[str, Any]]) -> None:
+    try:
+        _WORKING_PLATFORM_TARGETS.parent.mkdir(parents=True, exist_ok=True)
+        _WORKING_PLATFORM_TARGETS.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _platform_working_target(platform: str) -> dict[str, Any]:
+    return dict((_load_working_platform_targets().get(str(platform or "").strip().lower()) or {}))
+
+
+def _remember_platform_working_target(platform: str, result: dict[str, Any]) -> None:
+    p = str(platform or "").strip().lower()
+    if not p or not isinstance(result, dict):
+        return
+    targets = _load_working_platform_targets()
+    current = dict(targets.get(p) or {})
+    rid = str(
+        result.get("listing_id")
+        or result.get("product_id")
+        or result.get("target_product_id")
+        or result.get("post_id")
+        or result.get("document_id")
+        or result.get("target_document_id")
+        or result.get("book_id")
+        or result.get("id")
+        or ""
+    ).strip()
+    url = str(result.get("url") or "").strip()
+    if p == "gumroad":
+        slug = str(result.get("slug") or "").strip()
+        if not slug and url:
+            m = re.search(r"gumroad\.com/l/([A-Za-z0-9_-]+)", url)
+            if m:
+                slug = m.group(1)
+        if slug:
+            current["target_slug"] = slug
+    elif p == "etsy" and rid:
+        current["target_listing_id"] = rid
+    elif p == "amazon_kdp" and rid:
+        current["target_document_id"] = rid
+    elif p == "kofi" and rid:
+        current["target_product_id"] = rid
+    elif p == "printful" and rid:
+        current["target_product_id"] = rid
+    if rid:
+        current["id"] = rid
+    if url:
+        current["url"] = url
+    if current:
+        current["updated_at"] = datetime.now(timezone.utc).isoformat()
+        targets[p] = current
+        _save_working_platform_targets(targets)
 
 
 class CommsAgent:
@@ -706,6 +773,7 @@ class CommsAgent:
             return
         self._last_service_context = svc
         self._last_service_context_at = datetime.now(timezone.utc).isoformat()
+        self._sync_owner_task_service_context(svc)
         self._save_auth_state()
         self._record_context_learning(
             skill_name="service_context_tracking",
@@ -719,6 +787,17 @@ class CommsAgent:
             ),
             method={"service": svc},
         )
+
+    def _sync_owner_task_service_context(self, service: str) -> None:
+        if not self._owner_task_state:
+            return
+        svc = str(service or "").strip().lower()
+        if not svc:
+            return
+        try:
+            self._owner_task_state.enrich_active(service_context=svc)
+        except Exception:
+            pass
 
     def _has_fresh_service_context(self, max_age_minutes: int = 180) -> bool:
         if not self._last_service_context:
@@ -956,6 +1035,14 @@ class CommsAgent:
             except Exception:
                 return ""
         return ""
+
+    def _detect_service_from_reply_context(self, reply_meta: dict[str, str] | None) -> str:
+        if not isinstance(reply_meta, dict):
+            return ""
+        text = str(reply_meta.get("text", "") or "").strip()
+        if not text:
+            return ""
+        return self._detect_service_from_text(text)
 
     @staticmethod
     def _is_auth_issue_prompt(text: str) -> bool:
@@ -2458,7 +2545,8 @@ class CommsAgent:
                         "Текущая задача владельца:\n"
                         f"- {str(active.get('text', ''))[:800]}\n"
                         f"- intent: {active.get('intent', '')}\n"
-                        f"- status: {active.get('status', 'active')}",
+                        f"- status: {active.get('status', 'active')}\n"
+                        f"- service: {active.get('service_context', '') or 'n/a'}",
                         level="result",
                     )
                 else:
@@ -3381,6 +3469,7 @@ class CommsAgent:
             return
         platform = str(rec.get("platform") or "").strip().lower()
         run_tag = datetime.now(timezone.utc).strftime("%m%d-%H%M%S")
+        working_target = _platform_working_target(platform)
 
         # Baseline payload, then platform-specific normalization.
         payload = {
@@ -3401,6 +3490,10 @@ class CommsAgent:
             "seo_description": "SEO-optimized test listing for marketplace publish flow validation.",
             "url": "https://example.com/vito-test",
             "hashtags": ["#VITO", "#AITools", "#DigitalProduct"],
+            "author": "VITO Studio",
+            "subtitle": "Practical AI workflow kit for creators",
+            "materials": ["pdf", "digital download", "instant download", "planner pages"],
+            "preview_paths": [],
         }
         if platform == "reddit":
             uname = str(getattr(settings, "REDDIT_USERNAME", "") or "").strip()
@@ -3413,19 +3506,19 @@ class CommsAgent:
             payload["url"] = ""
             payload["image_url"] = ""
         if platform == "gumroad":
-            reuse_existing = str(os.getenv("GUMROAD_REUSE_TEST_LISTING", "0") or "0").strip().lower() in {"1", "true", "yes", "on"}
+            reuse_existing = bool(working_target.get("target_slug")) or str(os.getenv("GUMROAD_REUSE_TEST_LISTING", "0") or "0").strip().lower() in {"1", "true", "yes", "on"}
             payload.update(
                 {
                     # By default create new test listing; reuse existing only when explicitly enabled.
                     "allow_existing_update": bool(reuse_existing),
                     "owner_edit_confirmed": bool(reuse_existing),
-                    "target_slug": str(os.getenv("GUMROAD_TEST_SLUG", "yupwt") or "yupwt").strip(),
+                    "target_slug": str(working_target.get("target_slug") or os.getenv("GUMROAD_TEST_SLUG", "") or "").strip(),
                     "operation": "update" if reuse_existing else "create",
                     "keep_unpublished": False if live else True,
                 }
             )
         if platform == "etsy":
-            target_listing_id = str(os.getenv("ETSY_TEST_LISTING_ID", "") or "").strip()
+            target_listing_id = str(working_target.get("target_listing_id") or "").strip()
             if target_listing_id:
                 payload.update(
                     {
@@ -3438,12 +3531,32 @@ class CommsAgent:
             # Owner requirement: for Etsy prefer draft creation/editing in tests.
             payload["draft_only"] = True
         if platform == "amazon_kdp":
-            payload["operation"] = "create_or_update_draft"
+            target_document_id = str(working_target.get("target_document_id") or "").strip()
+            payload["operation"] = "update" if target_document_id else "create_or_update_draft"
+            if target_document_id:
+                payload.update(
+                    {
+                        "allow_existing_update": True,
+                        "owner_edit_confirmed": True,
+                        "target_document_id": target_document_id,
+                    }
+                )
         if platform == "twitter":
             payload["text"] = (
                 f"VITO test publish {run_tag}: SEO-ready digital product workflow "
                 "https://example.com/vito-test #VITO #AI #DigitalProducts"
             )
+        if platform == "kofi":
+            target_product_id = str(working_target.get("target_product_id") or "").strip()
+            if target_product_id:
+                payload.update(
+                    {
+                        "allow_existing_update": True,
+                        "owner_edit_confirmed": True,
+                        "target_product_id": target_product_id,
+                        "operation": "update",
+                    }
+                )
         if platform == "printful":
             payload.update(
                 {
@@ -3463,6 +3576,7 @@ class CommsAgent:
         st = str(out.get("status") or "")
         if st == "accepted":
             res = out.get("result") if isinstance(out.get("result"), dict) else {}
+            _remember_platform_working_target(platform, res)
             status = str(res.get("status") or "")
             evidence = res.get("evidence") if isinstance(res.get("evidence"), dict) else {}
             url = str(res.get("url") or evidence.get("url") or "")
@@ -3911,6 +4025,9 @@ class CommsAgent:
         self._append_telegram_trace("in", text, {"chat_id": int(self._owner_id)})
 
         reply_meta = self._extract_reply_context(update)
+        reply_service = self._detect_service_from_reply_context(reply_meta)
+        if reply_service:
+            self._touch_service_context(reply_service)
         if reply_meta:
             source = "text_reply"
         else:
@@ -4592,7 +4709,8 @@ class CommsAgent:
             "Текущая задача владельца:\n"
             f"- {str(active.get('text', ''))[:800]}\n"
             f"- intent: {active.get('intent', '')}\n"
-            f"- status: {active.get('status', 'active')}"
+            f"- status: {active.get('status', 'active')}\n"
+            f"- service: {active.get('service_context', '') or 'n/a'}"
         )
         await update.message.reply_text(msg, reply_markup=self._main_keyboard())
 
@@ -4631,7 +4749,10 @@ class CommsAgent:
                 reply_markup=self._main_keyboard(),
             )
             return
-        self._owner_task_state.set_active(new_task, source="telegram", intent="manual_replace", force=True)
+        metadata = {}
+        if self._has_fresh_service_context():
+            metadata["service_context"] = self._last_service_context
+        self._owner_task_state.set_active(new_task, source="telegram", intent="manual_replace", force=True, metadata=metadata)
         await update.message.reply_text("Текущая задача заменена.", reply_markup=self._main_keyboard())
 
     async def _cmd_trends(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
