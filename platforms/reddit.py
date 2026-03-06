@@ -68,6 +68,39 @@ class RedditPlatform(BasePlatform):
             return ""
         return ""
 
+    async def _publish_via_api(self, subreddit: str, title: str, body: str, link_url: str) -> dict:
+        """API submit fallback to avoid fragile browser composer/captcha loops."""
+        if not self._authenticated:
+            ok = await self.authenticate()
+            if not ok:
+                return {"platform": "reddit", "status": "not_authenticated"}
+        try:
+            session = await self._get_session()
+            headers = {"Authorization": f"Bearer {self._token}", "User-Agent": self._user_agent}
+            if link_url:
+                data = {"sr": subreddit, "title": title, "kind": "link", "url": link_url, "resubmit": "true", "api_type": "json"}
+            else:
+                data = {"sr": subreddit, "title": title, "kind": "self", "text": body, "resubmit": "true", "api_type": "json"}
+            async with session.post(
+                "https://oauth.reddit.com/api/submit",
+                data=data,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=20),
+            ) as resp:
+                payload = await resp.json(content_type=None)
+                errs = (((payload or {}).get("json") or {}).get("errors") or [])
+                if resp.status in (200, 201) and not errs:
+                    jd = ((payload or {}).get("json") or {}).get("data") or {}
+                    post_url = str(jd.get("url") or "").strip()
+                    if post_url and post_url.startswith("/"):
+                        post_url = f"https://www.reddit.com{post_url}"
+                    if not post_url:
+                        post_url = f"https://reddit.com/r/{subreddit}/new"
+                    return {"platform": "reddit", "status": "published", "url": post_url}
+                return {"platform": "reddit", "status": "error", "error": str(errs)[:300]}
+        except Exception as e:
+            return {"platform": "reddit", "status": "error", "error": str(e)}
+
     async def authenticate(self) -> bool:
         if bool(getattr(settings, "REDDIT_API_DISABLED", False)) or self._mode == "browser_only":
             if self._storage_state_path.exists():
@@ -125,7 +158,21 @@ class RedditPlatform(BasePlatform):
             return {"platform": "reddit", "status": "prepared", "dry_run": True, "subreddit": subreddit}
 
         if self._mode == "browser_only":
-            return await self._publish_via_browser(content or {})
+            res = await self._publish_via_browser(content or {})
+            if str(res.get("status") or "").strip().lower() in {"prepared", "blocked"}:
+                # Last fallback: API submit to avoid browser captcha/overlay issues.
+                subreddit = str(content.get("subreddit", "")).strip() or "test"
+                title = str(content.get("title", "")).strip()
+                body = str(content.get("text", "")).strip()
+                link_url = str(content.get("url", "") or content.get("image_url", "")).strip()
+                image_path = str(content.get("image_path", "")).strip()
+                if image_path and not link_url:
+                    link_url = await self._upload_image_to_cloudinary(image_path)
+                if title:
+                    api_res = await self._publish_via_api(subreddit, title, body, link_url)
+                    if str(api_res.get("status") or "").strip().lower() == "published":
+                        return api_res
+            return res
 
         if not self._authenticated:
             ok = await self.authenticate()
@@ -150,38 +197,20 @@ class RedditPlatform(BasePlatform):
                 "error": "image_path_not_supported_without_url; provide image_url/url for link post",
             }
 
-        try:
-            session = await self._get_session()
-            headers = {"Authorization": f"Bearer {self._token}", "User-Agent": self._user_agent}
-            if link_url:
-                data = {"sr": subreddit, "title": title, "kind": "link", "url": link_url, "resubmit": "true", "api_type": "json"}
-            else:
-                data = {"sr": subreddit, "title": title, "kind": "self", "text": body, "resubmit": "true", "api_type": "json"}
-            async with session.post(
-                "https://oauth.reddit.com/api/submit",
-                data=data,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=20),
-            ) as resp:
-                payload = await resp.json()
-                errs = (((payload or {}).get("json") or {}).get("errors") or [])
-                if resp.status in (200, 201) and not errs:
-                    try:
-                        url = f"https://reddit.com/r/{subreddit}/new"
-                        ExecutionFacts().record(
-                            action="platform:publish",
-                            status="published",
-                            detail=f"reddit subreddit={subreddit} title={title[:80]}",
-                            evidence=url,
-                            source="reddit.publish",
-                            evidence_dict={"platform": "reddit", "subreddit": subreddit, "title": title},
-                        )
-                    except Exception:
-                        pass
-                    return {"platform": "reddit", "status": "published", "url": url}
-                return {"platform": "reddit", "status": "error", "error": str(errs)[:300]}
-        except Exception as e:
-            return {"platform": "reddit", "status": "error", "error": str(e)}
+        res = await self._publish_via_api(subreddit, title, body, link_url)
+        if str(res.get("status") or "").lower() == "published":
+            try:
+                ExecutionFacts().record(
+                    action="platform:publish",
+                    status="published",
+                    detail=f"reddit subreddit={subreddit} title={title[:80]}",
+                    evidence=str(res.get("url") or ""),
+                    source="reddit.publish",
+                    evidence_dict={"platform": "reddit", "subreddit": subreddit, "title": title},
+                )
+            except Exception:
+                pass
+        return res
 
     async def _publish_via_browser(self, content: dict) -> dict:
         if not self._storage_state_path.exists():
@@ -226,16 +255,7 @@ class RedditPlatform(BasePlatform):
                 await page.wait_for_timeout(1200)
                 current = (page.url or "").lower()
                 body_text = (await page.text_content("body") or "").lower()
-                try:
-                    if "/comments/" in post_url:
-                        try:
-                            await page.goto(post_url, wait_until="domcontentloaded", timeout=90000)
-                            await page.wait_for_timeout(1500)
-                        except Exception:
-                            pass
-                    await page.screenshot(path=shot, full_page=True)
-                except Exception:
-                    pass
+                post_url = str(page.url or "")
                 if "blocked by network security" in body_text:
                     return {
                         "platform": "reddit",
@@ -334,6 +354,21 @@ class RedditPlatform(BasePlatform):
                     try:
                         await page.goto("https://old.reddit.com/submit", wait_until="domcontentloaded", timeout=90000)
                         await page.wait_for_timeout(1500)
+                        # Accept cookie banner if present (can block submit controls).
+                        for sel in (
+                            "#gdpr-banner button",
+                            "button:has-text('CONTINUE')",
+                            "button:has-text('Continue')",
+                            "button:has-text('Продолжить')",
+                        ):
+                            try:
+                                b = page.locator(sel)
+                                if await b.count():
+                                    await b.first.click(timeout=1200)
+                                    await page.wait_for_timeout(400)
+                                    break
+                            except Exception:
+                                continue
                         # choose post type based on payload: link post for image/url, otherwise self text post.
                         if link_url:
                             try:
@@ -430,6 +465,14 @@ class RedditPlatform(BasePlatform):
                         current2 = str(page.url or "")
                         if "/comments/" in current2:
                             post_url = current2
+                        elif has_captcha:
+                            return {
+                                "platform": "reddit",
+                                "status": "blocked",
+                                "error": "captcha_not_solved_or_submit_rejected",
+                                "url": page.url,
+                                "screenshot_path": shot,
+                            }
                     except Exception:
                         pass
                 try:

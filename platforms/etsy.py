@@ -238,6 +238,15 @@ class EtsyPlatform(BasePlatform):
                 )
                 await page.goto(target_url, wait_until="domcontentloaded", timeout=90000)
                 await page.wait_for_timeout(2000)
+                # Close GDPR/cookie dialog if present (can block editor controls).
+                for txt in ("Принять", "Accept", "Continue", "Продолжить"):
+                    try:
+                        btn = page.get_by_role("button", name=txt)
+                        if await btn.count():
+                            await btn.first.click(timeout=1200)
+                            await page.wait_for_timeout(350)
+                    except Exception:
+                        continue
                 current = page.url.lower()
                 if "/signin" in current or "/oauth" in current:
                     return {
@@ -276,6 +285,29 @@ class EtsyPlatform(BasePlatform):
                                 break
                 except Exception:
                     pass
+                # Strong category dialog handler for current Etsy ListingEditor UI.
+                try:
+                    resolved = await page.evaluate(
+                        """() => {
+                            const root = document.querySelector("[data-wt-dialog-root='true'], .wt-dialog[role='dialog']");
+                            if (!root) return false;
+                            const cb = root.querySelector("input[id^='category-'][type='checkbox']");
+                            if (cb && !cb.checked) cb.click();
+                            const btns = Array.from(root.querySelectorAll("button"));
+                            for (const b of btns) {
+                                const t = (b.textContent || "").trim().toLowerCase();
+                                if (t.includes("продолж") || t.includes("continue")) {
+                                    b.click();
+                                    return true;
+                                }
+                            }
+                            return false;
+                        }"""
+                    )
+                    if resolved:
+                        await page.wait_for_timeout(1200)
+                except Exception:
+                    pass
                 # Close/continue blocking onboarding dialogs if present.
                 for txt in (
                     "Continue",
@@ -294,6 +326,76 @@ class EtsyPlatform(BasePlatform):
                             await page.wait_for_timeout(700)
                     except Exception:
                         continue
+                # New-listing preflight dialog: set listing type/core details and continue.
+                try:
+                    await page.evaluate(
+                        """() => {
+                            const root =
+                                document.querySelector("[data-wt-dialog-root='true']") ||
+                                document.querySelector(".wt-dialog[role='dialog']");
+                            if (!root) return false;
+                            const titleEl = root.querySelector(".wt-dialog__header__heading");
+                            const title = (titleEl?.textContent || "").trim().toLowerCase();
+                            if (!title.includes("объявлен") && !title.includes("listing")) return false;
+                            const clickLabel = (tokens) => {
+                                const labels = Array.from(root.querySelectorAll("label"));
+                                for (const l of labels) {
+                                    const t = (l.textContent || "").trim().toLowerCase();
+                                    if (tokens.some(tok => t.includes(tok))) {
+                                        l.click();
+                                        return true;
+                                    }
+                                }
+                                return false;
+                            };
+                            clickLabel(["цифров", "digital"]);
+                            clickLabel(["я", "i "]);
+                            clickLabel(["готов", "finished"]);
+                            clickLabel(["полностью мной", "original", "created by me"]);
+                            const pickByName = (name, idx) => {
+                                const nodes = Array.from(root.querySelectorAll(`input[type='radio'][name='${name}']`));
+                                if (!nodes.length) return false;
+                                const i = Math.max(0, Math.min(nodes.length - 1, idx));
+                                const node = nodes[i];
+                                node.click();
+                                node.dispatchEvent(new Event('input', { bubbles: true }));
+                                node.dispatchEvent(new Event('change', { bubbles: true }));
+                                return true;
+                            };
+                            pickByName("listing_type_options_group", 1); // download
+                            pickByName("whoMade", 0); // i_did
+                            pickByName("isSupply", 0); // finished goods
+                            pickByName("whatContent", 0); // original
+                            const whenSel = root.querySelector("select#when-made-select, select[name='when_made'], select[name='whenMade']");
+                            if (whenSel) {
+                                const opts = Array.from(whenSel.querySelectorAll("option"));
+                                let val = "";
+                                for (const o of opts) {
+                                    const ov = (o.value || "").trim();
+                                    if (!ov) continue;
+                                    if (ov === "made_to_order") { val = ov; break; }
+                                    if (!val) val = ov;
+                                }
+                                if (val) {
+                                    whenSel.value = val;
+                                    whenSel.dispatchEvent(new Event('input', { bubbles: true }));
+                                    whenSel.dispatchEvent(new Event('change', { bubbles: true }));
+                                }
+                            }
+                            const buttons = Array.from(root.querySelectorAll("button"));
+                            for (const b of buttons) {
+                                const t = (b.textContent || "").trim().toLowerCase();
+                                if (t.includes("продолж") || t == "continue") {
+                                    b.click();
+                                    return true;
+                                }
+                            }
+                            return false;
+                        }"""
+                    )
+                    await page.wait_for_timeout(900)
+                except Exception:
+                    pass
 
                 # Best-effort field fill; Etsy UI may vary by locale/account state.
                 for sel in (
@@ -512,6 +614,112 @@ class EtsyPlatform(BasePlatform):
                                     break
                             except Exception:
                                 continue
+                        # JS fallback to avoid locale/role differences.
+                        try:
+                            await page.evaluate(
+                                """() => {
+                                    const labels = ["save as draft", "save and continue", "save", "сохранить"];
+                                    const buttons = Array.from(document.querySelectorAll("button"));
+                                    for (const b of buttons) {
+                                        const t = (b.textContent || "").trim().toLowerCase();
+                                        if (labels.some(x => t.includes(x)) && !b.disabled) {
+                                            b.click();
+                                            return true;
+                                        }
+                                    }
+                                    return false;
+                                }"""
+                            )
+                            await page.wait_for_timeout(1100)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                # If listing details dialog appears (type/core details), fill and continue, then retry save.
+                try:
+                    has_details_dialog = await page.evaluate(
+                        """() => {
+                            const root =
+                                document.querySelector("[data-wt-dialog-root='true']") ||
+                                document.querySelector(".wt-dialog[role='dialog']");
+                            if (!root) return false;
+                            const title = (root.querySelector(".wt-dialog__header__heading")?.textContent || "").toLowerCase();
+                            return title.includes("объявлен") || title.includes("listing");
+                        }"""
+                    )
+                    if has_details_dialog:
+                        await page.evaluate(
+                            """() => {
+                                const root =
+                                    document.querySelector("[data-wt-dialog-root='true']") ||
+                                    document.querySelector(".wt-dialog[role='dialog']");
+                                if (!root) return false;
+                            const clickLabel = (tokens) => {
+                                    const labels = Array.from(root.querySelectorAll("label"));
+                                    for (const l of labels) {
+                                        const t = (l.textContent || "").trim().toLowerCase();
+                                        if (tokens.some(tok => t.includes(tok))) {
+                                            l.click();
+                                            return true;
+                                        }
+                                    }
+                                    return false;
+                            };
+                            clickLabel(["цифров", "digital"]);
+                            clickLabel(["я", "i "]);
+                            clickLabel(["готов", "finished"]);
+                            clickLabel(["полностью мной", "original", "created by me"]);
+                            const pickByName = (name, idx) => {
+                                const nodes = Array.from(root.querySelectorAll(`input[type='radio'][name='${name}']`));
+                                if (!nodes.length) return false;
+                                const i = Math.max(0, Math.min(nodes.length - 1, idx));
+                                const node = nodes[i];
+                                node.click();
+                                node.dispatchEvent(new Event('input', { bubbles: true }));
+                                node.dispatchEvent(new Event('change', { bubbles: true }));
+                                return true;
+                            };
+                            pickByName("listing_type_options_group", 1);
+                            pickByName("whoMade", 0);
+                            pickByName("isSupply", 0);
+                            pickByName("whatContent", 0);
+                            const whenSel = root.querySelector("select#when-made-select, select[name='when_made'], select[name='whenMade']");
+                            if (whenSel) {
+                                const opts = Array.from(whenSel.querySelectorAll("option"));
+                                let val = "";
+                                for (const o of opts) {
+                                    const ov = (o.value || "").trim();
+                                    if (!ov) continue;
+                                    if (ov === "made_to_order") { val = ov; break; }
+                                    if (!val) val = ov;
+                                }
+                                if (val) {
+                                    whenSel.value = val;
+                                    whenSel.dispatchEvent(new Event('input', { bubbles: true }));
+                                    whenSel.dispatchEvent(new Event('change', { bubbles: true }));
+                                }
+                            }
+                            const buttons = Array.from(root.querySelectorAll("button"));
+                            for (const b of buttons) {
+                                    const t = (b.textContent || "").trim().toLowerCase();
+                                    if (t.includes("продолж") || t === "continue") {
+                                        b.click();
+                                        return true;
+                                    }
+                                }
+                                return false;
+                            }"""
+                        )
+                        await page.wait_for_timeout(1200)
+                        for txt in ("Save as draft", "Save and continue", "Save", "Сохранить"):
+                            try:
+                                btn = page.get_by_role("button", name=txt)
+                                if await btn.count():
+                                    await btn.first.click(timeout=2500)
+                                    await page.wait_for_timeout(1100)
+                                    break
+                            except Exception:
+                                continue
                 except Exception:
                     pass
 
@@ -599,6 +807,14 @@ class EtsyPlatform(BasePlatform):
                     listing_id = m.group(1)
                 if not listing_id:
                     try:
+                        html_now = await page.content()
+                        mi = re.search(r'"listingId"\s*:\s*(\d+)', html_now)
+                        if mi and mi.group(1) != "0":
+                            listing_id = mi.group(1)
+                    except Exception:
+                        pass
+                if (not listing_id) and allow_existing_update:
+                    try:
                         for ru in reversed(response_urls[-300:]):
                             mmr = re.search(r"/listing-editor/(\\d+)", str(ru)) or re.search(r"/listing/(\\d+)", str(ru))
                             if mmr:
@@ -606,7 +822,7 @@ class EtsyPlatform(BasePlatform):
                                 break
                     except Exception:
                         pass
-                if not listing_id:
+                if (not listing_id) and allow_existing_update:
                     try:
                         href = await page.locator("a[href*='/listing/']").first.get_attribute("href")
                         if href:
@@ -647,7 +863,7 @@ class EtsyPlatform(BasePlatform):
                                 pass
                         for h2 in hrefs2 or []:
                             mm0 = re.search(r"/listing/(\\d+)", str(h2)) or re.search(r"/listing-editor/(\\d+)", str(h2))
-                            if mm0 and mm0.group(1) not in existing_ids:
+                            if existing_ids and mm0 and mm0.group(1) not in existing_ids:
                                 listing_id = mm0.group(1)
                                 found_by_diff = True
                                 break
@@ -700,8 +916,6 @@ class EtsyPlatform(BasePlatform):
                                     if str(nid) not in existing_ids:
                                         pick = nid
                                         break
-                                if pick is None and str(title).lower().startswith("vito"):
-                                    pick = ids_sorted[0]
                                 if pick is not None:
                                     listing_id = str(pick)
                     except Exception:

@@ -35,14 +35,42 @@ from modules.platform_artifact_pack import build_platform_bundle
 
 def _payloads(live: bool) -> dict[str, dict]:
     tag = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    common_img_url = "https://via.placeholder.com/1200x630.png?text=VITO+Probe"
     gumroad_slug = (os.getenv("GUMROAD_TEST_SLUG", "yupwt") or "yupwt").strip()
-    img_path = ROOT / "runtime" / "probe_image.png"
+    img_path = ROOT / "output" / "ai_side_hustle_cover_1280x720.png"
     if not img_path.exists():
-        img_path.parent.mkdir(parents=True, exist_ok=True)
-        # 1x1 PNG
-        raw = b"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/w8AAgMBgN4n3S8AAAAASUVORK5CYII="
-        img_path.write_bytes(base64.b64decode(raw))
+        img_path = ROOT / "output" / "ai_side_hustle_thumb_600x600.png"
+    if not img_path.exists():
+        img_path = ROOT / "runtime" / "probe_image.png"
+        if not img_path.exists():
+            img_path.parent.mkdir(parents=True, exist_ok=True)
+            # 1200x630 PNG (valid for social/pinterest minimum sizes)
+            raw = (
+                b"iVBORw0KGgoAAAANSUhEUgAABLAAAAJ2CAIAAAC6V6tzAAAACXBIWXMAAAsSAAALEgHS3X78AAAK"
+                b"IUlEQVR4nO3WQQ0AAAgDIN8/9K3hA2M0q1gQkM3N7wAAAPg2gQAAABgQAAABgQAAABgQAAABgQAAABgQ"
+                b"AAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAA"
+                b"ABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAAB"
+                b"gQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQ"
+                b"AAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAA"
+                b"ABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAAB"
+                b"gQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQ"
+                b"AAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAA"
+                b"ABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAAB"
+                b"gQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQ"
+                b"AAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAA"
+                b"ABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAAB"
+                b"gQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQ"
+                b"AAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAA"
+                b"ABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAAB"
+                b"gQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQ"
+                b"AAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAA"
+                b"ABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAAB"
+                b"gQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQ"
+                b"AAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAA"
+                b"ABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAAB"
+                b"gQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQAAABgQ"
+                b"AAB4XwAAR3v9A9Q0zWwAAAAASUVORK5CYII="
+            )
+            img_path.write_bytes(base64.b64decode(raw))
     pdf_path = ROOT / "runtime" / "probe_asset.pdf"
     if not pdf_path.exists():
         raw_pdf = (
@@ -67,7 +95,6 @@ def _payloads(live: bool) -> dict[str, dict]:
             "subreddit": "u_Few_Garage_3659",
             "title": f"VITO probe {tag}",
             "text": "Live probe post from VITO",
-            "image_url": common_img_url,
         }),
         "etsy": build_platform_bundle("etsy", {
             "dry_run": not live,

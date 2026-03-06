@@ -72,6 +72,41 @@ async def _bookshelf_titles(page) -> list[str]:
         return []
 
 
+async def _kdp_relogin_if_needed(page) -> bool:
+    """Best-effort re-login when KDP asks only for password inside existing Amazon session."""
+    cur = (page.url or "").lower()
+    if "signin" not in cur and "ap/signin" not in cur:
+        try:
+            if await page.locator("input[type='password']").count() == 0:
+                return False
+        except Exception:
+            return False
+    pwd = str(os.getenv("KDP_PASSWORD", "")).strip()
+    if not pwd:
+        return False
+    try:
+        pwd_loc = page.locator("input[type='password'], input#ap_password, input[name='password']")
+        if await pwd_loc.count() == 0:
+            return False
+        await pwd_loc.first.fill(pwd)
+        clicked = await _click_first(
+            page,
+            [
+                "input#signInSubmit",
+                "button#signInSubmit",
+                "button:has-text('Sign in')",
+                "input[type='submit']",
+            ],
+            timeout_ms=4000,
+        )
+        if not clicked:
+            return False
+        await page.wait_for_timeout(2200)
+        return True
+    except Exception:
+        return False
+
+
 async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
     state = Path(storage_path)
     dbg = Path(debug_dir)
@@ -90,6 +125,16 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
         try:
             await page.goto("https://kdp.amazon.com/bookshelf", wait_until="domcontentloaded", timeout=120000)
             await page.wait_for_timeout(2500)
+            await _kdp_relogin_if_needed(page)
+            if "signin" in (page.url or "").lower() or "ap/signin" in (page.url or "").lower():
+                await page.screenshot(path=str(dbg / f"kdp_draft_{stamp}_signin_required.png"), full_page=True)
+                print(
+                    json.dumps(
+                        {"ok": False, "error": "signin_required_after_password", "url": page.url, "screenshot": str(dbg / f"kdp_draft_{stamp}_signin_required.png")},
+                        ensure_ascii=False,
+                    )
+                )
+                return 3
             before_titles = await _bookshelf_titles(page)
 
             # Step 1: open create flow
@@ -125,6 +170,7 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
                 pass
 
             await page.wait_for_timeout(2200)
+            await _kdp_relogin_if_needed(page)
 
             # Step 3: fill minimal required fields on details page (best effort).
             for sel in [
