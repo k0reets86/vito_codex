@@ -27,6 +27,7 @@ from agents.smm_agent import SMMAgent
 from platforms.etsy import EtsyPlatform
 from platforms.gumroad import GumroadPlatform
 from platforms.kofi import KofiPlatform
+from platforms.pinterest import PinterestPlatform
 from platforms.printful import PrintfulPlatform
 from platforms.reddit import RedditPlatform
 from platforms.twitter import TwitterPlatform
@@ -103,12 +104,13 @@ async def run() -> dict[str, Any]:
     etsy = EtsyPlatform()
     gumroad = GumroadPlatform()
     kofi = KofiPlatform()
+    pinterest = PinterestPlatform()
     printful = PrintfulPlatform()
     wordpress = WordPressPlatform()
 
     browser = BrowserAgent(**deps)
     qj = QualityJudge(**deps)
-    smm = SMMAgent(platforms={"twitter": twitter}, **deps)
+    smm = SMMAgent(platforms={"twitter": twitter, "reddit": reddit, "pinterest": pinterest}, **deps)
     ecommerce = ECommerceAgent(
         platforms={
             "etsy": etsy,
@@ -150,6 +152,17 @@ async def run() -> dict[str, Any]:
             ),
         }
         )
+        report["checks"].append(
+        {
+            "agent": "smm_agent",
+            "capability": "social_media",
+            "target": "pinterest",
+            "result": await _run_with_timeout(
+                smm.execute_task("social_media", platform="pinterest", content=f"VITO live pin audit {tag}"),
+                timeout=90,
+            ),
+        }
+        )
 
         report["checks"].append(
         {
@@ -169,7 +182,7 @@ async def run() -> dict[str, Any]:
                         "preview_path": str(PROBE_FILE),
                     },
                 ),
-                timeout=120,
+                timeout=300,
             ),
         }
         )
@@ -213,7 +226,7 @@ async def run() -> dict[str, Any]:
                         "preview_path": str(PROBE_FILE),
                     },
                 ),
-                timeout=240,
+                timeout=360,
             ),
         }
         )
@@ -234,7 +247,7 @@ async def run() -> dict[str, Any]:
                         "preview_path": str(PROBE_FILE),
                     },
                 ),
-                timeout=120,
+                timeout=300,
             ),
         }
         )
@@ -264,6 +277,7 @@ async def run() -> dict[str, Any]:
             "etsy": etsy,
             "gumroad": gumroad,
             "kofi": kofi,
+            "pinterest": pinterest,
             "printful": printful,
             "wordpress": wordpress,
         }.items():
@@ -309,7 +323,7 @@ async def run() -> dict[str, Any]:
             row["result"]["output"] = json.loads(json.dumps(row["result"].get("output", None), ensure_ascii=False, default=str))
         return report
     finally:
-        for pl in [twitter, reddit, etsy, gumroad, kofi, printful, wordpress]:
+        for pl in [twitter, reddit, etsy, gumroad, kofi, pinterest, printful, wordpress]:
             try:
                 await pl.close()
             except Exception:

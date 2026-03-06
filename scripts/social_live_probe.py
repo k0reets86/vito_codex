@@ -24,6 +24,7 @@ from modules.execution_facts import ExecutionFacts
 from platforms.twitter import TwitterPlatform
 from platforms.threads import ThreadsPlatform
 from platforms.reddit import RedditPlatform
+from platforms.pinterest import PinterestPlatform
 from platforms.tiktok import TikTokPlatform
 
 
@@ -35,6 +36,7 @@ async def run_probe() -> dict:
     probes = [
         ("threads", ThreadsPlatform()),
         ("reddit", RedditPlatform()),
+        ("pinterest", PinterestPlatform()),
         ("tiktok", TikTokPlatform()),
     ]
     for name, pl in probes:

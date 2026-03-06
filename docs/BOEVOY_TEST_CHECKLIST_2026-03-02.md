@@ -146,3 +146,18 @@ Current progress: `41 / 41 = 100.0%`
   - `python3 scripts/tg_global_combat_suite.py` -> `reports/VITO_TG_GLOBAL_COMBAT_2026-03-05_1559UTC.json`.
   - `python3 scripts/final_scorecard_report.py` -> `reports/VITO_FINAL_SCORECARD_2026-03-05_1559UTC.md`.
   - Final full regression completed with project root config: `PYTHONPATH=. pytest -q --maxfail=1` -> `1054 passed, 1 skipped, 1 warning` (warning: asyncio subprocess transport cleanup in `tests/test_comms_agent.py::test_cmd_prefs`).
+- 2026-03-06: Cookie-backed browser sessions imported and verified across 8 services:
+  - `python3 scripts/browser_session_import.py --service <svc> --cookies-file input/cookies/<svc>.cookies.json --verify` for `amazon_kdp, etsy, gumroad, kofi, pinterest, printful, reddit, twitter` -> all `ok=true`.
+- 2026-03-06: Telegram owner simulation (platform e2e package, owner-style commands):
+  - `python3 scripts/telegram_owner_simulator.py --scenario phase_platform_e2e --step-timeout 180`
+  - Evidence: `reports/VITO_TG_OWNER_SIM_phase_platform_e2e_2026-03-06_0052UTC.json` (`12/12`).
+- 2026-03-06: Live publish matrix re-run with browser-first flows + pinterest path:
+  - `python3 scripts/live_publish_matrix.py --live`
+  - Evidence: `reports/VITO_PUBLISH_MATRIX_LIVE_2026-03-06_0053UTC.json`
+  - Key statuses: `amazon_kdp=published`, `etsy=prepared`, `kofi=prepared`, `pinterest=prepared`, `gumroad=daily_limit`.
+- 2026-03-06: Agent→platform live audit re-run (expanded social stack incl. Pinterest):
+  - `python3 scripts/live_agent_platform_audit.py`
+  - Evidence: `reports/VITO_AGENT_PLATFORM_LIVE_AUDIT_2026-03-06_0053UTC.json`, `responding_percent=75.0`.
+- 2026-03-06: Social live probe re-run with Pinterest auth probe:
+  - `python3 scripts/social_live_probe.py`
+  - Evidence: `reports/VITO_SOCIAL_LIVE_PROBE_2026-03-06_0054UTC.json`.

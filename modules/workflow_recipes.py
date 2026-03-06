@@ -85,6 +85,19 @@ _RECIPES: dict[str, dict[str, Any]] = {
         ],
         "required_evidence": ["url", "id"],
     },
+    "pinterest_publish": {
+        "platform": "pinterest",
+        "goal": "Create or publish a Pinterest pin and verify resulting URL.",
+        "steps": [
+            "auth_check",
+            "open_pin_editor",
+            "fill_title_description_link",
+            "attach_media_optional",
+            "publish_or_save",
+            "verify_pin_url",
+        ],
+        "required_evidence": ["url"],
+    },
 }
 
 
@@ -113,4 +126,3 @@ def platform_recipe(platform: str) -> dict[str, Any] | None:
             row["name"] = key
             return row
     return None
-

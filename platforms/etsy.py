@@ -237,28 +237,36 @@ class EtsyPlatform(BasePlatform):
                 # Best-effort field fill; Etsy UI may vary by locale/account state.
                 for sel in ("input[name='title']", "input[data-test-id='listing-title-input']", "input[id*='title']"):
                     try:
-                        await page.fill(sel, title[:140])
-                        break
+                        loc = page.locator(sel)
+                        if await loc.count():
+                            await loc.first.fill(title[:140], timeout=1800)
+                            break
                     except Exception:
                         continue
                 for sel in ("textarea[name='description']", "textarea[id*='description']", "textarea"):
                     try:
-                        await page.fill(sel, description[:5000])
-                        break
+                        loc = page.locator(sel)
+                        if await loc.count():
+                            await loc.first.fill(description[:5000], timeout=1800)
+                            break
                     except Exception:
                         continue
                 for sel in ("input[name='price']", "input[id*='price']"):
                     try:
-                        await page.fill(sel, price)
-                        break
+                        loc = page.locator(sel)
+                        if await loc.count():
+                            await loc.first.fill(price, timeout=1800)
+                            break
                     except Exception:
                         continue
                 if tags:
                     tags_text = ", ".join(str(t)[:20] for t in tags[:13])
                     for sel in ("input[name='tags']", "input[id*='tag']"):
                         try:
-                            await page.fill(sel, tags_text)
-                            break
+                            loc = page.locator(sel)
+                            if await loc.count():
+                                await loc.first.fill(tags_text, timeout=1800)
+                                break
                         except Exception:
                             continue
 

@@ -10,6 +10,7 @@ def test_workflow_recipes_contains_required_platforms():
         "kofi_publish",
         "twitter_publish",
         "reddit_publish",
+        "pinterest_publish",
     }.issubset(names)
 
 
@@ -24,4 +25,3 @@ def test_get_workflow_recipe_single():
     rec = get_workflow_recipe("twitter_publish")
     assert rec is not None
     assert rec["platform"] == "twitter"
-

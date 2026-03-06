@@ -80,6 +80,7 @@ def main() -> int:
     commands = [
         ["python3", "scripts/telegram_owner_simulator.py", "--scenario", "smoke"],
         ["python3", "scripts/telegram_owner_simulator.py", "--scenario", "platform_context"],
+        ["python3", "scripts/telegram_owner_simulator.py", "--scenario", "phase_platform_e2e"],
         ["python3", "scripts/live_publish_matrix.py", "--live"],
         ["python3", "scripts/live_agent_platform_audit.py"],
         ["python3", "scripts/social_live_probe.py"],
@@ -103,6 +104,7 @@ def main() -> int:
     summary = {
         "tg_smoke_passed": False,
         "tg_platform_context_passed": False,
+        "tg_platform_e2e_passed": False,
         "publish_matrix_ready": {},
         "agent_audit_responding_percent": 0.0,
         "social_auth": {},
@@ -120,6 +122,8 @@ def main() -> int:
             summary["tg_smoke_passed"] = bool(sm.get("failed", 1) == 0)
         if scenario == "platform_context":
             summary["tg_platform_context_passed"] = bool(sm.get("failed", 1) == 0)
+        if scenario == "phase_platform_e2e":
+            summary["tg_platform_e2e_passed"] = bool(sm.get("failed", 1) == 0)
 
     # Parse publish matrix
     for st in steps:

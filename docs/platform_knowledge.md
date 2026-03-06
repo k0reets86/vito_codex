@@ -195,34 +195,47 @@ This block supersedes older notes where they conflict.
 
 Stub response: operational output.
 
-## Mega test task
+## 2026-03-06 Field Matrix (Browser-First Runtime)
 
-Stub response: operational output.
+Цель этого блока: дать VITO практичные требования для заполнения листингов/постов в live-сценариях.
 
-## Mega test task
+### Etsy (digital listing)
+- Заголовок: до 140 символов, теги: до 13 шт., каждый тег до 20 символов.
+- Фото листинга: рекомендовано не меньше 2000 px по ширине.
+- Digital files: до 5 файлов на листинг, до 20 MB каждый.
+- Источники:
+  - https://help.etsy.com/hc/en-us/articles/115015628347-How-to-Manage-Your-Digital-Listings
+  - https://help.etsy.com/hc/en-us/articles/360000344908-How-to-Add-Photos-and-Video-to-Your-Listings
 
-Stub response: operational output.
+### Amazon KDP
+- Keyword-поля: 7 keyword slots (использовать как обязательный минимум при подготовке метаданных).
+- Cover/bleed правила и шаблоны — только по официальному калькулятору KDP.
+- Источники:
+  - https://kdp.amazon.com/en_US/help/topic/G201298500
+  - https://kdp.amazon.com/en_US/help/topic/G201113520
 
-## Mega test task
+### Gumroad
+- Runtime правило: при browser-flow не трогать старые листинги без явного target id/slug.
+- Для digital delivery опираться на upload main file + cover + preview assets + tags/category через редактор.
+- Источники:
+  - https://gumroad.com/help
+  - https://gumroad.com/terms
 
-Stub response: operational output.
+### Ko-fi Shop
+- Для тестов: title + description + price + media/file, затем проверка URL товара/страницы.
+- Учитывать ограничения, зависящие от тарифного плана (storage/file size).
+- Источник:
+  - https://help.ko-fi.com/hc/en-us
 
-## Mega test task
+### Pinterest
+- Базовый runtime-flow: title + description + target URL + image (если доступна), затем publish/save.
+- Для креативов использовать вертикальные изображения (рекомендованный аспект 2:3).
+- Источник:
+  - https://help.pinterest.com/en/business/article/create-pins
 
-Stub response: operational output.
-
-## Mega test task
-
-Stub response: operational output.
-
-## Mega test task
-
-Stub response: operational output.
-
-## Mega test task
-
-Stub response: operational output.
-
-## Mega test task
-
-Stub response: operational output.
+### X (Twitter) / Reddit
+- X: API-публикация зависит от уровня доступа приложения; при ограничениях держать browser fallback.
+- Reddit: при ограниченном API держать browser-only режим для публикации/исследования.
+- Источники:
+  - https://developer.x.com/en/docs
+  - https://www.reddit.com/dev/api/

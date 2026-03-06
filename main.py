@@ -117,6 +117,7 @@ from platforms.threads import ThreadsPlatform
 from platforms.youtube import YouTubePlatform
 from platforms.reddit import RedditPlatform
 from platforms.tiktok import TikTokPlatform
+from platforms.pinterest import PinterestPlatform
 from platforms.image_generator import ImageGenerator
 
 from code_generator import CodeGenerator
@@ -326,7 +327,12 @@ class VITO:
         # Image Generator — Replicate/BFL/WaveSpeed/DALL-E + Cloudinary
         self._image_generator = ImageGenerator()
         # Social media platforms for SMMAgent
-        social_platforms = {"twitter": self._twitter}
+        social_platforms = {
+            "twitter": self._twitter,
+            "reddit": RedditPlatform(),
+            "pinterest": PinterestPlatform(),
+            "threads": ThreadsPlatform(),
+        }
         quality_judge = QualityJudge(**deps)
 
         # All agents
@@ -372,6 +378,7 @@ class VITO:
             "youtube": YouTubePlatform(),
             "reddit": RedditPlatform(),
             "tiktok": TikTokPlatform(),
+            "pinterest": PinterestPlatform(),
             "wordpress": platforms_publish.get("wordpress"),
             "medium": platforms_publish.get("medium"),
         }

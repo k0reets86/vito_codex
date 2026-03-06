@@ -115,6 +115,21 @@ def _builtin(name: str) -> list[Step]:
             Step("R01", "/recipes", ["workflow recipes", "gumroad_publish"], ["traceback", "exception"]),
             Step("R02", "/recipe_run twitter_publish", ["recipe", "twitter"], ["traceback", "exception"]),
         ]
+    if key == "phase_platform_e2e":
+        return [
+            Step("E01", "зайди на амазон", ["amazon", "вход", "логин"], ["traceback", "exception"]),
+            Step("E02", "зайди на этси", ["etsy", "вход", "логин"], ["traceback", "exception"]),
+            Step("E03", "зайди на гумроад", ["gumroad", "вход", "логин"], ["traceback", "exception"]),
+            Step("E04", "зайди на ко фи", ["ko-fi", "kofi", "вход"], ["traceback", "exception"]),
+            Step("E05", "зайди на пинтерест", ["pinterest", "вход", "логин"], ["traceback", "exception"]),
+            Step("E06", "/recipe_run gumroad_publish live", ["recipe", "gumroad"], ["traceback", "exception"]),
+            Step("E07", "/recipe_run etsy_publish live", ["recipe", "etsy"], ["traceback", "exception"]),
+            Step("E08", "/recipe_run kofi_publish live", ["recipe", "kofi", "ko-fi"], ["traceback", "exception"]),
+            Step("E09", "/recipe_run kdp_publish live", ["recipe", "amazon", "kdp"], ["traceback", "exception"]),
+            Step("E10", "/recipe_run twitter_publish live", ["recipe", "twitter"], ["traceback", "exception"]),
+            Step("E11", "/recipe_run reddit_publish live", ["recipe", "reddit"], ["traceback", "exception"]),
+            Step("E12", "/recipe_run pinterest_publish live", ["recipe", "pinterest"], ["traceback", "exception"]),
+        ]
     raise ValueError(f"Unknown scenario: {name}")
 
 

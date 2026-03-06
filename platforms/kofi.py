@@ -169,20 +169,26 @@ class KofiPlatform(BasePlatform):
 
                 for sel in ("input[name='title']", "input[placeholder*='Title']", "input[type='text']"):
                     try:
-                        await page.fill(sel, title[:120])
-                        break
+                        loc = page.locator(sel)
+                        if await loc.count():
+                            await loc.first.fill(title[:120], timeout=1800)
+                            break
                     except Exception:
                         continue
                 for sel in ("textarea[name='description']", "textarea[placeholder*='Description']", "textarea"):
                     try:
-                        await page.fill(sel, description[:3000])
-                        break
+                        loc = page.locator(sel)
+                        if await loc.count():
+                            await loc.first.fill(description[:3000], timeout=1800)
+                            break
                     except Exception:
                         continue
                 for sel in ("input[name='price']", "input[placeholder*='Price']", "input[inputmode='decimal']"):
                     try:
-                        await page.fill(sel, price)
-                        break
+                        loc = page.locator(sel)
+                        if await loc.count():
+                            await loc.first.fill(price, timeout=1800)
+                            break
                     except Exception:
                         continue
 

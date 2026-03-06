@@ -67,6 +67,8 @@ class Settings:
     REDDIT_STORAGE_STATE_FILE: str = os.getenv("REDDIT_STORAGE_STATE_FILE", "runtime/reddit_storage_state.json")
     THREADS_STORAGE_STATE_FILE: str = os.getenv("THREADS_STORAGE_STATE_FILE", "runtime/threads_storage_state.json")
     PINTEREST_STORAGE_STATE_FILE: str = os.getenv("PINTEREST_STORAGE_STATE_FILE", "runtime/pinterest_storage_state.json")
+    PINTEREST_ACCESS_TOKEN: str = os.getenv("PINTEREST_ACCESS_TOKEN", "")
+    PINTEREST_MODE: str = os.getenv("PINTEREST_MODE", "browser")
     INSTAGRAM_STORAGE_STATE_FILE: str = os.getenv("INSTAGRAM_STORAGE_STATE_FILE", "runtime/instagram_storage_state.json")
     FACEBOOK_STORAGE_STATE_FILE: str = os.getenv("FACEBOOK_STORAGE_STATE_FILE", "runtime/facebook_storage_state.json")
     TIKTOK_STORAGE_STATE_FILE: str = os.getenv("TIKTOK_STORAGE_STATE_FILE", "runtime/tiktok_storage_state.json")
