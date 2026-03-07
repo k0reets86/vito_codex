@@ -55,6 +55,185 @@ class AmazonKDPPlatform(BasePlatform):
             logger.warning(f"KDP saved-session probe error: {e}", extra={"event": "kdp_session_probe_error"})
             return False
 
+    async def _ensure_pricing_via_saved_session(
+        self,
+        document_id: str,
+        *,
+        price_us: str = "2.99",
+        royalty_rate: str = "35_PERCENT",
+        enroll_select: bool = False,
+    ) -> dict[str, Any]:
+        if not self._state_file.exists() or not str(document_id or "").strip():
+            return {"pricing_page_seen": False, "pricing_saved": False, "pricing_us_set": False}
+        screenshot_path = ""
+        try:
+            from playwright.async_api import async_playwright
+
+            doc = str(document_id).strip()
+            async with async_playwright() as p:
+                args = [
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--disable-software-rasterizer",
+                    "--renderer-process-limit=1",
+                ]
+                if bool(getattr(settings, "BROWSER_CONSTRAINED_MODE", True)):
+                    args.extend(["--no-zygote", "--single-process"])
+                browser = await p.chromium.launch(headless=True, args=args)
+                context = await browser.new_context(storage_state=str(self._state_file), viewport={"width": 1440, "height": 920})
+                page = await context.new_page()
+                url = f"https://kdp.amazon.com/en_US/title-setup/kindle/{doc}/pricing?ref_=kdp_BS_D_p_ed_pricing"
+                await page.goto(url, wait_until="domcontentloaded", timeout=120000)
+                await page.wait_for_timeout(3000)
+                page_seen = "/pricing" in (page.url or "").lower() or "edit ebook pricing" in ((await page.title()) or "").lower()
+                saved = False
+                price_set = False
+                if page_seen:
+                    try:
+                        loc = page.locator("#data-is-select")
+                        if await loc.count() > 0:
+                            if enroll_select:
+                                await loc.first.check(timeout=2500)
+                            else:
+                                await loc.first.uncheck(timeout=2500)
+                    except Exception:
+                        pass
+                    try:
+                        await page.get_by_text("All territories (worldwide rights)", exact=False).first.click(timeout=2500)
+                    except Exception:
+                        pass
+                    try:
+                        await page.evaluate(
+                            """(rate) => {
+                                const hidden = document.querySelector('#data-digital-worldwide-rights');
+                                if (hidden) {
+                                    hidden.value = 'true';
+                                    hidden.dispatchEvent(new Event('change', { bubbles: true }));
+                                }
+                                const radio = document.querySelector(`input[name="data[digital][royalty_rate]-radio"][value="${rate}"]`);
+                                if (radio) {
+                                    radio.checked = true;
+                                    radio.dispatchEvent(new Event('change', { bubbles: true }));
+                                }
+                                const royalty = document.querySelector('#data-digital-royalty-rate-hidden');
+                                if (royalty) royalty.value = rate;
+                            }""",
+                            royalty_rate,
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        price_input = page.locator("input[name='data[digital][channels][amazon][US][price_vat_inclusive]']").first
+                        await price_input.fill(str(price_us), timeout=3500)
+                        await page.keyboard.press("Tab")
+                        await page.wait_for_timeout(1200)
+                        price_set = True
+                    except Exception:
+                        price_set = False
+                    try:
+                        save_btn = page.locator("#save-announce")
+                        if await save_btn.count() > 0:
+                            await save_btn.first.click(timeout=3500)
+                            saved = True
+                    except Exception:
+                        saved = False
+                    await page.wait_for_timeout(2500)
+                    screenshot_path = "runtime/remote_auth/kdp_adapter_pricing_after_save.png"
+                    await page.screenshot(path=screenshot_path, full_page=True)
+                    try:
+                        await page.reload(wait_until="domcontentloaded", timeout=120000)
+                        await page.wait_for_timeout(2000)
+                        current_price = await page.evaluate(
+                            """() => {
+                                const el = document.querySelector("input[name='data[digital][channels][amazon][US][price_vat_inclusive]']");
+                                return el ? (el.value || '') : '';
+                            }"""
+                        )
+                        current_royalty = await page.evaluate(
+                            """() => {
+                                const el = document.querySelector('#data-digital-royalty-rate-hidden');
+                                return el ? (el.value || '') : '';
+                            }"""
+                        )
+                        current_worldwide = await page.evaluate(
+                            """() => {
+                                const el = document.querySelector('#data-digital-worldwide-rights');
+                                return el ? (el.value || '') : '';
+                            }"""
+                        )
+                        price_set = price_set and str(current_price or "").strip() == str(price_us)
+                        saved = saved and str(current_royalty or "").strip() == royalty_rate and str(current_worldwide or "").strip().lower() == "true"
+                    except Exception:
+                        pass
+                await context.close()
+                await browser.close()
+                return {
+                    "pricing_page_seen": bool(page_seen),
+                    "pricing_saved": bool(saved),
+                    "pricing_us_set": bool(price_set),
+                    "pricing_url": page.url,
+                    "price_us": str(price_us),
+                    "royalty_rate": str(royalty_rate),
+                    "enroll_select": bool(enroll_select),
+                    "screenshot_path": screenshot_path,
+                }
+        except Exception as e:
+            logger.warning(f"KDP pricing probe error: {e}", extra={"event": "kdp_pricing_probe_error"})
+            return {"pricing_page_seen": False, "pricing_saved": False, "pricing_us_set": False, "error": str(e), "screenshot_path": screenshot_path}
+
+    async def _probe_existing_draft_via_saved_session(self, document_id: str) -> dict[str, Any]:
+        if not self._state_file.exists() or not str(document_id or "").strip():
+            return {"draft_visible": False, "manuscript_uploaded": False, "cover_uploaded": False}
+        screenshot_path = ""
+        try:
+            from playwright.async_api import async_playwright
+
+            doc = str(document_id).strip()
+            async with async_playwright() as p:
+                args = [
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--disable-software-rasterizer",
+                    "--renderer-process-limit=1",
+                ]
+                if bool(getattr(settings, "BROWSER_CONSTRAINED_MODE", True)):
+                    args.extend(["--no-zygote", "--single-process"])
+                browser = await p.chromium.launch(headless=True, args=args)
+                context = await browser.new_context(storage_state=str(self._state_file), viewport={"width": 1440, "height": 920})
+                page = await context.new_page()
+                url = f"https://kdp.amazon.com/en_US/title-setup/kindle/{doc}/content?ref_=kdp_BS_D_c_ed_content"
+                await page.goto(url, wait_until="domcontentloaded", timeout=120000)
+                await page.wait_for_timeout(3000)
+                body = ((await page.text_content("body")) or "").lower()
+                interior_status = await page.evaluate(
+                    """() => {
+                        const el = document.querySelector('#data-assets-interior-asset-status');
+                        return el ? (el.value || el.textContent || '') : '';
+                    }"""
+                )
+                cover_status = await page.evaluate(
+                    """() => {
+                        const el = document.querySelector('#data-assets-cover-asset-status');
+                        return el ? (el.value || el.textContent || '') : '';
+                    }"""
+                )
+                screenshot_path = "runtime/remote_auth/kdp_adapter_content_probe.png"
+                await page.screenshot(path=screenshot_path, full_page=True)
+                await context.close()
+                await browser.close()
+                return {
+                    "draft_visible": "/title-setup/kindle/" in (page.url or "").lower() or "kindle ebook content" in ((await page.title()) or "").lower(),
+                    "manuscript_uploaded": str(interior_status or "").strip().upper() == "SUCCESS" or "manuscript check complete" in body,
+                    "cover_uploaded": str(cover_status or "").strip().upper() == "SUCCESS",
+                    "content_url": page.url,
+                    "screenshot_path": screenshot_path,
+                }
+        except Exception as e:
+            logger.warning(f"KDP content probe error: {e}", extra={"event": "kdp_content_probe_error"})
+            return {"draft_visible": False, "manuscript_uploaded": False, "cover_uploaded": False, "error": str(e), "screenshot_path": screenshot_path}
+
     async def authenticate(self) -> bool:
         """Аутентификация через BrowserAgent (KDP login page)."""
         # Preferred path: saved browser session (created by scripts/kdp_auth_helper.py).
@@ -94,8 +273,17 @@ class AmazonKDPPlatform(BasePlatform):
         operation = str(content.get("operation") or "create").strip().lower()
         allow_existing_update = bool(content.get("allow_existing_update"))
         owner_edit_confirmed = bool(content.get("owner_edit_confirmed"))
+        allow_new_draft = bool(content.get("allow_new_draft"))
         target_document_id = str(content.get("target_document_id") or content.get("target_book_id") or "").strip()
         if bool(getattr(settings, "PUBLISH_CREATE_GUARD_ENABLED", True)):
+            if operation in {"create", "new", "create_or_update_draft"} and not allow_existing_update and not target_document_id and not allow_new_draft:
+                result = {
+                    "platform": "amazon_kdp",
+                    "status": "blocked",
+                    "error": "new_draft_requires_explicit_allow_new_draft",
+                }
+                self._record_publish_lesson(result, source="amazon_kdp.publish")
+                return result
             if operation in {"create", "new"} and allow_existing_update:
                 result = {
                     "platform": "amazon_kdp",
@@ -195,9 +383,13 @@ class AmazonKDPPlatform(BasePlatform):
         env["KDP_TEST_DRAFT_MANUSCRIPT"] = str(content.get("manuscript_path") or content.get("pdf_path") or content.get("file_path") or "")
         env["KDP_TEST_DRAFT_COVER"] = str(content.get("cover_path") or content.get("image_path") or "")
         env["KDP_TEST_DRAFT_DOCUMENT_ID"] = str(content.get("target_document_id") or content.get("target_book_id") or "")
+        env["KDP_TEST_DRAFT_PRICE_US"] = str(content.get("price_us") or content.get("price") or "2.99")
+        env["KDP_TEST_DRAFT_ROYALTY"] = str(content.get("royalty_rate") or "35_PERCENT")
+        env["KDP_TEST_DRAFT_ENROLL_SELECT"] = "1" if bool(content.get("enroll_select")) else "0"
         env["KDP_EMAIL"] = str(getattr(settings, "KDP_EMAIL", "") or os.getenv("KDP_EMAIL") or "")
         env["KDP_PASSWORD"] = str(getattr(settings, "KDP_PASSWORD", "") or os.getenv("KDP_PASSWORD") or "")
         env["KDP_RESUME_ONLY"] = "1"
+        env["KDP_HELPER_IMMEDIATE_EXIT"] = "1"
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -221,14 +413,22 @@ class AmazonKDPPlatform(BasePlatform):
             title_visible = bool(payload.get("title_found_on_bookshelf")) or bool(payload.get("title_found_via_search"))
             if fields_filled <= 0 and helper_soft_ok and title_visible:
                 fields_filled = 1
+            pricing_meta: dict[str, Any] = {}
+            if env["KDP_TEST_DRAFT_DOCUMENT_ID"] and not any(bool(payload.get(k)) for k in ("pricing_saved", "pricing_us_set", "pricing_page_seen")):
+                pricing_meta = await self._ensure_pricing_via_saved_session(
+                    env["KDP_TEST_DRAFT_DOCUMENT_ID"],
+                    price_us=env["KDP_TEST_DRAFT_PRICE_US"],
+                    royalty_rate=env["KDP_TEST_DRAFT_ROYALTY"],
+                    enroll_select=env["KDP_TEST_DRAFT_ENROLL_SELECT"] == "1",
+                )
             if helper_ok:
                 result = {
                     "platform": "amazon_kdp",
                     "status": "draft",
                     "url": "https://kdp.amazon.com/bookshelf",
                     "id": "",
-                    "screenshot_path": str(payload.get("bookshelf_screenshot") or payload.get("screenshot") or ""),
-                    "output": {**payload, "fields_filled": fields_filled},
+                    "screenshot_path": str(pricing_meta.get("screenshot_path") or payload.get("bookshelf_screenshot") or payload.get("screenshot") or ""),
+                    "output": {**payload, **pricing_meta, "fields_filled": fields_filled},
                     "method": "kdp_helper",
                 }
                 self._record_publish_lesson(result, source="amazon_kdp.kdp_helper")
@@ -240,8 +440,8 @@ class AmazonKDPPlatform(BasePlatform):
                     "status": "draft",
                     "url": "https://kdp.amazon.com/bookshelf",
                     "id": "",
-                    "screenshot_path": str(payload.get("bookshelf_screenshot") or payload.get("screenshot") or ""),
-                    "output": {**payload, "fields_filled": fields_filled},
+                    "screenshot_path": str(pricing_meta.get("screenshot_path") or payload.get("bookshelf_screenshot") or payload.get("screenshot") or ""),
+                    "output": {**payload, **pricing_meta, "fields_filled": fields_filled},
                     "method": "kdp_helper",
                 }
                 self._record_publish_lesson(result, source="amazon_kdp.kdp_helper")
@@ -257,6 +457,44 @@ class AmazonKDPPlatform(BasePlatform):
                 "method": "kdp_helper",
             }
             self._record_publish_lesson(result, source="amazon_kdp.kdp_helper")
+            return result
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            content_probe = await self._probe_existing_draft_via_saved_session(env["KDP_TEST_DRAFT_DOCUMENT_ID"])
+            pricing_meta = await self._ensure_pricing_via_saved_session(
+                env["KDP_TEST_DRAFT_DOCUMENT_ID"],
+                price_us=env["KDP_TEST_DRAFT_PRICE_US"],
+                royalty_rate=env["KDP_TEST_DRAFT_ROYALTY"],
+                enroll_select=env["KDP_TEST_DRAFT_ENROLL_SELECT"] == "1",
+            )
+            if content_probe.get("draft_visible") and (content_probe.get("manuscript_uploaded") or content_probe.get("cover_uploaded")):
+                result = {
+                    "platform": "amazon_kdp",
+                    "status": "draft",
+                    "url": "https://kdp.amazon.com/bookshelf",
+                    "id": "",
+                    "screenshot_path": str(pricing_meta.get("screenshot_path") or content_probe.get("screenshot_path") or ""),
+                    "output": {
+                        "timeout_fallback": True,
+                        **content_probe,
+                        **pricing_meta,
+                    },
+                    "method": "kdp_helper_timeout_probe",
+                }
+                self._record_publish_lesson(result, source="amazon_kdp.kdp_helper_timeout")
+                self._record_execution_fact(result)
+                return result
+            result = {
+                "platform": "amazon_kdp",
+                "status": "prepared",
+                "error": "kdp_helper_timeout",
+                "output": {**content_probe, **pricing_meta},
+                "method": "kdp_helper_timeout_probe",
+            }
+            self._record_publish_lesson(result, source="amazon_kdp.kdp_helper_timeout")
             return result
         except Exception as e:
             result = {"platform": "amazon_kdp", "status": "prepared", "error": str(e), "method": "kdp_helper"}

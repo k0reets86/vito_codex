@@ -64,7 +64,7 @@ class TestKDPPublish:
     @pytest.mark.asyncio
     async def test_publish_with_browser(self, kdp):
         result = await kdp.publish({"title": "Book"})
-        assert result["status"] in {"published", "prepared"}
+        assert result["status"] in {"draft", "published", "prepared"}
 
     @pytest.mark.asyncio
     async def test_publish_no_browser_records_platform_lesson(self, kdp_no_browser, monkeypatch):

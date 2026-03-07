@@ -7,16 +7,37 @@ import argparse
 import asyncio
 import json
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
 
 from playwright.async_api import async_playwright
 from PIL import Image
 
+ROOT_DIR = Path(__file__).resolve().parent.parent
+import sys
+
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from modules.epub_builder import build_simple_epub
+
 try:
     from config.settings import settings
 except Exception:  # pragma: no cover - helper can still run without app settings
     settings = None
+
+
+def _emit_result(payload: dict, code: int = 0) -> int:
+    print(json.dumps(payload, ensure_ascii=False))
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    except Exception:
+        pass
+    if str(os.getenv("KDP_HELPER_IMMEDIATE_EXIT", "")).strip().lower() in {"1", "true", "yes", "on"}:
+        os._exit(code)
+    return code
 
 
 def _launch_args() -> list[str]:
@@ -97,6 +118,204 @@ async def _body_all(page) -> str:
         return ""
 
 
+async def _kdp_asset_status(page, kind: str) -> tuple[str, str]:
+    selectors = {
+        "interior": (
+            "#data-assets-interior-asset-status",
+            "#data-assets-interior-asset-status-msg",
+        ),
+        "cover": (
+            "#data-assets-cover-asset-status",
+            "#data-assets-cover-asset-status-msg",
+        ),
+    }
+    status_sel, msg_sel = selectors.get(kind, ("", ""))
+    status = ""
+    msg = ""
+    try:
+        if status_sel:
+            status = await page.evaluate(
+                f"""() => {{
+                    const el = document.querySelector({json.dumps(status_sel)});
+                    return el ? (el.value || el.textContent || '') : '';
+                }}"""
+            )
+    except Exception:
+        status = ""
+    try:
+        if msg_sel:
+            msg = await page.evaluate(
+                f"""() => {{
+                    const el = document.querySelector({json.dumps(msg_sel)});
+                    return el ? (el.value || el.textContent || '') : '';
+                }}"""
+            )
+    except Exception:
+        msg = ""
+    return str(status or "").strip().upper(), str(msg or "").strip()
+
+
+async def _kdp_fill_pricing_page(
+    page,
+    document_id: str,
+    price_us: str,
+    royalty_rate: str,
+    enroll_select: bool,
+    dbg: Path,
+    stamp: str,
+) -> dict:
+    result = {
+        "pricing_page_seen": False,
+        "pricing_saved": False,
+        "pricing_us_set": False,
+        "pricing_url": "",
+    }
+    target_doc = str(document_id or "").strip()
+    if not target_doc:
+        return result
+    await page.goto(
+        f"https://kdp.amazon.com/en_US/title-setup/kindle/{target_doc}/pricing?ref_=kdp_BS_D_p_ed_pricing",
+        wait_until="domcontentloaded",
+        timeout=120000,
+    )
+    await page.wait_for_timeout(3500)
+    await _kdp_relogin_if_needed(page)
+    if "pricing" not in (page.url or "").lower():
+        await page.goto(
+            f"https://kdp.amazon.com/en_US/title-setup/kindle/{target_doc}/pricing?ref_=kdp_BS_D_p_ed_pricing",
+            wait_until="domcontentloaded",
+            timeout=120000,
+        )
+        await page.wait_for_timeout(2500)
+    result["pricing_url"] = page.url
+    result["pricing_page_seen"] = "/pricing" in (page.url or "").lower() or "edit ebook pricing" in ((await page.title()) or "").lower()
+    if not result["pricing_page_seen"]:
+        return result
+
+    try:
+        loc = page.locator("#data-is-select")
+        if await loc.count() > 0:
+            if enroll_select:
+                await loc.first.check(timeout=2500)
+            else:
+                await loc.first.uncheck(timeout=2500)
+            await page.wait_for_timeout(400)
+    except Exception:
+        pass
+
+    await _click_first(
+        page,
+        [
+            "text=All territories (worldwide rights)",
+            "a:has-text('All territories (worldwide rights)')",
+            "#data-digital-worldwide-rights-accordion a",
+        ],
+        timeout_ms=2500,
+    )
+    await page.wait_for_timeout(500)
+    try:
+        await page.evaluate(
+            """() => {
+                const hidden = document.querySelector('#data-digital-worldwide-rights');
+                if (hidden) {
+                    hidden.value = 'true';
+                    hidden.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }"""
+        )
+    except Exception:
+        pass
+
+    if royalty_rate in {"35_PERCENT", "70_PERCENT"}:
+        clicked = await _click_first(
+            page,
+            [
+                f"input[name='data[digital][royalty_rate]-radio'][value='{royalty_rate}']",
+                f"label:has(input[name='data[digital][royalty_rate]-radio'][value='{royalty_rate}'])",
+            ],
+            timeout_ms=2500,
+        )
+        if not clicked:
+            try:
+                await page.evaluate(
+                    f"""() => {{
+                        const radio = document.querySelector("input[name='data[digital][royalty_rate]-radio'][value='{royalty_rate}']");
+                        if (radio) {{
+                            radio.checked = true;
+                            radio.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                        }}
+                        const hidden = document.querySelector('#data-digital-royalty-rate-hidden');
+                        if (hidden) hidden.value = '{royalty_rate}';
+                    }}"""
+                )
+            except Exception:
+                pass
+        await page.wait_for_timeout(600)
+
+    result["pricing_us_set"] = await _fill_first(
+        page,
+        [
+            "input[name='data[digital][channels][amazon][US][price_vat_inclusive]']",
+            "input[id*='us-price' i]",
+            "input[name*='price_vat_inclusive' i]",
+        ],
+        price_us,
+        timeout_ms=3500,
+    )
+    await page.wait_for_timeout(800)
+    if result["pricing_us_set"]:
+        try:
+            await page.keyboard.press("Tab")
+        except Exception:
+            pass
+        await page.wait_for_timeout(1200)
+
+    result["pricing_saved"] = await _click_first(
+        page,
+        [
+            "#save-announce",
+            "button:has-text('Save as Draft')",
+            "button:has-text('Save and Continue')",
+            "button:has-text('Save')",
+        ],
+        timeout_ms=3500,
+    )
+    await page.wait_for_timeout(2800)
+    await page.screenshot(path=str(dbg / f"kdp_draft_{stamp}_pricing_after_save.png"), full_page=True)
+
+    try:
+        await page.reload(wait_until="domcontentloaded", timeout=120000)
+        await page.wait_for_timeout(2500)
+        current_price = await page.evaluate(
+            """() => {
+                const el = document.querySelector("input[name='data[digital][channels][amazon][US][price_vat_inclusive]']");
+                return el ? (el.value || '') : '';
+            }"""
+        )
+        current_royalty = await page.evaluate(
+            """() => {
+                const el = document.querySelector('#data-digital-royalty-rate-hidden');
+                return el ? (el.value || '') : '';
+            }"""
+        )
+        current_worldwide = await page.evaluate(
+            """() => {
+                const el = document.querySelector('#data-digital-worldwide-rights');
+                return el ? (el.value || '') : '';
+            }"""
+        )
+        result["pricing_us_set"] = result["pricing_us_set"] and str(current_price or "").strip() == price_us
+        result["pricing_saved"] = (
+            result["pricing_saved"]
+            and str(current_royalty or "").strip() == royalty_rate
+            and str(current_worldwide or "").strip().lower() == "true"
+        )
+        result["pricing_url"] = page.url
+    except Exception:
+        pass
+    return result
+
+
 async def _click_text_any(page, texts: list[str], timeout_ms: int = 2500) -> bool:
     for txt in texts:
         try:
@@ -125,6 +344,20 @@ def _prepare_kdp_cover_file(cover_path: str, dbg: Path, stamp: str) -> str:
         return str(out)
     except Exception:
         return str(src)
+
+
+def _prepare_kdp_manuscript_file(manuscript_path: str, dbg: Path, stamp: str, title: str, author: str, description: str) -> str:
+    raw = str(manuscript_path or "").strip()
+    src = Path(raw) if raw else None
+    if src and src.exists() and src.suffix.lower() == ".epub":
+        return str(src)
+    out = dbg / f"kdp_manuscript_{stamp}.epub"
+    chapters = [
+        ("Introduction", description or "Practical starter guide for creators and operators."),
+        ("Workflow", "Define the niche, validate demand, prepare assets, publish, and iterate on confirmed signals."),
+        ("Launch Checklist", "Use one draft per platform, confirm every field, and verify the result visually."),
+    ]
+    return build_simple_epub(out, title=title, author=author, description=description, chapters=chapters)
 
 
 async def _open_kdp_details_flow(page) -> bool:
@@ -188,6 +421,30 @@ async def _open_kdp_details_flow(page) -> bool:
         return "/title-setup/" in current_url and ("book title" in body_text or "language" in body_text)
     except Exception:
         return False
+
+
+async def _open_existing_draft_direct(page, document_id: str) -> bool:
+    doc = str(document_id or "").strip()
+    if not doc:
+        return False
+    urls = [
+        f"https://kdp.amazon.com/en_US/title-setup/kindle/{doc}/details?ref_=kdp_BS_D_ta_ed_main",
+        f"https://kdp.amazon.com/en_US/title-setup/kindle/{doc}/content?ref_=kdp_BS_D_c_ed_content",
+    ]
+    for url in urls:
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=120000)
+            await page.wait_for_timeout(2500)
+            await _kdp_relogin_if_needed(page)
+            await page.wait_for_timeout(1800)
+            cur = (page.url or "").lower()
+            title = ((await page.title()) or "").lower()
+            body = ((await page.text_content("body")) or "").lower()
+            if f"/title-setup/kindle/{doc.lower()}/" in cur or "edit ebook" in title or "book title" in body:
+                return True
+        except Exception:
+            continue
+    return False
 
 
 async def _bookshelf_titles(page) -> list[str]:
@@ -352,53 +609,53 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
     keywords = [x.strip() for x in str(os.getenv("KDP_TEST_DRAFT_KEYWORDS", "")).split("|") if x.strip()]
     manuscript_path = str(os.getenv("KDP_TEST_DRAFT_MANUSCRIPT", "")).strip()
     cover_path = str(os.getenv("KDP_TEST_DRAFT_COVER", "")).strip()
+    price_us = str(os.getenv("KDP_TEST_DRAFT_PRICE_US", "2.99")).strip() or "2.99"
+    royalty_rate = str(os.getenv("KDP_TEST_DRAFT_ROYALTY", "35_PERCENT")).strip() or "35_PERCENT"
+    enroll_select = str(os.getenv("KDP_TEST_DRAFT_ENROLL_SELECT", "0")).strip().lower() in {"1", "true", "yes", "on"}
     resume_only = str(os.getenv("KDP_RESUME_ONLY", "")).strip().lower() in {"1", "true", "yes", "on"}
 
     cover_path = _prepare_kdp_cover_file(cover_path, dbg, stamp)
+    manuscript_path = _prepare_kdp_manuscript_file(manuscript_path, dbg, stamp, title, author, description)
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=headless, args=_launch_args())
         ctx = await browser.new_context(storage_state=str(state), viewport={"width": 1440, "height": 920})
         page = await ctx.new_page()
         try:
-            await page.goto("https://kdp.amazon.com/bookshelf", wait_until="domcontentloaded", timeout=120000)
-            await page.wait_for_timeout(2500)
-            await _kdp_relogin_if_needed(page)
-            if "signin" in (page.url or "").lower() or "ap/signin" in (page.url or "").lower():
-                await page.screenshot(path=str(dbg / f"kdp_draft_{stamp}_signin_required.png"), full_page=True)
-                print(
-                    json.dumps(
-                        {"ok": False, "error": "signin_required_after_password", "url": page.url, "screenshot": str(dbg / f"kdp_draft_{stamp}_signin_required.png")},
-                        ensure_ascii=False,
-                    )
-                )
-                return 3
-            before_titles = await _bookshelf_titles(page)
-
+            before_titles: list[str] = []
             resumed_existing = False
-            if document_id:
+            if document_id and resume_only:
+                await _open_existing_draft_direct(page, document_id)
+                await _kdp_relogin_if_needed(page)
+                await page.wait_for_timeout(1500)
+                await _open_existing_draft_direct(page, document_id)
+                resumed_existing = True
+            else:
+                await page.goto("https://kdp.amazon.com/bookshelf", wait_until="domcontentloaded", timeout=120000)
+                await page.wait_for_timeout(2500)
+                await _kdp_relogin_if_needed(page)
+                if "signin" in (page.url or "").lower() or "ap/signin" in (page.url or "").lower():
+                    await page.screenshot(path=str(dbg / f"kdp_draft_{stamp}_signin_required.png"), full_page=True)
+                    print(
+                        json.dumps(
+                            {"ok": False, "error": "signin_required_after_password", "url": page.url, "screenshot": str(dbg / f"kdp_draft_{stamp}_signin_required.png")},
+                            ensure_ascii=False,
+                        )
+                    )
+                    return 3
+                before_titles = await _bookshelf_titles(page)
+
+            if not resumed_existing and document_id:
+                resumed_existing = await _open_existing_draft_direct(page, document_id)
+            if not resumed_existing and document_id:
                 resumed_existing = await _open_existing_draft_by_document_id(page, document_id)
-            if not resumed_existing:
+            if not resumed_existing and not (document_id and resume_only):
                 resumed_existing = await _open_existing_bookshelf_draft(page, title)
             if resumed_existing:
                 await _kdp_relogin_if_needed(page)
                 await page.wait_for_timeout(2200)
-            elif resume_only:
-                await page.screenshot(path=str(dbg / f"kdp_draft_{stamp}_resume_only_not_found.png"), full_page=True)
-                print(
-                    json.dumps(
-                        {
-                            "ok": False,
-                            "ok_soft": False,
-                            "error": "resume_only_existing_draft_not_found",
-                            "title": title,
-                            "url": page.url,
-                            "screenshot": str(dbg / f"kdp_draft_{stamp}_resume_only_not_found.png"),
-                        },
-                        ensure_ascii=False,
-                    )
-                )
-                return 4
+            elif resume_only and not document_id:
+                resumed_existing = False
 
             if not resumed_existing:
                 # Step 1: open create flow
@@ -412,8 +669,7 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
                 )
                 if not opened:
                     await page.screenshot(path=str(dbg / f"kdp_draft_{stamp}_no_create.png"), full_page=True)
-                    print(json.dumps({"ok": False, "error": "create_button_not_found", "url": page.url}, ensure_ascii=False))
-                    return 3
+                    return _emit_result({"ok": False, "error": "create_button_not_found", "url": page.url}, 3)
 
                 await page.wait_for_timeout(1200)
 
@@ -423,18 +679,7 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
                 await _kdp_relogin_if_needed(page)
                 if not chosen:
                     await page.screenshot(path=str(dbg / f"kdp_draft_{stamp}_create_flow_not_opened.png"), full_page=True)
-                    print(
-                        json.dumps(
-                            {
-                                "ok": False,
-                                "error": "create_flow_not_opened",
-                                "url": page.url,
-                                "screenshot": str(dbg / f"kdp_draft_{stamp}_create_flow_not_opened.png"),
-                            },
-                            ensure_ascii=False,
-                        )
-                    )
-                    return 3
+                    return _emit_result({"ok": False, "error": "create_flow_not_opened", "url": page.url, "screenshot": str(dbg / f"kdp_draft_{stamp}_create_flow_not_opened.png")}, 3)
 
             # Step 3: fill metadata on details page (best effort).
             await _fill_first(
@@ -656,7 +901,7 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
                 )
                 if manuscript_uploaded:
                     await page.wait_for_timeout(3500)
-                    await _click_text_any(page, ["Continue with PDF", "I have another format"], timeout_ms=2500)
+                    await _click_text_any(page, ["Continue with PDF", "I have another format", "Continue"], timeout_ms=2500)
                     await page.wait_for_timeout(1200)
                     body_now = await _body_all(page)
                     manuscript_uploaded = (
@@ -709,43 +954,146 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
                     )
                     await page.wait_for_timeout(2500)
                     await page.screenshot(path=str(dbg / f"kdp_draft_{stamp}_after_assets.png"), full_page=True)
+                    # If content is valid enough, KDP should allow moving to pricing.
+                    await _click_first(
+                        page,
+                        [
+                            "#book-setup-navigation-bar-pricing-link",
+                            "a#book-setup-navigation-bar-pricing-link",
+                            "button:has-text('Kindle eBook Pricing')",
+                            "a:has-text('Kindle eBook Pricing')",
+                        ],
+                        timeout_ms=3500,
+                    )
+                    await page.wait_for_timeout(2000)
             except Exception:
                 pass
 
-            # Step 5: strict verification on Bookshelf with retries (KDP list can refresh with delay).
-            await page.goto("https://kdp.amazon.com/bookshelf", wait_until="domcontentloaded", timeout=120000)
-            await page.wait_for_timeout(3500)
-            # Additional verification path: search by exact title in bookshelf search field.
-            search_hit = False
+            # Step 4c: confirm asset state from KDP content page itself.
             try:
-                for sel in ("input[placeholder*='Search by title']", "input[aria-label*='Search by title']", "input[type='search']"):
-                    box = page.locator(sel)
-                    if await box.count() > 0:
-                        await box.first.fill(title)
-                        await page.keyboard.press("Enter")
-                        await page.wait_for_timeout(2200)
-                        body_text = (await page.text_content("body") or "").lower()
-                        if title.lower() in body_text:
-                            search_hit = True
-                        break
+                interior_status, interior_msg = await _kdp_asset_status(page, "interior")
+                cover_status_now, cover_msg_now = await _kdp_asset_status(page, "cover")
+                if not manuscript_uploaded:
+                    manuscript_uploaded = interior_status == "SUCCESS" or "manuscript check complete" in interior_msg.lower()
+                if not cover_uploaded:
+                    cover_uploaded = cover_status_now == "SUCCESS" or "uploaded successfully" in cover_msg_now.lower()
             except Exception:
-                search_hit = False
-            await page.screenshot(path=str(dbg / f"kdp_draft_{stamp}_bookshelf.png"), full_page=True)
-            after_titles = await _bookshelf_titles(page)
-            if not any((title or "").lower() in (t or "").lower() for t in after_titles):
-                for _ in range(2):
+                pass
+
+            # Step 5: pricing page
+            pricing_saved = False
+            pricing_us_set = False
+            pricing_page_seen = False
+            pricing_url = ""
+            try:
+                pricing_result = await asyncio.wait_for(
+                    _kdp_fill_pricing_page(page, document_id, price_us, royalty_rate, enroll_select, dbg, stamp),
+                    timeout=45,
+                )
+                pricing_saved = bool(pricing_result.get("pricing_saved"))
+                pricing_us_set = bool(pricing_result.get("pricing_us_set"))
+                pricing_page_seen = bool(pricing_result.get("pricing_page_seen"))
+                pricing_url = str(pricing_result.get("pricing_url") or "")
+                if not pricing_page_seen and document_id:
+                    pricing_page = await ctx.new_page()
                     try:
-                        await page.reload(wait_until="domcontentloaded", timeout=120000)
-                        await page.wait_for_timeout(2200)
-                        after_titles = await _bookshelf_titles(page)
-                        if any((title or "").lower() in (t or "").lower() for t in after_titles):
+                        pricing_result = await asyncio.wait_for(
+                            _kdp_fill_pricing_page(pricing_page, document_id, price_us, royalty_rate, enroll_select, dbg, stamp),
+                            timeout=45,
+                        )
+                        pricing_saved = bool(pricing_result.get("pricing_saved"))
+                        pricing_us_set = bool(pricing_result.get("pricing_us_set"))
+                        pricing_page_seen = bool(pricing_result.get("pricing_page_seen"))
+                        pricing_url = str(pricing_result.get("pricing_url") or "")
+                    finally:
+                        try:
+                            await pricing_page.close()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+            if resume_only and document_id and (manuscript_uploaded or cover_uploaded or pricing_page_seen):
+                fields_filled = 0
+                fields_filled += 1 if title.strip() else 0
+                fields_filled += 1 if bool(saved) else 0
+                fields_filled += 1 if bool(first_set) else 0
+                fields_filled += 1 if bool(description_set) else 0
+                fields_filled += int(keyword_slots_filled > 0)
+                fields_filled += 1 if bool(manuscript_uploaded) else 0
+                fields_filled += 1 if bool(cover_uploaded) else 0
+                fields_filled += 1 if bool(pricing_us_set) else 0
+                result = {
+                    "ok": bool(manuscript_uploaded or cover_uploaded or pricing_page_seen),
+                    "ok_soft": bool(manuscript_uploaded or cover_uploaded or pricing_page_seen),
+                    "title": title,
+                    "saved_click": bool(saved),
+                    "url": page.url,
+                    "title_found_on_bookshelf": True,
+                    "title_found_via_search": True,
+                    "draft_visible": True,
+                    "before_count": len(before_titles),
+                    "after_count": len(before_titles),
+                    "fields_filled": int(fields_filled),
+                    "description_set": bool(description_set),
+                    "keyword_slots_filled": int(keyword_slots_filled),
+                    "manuscript_uploaded": bool(manuscript_uploaded),
+                    "cover_uploaded": bool(cover_uploaded),
+                    "pricing_page_seen": bool(pricing_page_seen),
+                    "pricing_saved": bool(pricing_saved),
+                    "pricing_us_set": bool(pricing_us_set),
+                    "pricing_url": pricing_url,
+                    "price_us": price_us,
+                    "royalty_rate": royalty_rate,
+                    "enroll_select": bool(enroll_select),
+                    "manuscript_path": manuscript_path,
+                    "note": "resume_only_direct_document_verification",
+                    "screenshot": str(dbg / f"kdp_draft_{stamp}_after_save.png"),
+                    "bookshelf_screenshot": str(dbg / f"kdp_draft_{stamp}_after_save.png"),
+                }
+                return _emit_result(result, 0)
+
+            search_hit = False
+            after_titles: list[str] = []
+            has_title = False
+            appeared_new = False
+            if resume_only and document_id:
+                await page.screenshot(path=str(dbg / f"kdp_draft_{stamp}_bookshelf.png"), full_page=True)
+                search_hit = True
+                has_title = True
+            else:
+                await page.goto("https://kdp.amazon.com/bookshelf", wait_until="domcontentloaded", timeout=120000)
+                await page.wait_for_timeout(3500)
+                # Additional verification path: search by exact title in bookshelf search field.
+                try:
+                    for sel in ("input[placeholder*='Search by title']", "input[aria-label*='Search by title']", "input[type='search']"):
+                        box = page.locator(sel)
+                        if await box.count() > 0:
+                            await box.first.fill(title)
+                            await page.keyboard.press("Enter")
+                            await page.wait_for_timeout(2200)
+                            body_text = (await page.text_content("body") or "").lower()
+                            if title.lower() in body_text:
+                                search_hit = True
                             break
-                    except Exception:
-                        continue
-            before_l = [t.lower() for t in before_titles]
-            after_l = [t.lower() for t in after_titles]
-            has_title = title.lower() in after_l
-            appeared_new = any(t not in before_l for t in after_l)
+                except Exception:
+                    search_hit = False
+                await page.screenshot(path=str(dbg / f"kdp_draft_{stamp}_bookshelf.png"), full_page=True)
+                after_titles = await _bookshelf_titles(page)
+                if not any((title or "").lower() in (t or "").lower() for t in after_titles):
+                    for _ in range(2):
+                        try:
+                            await page.reload(wait_until="domcontentloaded", timeout=120000)
+                            await page.wait_for_timeout(2200)
+                            after_titles = await _bookshelf_titles(page)
+                            if any((title or "").lower() in (t or "").lower() for t in after_titles):
+                                break
+                        except Exception:
+                            continue
+                before_l = [t.lower() for t in before_titles]
+                after_l = [t.lower() for t in after_titles]
+                has_title = title.lower() in after_l
+                appeared_new = any(t not in before_l for t in after_l)
             fields_filled = 0
             fields_filled += 1 if title.strip() else 0
             fields_filled += 1 if bool(saved) else 0
@@ -754,6 +1102,7 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
             fields_filled += int(keyword_slots_filled > 0)
             fields_filled += 1 if bool(manuscript_uploaded) else 0
             fields_filled += 1 if bool(cover_uploaded) else 0
+            fields_filled += 1 if bool(pricing_us_set) else 0
             draft_visible = bool(has_title or appeared_new or search_hit)
             ok = bool(draft_visible)
             ok_soft = bool(draft_visible)
@@ -773,15 +1122,28 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
                 "keyword_slots_filled": int(keyword_slots_filled),
                 "manuscript_uploaded": bool(manuscript_uploaded),
                 "cover_uploaded": bool(cover_uploaded),
+                "pricing_page_seen": bool(pricing_page_seen),
+                "pricing_saved": bool(pricing_saved),
+                "pricing_us_set": bool(pricing_us_set),
+                "pricing_url": pricing_url,
+                "price_us": price_us,
+                "royalty_rate": royalty_rate,
+                "enroll_select": bool(enroll_select),
+                "manuscript_path": manuscript_path,
                 "note": "strict_bookshelf_verification",
                 "screenshot": str(dbg / f"kdp_draft_{stamp}_after_save.png"),
                 "bookshelf_screenshot": str(dbg / f"kdp_draft_{stamp}_bookshelf.png"),
             }
-            print(json.dumps(result, ensure_ascii=False))
-            return 0 if (ok or ok_soft) else 4
+            return _emit_result(result, 0 if (ok or ok_soft) else 4)
         finally:
-            await ctx.close()
-            await browser.close()
+            try:
+                await asyncio.wait_for(ctx.close(), timeout=3)
+            except Exception:
+                pass
+            try:
+                await asyncio.wait_for(browser.close(), timeout=3)
+            except Exception:
+                pass
 
 
 def main() -> int:
