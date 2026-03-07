@@ -58,10 +58,11 @@ class PinterestPlatform(BasePlatform):
         except Exception:
             return {"platform": "pinterest", "status": "error", "error": "playwright_not_installed"}
 
-        title = str(content.get("title") or content.get("name") or "VITO Pin").strip()
+        title = str(content.get("title") or content.get("name") or "Working Pin").strip()
         description = str(content.get("description") or content.get("text") or "").strip()
         target_url = str(content.get("url") or content.get("target_url") or "").strip()
         media_path = str(content.get("image_path") or content.get("cover_path") or "").strip()
+        target_tags = [str(x).strip() for x in (content.get("tags") or []) if str(x).strip()]
 
         shot = str(PROJECT_ROOT / "runtime" / "pinterest_browser_publish.png")
         page_html = str(PROJECT_ROOT / "runtime" / "pinterest_browser_publish.html")
@@ -229,7 +230,9 @@ class PinterestPlatform(BasePlatform):
                     except Exception:
                         pass
 
+                title_filled = False
                 for sel in (
+                    "#storyboard-selector-title",
                     "input[aria-label*='Название' i]",
                     "input[placeholder*='Название' i]",
                     "input[name*='title' i]",
@@ -240,35 +243,87 @@ class PinterestPlatform(BasePlatform):
                     try:
                         loc = page.locator(sel)
                         if await loc.count():
-                            await loc.first.fill(title[:100], timeout=2000)
+                            target = loc.first
+                            await target.click(timeout=2000)
+                            await target.fill(title[:100], timeout=2000)
+                            await page.wait_for_timeout(150)
+                            try:
+                                await target.press("Tab")
+                            except Exception:
+                                pass
+                            title_filled = True
                             break
                     except Exception:
                         continue
 
+                desc_filled = False
                 for sel in (
+                    "div[aria-label*='Добавьте подробное описание' i]",
                     "textarea[aria-label*='Описание' i]",
                     "textarea[placeholder*='Описание' i]",
                     "textarea[name*='description' i]",
                     "textarea[aria-label*='description' i]",
+                    "div[contenteditable='true'][aria-label*='Описание' i]",
+                    "div[contenteditable='true'][aria-label*='описание' i]",
+                    "div[contenteditable='true'][aria-label*='description' i]",
+                    "div[aria-label*='Добавьте подробное описание' i]",
                     "div[contenteditable='true'][aria-label*='description' i]",
                 ):
                     try:
                         loc = page.locator(sel)
                         if await loc.count():
-                            await loc.first.fill(description[:500], timeout=2000)
+                            target = loc.first
+                            try:
+                                await target.fill(description[:500], timeout=2000)
+                            except Exception:
+                                await target.click(timeout=2000)
+                                await page.wait_for_timeout(200)
+                                await target.press("Control+A")
+                                await target.type(description[:500], delay=10)
+                            await page.wait_for_timeout(150)
+                            try:
+                                await target.press("Tab")
+                            except Exception:
+                                pass
+                            desc_filled = True
                             break
                     except Exception:
                         continue
 
                 if target_url:
-                    for sel in ("input[placeholder*='Link' i]", "input[aria-label*='Link' i]", "input[type='url']"):
+                    for sel in ("#WebsiteField", "input[placeholder*='Link' i]", "input[aria-label*='Link' i]", "input[type='url']"):
                         try:
                             loc = page.locator(sel)
                             if await loc.count():
-                                await loc.first.fill(target_url[:512], timeout=2000)
+                                target = loc.first
+                                await target.click(timeout=2000)
+                                await target.fill(target_url[:512], timeout=2000)
+                                await page.wait_for_timeout(150)
+                                try:
+                                    await target.press("Tab")
+                                except Exception:
+                                    pass
                                 break
                         except Exception:
                             continue
+                if target_tags:
+                    try:
+                        tag_box = page.locator("#combobox-storyboard-interest-tags")
+                        if await tag_box.count():
+                            for tag in target_tags[:5]:
+                                await tag_box.first.fill(tag[:40], timeout=2000)
+                                await page.wait_for_timeout(400)
+                                try:
+                                    await tag_box.first.press("ArrowDown")
+                                    await tag_box.first.press("Enter")
+                                except Exception:
+                                    try:
+                                        await tag_box.first.press("Enter")
+                                    except Exception:
+                                        pass
+                                await page.wait_for_timeout(250)
+                    except Exception:
+                        pass
                 # Select board (required in many Pinterest UIs before publish).
                 try:
                     for sel in (

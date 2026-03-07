@@ -2692,3 +2692,18 @@ Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screen
 - Do not assume cover failure if hidden status fields already show `SUCCESS`.
 - Do not keep blaming the account page when pricing is actually blocked by incomplete/ unapproved `Content`.
 - Do not leave marketplace prices empty on the new `print-setup` pricing page.
+
+
+## Social package — screenshot-first findings (2026-03-07)
+
+### Pinterest
+- Confirmed live pin: `https://www.pinterest.com/pin/1134203487424108921`
+- Confirmed on final pin page: outbound Etsy link and visible description text.
+- Confirmed in publish-state HTML: title `AI Side Hustle Starter Kit for Creators`, description, and `WebsiteField=https://www.etsy.com/listing/4468093584`.
+- Important nuance: final pin page may render profile name (`Vito`) as the visible heading even when title is saved in the creation state. Do not treat missing visible H1 title as missing metadata without checking publish-state HTML and outbound link.
+
+### Reddit
+- Correct browser path is old.reddit profile submit: `https://old.reddit.com/user/<username>/submit`.
+- Correct final submit button is `button.btn[name="submit"][value="form"]`.
+- Media upload can complete (`Your video has uploaded!`) and still be rejected on final submit with: `That was a tricky one. Why don't you try that again.`
+- This is a confirmed anti-abuse / submit gate, not a selector or auth failure.

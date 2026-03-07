@@ -255,6 +255,14 @@ class RedditPlatform(BasePlatform):
             return {"platform": "reddit", "status": "error", "error": "playwright_not_installed"}
 
         subreddit = str(content.get("subreddit", "")).strip() or "test"
+        profile_name = ""
+        post_to_profile = False
+        if subreddit.lower().startswith("u_"):
+            profile_name = subreddit[2:].strip()
+            post_to_profile = bool(profile_name)
+        elif subreddit.lower().startswith("user/"):
+            profile_name = subreddit.split("/", 1)[1].strip()
+            post_to_profile = bool(profile_name)
         title = str(content.get("title", "")).strip()
         body = str(content.get("text", "")).strip()
         link_url = str(content.get("url", "") or content.get("image_url", "")).strip()
@@ -407,7 +415,10 @@ class RedditPlatform(BasePlatform):
                 # Legacy fallback: old.reddit submit form is often less fragile than new UI.
                 if "/comments/" not in post_url:
                     try:
-                        await page.goto("https://old.reddit.com/submit", wait_until="domcontentloaded", timeout=90000)
+                        old_submit_url = "https://old.reddit.com/submit"
+                        if post_to_profile and profile_name:
+                            old_submit_url = f"https://old.reddit.com/user/{profile_name}/submit"
+                        await page.goto(old_submit_url, wait_until="domcontentloaded", timeout=90000)
                         await page.wait_for_timeout(1500)
                         # Accept cookie banner if present (can block submit controls).
                         for sel in (
@@ -461,14 +472,45 @@ class RedditPlatform(BasePlatform):
                                         break
                                 except Exception:
                                     continue
-                        try:
-                            await page.fill("input[name='sr']", subreddit, timeout=2000)
-                        except Exception:
-                            pass
+                        if post_to_profile:
+                            # old.reddit profile submit is less reliable via standard check(); set it directly.
+                            try:
+                                await page.evaluate(
+                                    """() => {
+                                        const profile = document.querySelector('#submit_type_profile');
+                                        const sub = document.querySelector('#submit_type_subreddit');
+                                        if (sub) sub.checked = false;
+                                        if (profile) {
+                                            profile.checked = true;
+                                            profile.dispatchEvent(new Event('change', { bubbles: true }));
+                                            profile.dispatchEvent(new Event('click', { bubbles: true }));
+                                        }
+                                        const sr = document.querySelector('#sr-autocomplete');
+                                        if (sr) sr.value = '';
+                                        const selected = document.querySelector('#selected_sr_names');
+                                        if (selected) selected.value = '';
+                                    }"""
+                                )
+                                await page.wait_for_timeout(300)
+                            except Exception:
+                                pass
+                        else:
+                            try:
+                                await page.fill("input[name='sr']", subreddit, timeout=2000)
+                            except Exception:
+                                pass
                         await page.fill("textarea[name='title']", title[:300], timeout=2500)
                         if prefer_image_post:
                             try:
-                                await page.fill("input[name='url']", await self._upload_image_to_cloudinary(image_path), timeout=2500)
+                                img = page.locator("#image")
+                                if await img.count():
+                                    await img.first.set_input_files(image_path)
+                                    await page.wait_for_timeout(1200)
+                                    for _ in range(45):
+                                        body_now = ((await page.text_content("body")) or "").lower()
+                                        if "your video has uploaded" in body_now or "choose a thumbnail" in body_now:
+                                            break
+                                        await page.wait_for_timeout(1000)
                             except Exception:
                                 pass
                         elif link_url:
@@ -479,6 +521,16 @@ class RedditPlatform(BasePlatform):
                         elif body:
                             try:
                                 await page.fill("textarea[name='text']", body[:40000], timeout=2500)
+                            except Exception:
+                                pass
+                        # If text field becomes enabled after media upload, populate it.
+                        if body:
+                            try:
+                                txt = page.locator("textarea[name='text']")
+                                if await txt.count():
+                                    disabled = await txt.first.get_attribute("disabled")
+                                    if disabled is None:
+                                        await txt.first.fill(body[:40000], timeout=2500)
                             except Exception:
                                 pass
                         # Solve old.reddit reCAPTCHA if present.
@@ -512,7 +564,13 @@ class RedditPlatform(BasePlatform):
                                     "url": page.url,
                                     "screenshot_path": shot,
                                 }
-                        for sel in ("button[type='submit']", "button:has-text('submit')", "input[type='submit']"):
+                        for sel in (
+                            "button.btn[name='submit'][value='form']",
+                            "button[name='submit'][value='form']",
+                            "button[type='submit']",
+                            "button:has-text('submit')",
+                            "input[type='submit']",
+                        ):
                             btn = page.locator(sel)
                             if await btn.count():
                                 try:
@@ -525,7 +583,39 @@ class RedditPlatform(BasePlatform):
                         current2 = str(page.url or "")
                         if "/comments/" in current2:
                             post_url = current2
-                        elif has_captcha:
+                        else:
+                            # old.reddit may keep the user on /submit even after a successful token
+                            # injection; force form submission once before treating it as blocked.
+                            try:
+                                forced = await page.evaluate(
+                                    """() => {
+                                        const form = document.querySelector('#newlink');
+                                        if (!form) return false;
+                                        try { form.requestSubmit ? form.requestSubmit() : form.submit(); return true; }
+                                        catch (_) { return false; }
+                                    }"""
+                                )
+                                if forced:
+                                    await page.wait_for_timeout(3000)
+                                    current2 = str(page.url or "")
+                                    if "/comments/" in current2:
+                                        post_url = current2
+                            except Exception:
+                                pass
+                        reject_text = ""
+                        try:
+                            reject_text = (await page.text_content("body") or "").lower()
+                        except Exception:
+                            reject_text = ""
+                        if "that was a tricky one" in reject_text and "/comments/" not in post_url:
+                            return {
+                                "platform": "reddit",
+                                "status": "blocked",
+                                "error": "submit_rejected_after_media_upload",
+                                "url": page.url,
+                                "screenshot_path": shot,
+                            }
+                        if has_captcha and "/comments/" not in post_url:
                             return {
                                 "platform": "reddit",
                                 "status": "blocked",
