@@ -20,6 +20,7 @@ from config.paths import PROJECT_ROOT
 from config.settings import settings
 from modules.execution_facts import ExecutionFacts
 from modules.listing_optimizer import optimize_listing_payload
+from modules.platform_knowledge import record_platform_lesson
 from platforms.base_platform import BasePlatform
 
 logger = get_logger("etsy", agent="etsy")
@@ -152,34 +153,44 @@ class EtsyPlatform(BasePlatform):
         draft_only = bool(content.get("draft_only"))
         if bool(getattr(settings, "PUBLISH_CREATE_GUARD_ENABLED", True)):
             if operation in {"create", "new"} and allow_existing_update:
-                return {
+                result = {
                     "platform": "etsy",
                     "status": "blocked",
                     "error": "create_mode_forbids_existing_update",
                 }
+                self._record_browser_lesson(result, source="etsy.publish.browser")
+                return result
             if allow_existing_update and not owner_edit_confirmed:
-                return {
+                result = {
                     "platform": "etsy",
                     "status": "blocked",
                     "error": "existing_update_requires_explicit_owner_request",
                 }
+                self._record_browser_lesson(result, source="etsy.publish.browser")
+                return result
         if allow_existing_update and not target_listing_id:
-            return {
+            result = {
                 "platform": "etsy",
                 "status": "blocked",
                 "error": "existing_update_requires_target_listing_id",
             }
+            self._record_browser_lesson(result, source="etsy.publish.browser")
+            return result
         if not self._storage_state_path.exists():
-            return {
+            result = {
                 "platform": "etsy",
                 "status": "needs_browser_login",
                 "error": "Etsy browser session required. Run: python3 scripts/etsy_auth_helper.py browser-capture",
                 "storage_state": str(self._storage_state_path),
             }
+            self._record_browser_lesson(result, source="etsy.publish.browser")
+            return result
         try:
             from playwright.async_api import async_playwright
         except Exception:
-            return {"platform": "etsy", "status": "error", "error": "playwright_not_installed"}
+            result = {"platform": "etsy", "status": "error", "error": "playwright_not_installed"}
+            self._record_browser_lesson(result, source="etsy.publish.browser")
+            return result
 
         title = str(content.get("title") or "VITO Etsy Product").strip()
         description = str(content.get("description") or "").strip()
@@ -313,27 +324,33 @@ class EtsyPlatform(BasePlatform):
                         except Exception:
                             continue
                 if "/signin" in current or "/oauth" in current:
-                    return {
+                    result = {
                         "platform": "etsy",
                         "status": "needs_browser_login",
                         "error": "Stored Etsy session expired.",
                         "storage_state": str(self._storage_state_path),
                     }
+                    self._record_browser_lesson(result, source="etsy.publish.browser")
+                    return result
                 if ("/listing/" in current and "/edit" in current) or ("/listing-editor/edit/" in current):
                     if not allow_existing_update:
-                        return {
+                        result = {
                             "platform": "etsy",
                             "status": "blocked",
                             "error": "existing_listing_edit_detected_without_explicit_update",
                             "url": page.url,
                         }
+                        self._record_browser_lesson(result, source="etsy.publish.browser")
+                        return result
                     if target_listing_id and (f"/listing/{target_listing_id}" not in current and f"/listing-editor/edit/{target_listing_id}" not in current):
-                        return {
+                        result = {
                             "platform": "etsy",
                             "status": "blocked",
                             "error": "existing_listing_mismatch_target",
                             "url": page.url,
                         }
+                        self._record_browser_lesson(result, source="etsy.publish.browser")
+                        return result
 
                 # If category modal is open at landing, resolve it first.
                 try:
@@ -1054,7 +1071,7 @@ class EtsyPlatform(BasePlatform):
                         pass
                 if listing_id:
                     if (not allow_existing_update) and listing_id in existing_ids:
-                        return {
+                        result = {
                             "platform": "etsy",
                             "status": "prepared",
                             "mode": "browser_only",
@@ -1063,6 +1080,8 @@ class EtsyPlatform(BasePlatform):
                             "error": "existing_listing_reused_in_create_mode",
                             "listing_id": listing_id,
                         }
+                        self._record_browser_lesson(result, source="etsy.publish.browser")
+                        return result
                     url = f"https://www.etsy.com/listing/{listing_id}"
                     try:
                         ExecutionFacts().record(
@@ -1075,7 +1094,7 @@ class EtsyPlatform(BasePlatform):
                         )
                     except Exception:
                         pass
-                    return {
+                    result = {
                         "platform": "etsy",
                         "status": "draft" if draft_only and not publish_clicked else "created",
                         "id": listing_id,
@@ -1086,9 +1105,11 @@ class EtsyPlatform(BasePlatform):
                         "draft_only": bool(draft_only),
                         "fallback_existing": bool((not allow_existing_update) and listing_id in existing_ids),
                     }
+                    self._record_browser_lesson(result, source="etsy.publish.browser")
+                    return result
                 if draft_only and allow_existing_update and target_listing_id:
                     fallback_url = f"https://www.etsy.com/listing/{target_listing_id}"
-                    return {
+                    result = {
                         "platform": "etsy",
                         "status": "draft",
                         "id": target_listing_id,
@@ -1099,7 +1120,9 @@ class EtsyPlatform(BasePlatform):
                         "draft_only": True,
                         "fallback_existing": True,
                     }
-                return {
+                    self._record_browser_lesson(result, source="etsy.publish.browser")
+                    return result
+                result = {
                     "platform": "etsy",
                     "status": "prepared",
                     "id": "",
@@ -1130,8 +1153,12 @@ class EtsyPlatform(BasePlatform):
                         }"""
                     ),
                 }
+                self._record_browser_lesson(result, source="etsy.publish.browser")
+                return result
         except Exception as e:
-            return {"platform": "etsy", "status": "error", "error": str(e), "screenshot_path": shot}
+            result = {"platform": "etsy", "status": "error", "error": str(e), "screenshot_path": shot}
+            self._record_browser_lesson(result, source="etsy.publish.browser")
+            return result
         finally:
             try:
                 if page is not None:
@@ -1148,6 +1175,50 @@ class EtsyPlatform(BasePlatform):
                     await browser.close()
             except Exception:
                 pass
+
+    def _record_browser_lesson(self, result: dict[str, Any], *, source: str) -> None:
+        try:
+            status = str(result.get("status") or "unknown").strip().lower()
+            debug = result.get("debug") if isinstance(result.get("debug"), dict) else {}
+            details = []
+            if result.get("error"):
+                details.append(f"error={result.get('error')}")
+            if result.get("listing_id"):
+                details.append(f"listing_id={result.get('listing_id')}")
+            if result.get("draft_only") is not None:
+                details.append(f"draft_only={bool(result.get('draft_only'))}")
+            for key in ("title_inputs", "price_inputs", "file_inputs", "tag_inputs", "material_inputs", "spinner_present"):
+                if key in debug:
+                    details.append(f"{key}={debug.get(key)}")
+            lessons = []
+            anti_patterns = []
+            if status in {"draft", "created"}:
+                lessons.append("Используй один рабочий listing_id и не считай create успешным без listing_id.")
+                lessons.append("Etsy browser flow должен отдельно проверять editor URL, listing_id и screenshot evidence.")
+            else:
+                anti_patterns.append("Не считай Etsy create успешным только по открытому editor без listing_id.")
+                if result.get("error"):
+                    anti_patterns.append(f"Ошибка: {result.get('error')}")
+            record_platform_lesson(
+                "etsy",
+                status=status,
+                summary=f"Etsy browser publish result: {status}",
+                details="; ".join(details),
+                url=str(result.get("url") or ""),
+                lessons=lessons,
+                anti_patterns=anti_patterns,
+                evidence={
+                    "status": status,
+                    "listing_id": result.get("listing_id"),
+                    "url": result.get("url"),
+                    "screenshot_path": result.get("screenshot_path"),
+                    "draft_only": result.get("draft_only"),
+                    "debug": debug,
+                },
+                source=source,
+            )
+        except Exception:
+            pass
 
     async def get_shop(self, shop_id: str = "") -> dict:
         """GET /v3/application/shops/{shop_id} — get shop info."""

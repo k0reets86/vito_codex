@@ -66,6 +66,16 @@ class TestKDPPublish:
         result = await kdp.publish({"title": "Book"})
         assert result["status"] in {"published", "prepared"}
 
+    @pytest.mark.asyncio
+    async def test_publish_no_browser_records_platform_lesson(self, kdp_no_browser, monkeypatch):
+        calls = []
+        monkeypatch.setattr("platforms.amazon_kdp.record_platform_lesson", lambda service, **kwargs: calls.append((service, kwargs)))
+        result = await kdp_no_browser.publish({"title": "Book"})
+        assert result["status"] == "no_browser"
+        assert calls
+        assert calls[-1][0] == "amazon_kdp"
+        assert calls[-1][1]["status"] == "no_browser"
+
 
 class TestKDPAnalytics:
     @pytest.mark.asyncio

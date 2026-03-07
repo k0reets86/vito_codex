@@ -9,7 +9,9 @@ import shlex
 
 from config.logger import get_logger
 from config.settings import settings
+from modules.execution_facts import ExecutionFacts
 from modules.listing_optimizer import optimize_listing_payload
+from modules.platform_knowledge import record_platform_lesson
 from platforms.base_platform import BasePlatform
 
 logger = get_logger("amazon_kdp", agent="amazon_kdp")
@@ -95,25 +97,33 @@ class AmazonKDPPlatform(BasePlatform):
         target_document_id = str(content.get("target_document_id") or content.get("target_book_id") or "").strip()
         if bool(getattr(settings, "PUBLISH_CREATE_GUARD_ENABLED", True)):
             if operation in {"create", "new"} and allow_existing_update:
-                return {
+                result = {
                     "platform": "amazon_kdp",
                     "status": "blocked",
                     "error": "create_mode_forbids_existing_update",
                 }
+                self._record_publish_lesson(result, source="amazon_kdp.publish")
+                return result
             if allow_existing_update and not owner_edit_confirmed:
-                return {
+                result = {
                     "platform": "amazon_kdp",
                     "status": "blocked",
                     "error": "existing_update_requires_explicit_owner_request",
                 }
+                self._record_publish_lesson(result, source="amazon_kdp.publish")
+                return result
             if allow_existing_update and not target_document_id:
-                return {
+                result = {
                     "platform": "amazon_kdp",
                     "status": "blocked",
                     "error": "existing_update_requires_target_document_id",
                 }
+                self._record_publish_lesson(result, source="amazon_kdp.publish")
+                return result
         if not self.browser_agent:
-            return {"platform": "amazon_kdp", "status": "no_browser"}
+            result = {"platform": "amazon_kdp", "status": "no_browser"}
+            self._record_publish_lesson(result, source="amazon_kdp.publish")
+            return result
         try:
             result = await self.browser_agent.execute_task(
                 task_type="form_fill",
@@ -144,17 +154,23 @@ class AmazonKDPPlatform(BasePlatform):
             if status == "prepared" and self._state_file.exists():
                 helper = await self._publish_via_kdp_helper(content or {})
                 if isinstance(helper, dict):
+                    self._record_publish_lesson(helper, source="amazon_kdp.publish.helper")
                     return helper
+            self._record_publish_lesson(result_payload, source="amazon_kdp.publish")
             return result_payload
         except Exception as e:
             logger.error(f"KDP publish error: {e}", extra={"event": "kdp_publish_error"})
-            return {"platform": "amazon_kdp", "status": "error", "error": str(e)}
+            result = {"platform": "amazon_kdp", "status": "error", "error": str(e)}
+            self._record_publish_lesson(result, source="amazon_kdp.publish")
+            return result
 
     async def _publish_via_kdp_helper(self, content: dict) -> dict:
         """Fallback to dedicated KDP draft helper with strict bookshelf verification."""
         helper_script = Path("scripts/kdp_create_draft_test.py")
         if not helper_script.exists():
-            return {"platform": "amazon_kdp", "status": "prepared", "error": "kdp_helper_missing"}
+            result = {"platform": "amazon_kdp", "status": "prepared", "error": "kdp_helper_missing"}
+            self._record_publish_lesson(result, source="amazon_kdp.kdp_helper")
+            return result
         title = str(content.get("title") or "VITO TEST DRAFT").strip() or "VITO TEST DRAFT"
         cmd = [
             "xvfb-run",
@@ -201,7 +217,7 @@ class AmazonKDPPlatform(BasePlatform):
             if fields_filled <= 0 and helper_soft_ok:
                 fields_filled = 1
             if helper_ok:
-                return {
+                result = {
                     "platform": "amazon_kdp",
                     "status": "published",
                     "url": "https://kdp.amazon.com/bookshelf",
@@ -210,8 +226,11 @@ class AmazonKDPPlatform(BasePlatform):
                     "output": {**payload, "fields_filled": fields_filled},
                     "method": "kdp_helper",
                 }
+                self._record_publish_lesson(result, source="amazon_kdp.kdp_helper")
+                self._record_execution_fact(result)
+                return result
             if helper_soft_ok:
-                return {
+                result = {
                     "platform": "amazon_kdp",
                     "status": "draft",
                     "url": "https://kdp.amazon.com/bookshelf",
@@ -220,7 +239,10 @@ class AmazonKDPPlatform(BasePlatform):
                     "output": {**payload, "fields_filled": fields_filled},
                     "method": "kdp_helper",
                 }
-            return {
+                self._record_publish_lesson(result, source="amazon_kdp.kdp_helper")
+                self._record_execution_fact(result)
+                return result
+            result = {
                 "platform": "amazon_kdp",
                 "status": "prepared",
                 "url": "https://kdp.amazon.com/bookshelf",
@@ -229,8 +251,12 @@ class AmazonKDPPlatform(BasePlatform):
                 "output": (payload | {"fields_filled": fields_filled}) if payload else {"stdout": stdout[-1200:], "stderr": stderr[-1200:], "cmd": " ".join(shlex.quote(x) for x in cmd), "fields_filled": 0},
                 "method": "kdp_helper",
             }
+            self._record_publish_lesson(result, source="amazon_kdp.kdp_helper")
+            return result
         except Exception as e:
-            return {"platform": "amazon_kdp", "status": "prepared", "error": str(e), "method": "kdp_helper"}
+            result = {"platform": "amazon_kdp", "status": "prepared", "error": str(e), "method": "kdp_helper"}
+            self._record_publish_lesson(result, source="amazon_kdp.kdp_helper")
+            return result
 
     async def get_analytics(self) -> dict:
         """Получение аналитики через BrowserAgent (KDP Reports page)."""
@@ -256,3 +282,67 @@ class AmazonKDPPlatform(BasePlatform):
         if self.browser_agent is not None:
             return True
         return False
+
+    def _record_execution_fact(self, result: dict[str, Any]) -> None:
+        try:
+            ExecutionFacts().record(
+                action="platform:publish",
+                status=str(result.get("status") or "unknown"),
+                detail=f"amazon_kdp status={result.get('status')}",
+                evidence=str(result.get("url") or ""),
+                source="amazon_kdp.publish",
+                evidence_dict={
+                    "platform": "amazon_kdp",
+                    "status": result.get("status"),
+                    "url": result.get("url"),
+                    "screenshot_path": result.get("screenshot_path"),
+                    "method": result.get("method"),
+                    "output": result.get("output"),
+                },
+            )
+        except Exception:
+            pass
+
+    def _record_publish_lesson(self, result: dict[str, Any], *, source: str) -> None:
+        try:
+            status = str(result.get("status") or "unknown").strip().lower()
+            output = result.get("output") if isinstance(result.get("output"), dict) else {}
+            details = []
+            if result.get("error"):
+                details.append(f"error={result.get('error')}")
+            if output:
+                for key in ("fields_filled", "description_set", "keyword_slots_filled", "manuscript_uploaded", "cover_uploaded", "title_found_on_bookshelf", "title_found_via_search", "saved_click"):
+                    if key in output:
+                        details.append(f"{key}={output.get(key)}")
+            summary = f"KDP publish result: {status}"
+            lessons = []
+            anti_patterns = []
+            if status in {"draft", "published"}:
+                lessons.append("Подтверждай KDP-черновик только через bookshelf proof или helper evidence.")
+                if output.get("saved_click"):
+                    lessons.append("Сохраняй draft через helper и проверяй появление на Bookshelf.")
+                if output.get("manuscript_uploaded") or output.get("cover_uploaded"):
+                    lessons.append("Файлы manuscript/cover должны проверяться отдельно от metadata save.")
+            else:
+                anti_patterns.append("Не считай KDP успехом без bookshelf evidence или helper proof.")
+                if result.get("error"):
+                    anti_patterns.append(f"Ошибка: {result.get('error')}")
+            record_platform_lesson(
+                "amazon_kdp",
+                status=status,
+                summary=summary,
+                details="; ".join(details),
+                url=str(result.get("url") or ""),
+                lessons=lessons,
+                anti_patterns=anti_patterns,
+                evidence={
+                    "status": status,
+                    "url": result.get("url"),
+                    "screenshot_path": result.get("screenshot_path"),
+                    "method": result.get("method"),
+                    "output": output,
+                },
+                source=source,
+            )
+        except Exception:
+            pass
