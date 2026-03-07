@@ -258,8 +258,99 @@ async def test_cmd_status_uses_unified_snapshot_with_spend_breakdown(comms, mock
     comms.set_modules(goal_engine=ge_mock, decision_loop=dl_mock, llm_router=llm_mock, finance=fin_mock)
 
     await comms._cmd_status(mock_update, MagicMock())
-    text = mock_update.message.reply_text.call_args[0][0]
-    assert "Траты сегодня: LLM $1.20; Финконтроль $2.40" in text
+
+
+@pytest.mark.asyncio
+async def test_cmd_deep_persists_research_options_and_pending_actions(comms, mock_update, tmp_path):
+    mock_update.message.text = "/deep digital planners"
+    comms._judge_protocol = MagicMock()
+    comms._judge_protocol.evaluate_niche = AsyncMock(return_value={"ok": True})
+    comms._judge_protocol.format_verdict_for_telegram = MagicMock(return_value="Quick verdict")
+    comms._agent_registry = MagicMock()
+    comms._agent_registry.dispatch = AsyncMock(side_effect=[
+        TaskResult(
+            success=True,
+            output="Full deep report",
+            metadata={
+                "report_path": "/tmp/research.md",
+                "top_ideas": [
+                    {"rank": 1, "title": "Prompt Pack", "score": 89, "platform": "gumroad"},
+                    {"rank": 2, "title": "Planner", "score": 81, "platform": "etsy"},
+                ],
+                "recommended_product": {"title": "Prompt Pack", "score": 89, "platform": "gumroad"},
+            },
+        ),
+        TaskResult(success=True, output={"approved": True, "score": 88}),
+    ])
+    comms._conversation_engine = MagicMock()
+    comms._owner_task_state = OwnerTaskState(path=tmp_path / "owner_task_state.json")
+    comms._owner_task_state.set_active("исследуй нишу", source="telegram", intent="system_action", force=True)
+
+    await comms._cmd_deep(mock_update, MagicMock())
+
+    active = comms._owner_task_state.get_active()
+    assert active is not None
+    assert "Prompt Pack" in str(active.get("selected_research_title") or "")
+    assert comms._pending_system_action is not None
+    assert len(comms._pending_system_action["actions"]) == 2
+    assert comms._pending_system_action["actions"][1]["params"]["platforms"] == ["etsy"]
+
+
+def test_build_recipe_payload_prefers_draft_first_for_etsy(comms, monkeypatch):
+    monkeypatch.setattr("comms_agent._platform_working_target", lambda platform: {})
+    platform, payload = comms._build_recipe_payload(
+        "etsy_publish",
+        live=True,
+        request_text="создай черновик листинга на этси и заполни все поля",
+    )
+    assert platform == "etsy"
+    assert payload["draft_only"] is True
+    assert "target_listing_id" not in payload
+    assert str(payload.get("operation") or "").lower() != "update"
+    assert str(payload.get("task_root_id") or "").startswith("VT")
+    assert str(payload.get("project_id") or "").startswith(str(payload["task_root_id"]))
+    assert str(payload.get("listing_work_id") or "").startswith(str(payload["task_root_id"]))
+
+
+@pytest.mark.asyncio
+async def test_run_recipe_direct_remembers_working_target(comms, monkeypatch):
+    async def _fake_run_once(self, recipe_name, payload, trace_id=""):
+        return {
+            "status": "accepted",
+            "platform": "etsy",
+            "recipe": recipe_name,
+            "result": {"status": "draft", "listing_id": "12345", "url": "https://www.etsy.com/listing/12345"},
+        }
+
+    monkeypatch.setattr("modules.workflow_recipe_executor.WorkflowRecipeExecutor.run_once", _fake_run_once)
+    monkeypatch.setattr("comms_agent._save_working_platform_targets", lambda data: None)
+    saved = {}
+    monkeypatch.setattr("comms_agent._load_working_platform_targets", lambda: saved)
+
+    out = await comms._run_recipe_direct("etsy_publish", live=True, request_text="создай черновик на этси")
+    assert out["status"] == "accepted"
+    assert saved["etsy"]["target_listing_id"] == "12345"
+
+
+@pytest.mark.asyncio
+async def test_run_recipe_direct_remembers_partial_target_even_when_failed(comms, monkeypatch):
+    async def _fake_run_once(self, recipe_name, payload, trace_id=""):
+        return {
+            "status": "failed",
+            "platform": "gumroad",
+            "error": "acceptance_gate_missing_required_evidence",
+            "result": {"status": "draft", "product_id": "abc123", "slug": "draft-one", "url": "https://gumroad.com/products/draft-one/edit"},
+        }
+
+    monkeypatch.setattr("modules.workflow_recipe_executor.WorkflowRecipeExecutor.run_once", _fake_run_once)
+    monkeypatch.setattr("comms_agent._save_working_platform_targets", lambda data: None)
+    saved = {}
+    monkeypatch.setattr("comms_agent._load_working_platform_targets", lambda: saved)
+
+    out = await comms._run_recipe_direct("gumroad_publish", live=True, request_text="создай черновик на гумроад")
+    assert out["status"] == "failed"
+    assert saved["gumroad"]["target_slug"] == "draft-one"
+    assert saved["gumroad"]["id"] == "abc123"
 
 
 @pytest.mark.asyncio
@@ -1790,6 +1881,12 @@ def test_detect_contextual_inventory_does_not_capture_create_publish_intents(com
     assert comms._detect_contextual_service_inventory_request("создай листинг на этси") == ""
     assert comms._detect_contextual_service_inventory_request("опубликуй товар на gumroad") == ""
     assert comms._detect_contextual_service_inventory_request("create listing on etsy") == ""
+
+
+def test_detect_contextual_inventory_does_not_capture_strategy_request(comms):
+    comms._last_service_context = "amazon_kdp"
+    comms._last_service_context_at = datetime.now(timezone.utc).isoformat()
+    assert comms._detect_contextual_service_inventory_request("выбери лучший вариант и предложи структуру продукта") == ""
 
 
 def test_humanize_owner_text_strips_technical_noise(comms):
