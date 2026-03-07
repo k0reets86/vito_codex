@@ -240,11 +240,73 @@ async def _run_step(comms, owner_id: int, text: str) -> list[str]:
     return [x for x in replies if str(x).strip()]
 
 
+def _install_owner_flow_stubs(vito) -> None:
+    from agents.base_agent import TaskResult
+
+    registry = getattr(getattr(vito, "comms", None), "_agent_registry", None) or getattr(getattr(vito, "conversation_engine", None), "agent_registry", None)
+    if registry is None or not hasattr(registry, "dispatch"):
+        return
+    original_dispatch = registry.dispatch
+
+    async def _stubbed_dispatch(task_type: str, *args, **kwargs):
+        kind = str(task_type or "").strip().lower()
+        if kind in {"research", "market_analysis", "competitor_analysis"}:
+            topic = str(kwargs.get("topic") or kwargs.get("step") or kwargs.get("content") or "digital products").strip()
+            report = (
+                f"Executive summary for {topic}: demand is healthy, competition is manageable, "
+                "and bundles/templates remain monetizable.\n\n"
+                "Sources:\n- reddit\n- google_trends\n- product_hunt"
+            )
+            return TaskResult(
+                success=True,
+                output=report,
+                metadata={
+                    "executive_summary": f"Healthy demand found for {topic}.",
+                    "data_sources": ["reddit", "google_trends", "product_hunt"],
+                    "report_path": str(ROOT / "runtime" / "simulator" / "stub_research_report.md"),
+                    "top_ideas": [
+                        {"rank": 1, "title": "AI Prompt Pack", "score": 88, "platform": "gumroad"},
+                        {"rank": 2, "title": "Printable Planner Bundle", "score": 84, "platform": "etsy"},
+                        {"rank": 3, "title": "Creator Finance Tracker", "score": 79, "platform": "gumroad"},
+                    ],
+                    "recommended_product": {"title": "AI Prompt Pack", "score": 88, "platform": "gumroad", "why_now": "fast demand and low production cost"},
+                },
+            )
+        if kind in {"quality_review", "quality_judge"}:
+            return TaskResult(success=True, output={"approved": True, "score": 9})
+        if kind == "product_pipeline":
+            topic = str(kwargs.get("topic") or "Digital Product").strip()
+            platform = str(kwargs.get("platform") or "gumroad").strip().lower() or "gumroad"
+            steps = [
+                {"name": "research_sync", "ok": True},
+                {"name": "content_pack", "ok": True},
+                {"name": "seo_pack", "ok": True},
+                {"name": f"{platform}_draft", "ok": True},
+            ]
+            return TaskResult(
+                success=True,
+                output={
+                    "topic": topic,
+                    "platform": platform,
+                    "steps": steps,
+                    "draft_url": f"https://example.test/{platform}/{topic.lower().replace(' ', '-')}",
+                },
+            )
+        return await original_dispatch(task_type, *args, **kwargs)
+
+    registry.dispatch = _stubbed_dispatch
+    if getattr(vito, "comms", None) is not None:
+        vito.comms._agent_registry = registry
+    if getattr(vito, "conversation_engine", None) is not None:
+        vito.conversation_engine.agent_registry = registry
+
+
 async def _amain() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--scenario", default="smoke", help="smoke | platform_context")
     ap.add_argument("--out", default="", help="Optional output report path")
     ap.add_argument("--step-timeout", type=float, default=35.0, help="Max seconds per step")
+    ap.add_argument("--stub-owner-flow", action="store_true", help="Stub research/quality/product pipeline for cheap owner-flow regression")
     args = ap.parse_args()
 
     steps = _builtin(args.scenario)
@@ -259,6 +321,8 @@ async def _amain() -> int:
     settings.OWNER_TASK_STATE_PATH = str(sim_dir / "owner_task_state.json")
     from main import VITO
     vito = VITO()
+    if args.stub_owner_flow:
+        _install_owner_flow_stubs(vito)
     comms = vito.comms
     owner_id = int(getattr(settings, "TELEGRAM_OWNER_CHAT_ID", 0) or 0)
 
@@ -266,6 +330,7 @@ async def _amain() -> int:
         "timestamp": _utc_now(),
         "scenario": args.scenario,
         "mode": "local_owner_simulator",
+        "stub_owner_flow": bool(args.stub_owner_flow),
         "steps": [],
         "summary": {"passed": 0, "failed": 0, "total": len(steps)},
     }
