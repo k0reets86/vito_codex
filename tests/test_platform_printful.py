@@ -87,9 +87,34 @@ class TestPrintfulPublish:
         printful._store_id = "17803130"
         printful._store_type = "etsy"
         printful._sync_products_probe = AsyncMock(return_value={"ok": True, "count": 0})
+        printful._get_sync_products = AsyncMock(return_value={"ok": True, "items": []})
         result = await printful.publish({"sync_product": {"name": "VITO Probe"}})
-        assert result["status"] == "needs_browser_flow"
+        assert result["status"] == "needs_source_listing"
         assert result["store_type"] == "etsy"
+
+    @pytest.mark.asyncio
+    async def test_publish_non_api_store_type_with_existing_sync_product_requires_update_flow(self, printful):
+        printful._authenticated = True
+        printful._store_id = "17803130"
+        printful._store_type = "etsy"
+        printful._sync_products_probe = AsyncMock(return_value={"ok": True, "count": 1})
+        printful._get_sync_products = AsyncMock(
+            return_value={
+                "ok": True,
+                "items": [
+                    {
+                        "sync_product": {
+                            "id": 9911,
+                            "name": "VITO Probe",
+                            "external_id": "etsy-9911",
+                        }
+                    }
+                ],
+            }
+        )
+        result = await printful.publish({"sync_product": {"name": "VITO Probe"}})
+        assert result["status"] == "needs_sync_update_flow"
+        assert result["sync_product_id"] == "9911"
 
 
 class TestPrintfulAnalytics:

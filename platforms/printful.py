@@ -106,7 +106,7 @@ class PrintfulPlatform(BasePlatform):
                             await loc.first.click(timeout=2500)
                             await page.wait_for_timeout(2500)
                             action_url = page.url
-                            if "/dashboard/custom/" in (page.url or "").lower() or "/dashboard/custom-products" in (page.url or "").lower():
+                            if "/dashboard/custom/" in (page.url or "").lower():
                                 created = True
                                 break
                     except Exception:
@@ -147,7 +147,38 @@ class PrintfulPlatform(BasePlatform):
                 except Exception:
                     pass
 
-                result_status = "created" if created else "prepared"
+                current_url = page.url or ""
+                current_url_lower = current_url.lower()
+                page_title = ""
+                try:
+                    page_title = (await page.title()) or ""
+                except Exception:
+                    page_title = ""
+                page_body = ""
+                try:
+                    page_body = (await page.locator("body").inner_text())[:4000]
+                except Exception:
+                    page_body = ""
+                has_editor_signal = any(
+                    token in current_url_lower
+                    for token in (
+                        "/dashboard/custom/",
+                        "/dashboard/store/products/",
+                        "/dashboard/product-templates/edit/",
+                    )
+                )
+                has_creation_signal = any(
+                    token in page_body.lower()
+                    for token in (
+                        "product template",
+                        "add product details",
+                        "mockup generator",
+                        "product details",
+                    )
+                )
+                if not has_editor_signal and not has_creation_signal and "product catalog" in page_title.lower():
+                    created = False
+                result_status = "created" if created and (has_editor_signal or has_creation_signal) else "prepared"
                 result_url = product_url or action_url or page.url
                 result = {
                     "platform": "printful",
@@ -157,6 +188,7 @@ class PrintfulPlatform(BasePlatform):
                     "screenshot_path": shot,
                     "html_path": html_dump,
                     "store_type": self._store_type or "",
+                    "title": page_title[:200],
                 }
                 try:
                     ExecutionFacts().record(
@@ -261,6 +293,38 @@ class PrintfulPlatform(BasePlatform):
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    async def _get_sync_products(self, *, limit: int = 20, offset: int = 0) -> dict[str, Any]:
+        if not self._store_id:
+            return {"ok": False, "error": "no_store_id", "items": []}
+        try:
+            session = await self._get_session()
+            async with session.get(
+                f"{API_BASE}/sync/products",
+                params={"store_id": self._store_id, "limit": limit, "offset": offset},
+            ) as resp:
+                data = await resp.json()
+                if resp.status != 200:
+                    return {"ok": False, "status": resp.status, "error": str((data or {}).get("error", {})), "items": []}
+                items = (data or {}).get("result", []) if isinstance(data, dict) else []
+                return {"ok": True, "items": items if isinstance(items, list) else [], "data": data}
+        except Exception as e:
+            return {"ok": False, "error": str(e), "items": []}
+
+    def _pick_existing_sync_product(self, content: dict[str, Any], items: list[dict[str, Any]]) -> dict[str, Any] | None:
+        if not items:
+            return None
+        desired_name = str(((content or {}).get("sync_product") or {}).get("name") or "").strip().lower()
+        external_id = str(((content or {}).get("sync_product") or {}).get("external_id") or "").strip()
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            sync_product = item.get("sync_product") if isinstance(item.get("sync_product"), dict) else {}
+            if external_id and str(sync_product.get("external_id") or "").strip() == external_id:
+                return item
+            if desired_name and str(sync_product.get("name") or "").strip().lower() == desired_name:
+                return item
+        return items[0]
+
     async def _create_via_sync_api(self, content: dict) -> dict:
         """Fallback for non-API stores (Etsy/Shopify connected): try Sync API create path."""
         if not self._store_id:
@@ -316,6 +380,45 @@ class PrintfulPlatform(BasePlatform):
             return {"platform": "printful", "status": "error", "error": "no_store_connected"}
         if self._store_type and self._store_type != "api":
             probe = await self._sync_products_probe()
+            sync_listing = await self._get_sync_products(limit=50, offset=0)
+            sync_items = list(sync_listing.get("items") or [])
+            if not sync_items:
+                result = {
+                    "platform": "printful",
+                    "status": "needs_source_listing",
+                    "error": (
+                        f"Printful store type '{self._store_type}' does not allow creating a brand new product directly. "
+                        "Create the source listing on Etsy first, then sync/update it from Printful."
+                    ),
+                    "store_type": self._store_type,
+                    "store_id": self._store_id,
+                    "sync_probe": probe,
+                }
+                return result
+            selected_sync = self._pick_existing_sync_product(content, sync_items)
+            if selected_sync:
+                sync_product = selected_sync.get("sync_product") if isinstance(selected_sync.get("sync_product"), dict) else {}
+                sync_product_id = str(sync_product.get("id") or "")
+                sync_product_name = str(sync_product.get("name") or "")
+                sync_product_url = (
+                    f"https://www.printful.com/dashboard/store/products/{sync_product_id}"
+                    if sync_product_id
+                    else "https://www.printful.com/dashboard/store"
+                )
+                return {
+                    "platform": "printful",
+                    "status": "needs_sync_update_flow",
+                    "error": (
+                        "Connected Etsy store already has synced products. "
+                        "Use the sync-update/editor flow instead of trying to create a brand new product from scratch."
+                    ),
+                    "store_type": self._store_type,
+                    "store_id": self._store_id,
+                    "sync_probe": probe,
+                    "sync_product_id": sync_product_id,
+                    "sync_product_name": sync_product_name,
+                    "url": sync_product_url,
+                }
             # Attempt Sync API path first; only fallback to browser flow if denied.
             via_sync = await self._create_via_sync_api(content)
             if str(via_sync.get("status") or "") == "created":
