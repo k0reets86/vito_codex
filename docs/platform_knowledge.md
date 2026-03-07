@@ -2496,3 +2496,184 @@ Anti-patterns:
 - Не считай KDP успехом без bookshelf evidence или helper proof.
 - Ошибка: new_draft_requires_explicit_allow_new_draft
 Evidence: {"status": "blocked", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=6; description_set=True; keyword_slots_filled=2; manuscript_uploaded=True; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+- Файлы manuscript/cover должны проверяться отдельно от metadata save.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_204808_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "before_count": 4, "after_count": 4, "fields_filled": 6, "description_set": true, "keyword_slots_filled": 2, "manuscript_uploaded": true, "cover_uploaded": false, "pricing_page_seen": false, "pricing_saved": false, "pricing_us_set": false, "pricing_url": "", "price_us": "2.99", "royalty_rate": "35_PERCENT", "enroll_select": false, "manuscript_path": "runtime/remote_auth/kdp_manuscript_20260307_204808.epub", "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_204808_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_204808_books
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.publish.helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=6; description_set=True; keyword_slots_filled=2; manuscript_uploaded=True; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+- Файлы manuscript/cover должны проверяться отдельно от metadata save.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_204808_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "before_count": 4, "after_count": 4, "fields_filled": 6, "description_set": true, "keyword_slots_filled": 2, "manuscript_uploaded": true, "cover_uploaded": false, "pricing_page_seen": false, "pricing_saved": false, "pricing_us_set": false, "pricing_url": "", "price_us": "2.99", "royalty_rate": "35_PERCENT", "enroll_select": false, "manuscript_path": "runtime/remote_auth/kdp_manuscript_20260307_204808.epub", "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_204808_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_204808_books
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_after.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "saved_click": true, "title_found_on_bookshelf": false, "title_found_via_search": false, "fields_filled": 4, "screenshot": "runtime/kdp_after.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=False
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "saved_click": false, "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "fields_filled": 4, "bookshelf_screenshot": "runtime/kdp_bookshelf.png", "linked_formats": {}}}
+# Amazon KDP
+
+## Paperback linked from existing eBook
+
+- Source linked paperback draft:
+  - `document_id = A8T0ZQ5CNS6`
+- Do not create a new object when linked paperback already exists on Bookshelf.
+- Existing published / in-review eBook must not be edited implicitly.
+- Existing stale draft `Book Toolkit` was deleted and must not be reused.
+
+### Confirmed routes
+
+- Details:
+  - `https://kdp.amazon.com/action/dualbookshelf.editpaperbackdetails/en_US/title-setup/paperback/A8T0ZQ5CNS6/details`
+- Content:
+  - `https://kdp.amazon.com/action/dualbookshelf.editpaperbackcontent/en_US/title-setup/paperback/A8T0ZQ5CNS6/content`
+- Pricing:
+  - `https://kdp.amazon.com/action/dualbookshelf.editpaperbackpricing/en_US/title-setup/paperback/A8T0ZQ5CNS6/pricing`
+  - plain resolved URL also works after auth redirect:
+    - `/en_US/title-setup/paperback/A8T0ZQ5CNS6/pricing`
+
+### Confirmed content inputs
+
+- Manuscript upload:
+  - `#data-print-book-publisher-interior-file-upload-AjaxInput`
+- Cover upload:
+  - `#data-print-book-publisher-cover-file-upload-AjaxInput`
+  - `#data-print-book-publisher-cover-pdf-only-file-upload-AjaxInput`
+- AI questionnaire:
+  - `#generative-ai-questionnaire-text`
+  - `#generative-ai-questionnaire-images`
+  - `#generative-ai-questionnaire-translations`
+
+### Confirmed content status signals
+
+- Manuscript success:
+  - `#data-print-book-publisher-interior-asset-status = SUCCESS`
+- Cover success:
+  - `#data-print-book-publisher-cover-asset-status = SUCCESS`
+  - `#data-print-book-publisher-cover-pdf-only-asset-status = SUCCESS`
+- KDP page also shows:
+  - `Manuscript "...pdf" uploaded successfully!`
+  - `Cover uploaded successfully!`
+
+### Confirmed content behavior
+
+- Paperback manuscript must be print PDF, not ebook EPUB.
+- One-page PDF is rejected.
+- Working generator path now uses a 24-page PDF for print.
+- `Save and Continue` on paperback content is long-running and should not be treated as immediate failure.
+- `Launch Previewer` is available but can hang in headless flow; do not use previewer hang as proof of failure if content status fields are already `SUCCESS`.
+
+### Confirmed pricing selectors
+
+- Legacy pricing route selectors:
+  - `#data-print-book-worldwide-rights`
+  - `input[name='data[print_book][amazon_channel][us][price_vat_exclusive]']`
+- Active `print-setup` pricing route selectors:
+  - route:
+    - `https://kdp.amazon.com/en_US/print-setup/paperback/A8T0ZQ5CNS6/pricing`
+  - worldwide rights:
+    - `#worldwide-rights`
+  - price inputs:
+    - `#price-input-usd`
+    - `#price-input-cad`
+    - `#price-input-jpy`
+    - `#price-input-gbp`
+    - `#price-input-aud`
+    - `#price-input-eur` (multiple rows)
+    - `#price-input-pln`
+    - `#price-input-sek`
+  - save button text:
+    - `Save as Draft`
+
+### Confirmed pricing behavior
+
+- Account page was investigated via `account.kdp.amazon.com/api/payee`.
+- Account identity/bank/tax are already complete enough:
+  - `missingImportantFields = false`
+  - `identityPageActionRequired = false`
+  - `verificationCompleted = true`
+- Real blocker was not account page but unapproved `Paperback Content`.
+- `Print Previewer` originally failed because uploaded cover was front-only:
+  - expected cover size: `12.304 x 9.250`
+  - submitted file size: `6.000 x 9.000`
+- After generating and uploading wrap cover PDF with paperback dimensions:
+  - previewer cover error disappeared
+  - `Approve` returned to content page
+  - `Paperback Content = Complete`
+- On the new `print-setup` pricing page KDP requires explicit prices in all marketplace rows.
+- Confirmed working persisted values after reload:
+  - USD `6.99`
+  - CAD `9.99`
+  - JPY `999`
+  - GBP `7.99`
+  - AUD `13.99`
+  - EUR rows `9,99`
+  - PLN `40.00`
+  - SEK `110.00`
+
+### Confirmed paperback runbook
+
+1. Start from existing linked paperback draft:
+   - `A8T0ZQ5CNS6`
+2. Do not create a new paperback if the linked one already exists on Bookshelf.
+3. `Content`:
+   - upload print manuscript PDF
+   - upload paperback wrap cover PDF, not front-only cover
+   - wait for success statuses
+   - launch `Print Previewer`
+   - if previewer reports cover size mismatch, regenerate wrap cover with the exact previewer-required dimensions
+   - click `Approve`
+4. `Pricing`:
+   - use `print-setup/paperback/<document_id>/pricing`
+   - if redirected to `amazon.com/ap/signin`, enter password and return to the same route
+   - select `#worldwide-rights`
+   - fill all marketplace price inputs
+   - click `Save as Draft`
+   - verify values persist after reload
+
+### General browser 2FA rule
+
+- VITO enters login and password itself.
+- If the platform opens a code/2FA prompt, only then it asks the owner for a code.
+- After receiving the code, VITO completes login and saves refreshed browser session state.
+
+### Anti-patterns
+
+- Do not reuse published or in-review ebook as implicit edit target.
+- Do not create a new paperback if Bookshelf already shows linked paperback draft.
+- Do not assume cover failure if hidden status fields already show `SUCCESS`.
+- Do not keep blaming the account page when pricing is actually blocked by incomplete/ unapproved `Content`.
+- Do not leave marketplace prices empty on the new `print-setup` pricing page.

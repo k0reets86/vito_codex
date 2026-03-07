@@ -17,6 +17,80 @@ from platforms.base_platform import BasePlatform
 logger = get_logger("amazon_kdp", agent="amazon_kdp")
 
 
+def _kdp_doc_kind() -> str:
+    kind = str(os.getenv("KDP_TEST_DOC_TYPE", "kindle")).strip().lower()
+    return kind if kind in {"kindle", "paperback", "hardcover"} else "kindle"
+
+
+def _kdp_setup_url(kind: str, document_id: str, step: str, ref: str = "") -> str:
+    if kind in {"paperback", "hardcover"}:
+        action = f"dualbookshelf.edit{kind}{step}"
+        base = f"https://kdp.amazon.com/action/{action}/en_US/title-setup/{kind}/{document_id}/{step}"
+    else:
+        base = f"https://kdp.amazon.com/en_US/title-setup/{kind}/{document_id}/{step}"
+    return f"{base}?{ref}" if ref else base
+
+
+def _kdp_is_pricing_page(url: str, title: str, kind: str) -> bool:
+    url_now = str(url or "").lower()
+    title_now = str(title or "").lower()
+    if "/pricing" in url_now:
+        return True
+    if kind == "kindle":
+        return "edit ebook pricing" in title_now
+    if kind == "paperback":
+        return "edit paperback rights" in title_now or "paperback rights & pricing" in title_now
+    if kind == "hardcover":
+        return "edit hardcover rights" in title_now or "hardcover rights & pricing" in title_now
+    return False
+
+
+def _kdp_is_content_page(url: str, title: str, kind: str) -> bool:
+    url_now = str(url or "").lower()
+    title_now = str(title or "").lower()
+    if f"/title-setup/{kind}/" in url_now and "/content" in url_now:
+        return True
+    if kind == "kindle":
+        return "kindle ebook content" in title_now
+    if kind == "paperback":
+        return "paperback content" in title_now or "edit paperback content" in title_now
+    if kind == "hardcover":
+        return "hardcover content" in title_now or "edit hardcover content" in title_now
+    return False
+
+
+async def _kdp_relogin_if_needed(page) -> bool:
+    cur = str(page.url or "").lower()
+    if "signin" not in cur and "ap/signin" not in cur:
+        try:
+            if await page.locator("input[type='password'], input#ap_password, input[name='password']").count() == 0:
+                return False
+        except Exception:
+            return False
+    pwd = str(getattr(settings, "KDP_PASSWORD", "") or "").strip()
+    if not pwd:
+        return False
+    try:
+        pwd_loc = page.locator("input[type='password'], input#ap_password, input[name='password']")
+        if await pwd_loc.count() == 0:
+            return False
+        await pwd_loc.first.fill(pwd)
+        for sel in (
+            "input#signInSubmit",
+            "button#signInSubmit",
+            "button:has-text('Sign in')",
+            "input[type='submit']",
+        ):
+            loc = page.locator(sel)
+            if await loc.count() > 0:
+                await loc.first.click(timeout=4000)
+                await page.wait_for_timeout(2500)
+                return True
+    except Exception:
+        return False
+    return False
+
+
 class AmazonKDPPlatform(BasePlatform):
     def __init__(self, browser_agent=None, **kwargs):
         super().__init__(name="amazon_kdp", browser_agent=browser_agent, **kwargs)
@@ -83,87 +157,187 @@ class AmazonKDPPlatform(BasePlatform):
                 browser = await p.chromium.launch(headless=True, args=args)
                 context = await browser.new_context(storage_state=str(self._state_file), viewport={"width": 1440, "height": 920})
                 page = await context.new_page()
-                url = f"https://kdp.amazon.com/en_US/title-setup/kindle/{doc}/pricing?ref_=kdp_BS_D_p_ed_pricing"
+                kind = _kdp_doc_kind()
+                url = _kdp_setup_url(kind, doc, "pricing", "ref_=kdp_BS_D_p_ed_pricing")
                 await page.goto(url, wait_until="domcontentloaded", timeout=120000)
                 await page.wait_for_timeout(3000)
-                page_seen = "/pricing" in (page.url or "").lower() or "edit ebook pricing" in ((await page.title()) or "").lower()
+                await _kdp_relogin_if_needed(page)
+                await page.wait_for_timeout(1500)
+                if not _kdp_is_pricing_page(page.url, await page.title(), kind):
+                    await page.goto(url, wait_until="domcontentloaded", timeout=120000)
+                    await page.wait_for_timeout(2500)
+                    await _kdp_relogin_if_needed(page)
+                    await page.wait_for_timeout(1500)
+                page_seen = _kdp_is_pricing_page(page.url, await page.title(), kind)
                 saved = False
                 price_set = False
+                account_gate = False
                 if page_seen:
-                    try:
-                        loc = page.locator("#data-is-select")
-                        if await loc.count() > 0:
-                            if enroll_select:
-                                await loc.first.check(timeout=2500)
-                            else:
-                                await loc.first.uncheck(timeout=2500)
-                    except Exception:
-                        pass
-                    try:
-                        await page.get_by_text("All territories (worldwide rights)", exact=False).first.click(timeout=2500)
-                    except Exception:
-                        pass
-                    try:
-                        await page.evaluate(
-                            """(rate) => {
-                                const hidden = document.querySelector('#data-digital-worldwide-rights');
-                                if (hidden) {
-                                    hidden.value = 'true';
-                                    hidden.dispatchEvent(new Event('change', { bubbles: true }));
-                                }
-                                const radio = document.querySelector(`input[name="data[digital][royalty_rate]-radio"][value="${rate}"]`);
-                                if (radio) {
-                                    radio.checked = true;
-                                    radio.dispatchEvent(new Event('change', { bubbles: true }));
-                                }
-                                const royalty = document.querySelector('#data-digital-royalty-rate-hidden');
-                                if (royalty) royalty.value = rate;
-                            }""",
-                            royalty_rate,
-                        )
-                    except Exception:
-                        pass
-                    try:
-                        price_input = page.locator("input[name='data[digital][channels][amazon][US][price_vat_inclusive]']").first
-                        await price_input.fill(str(price_us), timeout=3500)
-                        await page.keyboard.press("Tab")
-                        await page.wait_for_timeout(1200)
-                        price_set = True
-                    except Exception:
-                        price_set = False
-                    try:
-                        save_btn = page.locator("#save-announce")
-                        if await save_btn.count() > 0:
-                            await save_btn.first.click(timeout=3500)
-                            saved = True
-                    except Exception:
-                        saved = False
+                    body_before = ((await page.text_content("body")) or "").lower()
+                    account_gate = "account information incomplete" in body_before
+                    if kind == "kindle":
+                        try:
+                            loc = page.locator("#data-is-select")
+                            if await loc.count() > 0:
+                                if enroll_select:
+                                    await loc.first.check(timeout=2500)
+                                else:
+                                    await loc.first.uncheck(timeout=2500)
+                        except Exception:
+                            pass
+                        try:
+                            await page.get_by_text("All territories (worldwide rights)", exact=False).first.click(timeout=2500)
+                        except Exception:
+                            pass
+                        try:
+                            await page.evaluate(
+                                """(rate) => {
+                                    const hidden = document.querySelector('#data-digital-worldwide-rights');
+                                    if (hidden) {
+                                        hidden.value = 'true';
+                                        hidden.dispatchEvent(new Event('change', { bubbles: true }));
+                                    }
+                                    const radio = document.querySelector(`input[name="data[digital][royalty_rate]-radio"][value="${rate}"]`);
+                                    if (radio) {
+                                        radio.checked = true;
+                                        radio.dispatchEvent(new Event('change', { bubbles: true }));
+                                    }
+                                    const royalty = document.querySelector('#data-digital-royalty-rate-hidden');
+                                    if (royalty) royalty.value = rate;
+                                }""",
+                                royalty_rate,
+                            )
+                        except Exception:
+                            pass
+                        try:
+                            price_input = page.locator("input[name='data[digital][channels][amazon][US][price_vat_inclusive]']").first
+                            await price_input.fill(str(price_us), timeout=3500)
+                            await page.keyboard.press("Tab")
+                            await page.wait_for_timeout(1200)
+                            price_set = True
+                        except Exception:
+                            price_set = False
+                        try:
+                            save_btn = page.locator("#save-announce")
+                            if await save_btn.count() > 0:
+                                await save_btn.first.click(timeout=3500)
+                                saved = True
+                        except Exception:
+                            saved = False
+                    else:
+                        try:
+                            await page.goto(f"https://kdp.amazon.com/en_US/print-setup/{kind}/{doc}/pricing", wait_until="domcontentloaded", timeout=120000)
+                            await page.wait_for_timeout(2500)
+                            await _kdp_relogin_if_needed(page)
+                            await page.wait_for_timeout(1200)
+                        except Exception:
+                            pass
+                        try:
+                            for sel in [
+                                "#worldwide-rights",
+                                "label[for='worldwide-rights']",
+                                "text=Worldwide rights",
+                            ]:
+                                loc = page.locator(sel)
+                                if await loc.count() > 0:
+                                    await loc.first.click(timeout=2500)
+                                    break
+                        except Exception:
+                            pass
+                        try:
+                            values = {
+                                "#price-input-usd": str(price_us),
+                                "#price-input-cad": "9.99",
+                                "#price-input-jpy": "999",
+                                "#price-input-gbp": "7.99",
+                                "#price-input-aud": "13.99",
+                                "#price-input-pln": "40.00",
+                                "#price-input-sek": "110.00",
+                            }
+                            try:
+                                eur_count = await page.locator("#price-input-eur").count()
+                            except Exception:
+                                eur_count = 0
+                            for idx in range(eur_count):
+                                values[f"#price-input-eur >> nth={idx}"] = "9,99"
+                            price_set = True
+                            for sel, value in values.items():
+                                loc = page.locator(sel).first
+                                await loc.fill(value, timeout=3500)
+                                await page.wait_for_timeout(120)
+                            await page.keyboard.press("Tab")
+                            await page.wait_for_timeout(1200)
+                        except Exception:
+                            price_set = False
+                        try:
+                            for save_sel in [
+                                "button:has-text('Save as Draft')",
+                                "button:has-text('Save')",
+                                "#save-and-publish-button",
+                                "input[type='submit']",
+                            ]:
+                                save_btn = page.locator(save_sel)
+                                if await save_btn.count() > 0:
+                                    await save_btn.first.click(timeout=3500)
+                                    saved = True
+                                    break
+                        except Exception:
+                            saved = False
                     await page.wait_for_timeout(2500)
                     screenshot_path = "runtime/remote_auth/kdp_adapter_pricing_after_save.png"
                     await page.screenshot(path=screenshot_path, full_page=True)
                     try:
                         await page.reload(wait_until="domcontentloaded", timeout=120000)
                         await page.wait_for_timeout(2000)
-                        current_price = await page.evaluate(
-                            """() => {
-                                const el = document.querySelector("input[name='data[digital][channels][amazon][US][price_vat_inclusive]']");
-                                return el ? (el.value || '') : '';
-                            }"""
-                        )
-                        current_royalty = await page.evaluate(
-                            """() => {
-                                const el = document.querySelector('#data-digital-royalty-rate-hidden');
-                                return el ? (el.value || '') : '';
-                            }"""
-                        )
-                        current_worldwide = await page.evaluate(
-                            """() => {
-                                const el = document.querySelector('#data-digital-worldwide-rights');
-                                return el ? (el.value || '') : '';
-                            }"""
-                        )
-                        price_set = price_set and str(current_price or "").strip() == str(price_us)
-                        saved = saved and str(current_royalty or "").strip() == royalty_rate and str(current_worldwide or "").strip().lower() == "true"
+                        if kind == "kindle":
+                            current_price = await page.evaluate(
+                                """() => {
+                                    const el = document.querySelector("input[name='data[digital][channels][amazon][US][price_vat_inclusive]']");
+                                    return el ? (el.value || '') : '';
+                                }"""
+                            )
+                            current_royalty = await page.evaluate(
+                                """() => {
+                                    const el = document.querySelector('#data-digital-royalty-rate-hidden');
+                                    return el ? (el.value || '') : '';
+                                }"""
+                            )
+                            current_worldwide = await page.evaluate(
+                                """() => {
+                                    const el = document.querySelector('#data-digital-worldwide-rights');
+                                    return el ? (el.value || '') : '';
+                                }"""
+                            )
+                            price_set = price_set and str(current_price or "").strip() == str(price_us)
+                            saved = saved and str(current_royalty or "").strip() == royalty_rate and str(current_worldwide or "").strip().lower() == "true"
+                        else:
+                            vals = await page.evaluate(
+                                """() => {
+                                    const read = (sel) => Array.from(document.querySelectorAll(sel)).map((el) => (el && 'value' in el) ? String(el.value || '').trim() : '');
+                                    return {
+                                        usd: read('#price-input-usd'),
+                                        cad: read('#price-input-cad'),
+                                        jpy: read('#price-input-jpy'),
+                                        gbp: read('#price-input-gbp'),
+                                        aud: read('#price-input-aud'),
+                                        eur: read('#price-input-eur'),
+                                        pln: read('#price-input-pln'),
+                                        sek: read('#price-input-sek'),
+                                    };
+                                }"""
+                            )
+                            price_set = price_set and (vals.get("usd") or [""])[0] == str(price_us)
+                            saved = saved and all([
+                                (vals.get("cad") or [""])[0] == "9.99",
+                                (vals.get("jpy") or [""])[0] == "999",
+                                (vals.get("gbp") or [""])[0] == "7.99",
+                                (vals.get("aud") or [""])[0] == "13.99",
+                                all(v == "9,99" for v in (vals.get("eur") or [])),
+                                (vals.get("pln") or [""])[0] == "40.00",
+                                (vals.get("sek") or [""])[0] == "110.00",
+                            ])
+                        body_after = ((await page.text_content("body")) or "").lower()
+                        account_gate = account_gate or ("account information incomplete" in body_after)
                     except Exception:
                         pass
                 await context.close()
@@ -176,6 +350,7 @@ class AmazonKDPPlatform(BasePlatform):
                     "price_us": str(price_us),
                     "royalty_rate": str(royalty_rate),
                     "enroll_select": bool(enroll_select),
+                    "account_gate": bool(account_gate),
                     "screenshot_path": screenshot_path,
                 }
         except Exception as e:
@@ -203,9 +378,17 @@ class AmazonKDPPlatform(BasePlatform):
                 browser = await p.chromium.launch(headless=True, args=args)
                 context = await browser.new_context(storage_state=str(self._state_file), viewport={"width": 1440, "height": 920})
                 page = await context.new_page()
-                url = f"https://kdp.amazon.com/en_US/title-setup/kindle/{doc}/content?ref_=kdp_BS_D_c_ed_content"
+                kind = _kdp_doc_kind()
+                url = _kdp_setup_url(kind, doc, "content", "ref_=kdp_BS_D_c_ed_content")
                 await page.goto(url, wait_until="domcontentloaded", timeout=120000)
                 await page.wait_for_timeout(3000)
+                await _kdp_relogin_if_needed(page)
+                await page.wait_for_timeout(1500)
+                if not _kdp_is_content_page(page.url, await page.title(), kind):
+                    await page.goto(url, wait_until="domcontentloaded", timeout=120000)
+                    await page.wait_for_timeout(2500)
+                    await _kdp_relogin_if_needed(page)
+                    await page.wait_for_timeout(1500)
                 body = ((await page.text_content("body")) or "").lower()
                 interior_status = await page.evaluate(
                     """() => {
@@ -224,7 +407,7 @@ class AmazonKDPPlatform(BasePlatform):
                 await context.close()
                 await browser.close()
                 return {
-                    "draft_visible": "/title-setup/kindle/" in (page.url or "").lower() or "kindle ebook content" in ((await page.title()) or "").lower(),
+                    "draft_visible": _kdp_is_content_page(page.url, await page.title(), kind),
                     "manuscript_uploaded": str(interior_status or "").strip().upper() == "SUCCESS" or "manuscript check complete" in body,
                     "cover_uploaded": str(cover_status or "").strip().upper() == "SUCCESS",
                     "content_url": page.url,
@@ -422,7 +605,7 @@ class AmazonKDPPlatform(BasePlatform):
             result = {"platform": "amazon_kdp", "status": "prepared", "error": "kdp_helper_missing"}
             self._record_publish_lesson(result, source="amazon_kdp.kdp_helper")
             return result
-        title = str(content.get("title") or "VITO TEST DRAFT").strip() or "VITO TEST DRAFT"
+        title = str(content.get("title") or "Working Draft").strip() or "Working Draft"
         cmd = [
             "xvfb-run",
             "-a",
@@ -436,7 +619,7 @@ class AmazonKDPPlatform(BasePlatform):
         env = dict(os.environ)
         env["KDP_TEST_DRAFT_TITLE"] = title
         env["KDP_TEST_DRAFT_SUBTITLE"] = str(content.get("subtitle") or "")
-        env["KDP_TEST_DRAFT_AUTHOR"] = str(content.get("author") or "VITO Studio")
+        env["KDP_TEST_DRAFT_AUTHOR"] = str(content.get("author") or content.get("brand_name") or "Editorial Team")
         env["KDP_TEST_DRAFT_DESCRIPTION"] = str(content.get("description") or "")
         kw = content.get("keyword_slots") or content.get("keywords") or []
         if isinstance(kw, list):

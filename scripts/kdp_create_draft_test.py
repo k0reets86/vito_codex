@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from playwright.async_api import async_playwright
-from PIL import Image
+from PIL import Image, ImageDraw
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 import sys
@@ -21,6 +21,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from modules.epub_builder import build_simple_epub
+from modules.pdf_utils import write_minimal_pdf
 
 try:
     from config.settings import settings
@@ -173,8 +174,12 @@ async def _kdp_fill_pricing_page(
     target_doc = str(document_id or "").strip()
     if not target_doc:
         return result
+    doc_kind = _kdp_doc_kind()
+    pricing_url = _kdp_setup_url(doc_kind, target_doc, 'pricing', 'ref_=kdp_BS_D_p_ed_pricing')
+    if doc_kind in {"paperback", "hardcover"}:
+        pricing_url = f"https://kdp.amazon.com/en_US/print-setup/{doc_kind}/{target_doc}/pricing"
     await page.goto(
-        f"https://kdp.amazon.com/en_US/title-setup/kindle/{target_doc}/pricing?ref_=kdp_BS_D_p_ed_pricing",
+        pricing_url,
         wait_until="domcontentloaded",
         timeout=120000,
     )
@@ -182,13 +187,14 @@ async def _kdp_fill_pricing_page(
     await _kdp_relogin_if_needed(page)
     if "pricing" not in (page.url or "").lower():
         await page.goto(
-            f"https://kdp.amazon.com/en_US/title-setup/kindle/{target_doc}/pricing?ref_=kdp_BS_D_p_ed_pricing",
+            pricing_url,
             wait_until="domcontentloaded",
             timeout=120000,
         )
         await page.wait_for_timeout(2500)
     result["pricing_url"] = page.url
-    result["pricing_page_seen"] = "/pricing" in (page.url or "").lower() or "edit ebook pricing" in ((await page.title()) or "").lower()
+    title_now = ((await page.title()) or "").lower()
+    result["pricing_page_seen"] = _kdp_is_pricing_page(page.url, title_now, doc_kind)
     if not result["pricing_page_seen"]:
         return result
 
@@ -203,67 +209,105 @@ async def _kdp_fill_pricing_page(
     except Exception:
         pass
 
-    await _click_first(
-        page,
-        [
-            "text=All territories (worldwide rights)",
-            "a:has-text('All territories (worldwide rights)')",
-            "#data-digital-worldwide-rights-accordion a",
-        ],
-        timeout_ms=2500,
-    )
-    await page.wait_for_timeout(500)
-    try:
-        await page.evaluate(
-            """() => {
-                const hidden = document.querySelector('#data-digital-worldwide-rights');
-                if (hidden) {
-                    hidden.value = 'true';
-                    hidden.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-            }"""
-        )
-    except Exception:
-        pass
-
-    if royalty_rate in {"35_PERCENT", "70_PERCENT"}:
-        clicked = await _click_first(
+    if doc_kind == "kindle":
+        await _click_first(
             page,
             [
-                f"input[name='data[digital][royalty_rate]-radio'][value='{royalty_rate}']",
-                f"label:has(input[name='data[digital][royalty_rate]-radio'][value='{royalty_rate}'])",
+                "text=All territories (worldwide rights)",
+                "a:has-text('All territories (worldwide rights)')",
+                "#data-digital-worldwide-rights-accordion a",
             ],
             timeout_ms=2500,
         )
-        if not clicked:
+        await page.wait_for_timeout(500)
+        try:
+            await page.evaluate(
+                """() => {
+                    const hidden = document.querySelector('#data-digital-worldwide-rights');
+                    if (hidden) {
+                        hidden.value = 'true';
+                        hidden.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                }"""
+            )
+        except Exception:
+            pass
+
+        if royalty_rate in {"35_PERCENT", "70_PERCENT"}:
+            clicked = await _click_first(
+                page,
+                [
+                    f"input[name='data[digital][royalty_rate]-radio'][value='{royalty_rate}']",
+                    f"label:has(input[name='data[digital][royalty_rate]-radio'][value='{royalty_rate}'])",
+                ],
+                timeout_ms=2500,
+            )
+            if not clicked:
+                try:
+                    await page.evaluate(
+                        f"""() => {{
+                            const radio = document.querySelector("input[name='data[digital][royalty_rate]-radio'][value='{royalty_rate}']");
+                            if (radio) {{
+                                radio.checked = true;
+                                radio.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                            }}
+                            const hidden = document.querySelector('#data-digital-royalty-rate-hidden');
+                            if (hidden) hidden.value = '{royalty_rate}';
+                        }}"""
+                    )
+                except Exception:
+                    pass
+            await page.wait_for_timeout(600)
+
+        result["pricing_us_set"] = await _fill_first(
+            page,
+            [
+                "input[name='data[digital][channels][amazon][US][price_vat_inclusive]']",
+                "input[id*='us-price' i]",
+                "input[name*='price_vat_inclusive' i]",
+            ],
+            price_us,
+            timeout_ms=3500,
+        )
+        await page.wait_for_timeout(800)
+        if result["pricing_us_set"]:
             try:
-                await page.evaluate(
-                    f"""() => {{
-                        const radio = document.querySelector("input[name='data[digital][royalty_rate]-radio'][value='{royalty_rate}']");
-                        if (radio) {{
-                            radio.checked = true;
-                            radio.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                        }}
-                        const hidden = document.querySelector('#data-digital-royalty-rate-hidden');
-                        if (hidden) hidden.value = '{royalty_rate}';
-                    }}"""
-                )
+                await page.keyboard.press("Tab")
             except Exception:
                 pass
-        await page.wait_for_timeout(600)
-
-    result["pricing_us_set"] = await _fill_first(
-        page,
-        [
-            "input[name='data[digital][channels][amazon][US][price_vat_inclusive]']",
-            "input[id*='us-price' i]",
-            "input[name*='price_vat_inclusive' i]",
-        ],
-        price_us,
-        timeout_ms=3500,
-    )
-    await page.wait_for_timeout(800)
-    if result["pricing_us_set"]:
+            await page.wait_for_timeout(1200)
+    else:
+        await _click_first(
+            page,
+            [
+                "#worldwide-rights",
+                "label[for='worldwide-rights']",
+                "text=Worldwide rights",
+            ],
+            timeout_ms=2500,
+        )
+        await page.wait_for_timeout(400)
+        price_map = {
+            "#price-input-usd": str(price_us),
+            "#price-input-cad": "9.99",
+            "#price-input-jpy": "999",
+            "#price-input-gbp": "7.99",
+            "#price-input-aud": "13.99",
+            "#price-input-pln": "40.00",
+            "#price-input-sek": "110.00",
+        }
+        try:
+            eur_count = await page.locator("#price-input-eur").count()
+        except Exception:
+            eur_count = 0
+        for idx in range(eur_count):
+            price_map[f"#price-input-eur >> nth={idx}"] = "9,99"
+        all_ok = True
+        for sel, value in price_map.items():
+            ok = await _fill_first(page, [sel], value, timeout_ms=3500)
+            all_ok = all_ok and ok
+            await page.wait_for_timeout(150)
+        result["pricing_us_set"] = all_ok
         try:
             await page.keyboard.press("Tab")
         except Exception:
@@ -286,30 +330,60 @@ async def _kdp_fill_pricing_page(
     try:
         await page.reload(wait_until="domcontentloaded", timeout=120000)
         await page.wait_for_timeout(2500)
-        current_price = await page.evaluate(
-            """() => {
-                const el = document.querySelector("input[name='data[digital][channels][amazon][US][price_vat_inclusive]']");
-                return el ? (el.value || '') : '';
-            }"""
-        )
-        current_royalty = await page.evaluate(
-            """() => {
-                const el = document.querySelector('#data-digital-royalty-rate-hidden');
-                return el ? (el.value || '') : '';
-            }"""
-        )
-        current_worldwide = await page.evaluate(
-            """() => {
-                const el = document.querySelector('#data-digital-worldwide-rights');
-                return el ? (el.value || '') : '';
-            }"""
-        )
-        result["pricing_us_set"] = result["pricing_us_set"] and str(current_price or "").strip() == price_us
-        result["pricing_saved"] = (
-            result["pricing_saved"]
-            and str(current_royalty or "").strip() == royalty_rate
-            and str(current_worldwide or "").strip().lower() == "true"
-        )
+        if doc_kind == "kindle":
+            current_price = await page.evaluate(
+                """() => {
+                    const el = document.querySelector("input[name='data[digital][channels][amazon][US][price_vat_inclusive]']");
+                    return el ? (el.value || '') : '';
+                }"""
+            )
+            current_royalty = await page.evaluate(
+                """() => {
+                    const el = document.querySelector('#data-digital-royalty-rate-hidden');
+                    return el ? (el.value || '') : '';
+                }"""
+            )
+            current_worldwide = await page.evaluate(
+                """() => {
+                    const el = document.querySelector('#data-digital-worldwide-rights');
+                    return el ? (el.value || '') : '';
+                }"""
+            )
+            result["pricing_us_set"] = result["pricing_us_set"] and str(current_price or "").strip() == price_us
+            result["pricing_saved"] = (
+                result["pricing_saved"]
+                and str(current_royalty or "").strip() == royalty_rate
+                and str(current_worldwide or "").strip().lower() == "true"
+            )
+        else:
+            vals = await page.evaluate(
+                """() => {
+                    const read = (sel) => {
+                        const els = Array.from(document.querySelectorAll(sel));
+                        return els.map((el) => (el && 'value' in el) ? String(el.value || '').trim() : '');
+                    };
+                    return {
+                        usd: read('#price-input-usd'),
+                        cad: read('#price-input-cad'),
+                        jpy: read('#price-input-jpy'),
+                        gbp: read('#price-input-gbp'),
+                        aud: read('#price-input-aud'),
+                        eur: read('#price-input-eur'),
+                        pln: read('#price-input-pln'),
+                        sek: read('#price-input-sek'),
+                    };
+                }"""
+            )
+            result["pricing_us_set"] = result["pricing_us_set"] and (vals.get("usd") or [""])[0] == str(price_us)
+            result["pricing_saved"] = result["pricing_saved"] and all([
+                (vals.get("cad") or [""])[0] == "9.99",
+                (vals.get("jpy") or [""])[0] == "999",
+                (vals.get("gbp") or [""])[0] == "7.99",
+                (vals.get("aud") or [""])[0] == "13.99",
+                all(v == "9,99" for v in (vals.get("eur") or [])),
+                (vals.get("pln") or [""])[0] == "40.00",
+                (vals.get("sek") or [""])[0] == "110.00",
+            ])
         result["pricing_url"] = page.url
     except Exception:
         pass
@@ -335,6 +409,38 @@ def _prepare_kdp_cover_file(cover_path: str, dbg: Path, stamp: str) -> str:
     src = Path(raw)
     if not src.exists():
         return ""
+    kind = _kdp_doc_kind()
+    if kind in {"paperback", "hardcover"}:
+        target_width_in = 12.304 if kind == "paperback" else 13.0
+        target_height_in = 9.25
+        dpi = 300
+        canvas_w = int(round(target_width_in * dpi))
+        canvas_h = int(round(target_height_in * dpi))
+        front_w = int(round(6.0 * dpi))
+        front_h = int(round(9.0 * dpi))
+        out = dbg / f"kdp_cover_{kind}_{stamp}.pdf"
+        try:
+            img = Image.open(src).convert("RGB")
+            canvas = Image.new("RGB", (canvas_w, canvas_h), "white")
+
+            # Reserve the right side for the front cover and keep left/spine neutral.
+            front = img.copy()
+            front.thumbnail((front_w, front_h))
+            front_x = canvas_w - front.width - int(round(0.15 * dpi))
+            front_y = max(0, (canvas_h - front.height) // 2)
+            canvas.paste(front, (front_x, front_y))
+
+            # Add minimal spine guide and back-cover title so the PDF is not blank.
+            draw = ImageDraw.Draw(canvas)
+            spine_x = max(0, front_x - int(round(0.28 * dpi)))
+            draw.line((spine_x, 0, spine_x, canvas_h), fill=(220, 220, 220), width=3)
+            draw.text((int(round(0.35 * dpi)), int(round(0.45 * dpi))), "Paperback Edition", fill="black")
+            draw.text((int(round(0.35 * dpi)), int(round(0.9 * dpi))), "Practical workbook for creators and operators.", fill="black")
+
+            canvas.save(out, format="PDF", resolution=float(dpi))
+            return str(out)
+        except Exception:
+            return str(src)
     if src.suffix.lower() in {".jpg", ".jpeg", ".tif", ".tiff"}:
         return str(src)
     try:
@@ -349,8 +455,33 @@ def _prepare_kdp_cover_file(cover_path: str, dbg: Path, stamp: str) -> str:
 def _prepare_kdp_manuscript_file(manuscript_path: str, dbg: Path, stamp: str, title: str, author: str, description: str) -> str:
     raw = str(manuscript_path or "").strip()
     src = Path(raw) if raw else None
-    if src and src.exists() and src.suffix.lower() == ".epub":
+    kind = _kdp_doc_kind()
+    if src and src.exists() and ((kind == "kindle" and src.suffix.lower() == ".epub") or (kind in {"paperback", "hardcover"} and src.suffix.lower() == ".pdf")):
         return str(src)
+    if kind in {"paperback", "hardcover"}:
+        out = dbg / f"kdp_manuscript_{kind}_{stamp}.pdf"
+        pages = []
+        base_lines = [
+            title,
+            description or "Practical workbook for creators and operators.",
+            "Prompt 1: Define your niche and audience.",
+            "Prompt 2: Outline the product and monetization path.",
+            "Prompt 3: Build the launch checklist and shipping plan.",
+        ]
+        for page_num in range(24):
+            img = Image.new("RGB", (1800, 2700), "white")
+            draw = ImageDraw.Draw(img)
+            y = 140
+            draw.text((120, y), title, fill="black")
+            y += 120
+            draw.text((120, y), f"Page {page_num + 1}", fill="black")
+            y += 120
+            for line in base_lines:
+                draw.text((120, y), line[:80], fill="black")
+                y += 100
+            pages.append(img)
+        pages[0].save(out, save_all=True, append_images=pages[1:], resolution=300.0)
+        return str(out)
     out = dbg / f"kdp_manuscript_{stamp}.epub"
     chapters = [
         ("Introduction", description or "Practical starter guide for creators and operators."),
@@ -358,6 +489,49 @@ def _prepare_kdp_manuscript_file(manuscript_path: str, dbg: Path, stamp: str, ti
         ("Launch Checklist", "Use one draft per platform, confirm every field, and verify the result visually."),
     ]
     return build_simple_epub(out, title=title, author=author, description=description, chapters=chapters)
+
+
+def _kdp_doc_kind() -> str:
+    kind = str(os.getenv("KDP_TEST_DOC_TYPE", "kindle")).strip().lower()
+    return kind if kind in {"kindle", "paperback", "hardcover"} else "kindle"
+
+
+def _kdp_setup_url(kind: str, document_id: str, step: str, ref: str = "") -> str:
+    if kind in {"paperback", "hardcover"}:
+        action = f"dualbookshelf.edit{kind}{step}"
+        base = f"https://kdp.amazon.com/action/{action}/en_US/title-setup/{kind}/{document_id}/{step}"
+    else:
+        base = f"https://kdp.amazon.com/en_US/title-setup/{kind}/{document_id}/{step}"
+    return f"{base}?{ref}" if ref else base
+
+
+def _kdp_is_pricing_page(url: str, title: str, kind: str) -> bool:
+    url_now = str(url or "").lower()
+    title_now = str(title or "").lower()
+    if "/pricing" in url_now:
+        return True
+    if kind == "kindle":
+        return "edit ebook pricing" in title_now
+    if kind == "paperback":
+        return "edit paperback rights" in title_now or "paperback rights & pricing" in title_now
+    if kind == "hardcover":
+        return "edit hardcover rights" in title_now or "hardcover rights & pricing" in title_now
+    return False
+
+
+def _kdp_is_cover_processing(body: str, kind: str) -> bool:
+    body_now = str(body or "").lower()
+    if "cover uploaded successfully" in body_now:
+        return True
+    if "processing your file" not in body_now:
+        return False
+    if kind == "kindle":
+        return "kindle ebook cover" in body_now
+    if kind == "paperback":
+        return "paperback cover" in body_now or "book cover" in body_now
+    if kind == "hardcover":
+        return "hardcover cover" in body_now or "book cover" in body_now
+    return False
 
 
 async def _open_kdp_details_flow(page) -> bool:
@@ -428,8 +602,8 @@ async def _open_existing_draft_direct(page, document_id: str) -> bool:
     if not doc:
         return False
     urls = [
-        f"https://kdp.amazon.com/en_US/title-setup/kindle/{doc}/details?ref_=kdp_BS_D_ta_ed_main",
-        f"https://kdp.amazon.com/en_US/title-setup/kindle/{doc}/content?ref_=kdp_BS_D_c_ed_content",
+        _kdp_setup_url(_kdp_doc_kind(), doc, 'details', 'ref_=kdp_BS_D_ta_ed_main'),
+        _kdp_setup_url(_kdp_doc_kind(), doc, 'content', 'ref_=kdp_BS_D_c_ed_content'),
     ]
     for url in urls:
         try:
@@ -440,7 +614,12 @@ async def _open_existing_draft_direct(page, document_id: str) -> bool:
             cur = (page.url or "").lower()
             title = ((await page.title()) or "").lower()
             body = ((await page.text_content("body")) or "").lower()
-            if f"/title-setup/kindle/{doc.lower()}/" in cur or "edit ebook" in title or "book title" in body:
+            kind = _kdp_doc_kind()
+            if f"/title-setup/{kind}/{doc.lower()}/" in cur or "book title" in body or (
+                ("edit ebook" in title and kind == "kindle")
+                or ("edit paperback" in title and kind == "paperback")
+                or ("edit hardcover" in title and kind == "hardcover")
+            ):
                 return True
         except Exception:
             continue
@@ -528,7 +707,7 @@ async def _open_existing_draft_by_document_id(page, document_id: str) -> bool:
     doc_id = str(document_id or "").strip()
     if not doc_id:
         return False
-    url = f"https://kdp.amazon.com/en_US/title-setup/kindle/{doc_id}/details?ref_=kdp_BS_D_ta_ed_main"
+    url = _kdp_setup_url(_kdp_doc_kind(), doc_id, 'details', 'ref_=kdp_BS_D_ta_ed_main')
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=120000)
         await page.wait_for_timeout(2200)
@@ -541,10 +720,11 @@ async def _open_existing_draft_by_document_id(page, document_id: str) -> bool:
             await page.wait_for_timeout(2500)
         if "signin" in (page.url or "").lower() or "ap/signin" in (page.url or "").lower():
             return False
-        if f"/title-setup/kindle/{doc_id}/details" not in (page.url or ""):
+        kind = _kdp_doc_kind()
+        if f"/title-setup/{kind}/{doc_id}/details" not in (page.url or ""):
             await page.goto(url, wait_until="domcontentloaded", timeout=120000)
             await page.wait_for_timeout(1800)
-        return f"/title-setup/kindle/{doc_id}/details" in (page.url or "")
+        return f"/title-setup/{kind}/{doc_id}/details" in (page.url or "")
     except Exception:
         return False
 
@@ -593,10 +773,10 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
         return 2
 
     stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    title = str(os.getenv("KDP_TEST_DRAFT_TITLE", "VITO TEST DRAFT")).strip() or "VITO TEST DRAFT"
+    title = str(os.getenv("KDP_TEST_DRAFT_TITLE", "Working Draft")).strip() or "Working Draft"
     document_id = str(os.getenv("KDP_TEST_DRAFT_DOCUMENT_ID", "")).strip()
     subtitle = str(os.getenv("KDP_TEST_DRAFT_SUBTITLE", "")).strip()
-    author = str(os.getenv("KDP_TEST_DRAFT_AUTHOR", "Vito Bot")).strip() or "Vito Bot"
+    author = str(os.getenv("KDP_TEST_DRAFT_AUTHOR", "Editorial Team")).strip() or "Editorial Team"
     description = str(
         os.getenv(
             "KDP_TEST_DRAFT_DESCRIPTION",
@@ -616,6 +796,7 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
 
     cover_path = _prepare_kdp_cover_file(cover_path, dbg, stamp)
     manuscript_path = _prepare_kdp_manuscript_file(manuscript_path, dbg, stamp, title, author, description)
+    doc_kind = _kdp_doc_kind()
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=headless, args=_launch_args())
@@ -682,59 +863,61 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
                     return _emit_result({"ok": False, "error": "create_flow_not_opened", "url": page.url, "screenshot": str(dbg / f"kdp_draft_{stamp}_create_flow_not_opened.png")}, 3)
 
             # Step 3: fill metadata on details page (best effort).
-            await _fill_first(
-                page,
-                [
-                "input[name='data[title]']",
-                "input#data-title",
-                "input[name='bookTitle']",
-                "input#bookTitle",
-                "input[aria-label*='Book title']",
-                "input[placeholder*='Book title']",
-                ],
-                title,
-            )
-            await _fill_first(
-                page,
-                [
-                    "input[name='data[subtitle]']",
-                    "input#data-subtitle",
-                    "input[name='bookSubtitle']",
-                    "input#bookSubtitle",
-                    "input[aria-label*='Subtitle']",
-                    "input[placeholder*='Subtitle']",
-                ],
-                subtitle,
-            )
+            if doc_kind == "kindle":
+                await _fill_first(
+                    page,
+                    [
+                    "input[name='data[title]']",
+                    "input#data-title",
+                    "input[name='bookTitle']",
+                    "input#bookTitle",
+                    "input[aria-label*='Book title']",
+                    "input[placeholder*='Book title']",
+                    ],
+                    title,
+                )
+                await _fill_first(
+                    page,
+                    [
+                        "input[name='data[subtitle]']",
+                        "input#data-subtitle",
+                        "input[name='bookSubtitle']",
+                        "input#bookSubtitle",
+                        "input[aria-label*='Subtitle']",
+                        "input[placeholder*='Subtitle']",
+                    ],
+                    subtitle,
+                )
 
             # author name
             author_first, _, author_last = author.partition(" ")
             author_last = author_last.strip() or "Bot"
             first_set = False
-            first_set = await _fill_first(
-                page,
-                [
-                    "input[name='data[primary_author][first_name]']",
-                    "input#data-primary-author-first-name",
-                    "input[name='authorFirstName']",
-                    "input#authorFirstName",
-                    "input[aria-label*='First name']",
-                ],
-                author_first or "Vito",
-            )
-            if first_set:
-                await _fill_first(
+            if doc_kind == "kindle":
+                first_set = await _fill_first(
                     page,
                     [
-                        "input[name='data[primary_author][last_name]']",
-                        "input#data-primary-author-last-name",
-                        "input#data-print-book-primary-author-last-name-jp",
-                        "input[name='authorLastName']",
-                        "input#authorLastName",
-                        "input[aria-label*='Last name']",
+                        "input[name='data[primary_author][first_name]']",
+                        "input#data-primary-author-first-name",
+                        "input[name='authorFirstName']",
+                        "input#authorFirstName",
+                        "input[aria-label*='First name']",
                     ],
-                    author_last,
+                    author_first or "Vito",
                 )
+                if first_set:
+                    await _fill_first(
+                        page,
+                        [
+                            "input[name='data[primary_author][last_name]']",
+                            "input#data-primary-author-last-name",
+                            "input#data-print-book-primary-author-last-name-jp",
+                            "input[name='authorLastName']",
+                            "input#authorLastName",
+                            "input[aria-label*='Last name']",
+                        ],
+                        author_last,
+                    )
 
             description_set = await _fill_first(
                 page,
@@ -742,6 +925,7 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
                     "textarea[name='data[description]']",
                     "textarea[name='description']",
                     "textarea#description",
+                    "input[name='data[print_book][description]']",
                     "textarea[aria-label*='Description']",
                     "textarea[placeholder*='Description']",
                     "div[contenteditable='true']",
@@ -818,7 +1002,7 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
                     await page.wait_for_timeout(1500)
                     try:
                         await page.evaluate(
-                            """() => {
+                            """(kind) => {
                                 const modal = Array.from(document.querySelectorAll("div,section,dialog")).find(el =>
                                     /select categories and subcategories/i.test(el.textContent || "")
                                 ) || document;
@@ -831,8 +1015,18 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
                                         categorySelect.dispatchEvent(new Event('change', { bubbles: true }));
                                     }
                                 }
-                                const picks = Array.from(modal.querySelectorAll("input[type='checkbox'], input[type='radio']")).filter(el => !el.checked);
-                                const pick = picks[0] || null;
+                                const second = modal.querySelector("select[name='react-aui-2']");
+                                if (second && (!second.value || second.value.includes('level'))) {
+                                    const option = Array.from(second.options).find(o => /Business Development|Entrepreneurship|General/i.test(o.textContent || ""));
+                                    if (option) {
+                                        second.value = option.value;
+                                        second.dispatchEvent(new Event('input', { bubbles: true }));
+                                        second.dispatchEvent(new Event('change', { bubbles: true }));
+                                    }
+                                }
+                                const labels = Array.from(modal.querySelectorAll("label, span, div"));
+                                const pickWrap = labels.find(el => /General|Bitcoin & Cryptocurrencies/i.test(el.textContent || ""));
+                                const pick = pickWrap ? (pickWrap.querySelector("input[type='checkbox'], input[type='radio']") || null) : Array.from(modal.querySelectorAll("input[type='checkbox'], input[type='radio']")).find(el => !el.checked) || null;
                                 if (pick) {
                                     pick.click();
                                     pick.dispatchEvent(new Event('input', { bubbles: true }));
@@ -847,13 +1041,22 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
                                     }
                                 }
                                 return !!pick;
-                            }"""
+                            }""",
+                            doc_kind,
                         )
                     except Exception:
                         pass
                     await page.wait_for_timeout(1200)
             except Exception:
                 pass
+
+            if doc_kind in {"paperback", "hardcover"}:
+                try:
+                    await _check_first(page, ["#data-view-is-lcb"])
+                except Exception:
+                    pass
+                await _click_text_any(page, ["Release my book for sale now"], timeout_ms=2000)
+                await page.wait_for_timeout(600)
 
             await page.wait_for_timeout(800)
 
@@ -891,23 +1094,33 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
                 await page.wait_for_timeout(600)
                 manuscript_uploaded = await _set_input_file(
                     page,
-                    [
-                        "#data-assets-interior-file-upload-AjaxInput",
-                        "input[type='file'][accept*='pdf' i]",
-                        "input[type='file'][name*='manuscript' i]",
-                        "input[type='file'][id*='manuscript' i]",
-                    ],
+                    (
+                        [
+                            "#data-assets-interior-file-upload-AjaxInput",
+                            "input[type='file'][accept*='pdf' i]",
+                            "input[type='file'][name*='manuscript' i]",
+                            "input[type='file'][id*='manuscript' i]",
+                        ]
+                        if doc_kind == "kindle"
+                        else [
+                            "#data-print-book-publisher-interior-file-upload-AjaxInput",
+                            "input[type='file'][id*='publisher-interior' i]",
+                            "input[type='file'][accept*='.pdf' i]",
+                        ]
+                    ),
                     manuscript_path,
                 )
                 if manuscript_uploaded:
                     await page.wait_for_timeout(3500)
-                    await _click_text_any(page, ["Continue with PDF", "I have another format", "Continue"], timeout_ms=2500)
+                    if doc_kind == "kindle":
+                        await _click_text_any(page, ["Continue with PDF", "I have another format", "Continue"], timeout_ms=2500)
                     await page.wait_for_timeout(1200)
                     body_now = await _body_all(page)
                     manuscript_uploaded = (
                         "uploaded successfully" in body_now
                         or "completed conversion" in body_now
                         or "uploaded on" in body_now
+                        or (doc_kind in {"paperback", "hardcover"} and ("manuscript uploaded" in body_now or "processing your manuscript" in body_now))
                     )
                 # If KDP asks to upload your own cover, try to enable that path.
                 await _click_first(
@@ -916,7 +1129,6 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
                         "label:has-text('Upload a cover you already have')",
                         "text=Upload a cover you already have",
                         "label:has-text('Upload your cover file')",
-                        "label:has-text('Upload your cover file')",
                         "input[value='UPLOAD_YOUR_COVER']",
                     ],
                     timeout_ms=2000,
@@ -924,23 +1136,40 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
                 await page.wait_for_timeout(600)
                 cover_uploaded = await _set_input_file(
                     page,
-                    [
-                        "#data-assets-cover-file-upload-AjaxInput",
-                        "#data-assets-cover-jp-file-upload-AjaxInput",
-                        "input[type='file'][accept*='jpeg' i]",
-                        "input[type='file'][accept*='jpg' i]",
-                        "input[type='file'][name*='cover' i]",
-                        "input[type='file'][id*='cover' i]",
-                    ],
+                    (
+                        [
+                            "#data-assets-cover-file-upload-AjaxInput",
+                            "#data-assets-cover-jp-file-upload-AjaxInput",
+                            "input[type='file'][accept*='jpeg' i]",
+                            "input[type='file'][accept*='jpg' i]",
+                            "input[type='file'][name*='cover' i]",
+                            "input[type='file'][id*='cover' i]",
+                        ]
+                        if doc_kind == "kindle"
+                        else [
+                            "#data-print-book-publisher-cover-pdf-only-file-upload-AjaxInput",
+                            "#data-print-book-publisher-cover-file-upload-AjaxInput",
+                            "input[type='file'][id*='publisher-cover-pdf-only' i]",
+                            "input[type='file'][id*='publisher-cover-file-upload' i]",
+                            "input[type='file'][accept='.pdf']",
+                        ]
+                    ),
                     cover_path,
                 )
                 if cover_uploaded:
                     await page.wait_for_timeout(3500)
                     body_now = await _body_all(page)
-                    cover_uploaded = (
-                        "cover uploaded successfully" in body_now
-                        or ("processing your file" in body_now and "kindle ebook cover" in body_now)
+                    cover_uploaded = _kdp_is_cover_processing(body_now, doc_kind) or (
+                        doc_kind in {"paperback", "hardcover"} and ("cover uploaded" in body_now or "processing your file" in body_now)
                     )
+                if doc_kind in {"paperback", "hardcover"}:
+                    try:
+                        for sel in ["#generative-ai-questionnaire-text", "#generative-ai-questionnaire-images", "#generative-ai-questionnaire-translations"]:
+                            loc = page.locator(sel)
+                            if await loc.count() > 0:
+                                await loc.first.select_option(index=2)
+                    except Exception:
+                        pass
                 if manuscript_uploaded or cover_uploaded:
                     await _click_first(
                         page,
