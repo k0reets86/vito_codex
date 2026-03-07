@@ -180,6 +180,16 @@ class ConversationEngine:
                 pass
             deterministic["nlu_tones"] = self._detect_tone(text)
             return deterministic
+        research_continuation = self._maybe_continue_from_research_state(text)
+        if research_continuation is not None:
+            try:
+                self._add_turn("user", text, Intent.SYSTEM_ACTION)
+                if research_continuation.get("response"):
+                    self._add_turn("assistant", research_continuation["response"])
+            except Exception:
+                pass
+            research_continuation["nlu_tones"] = self._detect_tone(text)
+            return research_continuation
         # 1. Detect intent + tone
         tones = self._detect_tone(text)
         intent = self._detect_intent_rules(text)
@@ -1402,11 +1412,27 @@ class ConversationEngine:
 
         if action == "run_deep_research" and self.agent_registry:
             topic = str(params.get("topic") or "digital products").strip()
-            result = await self.agent_registry.dispatch("research", step=topic, topic=topic, goal_title=f"Deep research: {topic[:80]}")
-            if result and result.success:
+            task_root_id = ""
+            if self.owner_task_state:
+                try:
+                    active = self.owner_task_state.get_active() or {}
+                    task_root_id = str(active.get("task_root_id") or "").strip()
+                except Exception:
+                    task_root_id = ""
+            result = await self.agent_registry.dispatch(
+                "research",
+                step=topic,
+                topic=topic,
+                task_root_id=task_root_id,
+                goal_title=f"Deep research: {topic[:80]}",
+            )
+            if result and (result.success or getattr(result, "output", None)):
                 meta = getattr(result, "metadata", {}) or {}
                 summary = str(meta.get("executive_summary") or str(result.output)[:1200])
                 sources = list(meta.get("data_sources") or [])
+                report_path = str(meta.get("report_path") or "").strip()
+                top_ideas = list(meta.get("top_ideas") or [])
+                recommended_product = meta.get("recommended_product") if isinstance(meta.get("recommended_product"), dict) else {}
                 verdict = "unknown"
                 score = 0
                 try:
@@ -1421,12 +1447,27 @@ class ConversationEngine:
                         verdict = "ok" if bool(qout.get("approved", False)) else "rework"
                 except Exception:
                     pass
+                if self.owner_task_state:
+                    try:
+                        self.owner_task_state.enrich_active(
+                            research_topic=topic[:200],
+                            research_report_path=report_path,
+                            research_quality_score=score,
+                            research_options_json=json.dumps(top_ideas, ensure_ascii=False),
+                            research_recommended_json=json.dumps(recommended_product, ensure_ascii=False),
+                            selected_research_title=str((recommended_product or {}).get("title") or "")[:180],
+                        )
+                    except Exception:
+                        pass
                 return self._format_deep_research_owner_report(
                     topic=topic,
                     summary=summary,
                     score=score,
                     verdict=verdict,
                     sources=sources,
+                    report_path=report_path,
+                    top_ideas=top_ideas,
+                    recommended_product=recommended_product,
                 )
             return f"Глубокое исследование не удалось: {getattr(result, 'error', 'unknown')}"
 
@@ -1569,8 +1610,9 @@ class ConversationEngine:
             low = request.lower()
             if not platform:
                 return "Платформа не определена."
+            create_like = any(k in low for k in ("опубликуй", "создай", "заполни", "редакт", "publish", "create", "draft", "черновик"))
             # Status / inventory path
-            if any(k in low for k in ("статус", "состояние", "есть ли", "проверь", "товар", "товары", "листинг")):
+            if (not create_like) and any(k in low for k in ("статус", "состояние", "есть ли", "проверь", "товар", "товары", "листинг")):
                 if self.agent_registry and platform in {"gumroad", "etsy", "kofi", "printful", "amazon_kdp"}:
                     res = await self.agent_registry.dispatch("sales_check", platform=platform)
                     if res and res.success:
@@ -1581,13 +1623,51 @@ class ConversationEngine:
                 if not tt:
                     return "Для KDP редактирования укажи точное название драфта."
                 return await self._dispatch_action("run_kdp_draft_maintenance", {"target_title": tt, "language": "English"})
-            # Publish / create listing via product pipeline
-            if any(k in low for k in ("опубликуй", "создай", "листинг", "товар", "publish", "create")):
+            # Publish / create listing via the same recipe-executor used by explicit TG /recipe_run.
+            if create_like or any(k in low for k in ("листинг", "товар")):
+                recipe_map = {
+                    "gumroad": "gumroad_publish",
+                    "etsy": "etsy_publish",
+                    "kofi": "kofi_publish",
+                    "amazon_kdp": "kdp_publish",
+                    "twitter": "twitter_publish",
+                    "reddit": "reddit_publish",
+                    "pinterest": "pinterest_publish",
+                    "printful": "printful_publish",
+                }
+                recipe_name = recipe_map.get(platform)
+                if recipe_name and self.comms and hasattr(self.comms, "_run_recipe_direct"):
+                    out = await self.comms._run_recipe_direct(recipe_name, live=True, request_text=request)  # type: ignore[attr-defined]
+                    st = str(out.get("status") or "").strip().lower()
+                    if st == "accepted":
+                        res = out.get("result") if isinstance(out.get("result"), dict) else {}
+                        ev = res.get("evidence") if isinstance(res.get("evidence"), dict) else {}
+                        status = str(res.get("status") or "").strip() or "-"
+                        url = str(res.get("url") or ev.get("url") or "").strip() or "-"
+                        rid = str(
+                            res.get("listing_id")
+                            or res.get("product_id")
+                            or res.get("post_id")
+                            or res.get("tweet_id")
+                            or res.get("document_id")
+                            or res.get("id")
+                            or ev.get("id")
+                            or "-"
+                        ).strip()
+                        return (
+                            f"{platform}: задача выполнена через publish-flow.\n"
+                            f"- status: {status}\n"
+                            f"- url: {url}\n"
+                            f"- id: {rid}"
+                        )
+                    result = out.get("result") if isinstance(out.get("result"), dict) else {}
+                    return (
+                        f"{platform}: publish-flow не прошёл.\n"
+                        f"- причина: {out.get('error', 'unknown')}\n"
+                        f"- status: {str(result.get('status') or '-')}"
+                    )
                 topic = self._extract_product_topic(request)
-                return await self._dispatch_action(
-                    "run_product_pipeline",
-                    {"topic": topic, "platforms": [platform], "auto_publish": True},
-                )
+                return await self._dispatch_action("run_product_pipeline", {"topic": topic, "platforms": [platform], "auto_publish": True})
             # Social posting
             if platform in {"twitter", "reddit", "threads"} and self.agent_registry:
                 content = request
@@ -2134,10 +2214,11 @@ class ConversationEngine:
             ("amazon_kdp", ("amazon", "амазон", "kdp", "кдп")),
             ("gumroad", ("gumroad", "гумроад", "гамроад")),
             ("etsy", ("etsy", "етси", "этси")),
-            ("kofi", ("kofi", "ko-fi", "кофи", "ко-фи")),
+            ("kofi", ("kofi", "ko-fi", "ko fi", "кофи", "ко-фи", "ко фи")),
             ("printful", ("printful", "принтфул")),
             ("twitter", ("twitter", "x.com", "икс", "твиттер")),
             ("reddit", ("reddit", "реддит")),
+            ("pinterest", ("pinterest", "пинтерест")),
             ("threads", ("threads", "тредс", "тхредс")),
         )
         for key, aliases in mapping:
@@ -2181,18 +2262,119 @@ class ConversationEngine:
         score: int,
         verdict: str,
         sources: list[str],
+        report_path: str = "",
+        top_ideas: list[dict[str, Any]] | None = None,
+        recommended_product: dict[str, Any] | None = None,
     ) -> str:
         src = ", ".join(sorted({str(s).strip() for s in (sources or []) if str(s).strip()})) or "not_detected"
         status = "ok" if str(verdict).lower() == "ok" else "rework"
         body = str(summary or "").strip()
         if len(body) > 3500:
             body = body[:3500].rstrip() + "\n..."
+        ideas_block = ""
+        items = list(top_ideas or [])[:5]
+        if items:
+            lines = []
+            for item in items:
+                lines.append(
+                    f"{int(item.get('rank', len(lines) + 1) or len(lines) + 1)}. "
+                    f"{str(item.get('title') or 'Idea').strip()} — "
+                    f"{int(item.get('score', 0) or 0)}/100 "
+                    f"[{str(item.get('platform') or 'platform?').strip()}]"
+                )
+            ideas_block = "Топ-варианты:\n" + "\n".join(lines) + "\n\n"
+        rec = dict(recommended_product or {})
+        rec_block = ""
+        if rec:
+            rec_block = (
+                "Рекомендую сейчас:\n"
+                f"- {str(rec.get('title') or topic).strip()} — {int(rec.get('score', 0) or 0)}/100\n"
+                f"- platform: {str(rec.get('platform') or 'gumroad').strip()}\n"
+                f"- why now: {str(rec.get('why_now') or '').strip()[:220]}\n\n"
+            )
         return (
             f"Глубокое исследование готово: {topic}\n\n"
             f"Quality gate: {status} (score={int(score or 0)}).\n"
             f"Источники: {src}\n\n"
-            f"Результат:\n{body}"
+            f"{rec_block}"
+            f"{ideas_block}"
+            f"Результат:\n{body}\n\n"
+            f"Полный отчёт: {report_path or 'не сохранён'}\n\n"
+            "Можно ответить просто номером варианта или фразой вроде "
+            "«создавай», «вариант 2 на etsy», «делай рекомендованный»."
         )
+
+    def _maybe_continue_from_research_state(self, text: str) -> dict[str, Any] | None:
+        if not self.owner_task_state:
+            return None
+        try:
+            active = self.owner_task_state.get_active() or {}
+        except Exception:
+            return None
+        raw = str(active.get("research_options_json") or "").strip()
+        if not raw:
+            return None
+        try:
+            ideas = json.loads(raw)
+        except Exception:
+            return None
+        if not isinstance(ideas, list) or not ideas:
+            return None
+        lower = str(text or "").strip().lower()
+        choice_match = re.search(r"(?<!\\d)([1-5])(?!\\d)", lower)
+        selected_idx = int(choice_match.group(1)) if choice_match else 0
+        selected: dict[str, Any] | None = None
+        if selected_idx and 1 <= selected_idx <= len(ideas):
+            candidate = ideas[selected_idx - 1]
+            if isinstance(candidate, dict):
+                selected = candidate
+        elif any(tok in lower for tok in ("рекоменд", "recommended", "этот", "this one")):
+            try:
+                selected = json.loads(str(active.get("research_recommended_json") or "{}"))
+            except Exception:
+                selected = None
+        elif str(active.get("selected_research_json") or "").strip():
+            try:
+                selected = json.loads(str(active.get("selected_research_json")))
+            except Exception:
+                selected = None
+        if selected_idx and selected:
+            self.owner_task_state.enrich_active(
+                selected_research_option=selected_idx,
+                selected_research_json=json.dumps(selected, ensure_ascii=False),
+                selected_research_title=str(selected.get("title") or "")[:180],
+            )
+            if lower.isdigit() or "вариант" in lower:
+                return {
+                    "intent": Intent.QUESTION.value,
+                    "response": (
+                        f"Зафиксировал вариант {selected_idx}: {str(selected.get('title') or '').strip()} "
+                        f"({int(selected.get('score', 0) or 0)}/100). "
+                        "Если запускать сразу, напиши: «создавай» или укажи платформу."
+                    ),
+                }
+        create_like = any(k in lower for k in ("создавай", "сделай", "публикуй", "запускай", "делай", "launch", "publish", "create"))
+        if not create_like or not isinstance(selected, dict):
+            return None
+        platforms = self._extract_platforms(text)
+        default_platform = str(selected.get("platform") or "").strip().lower()
+        if default_platform and default_platform not in platforms:
+            platforms = [default_platform] + [p for p in platforms if p != default_platform]
+        topic = str(selected.get("title") or active.get("selected_research_title") or active.get("text") or "Digital Product Starter Kit").strip()
+        try:
+            self.owner_task_state.enrich_active(
+                selected_research_json=json.dumps(selected, ensure_ascii=False),
+                selected_research_title=topic[:180],
+                selected_research_platform=",".join(platforms),
+            )
+        except Exception:
+            pass
+        return {
+            "intent": Intent.SYSTEM_ACTION.value,
+            "response": f"Принял. Собираю и публикую: {topic} ({', '.join(platforms)}).",
+            "actions": [{"action": "run_product_pipeline", "params": {"topic": topic, "platforms": platforms, "auto_publish": True}}],
+            "needs_confirmation": False,
+        }
 
     def _quick_spend(self) -> str:
         spend = self.llm_router.get_daily_spend() if self.llm_router else 0.0
@@ -2546,7 +2728,8 @@ class ConversationEngine:
                 f"- текущая задача: {str(active.get('text', ''))[:260]}\n"
                 f"- intent: {str(active.get('intent', ''))[:80]}\n"
                 f"- статус: {str(active.get('status', 'active'))[:40]}\n"
-                f"- сервис: {str(active.get('service_context', ''))[:80] if active.get('service_context') else 'не зафиксирован'}"
+                f"- сервис: {str(active.get('service_context', ''))[:80] if active.get('service_context') else 'не зафиксирован'}\n"
+                f"- выбранная идея: {str(active.get('selected_research_title', ''))[:160] if active.get('selected_research_title') else 'не выбрана'}"
             )
         except Exception:
             return "Фокус владельца: (не зафиксирован)"

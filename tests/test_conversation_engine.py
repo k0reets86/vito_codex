@@ -1,5 +1,6 @@
 """Тесты для ConversationEngine."""
 
+import json
 import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -71,6 +72,9 @@ class TestIntentDetection:
 
     def test_extract_platform_key_supports_kofi_hyphen_ru(self, engine):
         assert engine._extract_platform_key("создай товар на ко-фи") == "kofi"
+
+    def test_extract_platform_key_supports_kofi_space_ru(self, engine):
+        assert engine._extract_platform_key("создай товар на ко фи") == "kofi"
 
     def test_imperative_detection_supports_login_verbs(self, engine):
         assert engine._looks_like_imperative_request("зайди на амазон") is True
@@ -208,6 +212,37 @@ class TestProcessMessage:
         engine.llm_router.call_llm.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_run_platform_task_uses_recipe_executor_via_comms(self, mock_llm_router, mock_memory):
+        comms = MagicMock()
+        comms._run_recipe_direct = AsyncMock(
+            return_value={
+                "status": "accepted",
+                "result": {
+                    "status": "draft",
+                    "listing_id": "12345",
+                    "url": "https://www.etsy.com/listing/12345",
+                },
+            }
+        )
+        engine = ConversationEngine(
+            llm_router=mock_llm_router,
+            memory=mock_memory,
+            agent_registry=MagicMock(),
+            comms=comms,
+        )
+        out = await engine._dispatch_action(
+            "run_platform_task",
+            {"platform": "etsy", "request": "создай черновик листинга на этси и заполни все поля"},
+        )
+        assert "publish-flow" in out
+        assert "12345" in out
+        comms._run_recipe_direct.assert_awaited_once_with(
+            "etsy_publish",
+            live=True,
+            request_text="создай черновик листинга на этси и заполни все поля",
+        )
+
+    @pytest.mark.asyncio
     async def test_deterministic_network_check_route(self, engine):
         result = await engine.process_message("проверь доступ к интернету")
         assert result["intent"] == "question"
@@ -340,7 +375,15 @@ class TestProcessMessage:
                     {
                         "success": True,
                         "output": "Long report body",
-                        "metadata": {"executive_summary": "Summary line", "data_sources": ["reddit", "google_trends"]},
+                        "metadata": {
+                            "executive_summary": "Summary line",
+                            "data_sources": ["reddit", "google_trends"],
+                            "top_ideas": [
+                                {"rank": 1, "title": "Prompt Pack", "score": 89, "platform": "gumroad"},
+                                {"rank": 2, "title": "Planner", "score": 81, "platform": "etsy"},
+                            ],
+                            "recommended_product": {"title": "Prompt Pack", "score": 89, "platform": "gumroad", "why_now": "rising intent"},
+                        },
                         "error": "",
                     },
                 )(),
@@ -352,6 +395,8 @@ class TestProcessMessage:
         assert "Глубокое исследование готово" in msg
         assert "Источники: google_trends, reddit" in msg
         assert "score=88" in msg
+        assert "Топ-варианты:" in msg
+        assert "Prompt Pack" in msg
 
     @pytest.mark.asyncio
     async def test_dispatch_agent_research_adds_quality_gate(self, mock_llm_router, mock_memory):
@@ -568,6 +613,55 @@ async def test_handle_goal_request_auto_approve_cannot_be_overridden_by_llm(monk
     result = await engine._handle_goal_request("сделай лендинг")
     assert result["create_goal"] is True
     assert result["needs_approval"] is False
+
+
+@pytest.mark.asyncio
+async def test_run_deep_research_returns_report_even_if_registry_marks_verification_failure(mock_llm_router, mock_memory, tmp_path):
+    owner_state = OwnerTaskState(path=tmp_path / "owner_task_state.json")
+    owner_state.set_active("проведи глубокое исследование", intent="goal_request")
+    registry = MagicMock()
+    registry.dispatch = AsyncMock(side_effect=[
+        MagicMock(
+            success=False,
+            error="verification_failed:quality_judge",
+            output="## Executive Summary\nSolid demand found.\n## Sources\n- reddit",
+            metadata={
+                "executive_summary": "Solid demand found.",
+                "data_sources": ["reddit"],
+                "report_path": "/tmp/report.md",
+            },
+        ),
+        MagicMock(success=True, output={"score": 8, "approved": True}),
+    ])
+    engine = ConversationEngine(
+        llm_router=mock_llm_router,
+        memory=mock_memory,
+        owner_task_state=owner_state,
+        agent_registry=registry,
+    )
+    out = await engine._dispatch_action("run_deep_research", {"topic": "digital products"})
+    assert "Глубокое исследование готово" in out
+    assert "/tmp/report.md" in out
+
+
+@pytest.mark.asyncio
+async def test_process_message_allows_research_choice_then_create(mock_llm_router, mock_memory, tmp_path):
+    owner_state = OwnerTaskState(path=tmp_path / "owner_task_state.json")
+    owner_state.set_active("исследуй нишу", source="telegram", intent="system_action", force=True)
+    owner_state.enrich_active(
+        research_options_json=json.dumps([
+            {"rank": 1, "title": "Prompt Pack", "score": 89, "platform": "gumroad"},
+            {"rank": 2, "title": "Printable Planner", "score": 81, "platform": "etsy"},
+        ], ensure_ascii=False),
+        research_recommended_json=json.dumps({"title": "Prompt Pack", "score": 89, "platform": "gumroad"}, ensure_ascii=False),
+    )
+    engine = ConversationEngine(llm_router=mock_llm_router, memory=mock_memory, owner_task_state=owner_state)
+    out1 = await engine.process_message("2")
+    assert "Зафиксировал вариант 2" in out1["response"]
+    out2 = await engine.process_message("создавай")
+    assert out2["intent"] == "system_action"
+    assert out2["actions"][0]["action"] == "run_product_pipeline"
+    assert out2["actions"][0]["params"]["topic"] == "Printable Planner"
 
 
 @pytest.mark.asyncio
