@@ -246,3 +246,20 @@ Key risk if skipped:
   - Telegram reply-to now restores service context before conversation processing
   - owner task state now persists and enriches `service_context`
   - service context is visible in owner focus/status output across comms + conversation engine
+
+## Deferred But Mandatory Follow-up
+- Revisit LLM router before combat mode:
+  - re-evaluate which model serves which task family,
+  - explicitly document brainstorm / multi-model reasoning path,
+  - set cost/quality-based fallback order for production.
+- Run a fresh deep audit of all 23 agents:
+  - actual runtime ability,
+  - coordination quality,
+  - memory usage quality,
+  - autonomy gaps,
+  - browser/platform readiness.
+- Research pipeline hardening:
+  - split `raw research -> synthesis -> judge`,
+  - keep `Gemini-only` test mode where required,
+  - prepare switchable battle-mode router behind a flag,
+  - always persist full deep-research reports to reusable artifacts.
