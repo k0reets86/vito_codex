@@ -16,3 +16,6 @@ def test_owner_task_state_supports_metadata_and_enrich(tmp_path):
     assert changed is True
     active = state.get_active()
     assert active["task_family"] == "account_ops"
+    assert str(active.get("task_root_id") or "").startswith("VT")
+    assert str(active.get("project_id") or "").startswith(str(active["task_root_id"]))
+    assert str(active.get("publish_work_id") or "").startswith(str(active["task_root_id"]))

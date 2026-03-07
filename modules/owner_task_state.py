@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from config.paths import root_path
+from modules.task_lineage import derive_artifact_map, generate_task_root_id
 
 
 class OwnerTaskState:
@@ -54,6 +55,14 @@ class OwnerTaskState:
                 if value in (None, ""):
                     continue
                 active[str(key)[:80]] = value if isinstance(value, (int, float, bool)) else str(value)[:500]
+        task_root_id = str(active.get("task_root_id") or "").strip() or generate_task_root_id(text)
+        active["task_root_id"] = task_root_id
+        artifact_ids = derive_artifact_map(task_root_id)
+        active.setdefault("project_id", artifact_ids.get("project_id", ""))
+        active.setdefault("listing_work_id", artifact_ids.get("listing_id", ""))
+        active.setdefault("content_work_id", artifact_ids.get("content_id", ""))
+        active.setdefault("seo_work_id", artifact_ids.get("seo_id", ""))
+        active.setdefault("publish_work_id", artifact_ids.get("publish_id", ""))
         payload["active"] = active
         self._write(payload)
         return True
