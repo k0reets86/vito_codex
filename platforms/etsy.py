@@ -187,6 +187,9 @@ class EtsyPlatform(BasePlatform):
             }
             self._record_browser_lesson(result, source="etsy.publish.browser")
             return result
+        if draft_only and not target_listing_id:
+            allow_existing_update = True
+            owner_edit_confirmed = True
         try:
             from playwright.async_api import async_playwright
         except Exception:
@@ -274,11 +277,113 @@ class EtsyPlatform(BasePlatform):
                     except Exception:
                         pass
                     return await _editor_debug()
+                async def _click_named_button(texts: list[str], root=None, timeout_ms: int = 2500) -> str:
+                    target = root or page
+                    for txt in texts:
+                        try:
+                            btn = target.get_by_role("button", name=txt)
+                            if await btn.count():
+                                await btn.first.click(timeout=timeout_ms)
+                                return txt
+                        except Exception:
+                            pass
+                        try:
+                            loc = target.locator(f"button:has-text('{txt}'), [role='button']:has-text('{txt}')")
+                            if await loc.count():
+                                await loc.first.click(timeout=timeout_ms)
+                                return txt
+                        except Exception:
+                            pass
+                    return ""
+
+                async def _handle_wizard_dialogs(max_rounds: int = 8) -> list[str]:
+                    handled: list[str] = []
+                    for _ in range(max_rounds):
+                        try:
+                            roots = page.locator("[role='dialog'], .wt-dialog, [data-wt-dialog-root='true']")
+                            if await roots.count() == 0:
+                                break
+                            root = roots.last
+                            txt = ((await root.text_content()) or "").strip()
+                        except Exception:
+                            break
+                        if not txt:
+                            break
+                        lowered = txt.lower()
+                        action = ""
+                        if "что это за товар?" in lowered or "what is this item?" in lowered:
+                            action = await _click_named_button(["Продолжить", "Continue"], root=root)
+                            handled.append("what_is_item")
+                        elif "выберите партнеров по производству" in lowered or "production partner" in lowered:
+                            action = await _click_named_button(["Готово", "Done"], root=root)
+                            handled.append("production_partner")
+                        elif "создать профиль обработки" in lowered or "processing profile" in lowered:
+                            action = await _click_named_button(["Применить", "Apply"], root=root)
+                            handled.append("processing_profile_create")
+                        elif "ваши профили обработки" in lowered:
+                            action = await _click_named_button(["Применить", "Apply"], root=root)
+                            handled.append("processing_profile_select")
+                        elif "создание политики" in lowered or "return" in lowered:
+                            action = await _click_named_button(["Сохранить и применить", "Save and apply"], root=root)
+                            handled.append("policy_create")
+                        elif "изменить настройки" in lowered:
+                            action = await _click_named_button(["Сохранить", "Save", "Готово"], root=root)
+                            handled.append("settings_change")
+                        elif "регионы, в которых работает etsy" in lowered:
+                            action = await _click_named_button(["Понятно", "OK", "Готово"], root=root)
+                            handled.append("regions_notice")
+                        elif "отменить изменения?" in lowered:
+                            action = await _click_named_button(["Продолжить редактирование", "Continue editing"], root=root)
+                            handled.append("continue_editing")
+                        elif "все равно изменить категорию" in lowered:
+                            action = await _click_named_button(["Все равно изменить категорию"], root=root)
+                            handled.append("force_change_category")
+                        if not action:
+                            break
+                        await page.wait_for_timeout(1800)
+                    return handled
+
+                async def _discover_latest_draft_listing_id() -> str:
+                    try:
+                        await page.goto("https://www.etsy.com/your/shops/me/tools/listings", wait_until="domcontentloaded", timeout=90000)
+                        await page.wait_for_timeout(2200)
+                        draft_radio = page.locator("input[name='item_status'][value='draft']")
+                        if await draft_radio.count():
+                            await draft_radio.first.check(force=True)
+                            await page.wait_for_timeout(3500)
+                        hrefs = await page.evaluate(
+                            """() => Array.from(document.querySelectorAll("a[href*='/listing/'], a[href*='/listing-editor/edit/']"))
+                            .map(a => a.getAttribute('href') || '')
+                            .filter(Boolean)
+                            .slice(0, 200)"""
+                        )
+                        for h in hrefs or []:
+                            mm = re.search(r"/listing-editor/edit/(\d+)", str(h)) or re.search(r"/listing/(\d+)", str(h))
+                            if mm:
+                                return mm.group(1)
+                    except Exception:
+                        return ""
+                    return ""
                 response_urls: list[str] = []
                 try:
                     page.on("response", lambda resp: response_urls.append(str(getattr(resp, "url", "") or "")))
                 except Exception:
                     pass
+                if allow_existing_update and not target_listing_id:
+                    target_listing_id = await _discover_latest_draft_listing_id()
+                    if target_listing_id:
+                        logger.info(
+                            "Etsy browser flow reusing latest existing draft",
+                            extra={"event": "etsy_reuse_existing_draft", "context": {"listing_id": target_listing_id}},
+                        )
+                    elif draft_only:
+                        result = {
+                            "platform": "etsy",
+                            "status": "blocked",
+                            "error": "draft_only_requires_existing_draft",
+                        }
+                        self._record_browser_lesson(result, source="etsy.publish.browser")
+                        return result
                 existing_ids: set[str] = set()
                 if not allow_existing_update:
                     try:
@@ -759,36 +864,43 @@ class EtsyPlatform(BasePlatform):
                 except Exception:
                     pass
 
-                # Try draft/save actions if visible
-                for txt in ("Save as draft", "Save and continue", "Save"):
+                wizard_actions: list[str] = []
+                for _ in range(5):
+                    save_clicked = await _click_named_button(["Сохранить как черновик", "Save as draft", "Save and continue", "Save"])
+                    if not save_clicked:
+                        try:
+                            forced = await page.evaluate(
+                                """() => {
+                                    const labels = ["save as draft", "save and continue", "save", "сохранить как черновик", "сохранить"];
+                                    const buttons = Array.from(document.querySelectorAll("button"));
+                                    for (const b of buttons) {
+                                        const t = (b.textContent || "").trim().toLowerCase();
+                                        if (labels.some(x => t.includes(x)) && !b.disabled) {
+                                            b.scrollIntoView({ block: "center" });
+                                            b.click();
+                                            return true;
+                                        }
+                                    }
+                                    return false;
+                                }"""
+                            )
+                            if forced:
+                                save_clicked = "forced_save"
+                        except Exception:
+                            save_clicked = ""
+                    if not save_clicked:
+                        break
+                    wizard_actions.append(save_clicked)
+                    await page.wait_for_timeout(1400)
+                    handled = await _handle_wizard_dialogs()
+                    wizard_actions.extend(handled)
+                    await page.wait_for_timeout(1600)
                     try:
-                        btn = page.get_by_role("button", name=txt)
-                        if await btn.count():
-                            await btn.first.click(timeout=2500)
-                            await page.wait_for_timeout(1200)
+                        html_now = await page.content()
+                        if re.search(r"/listing/(\d+)", page.url) or re.search(r"/listing-editor/edit/(\d+)", page.url) or re.search(r'"listingId"\s*:\s*(?!0)\d+', html_now):
                             break
                     except Exception:
-                        continue
-                # Force-click save controls in case button is out of viewport or covered.
-                try:
-                    await page.evaluate(
-                        """() => {
-                            const labels = ["save as draft", "save and continue", "save", "сохранить"];
-                            const buttons = Array.from(document.querySelectorAll("button"));
-                            for (const b of buttons) {
-                                const t = (b.textContent || "").trim().toLowerCase();
-                                if (labels.some(x => t.includes(x)) && !b.disabled) {
-                                    b.scrollIntoView({ block: "center" });
-                                    b.click();
-                                    return true;
-                                }
-                            }
-                            return false;
-                        }"""
-                    )
-                    await page.wait_for_timeout(1400)
-                except Exception:
-                    pass
+                        pass
                 # If "What is this item?" category dialog appears, resolve it and retry save.
                 try:
                     has_category_dialog = await page.locator("div[role='dialog'] input[id^='category-']").count()
@@ -1195,6 +1307,7 @@ class EtsyPlatform(BasePlatform):
                     "draft_only": bool(draft_only),
                     "error": "editor_not_ready" if editor_not_ready else "listing_id_not_detected",
                     "debug": editor_debug,
+                    "wizard_actions": wizard_actions,
                 }
                 self._record_browser_lesson(result, source="etsy.publish.browser")
                 return result

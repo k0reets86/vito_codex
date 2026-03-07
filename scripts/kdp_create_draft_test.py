@@ -12,6 +12,11 @@ from pathlib import Path
 
 from playwright.async_api import async_playwright
 
+try:
+    from config.settings import settings
+except Exception:  # pragma: no cover - helper can still run without app settings
+    settings = None
+
 
 def _launch_args() -> list[str]:
     return [
@@ -77,6 +82,14 @@ async def _set_input_file(page, selectors: list[str], file_path: str, timeout_ms
         except Exception:
             continue
     return False
+
+
+async def _body_contains(page, needles: list[str]) -> bool:
+    try:
+        body = ((await page.text_content("body")) or "").lower()
+    except Exception:
+        return False
+    return any(str(n or "").strip().lower() in body for n in needles if str(n or "").strip())
 
 
 async def _open_kdp_details_flow(page) -> bool:
@@ -228,7 +241,7 @@ async def _kdp_relogin_if_needed(page) -> bool:
                 return False
         except Exception:
             return False
-    pwd = str(os.getenv("KDP_PASSWORD", "")).strip()
+    pwd = str(os.getenv("KDP_PASSWORD", "")).strip() or str(getattr(settings, "KDP_PASSWORD", "") or "").strip()
     if not pwd:
         return False
     try:
@@ -278,6 +291,7 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
     keywords = [x.strip() for x in str(os.getenv("KDP_TEST_DRAFT_KEYWORDS", "")).split("|") if x.strip()]
     manuscript_path = str(os.getenv("KDP_TEST_DRAFT_MANUSCRIPT", "")).strip()
     cover_path = str(os.getenv("KDP_TEST_DRAFT_COVER", "")).strip()
+    resume_only = str(os.getenv("KDP_RESUME_ONLY", "")).strip().lower() in {"1", "true", "yes", "on"}
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=headless, args=_launch_args())
@@ -302,6 +316,22 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
             if resumed_existing:
                 await _kdp_relogin_if_needed(page)
                 await page.wait_for_timeout(2200)
+            elif resume_only:
+                await page.screenshot(path=str(dbg / f"kdp_draft_{stamp}_resume_only_not_found.png"), full_page=True)
+                print(
+                    json.dumps(
+                        {
+                            "ok": False,
+                            "ok_soft": False,
+                            "error": "resume_only_existing_draft_not_found",
+                            "title": title,
+                            "url": page.url,
+                            "screenshot": str(dbg / f"kdp_draft_{stamp}_resume_only_not_found.png"),
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+                return 4
 
             if not resumed_existing:
                 # Step 1: open create flow
@@ -477,16 +507,29 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
                     try:
                         await page.evaluate(
                             """() => {
-                                const pick = document.querySelector("input[type='checkbox'][name*='browse'], input[type='radio'][name*='browse'], input[type='checkbox'][id*='browse'], input[type='radio'][id*='browse']");
+                                const modal = Array.from(document.querySelectorAll("div,section,dialog")).find(el =>
+                                    /select categories and subcategories/i.test(el.textContent || "")
+                                ) || document;
+                                const categorySelect = modal.querySelector("select[name='react-aui-0']");
+                                if (categorySelect && (!categorySelect.value || categorySelect.value.includes('Select one'))) {
+                                    const option = Array.from(categorySelect.options).find(o => /Business & Money/i.test(o.textContent || ""));
+                                    if (option) {
+                                        categorySelect.value = option.value;
+                                        categorySelect.dispatchEvent(new Event('input', { bubbles: true }));
+                                        categorySelect.dispatchEvent(new Event('change', { bubbles: true }));
+                                    }
+                                }
+                                const picks = Array.from(modal.querySelectorAll("input[type='checkbox'], input[type='radio']")).filter(el => !el.checked);
+                                const pick = picks[0] || null;
                                 if (pick) {
                                     pick.click();
                                     pick.dispatchEvent(new Event('input', { bubbles: true }));
                                     pick.dispatchEvent(new Event('change', { bubbles: true }));
                                 }
-                                const buttons = Array.from(document.querySelectorAll("button, input[type='submit'], a"));
+                                const buttons = Array.from(modal.querySelectorAll("button, input[type='submit'], a"));
                                 for (const b of buttons) {
                                     const t = ((b.textContent || b.value || '')).trim().toLowerCase();
-                                    if (t.includes('save') || t.includes('done') || t.includes('continue') || t.includes('confirm')) {
+                                    if (t.includes('save categories') || t.includes('save') || t.includes('done') || t.includes('continue') || t.includes('confirm')) {
                                         b.click();
                                         return true;
                                     }
@@ -515,16 +558,29 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
                 timeout_ms=4500,
             )
             await page.wait_for_timeout(3000)
+            await _kdp_relogin_if_needed(page)
+            await page.wait_for_timeout(1200)
             await page.screenshot(path=str(dbg / f"kdp_draft_{stamp}_after_save.png"), full_page=True)
 
             # Step 4b: content/assets page, when flow advanced.
             manuscript_uploaded = False
             cover_uploaded = False
             try:
+                await _kdp_relogin_if_needed(page)
                 await page.wait_for_timeout(2200)
+                await _click_first(
+                    page,
+                    [
+                        "label:has-text('Yes. I have a file I would like to upload at this time.')",
+                        "text=Yes. I have a file I would like to upload at this time.",
+                    ],
+                    timeout_ms=2500,
+                )
+                await page.wait_for_timeout(600)
                 manuscript_uploaded = await _set_input_file(
                     page,
                     [
+                        "#data-assets-interior-file-upload-AjaxInput",
                         "input[type='file'][accept*='pdf' i]",
                         "input[type='file'][name*='manuscript' i]",
                         "input[type='file'][id*='manuscript' i]",
@@ -532,20 +588,26 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
                     manuscript_path,
                 )
                 if manuscript_uploaded:
-                    await page.wait_for_timeout(2500)
+                    await page.wait_for_timeout(3500)
+                    manuscript_uploaded = not await _body_contains(page, ["upload manuscript"])
                 # If KDP asks to upload your own cover, try to enable that path.
                 await _click_first(
                     page,
                     [
                         "label:has-text('Upload a cover you already have')",
+                        "text=Upload a cover you already have",
+                        "label:has-text('Upload your cover file')",
                         "label:has-text('Upload your cover file')",
                         "input[value='UPLOAD_YOUR_COVER']",
                     ],
                     timeout_ms=2000,
                 )
+                await page.wait_for_timeout(600)
                 cover_uploaded = await _set_input_file(
                     page,
                     [
+                        "#data-assets-cover-file-upload-AjaxInput",
+                        "#data-assets-cover-jp-file-upload-AjaxInput",
                         "input[type='file'][accept*='jpeg' i]",
                         "input[type='file'][accept*='jpg' i]",
                         "input[type='file'][name*='cover' i]",
@@ -554,7 +616,8 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
                     cover_path,
                 )
                 if cover_uploaded:
-                    await page.wait_for_timeout(2500)
+                    await page.wait_for_timeout(3500)
+                    cover_uploaded = not await _body_contains(page, ["no cover uploaded"])
                 if manuscript_uploaded or cover_uploaded:
                     await _click_first(
                         page,
