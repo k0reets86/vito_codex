@@ -316,6 +316,7 @@ class AgentRegistry:
                     and orchestration_depth == 0
                     and verify_cap != task_type
                 ):
+                    soft_verify_task_types = {"research", "competitor_analysis", "market_analysis"}
                     verify_content = result.output
                     if not isinstance(verify_content, str):
                         try:
@@ -335,22 +336,47 @@ class AgentRegistry:
                         **verify_input,
                     )
                     if not vr or not vr.success:
-                        result.success = False
-                        result.error = f"verification_failed:{verify_cap}"
+                        if task_type in soft_verify_task_types and result.output:
+                            md = result.metadata or {}
+                            md["verification"] = {
+                                "capability": verify_cap,
+                                "success": False,
+                                "approved": False,
+                                "soft_failed": True,
+                                "reason": f"verification_failed:{verify_cap}",
+                            }
+                            result.metadata = md
+                        else:
+                            result.success = False
+                            result.error = f"verification_failed:{verify_cap}"
                     else:
                         approved = True
                         if isinstance(vr.output, dict) and "approved" in vr.output:
                             approved = bool(vr.output.get("approved"))
                         if not approved:
-                            result.success = False
-                            result.error = f"verification_rejected:{verify_cap}"
+                            if task_type in soft_verify_task_types and result.output:
+                                md = result.metadata or {}
+                                md["verification"] = {
+                                    "capability": verify_cap,
+                                    "success": True,
+                                    "approved": False,
+                                    "soft_failed": True,
+                                    "output": vr.output,
+                                }
+                                result.metadata = md
+                            else:
+                                result.success = False
+                                result.error = f"verification_rejected:{verify_cap}"
                         md = result.metadata or {}
-                        md["verification"] = {
+                        ver_row = {
                             "capability": verify_cap,
                             "success": bool(vr and vr.success),
                             "approved": approved,
                             "output": vr.output,
                         }
+                        if task_type in soft_verify_task_types and result.output and not approved:
+                            ver_row["soft_failed"] = True
+                        md["verification"] = ver_row
                         result.metadata = md
                 agent._track_result(result)
                 # Record execution facts for verified actions

@@ -87,6 +87,26 @@ class FakeOwnerOrchestratingAgent(BaseAgent):
         return TaskResult(success=True, output={"status": "ok", "delegations_seen": len(delegated)})
 
 
+class FakeResearchAgent(BaseAgent):
+    def __init__(self, name, caps, **kwargs):
+        super().__init__(name=name, description=f"Fake research {name}", **kwargs)
+        self._caps = caps
+
+    @property
+    def capabilities(self) -> list[str]:
+        return self._caps
+
+    def build_task_orchestration(self, task_type: str, **kwargs) -> dict:
+        return {"verify_with": "quality_review"}
+
+    async def execute_task(self, task_type: str, **kwargs) -> TaskResult:
+        return TaskResult(
+            success=True,
+            output="## Executive Summary\nUseful market signals found.\n## Sources\n- reddit\n- google_trends",
+            metadata={"report_path": "/tmp/deep_research.md", "executive_summary": "Useful market signals found."},
+        )
+
+
 class FakeMemoryAwareAgent(BaseAgent):
     def __init__(self, name, caps, **kwargs):
         super().__init__(name=name, description=f"Fake memory aware {name}", **kwargs)
@@ -233,6 +253,21 @@ class TestRegistryDispatch:
         assert result is not None
         assert result.success is False
         assert "verification_rejected:quality_review" in (result.error or "")
+
+    @pytest.mark.asyncio
+    async def test_dispatch_research_keeps_output_on_verification_reject(self):
+        registry = AgentRegistry()
+        researcher = FakeResearchAgent("researcher", ["research"])
+        verifier = FakeVerifierAgent("judge", ["quality_review"], approved=False)
+        registry.register(researcher)
+        registry.register(verifier)
+
+        result = await registry.dispatch("research", topic="digital products")
+        assert result is not None
+        assert result.success is True
+        assert "Executive Summary" in str(result.output)
+        assert isinstance(result.metadata.get("verification"), dict)
+        assert result.metadata["verification"].get("soft_failed") is True
 
 
 class TestRegistryLifecycle:
