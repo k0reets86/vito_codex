@@ -115,6 +115,21 @@ Use these as defaults unless Gumroad UI indicates different requirements.
 - Free posts are limited to 25 MB per image, while Contributors may embed audio up to 200 MB and rely on external video hosts (YouTube, Vimeo, TikTok) for video content. citeturn7search0
 - Ko-fi enforces payment-provider rules (PayPal/Stripe), so anything disallowed by those partners—unlicensed goods, prohibited services, or trademark violations—risks removal or account suspension; review Ko-fi’s content policy before publishing. citeturn7search8
 
+### Ko-fi — verified browser gate (2026-03-07)
+- Screenshot-first probe with saved browser state confirmed the current live blocker:
+  - `https://ko-fi.com/` -> title `Just a moment...`
+  - `https://ko-fi.com/shop/settings?productType=0` -> title `Just a moment...`
+- Current evidence:
+  - `runtime/kofi_screenshot_probe.json`
+  - `runtime/kofi_screenshot_probe_home.png`
+  - `runtime/kofi_screenshot_probe_manage.png`
+- Interpretation:
+  - current browser session is not enough to pass Ko-fi anti-bot / Cloudflare gate automatically
+  - do not report Ko-fi create/publish as `prepared` or `created` until the challenge is actually passed
+- Runbook rule:
+  - first confirm challenge-free entry to home/manage with screenshots
+  - only after that continue to shop/product editor flow
+
 ## Payhip — Large Digital Files and Controls
 - Payhip accepts any file format, up to 5 GB per file, with unlimited storage and bandwidth; bundles and multiple asset uploads are supported, and embed buttons extend purchases beyond the website. citeturn8search0turn8search5
 - Built-in protection caps download attempts (default five, adjustable) and offers optional PDF stamping that prints buyer email/date on each page (PDFs must stay under 250 MB for stamping). citeturn8search1

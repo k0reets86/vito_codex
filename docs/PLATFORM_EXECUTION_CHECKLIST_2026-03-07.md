@@ -1,5 +1,8 @@
 # Platform Execution Checklist — 2026-03-07
 
+Rule:
+- Every live platform step must be confirmed screenshot-first: full page before action, full page after action, then URL + DOM + screenshot must agree.
+
 ## Active order
 1. Etsy existing draft
 2. Printful -> Etsy browser flow
@@ -19,30 +22,45 @@
 - [x] commit
 
 ## 2. Printful -> Etsy browser flow
-- [ ] no false API success
-- [ ] create product in Printful browser flow
-- [ ] fill product card
-- [ ] send/publish to Etsy
-- [ ] verify Etsy draft created
-- [ ] runbook written to knowledge
-- [ ] commit
+- [x] no false API success
+- [x] create product in Printful browser flow
+- [x] fill product card
+- [x] send/publish to Etsy
+- [x] verify Etsy draft created
+- [x] runbook written to knowledge
+- [x] commit
+- Evidence:
+  - Printful template/product path proved on `99888631`
+  - Linked Etsy draft: `4468240834`
+  - Adapter acceptance fixed in commit `e567541`
 
 ## 3. KDP paperback from published ebook
 - [ ] start from published ebook
 - [ ] use exact UI fork Publish -> Create paperback
 - [ ] create fresh paperback draft
-- [ ] fill paperback draft
-- [ ] evidence captured
-- [ ] runbook written to knowledge
-- [ ] commit
+- [x] fill paperback draft
+- [x] evidence captured
+- [x] runbook written to knowledge
+- [x] commit
+- Current working paperback object:
+  - `A8T0ZQ5CNS6`
+- Current state:
+  - Content approved via previewer
+  - Print pricing persisted on `print-setup/paperback/<doc>/pricing`
+  - Package committed in `5445436`
+- Remaining gap:
+  - Re-run exact owner-required fork from published ebook UI and recreate paperback once more as canonical runbook
 
 ## 4. Ko-fi
-- [ ] verify real browser flow
-- [ ] confirm whether Cloudflare is bypassable
+- [x] verify real browser flow
+- [x] confirm whether Cloudflare is bypassable
 - [ ] if yes: create real draft/post
-- [ ] if no: honest gate + login runbook
-- [ ] knowledge
+- [x] if no: honest gate + login runbook
+- [x] knowledge
 - [ ] commit
+- Current state:
+  - screenshot-first probe confirms `Just a moment...` on both home and shop manage
+  - evidence: `runtime/kofi_screenshot_probe.json`, `runtime/kofi_screenshot_probe_home.png`, `runtime/kofi_screenshot_probe_manage.png`
 
 ## 5. Gumroad
 - [ ] wait for fresh valid draft after limit reset
