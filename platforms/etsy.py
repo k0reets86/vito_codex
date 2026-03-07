@@ -618,8 +618,8 @@ class EtsyPlatform(BasePlatform):
                                 for (const o of opts) {
                                     const ov = (o.value || "").trim();
                                     if (!ov) continue;
-                                    if (ov === "made_to_order") { val = ov; break; }
-                                    if (!val) val = ov;
+                                    if (ov === "2020_2026") { val = ov; break; }
+                                    if (ov !== "made_to_order" && !val) val = ov;
                                 }
                                 if (val) {
                                     whenSel.value = val;
@@ -711,7 +711,7 @@ class EtsyPlatform(BasePlatform):
                 # Common required attributes for draft creation.
                 for sel, val in (
                     ("select[name='who_made']", "i_did"),
-                    ("select[name='when_made']", "made_to_order"),
+                    ("select[name='when_made']", "2020_2026"),
                     ("select[name='is_supply']", "false"),
                     ("input[name='quantity']", "1"),
                 ):
@@ -738,7 +738,7 @@ class EtsyPlatform(BasePlatform):
                                 return true;
                             };
                             set("select[name='who_made']", "i_did");
-                            set("select[name='when_made']", "made_to_order");
+                            set("select[name='when_made']", "2020_2026");
                             set("select[name='is_supply']", "false");
                             const q = document.querySelector("input[name='quantity']");
                             if (q) {
@@ -781,6 +781,41 @@ class EtsyPlatform(BasePlatform):
                             await page.wait_for_timeout(2200)
                     except Exception:
                         pass
+                # Existing Etsy drafts can be left in "made to order" digital mode,
+                # which hides the actual downloadable-file uploader.
+                try:
+                    body_text = ((await page.locator("body").inner_text()) or "").lower()
+                    if ("файл на заказ" in body_text or "made to order" in body_text) and await page.locator("button[data-change-core-details-button='true']").count():
+                        await page.locator("button[data-change-core-details-button='true']").first.click(timeout=2500)
+                        await page.wait_for_timeout(900)
+                        await page.evaluate(
+                            """() => {
+                                const root = document.querySelector('[data-wt-dialog-root="true"]');
+                                if (!root) return false;
+                                const sel = root.querySelector('select#when-made-select, select[name="when_made"], select[name="whenMade"]');
+                                if (sel) {
+                                    const opts = Array.from(sel.options).map(o => (o.value || "").trim()).filter(Boolean);
+                                    const target = opts.find(v => v === "2020_2026") || opts.find(v => v && v !== "made_to_order") || "";
+                                    if (target) {
+                                        sel.value = target;
+                                        sel.dispatchEvent(new Event('input', { bubbles: true }));
+                                        sel.dispatchEvent(new Event('change', { bubbles: true }));
+                                    }
+                                }
+                                const applyBtn = Array.from(root.querySelectorAll('button')).find(
+                                    b => /применить|apply/i.test((b.textContent || "").trim())
+                                );
+                                if (applyBtn) {
+                                    applyBtn.click();
+                                    return true;
+                                }
+                                return false;
+                            }"""
+                        )
+                        await page.wait_for_timeout(1800)
+                except Exception:
+                    pass
+
                 # Attach downloadable file for digital listing if input is present.
                 digital_file = str(content.get("pdf_path") or content.get("file_path") or "").strip()
                 if digital_file and os.path.isfile(digital_file):
