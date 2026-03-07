@@ -131,6 +131,22 @@ def _builtin(name: str) -> list[Step]:
             Step("E12", "/recipe_run pinterest_publish live", ["recipe", "pinterest"], ["traceback", "exception"]),
             Step("E13", "/recipe_run printful_publish live", ["recipe", "printful"], ["traceback", "exception"]),
         ]
+    if key == "phase_platform_owner_live":
+        return [
+            Step("OL01", "зайди на амазон", ["amazon", "вход", "логин"], ["traceback", "exception"]),
+            Step("OL02", "зайди на этси", ["etsy", "вход", "логин"], ["traceback", "exception"]),
+            Step("OL03", "зайди на гумроад", ["gumroad", "вход", "логин"], ["traceback", "exception"]),
+            Step("OL04", "зайди на ко фи", ["ko-fi", "kofi", "вход"], ["traceback", "exception"]),
+            Step("OL05", "зайди на пинтерест", ["pinterest", "вход", "логин"], ["traceback", "exception"]),
+            Step("OL06", "создай черновик товара на гумроад и заполни все поля, теги, описание и файлы", ["gumroad"], ["traceback", "exception"]),
+            Step("OL07", "создай черновик листинга на этси и заполни все поля, теги, описание и файл", ["etsy"], ["traceback", "exception"]),
+            Step("OL08", "создай черновик книги на амазон кдп и заполни метаданные и файлы", ["amazon", "kdp"], ["traceback", "exception"]),
+            Step("OL09", "создай товар в ко фи и заполни все поля", ["ko-fi", "kofi"], ["traceback", "exception"]),
+            Step("OL10", "создай принт через принтфул и проверь связку с этси", ["printful"], ["traceback", "exception"]),
+            Step("OL11", "опубликуй тестовый пост в реддит с картинкой и ссылкой", ["reddit"], ["traceback", "exception"]),
+            Step("OL12", "опубликуй тестовый пост в твиттер с картинкой, ссылкой и тегами", ["twitter"], ["traceback", "exception"]),
+            Step("OL13", "опубликуй тестовый пин в пинтерест", ["pinterest"], ["traceback", "exception"]),
+        ]
     raise ValueError(f"Unknown scenario: {name}")
 
 
