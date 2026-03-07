@@ -24,11 +24,22 @@ class WorkflowRecipeExecutor:
 
     @staticmethod
     def _evidence_value(result: dict[str, Any], key: str) -> str:
-        direct = str(result.get(key) or "").strip()
-        if direct:
-            return direct
+        alias_map = {
+            "screenshot": ("screenshot", "screenshot_path"),
+            "path": ("path", "file_path"),
+            "id": ("id", "listing_id", "product_id", "tweet_id", "post_id"),
+            "url": ("url", "public_url", "product_url", "post_url", "tweet_url"),
+        }
+        for alias in alias_map.get(str(key or "").strip(), (str(key or "").strip(),)):
+            direct = str(result.get(alias) or "").strip()
+            if direct:
+                return direct
         ev = result.get("evidence") if isinstance(result.get("evidence"), dict) else {}
-        return str(ev.get(key) or "").strip()
+        for alias in alias_map.get(str(key or "").strip(), (str(key or "").strip(),)):
+            val = str(ev.get(alias) or "").strip()
+            if val:
+                return val
+        return ""
 
     @staticmethod
     def _has_required_evidence(result: dict[str, Any], required_keys: list[str]) -> bool:
