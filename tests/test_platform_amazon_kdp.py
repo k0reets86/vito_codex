@@ -102,6 +102,33 @@ class TestKDPPublish:
         assert result["status"] == "prepared"
         assert result["output"]["draft_visible"] is False
 
+    @pytest.mark.asyncio
+    async def test_kdp_helper_visible_bookshelf_result_maps_to_draft(self, kdp, monkeypatch):
+        async def _fake_exec(*args, **kwargs):
+            class _Proc:
+                returncode = 0
+
+                async def communicate(self):
+                    payload = {
+                        "ok": True,
+                        "ok_soft": True,
+                        "saved_click": False,
+                        "title_found_on_bookshelf": False,
+                        "title_found_via_search": True,
+                        "draft_visible": True,
+                        "fields_filled": 4,
+                        "bookshelf_screenshot": "runtime/kdp_bookshelf.png",
+                    }
+                    return (json.dumps(payload).encode("utf-8"), b"")
+
+            return _Proc()
+
+        import json
+        monkeypatch.setattr("platforms.amazon_kdp.asyncio.create_subprocess_exec", _fake_exec)
+        result = await kdp._publish_via_kdp_helper({"title": "Book"})
+        assert result["status"] == "draft"
+        assert result["screenshot_path"] == "runtime/kdp_bookshelf.png"
+
 
 class TestKDPAnalytics:
     @pytest.mark.asyncio

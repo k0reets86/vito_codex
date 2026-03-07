@@ -52,6 +52,18 @@ async def _fill_first(page, selectors: list[str], value: str, timeout_ms: int = 
     return False
 
 
+async def _check_first(page, selectors: list[str], timeout_ms: int = 2500) -> bool:
+    for sel in selectors:
+        try:
+            loc = page.locator(sel)
+            if await loc.count() > 0:
+                await loc.first.check(timeout=timeout_ms)
+                return True
+        except Exception:
+            continue
+    return False
+
+
 async def _set_input_file(page, selectors: list[str], file_path: str, timeout_ms: int = 12000) -> bool:
     fp = str(file_path or "").strip()
     if not fp or not Path(fp).exists():
@@ -74,9 +86,19 @@ async def _open_kdp_details_flow(page) -> bool:
                 return True
         except Exception:
             pass
+        try:
+            current_url = (page.url or "").lower()
+        except Exception:
+            current_url = ""
+        try:
+            body_text = ((await page.text_content("body")) or "").lower()
+        except Exception:
+            body_text = ""
+        if "/title-setup/" in current_url and ("book title" in body_text or "language" in body_text):
+            return True
         body = ""
         try:
-            body = ((await page.text_content("body")) or "").lower()
+            body = body_text
         except Exception:
             body = ""
         clicked = await _click_first(
@@ -97,6 +119,8 @@ async def _open_kdp_details_flow(page) -> bool:
         )
         if clicked:
             await page.wait_for_timeout(2200)
+            await _kdp_relogin_if_needed(page)
+            await page.wait_for_timeout(1400)
             try:
                 await page.wait_for_load_state("domcontentloaded", timeout=10000)
             except Exception:
@@ -108,6 +132,12 @@ async def _open_kdp_details_flow(page) -> bool:
             break
     try:
         return await page.locator("input[name='bookTitle'], input#bookTitle, input[aria-label*='Book title']").count() > 0
+    except Exception:
+        pass
+    try:
+        current_url = (page.url or "").lower()
+        body_text = ((await page.text_content("body")) or "").lower()
+        return "/title-setup/" in current_url and ("book title" in body_text or "language" in body_text)
     except Exception:
         return False
 
@@ -145,6 +175,48 @@ async def _bookshelf_titles(page) -> list[str]:
         return [str(x) for x in (items or [])]
     except Exception:
         return []
+
+
+async def _open_existing_bookshelf_draft(page, title: str) -> bool:
+    needle = str(title or "").strip().lower()
+    if not needle:
+        return False
+    try:
+        for sel in ("input[placeholder*='Search by title']", "input[aria-label*='Search by title']", "input[type='search']"):
+            box = page.locator(sel)
+            if await box.count() > 0:
+                await box.first.fill(title)
+                await page.keyboard.press("Enter")
+                await page.wait_for_timeout(1800)
+                break
+    except Exception:
+        pass
+    try:
+        clicked = await page.evaluate(
+            """(needle) => {
+                const key = String(needle || '').trim().toLowerCase();
+                const rows = Array.from(document.querySelectorAll('div,article,li,tr'));
+                for (const row of rows) {
+                    const txt = (row.textContent || '').toLowerCase();
+                    if (!txt.includes(key) || !txt.includes('continue setup')) continue;
+                    const btn = Array.from(row.querySelectorAll('a,button')).find(el =>
+                        /continue setup/i.test((el.textContent || '').trim())
+                    );
+                    if (btn) {
+                        btn.click();
+                        return true;
+                    }
+                }
+                return false;
+            }""",
+            needle,
+        )
+        if clicked:
+            await page.wait_for_timeout(2500)
+            return True
+    except Exception:
+        pass
+    return False
 
 
 async def _kdp_relogin_if_needed(page) -> bool:
@@ -226,45 +298,53 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
                 return 3
             before_titles = await _bookshelf_titles(page)
 
-            # Step 1: open create flow
-            opened = await _click_first(
-                page,
-                [
-                    "button:has-text('Create')",
-                    "a:has-text('Create')",
-                    "text=Create",
-                ],
-            )
-            if not opened:
-                await page.screenshot(path=str(dbg / f"kdp_draft_{stamp}_no_create.png"), full_page=True)
-                print(json.dumps({"ok": False, "error": "create_button_not_found", "url": page.url}, ensure_ascii=False))
-                return 3
+            resumed_existing = await _open_existing_bookshelf_draft(page, title)
+            if resumed_existing:
+                await _kdp_relogin_if_needed(page)
+                await page.wait_for_timeout(2200)
 
-            await page.wait_for_timeout(1200)
-
-            # Step 2: choose ebook/paperback flow and ensure details form is actually opened.
-            chosen = await _open_kdp_details_flow(page)
-            await page.wait_for_timeout(2200)
-            await _kdp_relogin_if_needed(page)
-            if not chosen:
-                await page.screenshot(path=str(dbg / f"kdp_draft_{stamp}_create_flow_not_opened.png"), full_page=True)
-                print(
-                    json.dumps(
-                        {
-                            "ok": False,
-                            "error": "create_flow_not_opened",
-                            "url": page.url,
-                            "screenshot": str(dbg / f"kdp_draft_{stamp}_create_flow_not_opened.png"),
-                        },
-                        ensure_ascii=False,
-                    )
+            if not resumed_existing:
+                # Step 1: open create flow
+                opened = await _click_first(
+                    page,
+                    [
+                        "button:has-text('Create')",
+                        "a:has-text('Create')",
+                        "text=Create",
+                    ],
                 )
-                return 3
+                if not opened:
+                    await page.screenshot(path=str(dbg / f"kdp_draft_{stamp}_no_create.png"), full_page=True)
+                    print(json.dumps({"ok": False, "error": "create_button_not_found", "url": page.url}, ensure_ascii=False))
+                    return 3
+
+                await page.wait_for_timeout(1200)
+
+                # Step 2: choose ebook/paperback flow and ensure details form is actually opened.
+                chosen = await _open_kdp_details_flow(page)
+                await page.wait_for_timeout(2200)
+                await _kdp_relogin_if_needed(page)
+                if not chosen:
+                    await page.screenshot(path=str(dbg / f"kdp_draft_{stamp}_create_flow_not_opened.png"), full_page=True)
+                    print(
+                        json.dumps(
+                            {
+                                "ok": False,
+                                "error": "create_flow_not_opened",
+                                "url": page.url,
+                                "screenshot": str(dbg / f"kdp_draft_{stamp}_create_flow_not_opened.png"),
+                            },
+                            ensure_ascii=False,
+                        )
+                    )
+                    return 3
 
             # Step 3: fill metadata on details page (best effort).
             await _fill_first(
                 page,
                 [
+                "input[name='data[title]']",
+                "input#data-title",
                 "input[name='bookTitle']",
                 "input#bookTitle",
                 "input[aria-label*='Book title']",
@@ -275,6 +355,8 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
             await _fill_first(
                 page,
                 [
+                    "input[name='data[subtitle]']",
+                    "input#data-subtitle",
                     "input[name='bookSubtitle']",
                     "input#bookSubtitle",
                     "input[aria-label*='Subtitle']",
@@ -290,6 +372,8 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
             first_set = await _fill_first(
                 page,
                 [
+                    "input[name='data[primary_author][first_name]']",
+                    "input#data-primary-author-first-name",
                     "input[name='authorFirstName']",
                     "input#authorFirstName",
                     "input[aria-label*='First name']",
@@ -300,6 +384,9 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
                 await _fill_first(
                     page,
                     [
+                        "input[name='data[primary_author][last_name]']",
+                        "input#data-primary-author-last-name",
+                        "input#data-print-book-primary-author-last-name-jp",
                         "input[name='authorLastName']",
                         "input#authorLastName",
                         "input[aria-label*='Last name']",
@@ -310,17 +397,48 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
             description_set = await _fill_first(
                 page,
                 [
+                    "textarea[name='data[description]']",
                     "textarea[name='description']",
                     "textarea#description",
                     "textarea[aria-label*='Description']",
                     "textarea[placeholder*='Description']",
+                    "div[contenteditable='true']",
                 ],
                 description[:3800],
                 timeout_ms=5000,
             )
+            if not description_set:
+                try:
+                    description_set = bool(
+                        await page.evaluate(
+                            """(val) => {
+                                const hidden = document.querySelector("input[name='data[description]']");
+                                if (hidden) {
+                                    hidden.value = val;
+                                    hidden.dispatchEvent(new Event('input', { bubbles: true }));
+                                    hidden.dispatchEvent(new Event('change', { bubbles: true }));
+                                }
+                                const editable = document.querySelector("[contenteditable='true']");
+                                if (editable) {
+                                    editable.innerHTML = val.replace(/\\n/g, "<br>");
+                                    editable.dispatchEvent(new Event('input', { bubbles: true }));
+                                    editable.dispatchEvent(new Event('change', { bubbles: true }));
+                                }
+                                return !!hidden || !!editable;
+                            }""",
+                            description[:3800],
+                        )
+                    )
+                except Exception:
+                    description_set = False
+
+            await _check_first(page, ["input#non-public-domain", "input[name='data-is-public-domain'][value='false']"])
+            await _check_first(page, ["input[name='data[is_adult_content]-radio'][value='false']"])
 
             keyword_slots_filled = 0
             keyword_selectors = [
+                "input[name='data[keywords][0]']",
+                "input[id^='data-keywords-']",
                 "input[name='keywords[0]']",
                 "input[id*='keyword']",
                 "input[aria-label*='keyword' i]",
@@ -342,6 +460,45 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
                         continue
                 if filled:
                     keyword_slots_filled += 1
+
+            try:
+                opened_categories = await _click_first(
+                    page,
+                    [
+                        "button#categories-modal-button",
+                        "#categories-modal-button",
+                        "button:has-text('Choose categories')",
+                        "a:has-text('Choose categories')",
+                    ],
+                    timeout_ms=3000,
+                )
+                if opened_categories:
+                    await page.wait_for_timeout(1500)
+                    try:
+                        await page.evaluate(
+                            """() => {
+                                const pick = document.querySelector("input[type='checkbox'][name*='browse'], input[type='radio'][name*='browse'], input[type='checkbox'][id*='browse'], input[type='radio'][id*='browse']");
+                                if (pick) {
+                                    pick.click();
+                                    pick.dispatchEvent(new Event('input', { bubbles: true }));
+                                    pick.dispatchEvent(new Event('change', { bubbles: true }));
+                                }
+                                const buttons = Array.from(document.querySelectorAll("button, input[type='submit'], a"));
+                                for (const b of buttons) {
+                                    const t = ((b.textContent || b.value || '')).trim().toLowerCase();
+                                    if (t.includes('save') || t.includes('done') || t.includes('continue') || t.includes('confirm')) {
+                                        b.click();
+                                        return true;
+                                    }
+                                }
+                                return !!pick;
+                            }"""
+                        )
+                    except Exception:
+                        pass
+                    await page.wait_for_timeout(1200)
+            except Exception:
+                pass
 
             await page.wait_for_timeout(800)
 
@@ -456,10 +613,9 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
             fields_filled += int(keyword_slots_filled > 0)
             fields_filled += 1 if bool(manuscript_uploaded) else 0
             fields_filled += 1 if bool(cover_uploaded) else 0
-            ok = bool(saved and (has_title or appeared_new or search_hit))
-            # "saved and landed on bookshelf" is not enough; the draft must be visible
-            # either by exact title, search hit, or a genuinely new bookshelf row.
-            ok_soft = bool(saved and (has_title or appeared_new or search_hit))
+            draft_visible = bool(has_title or appeared_new or search_hit)
+            ok = bool(draft_visible)
+            ok_soft = bool(draft_visible)
             result = {
                 "ok": bool(ok),
                 "ok_soft": bool(ok_soft),
@@ -468,6 +624,7 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
                 "url": page.url,
                 "title_found_on_bookshelf": has_title,
                 "title_found_via_search": bool(search_hit),
+                "draft_visible": bool(draft_visible),
                 "before_count": len(before_titles),
                 "after_count": len(after_titles),
                 "fields_filled": int(fields_filled),

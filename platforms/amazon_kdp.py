@@ -194,6 +194,8 @@ class AmazonKDPPlatform(BasePlatform):
             env["KDP_TEST_DRAFT_KEYWORDS"] = str(kw or "")
         env["KDP_TEST_DRAFT_MANUSCRIPT"] = str(content.get("manuscript_path") or content.get("pdf_path") or content.get("file_path") or "")
         env["KDP_TEST_DRAFT_COVER"] = str(content.get("cover_path") or content.get("image_path") or "")
+        env["KDP_EMAIL"] = str(getattr(settings, "KDP_EMAIL", "") or os.getenv("KDP_EMAIL") or "")
+        env["KDP_PASSWORD"] = str(getattr(settings, "KDP_PASSWORD", "") or os.getenv("KDP_PASSWORD") or "")
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -220,7 +222,7 @@ class AmazonKDPPlatform(BasePlatform):
             if helper_ok:
                 result = {
                     "platform": "amazon_kdp",
-                    "status": "published",
+                    "status": "draft",
                     "url": "https://kdp.amazon.com/bookshelf",
                     "id": "",
                     "screenshot_path": str(payload.get("bookshelf_screenshot") or payload.get("screenshot") or ""),
