@@ -9,7 +9,11 @@ from config.logger import get_logger
 from config.settings import settings
 from modules.listing_optimizer import optimize_listing_payload
 from modules.platform_artifact_pack import build_platform_bundle
+from modules.platform_result_contract import normalize_platform_result, validate_platform_result_contract
 from modules.platform_rules_sync import configured_services, sync_platform_rules
+from modules.platform_knowledge import get_service_knowledge
+from modules.workflow_recipes import platform_recipe
+from modules.workflow_recipe_executor import WorkflowRecipeExecutor
 
 logger = get_logger("ecommerce_agent", agent="ecommerce_agent")
 
@@ -150,6 +154,7 @@ class ECommerceAgent(BaseAgent):
 
     async def create_listing(self, platform: str, data: dict) -> TaskResult:
         platform = str(platform or "gumroad").strip().lower()
+        knowledge = get_service_knowledge(platform)
         # Responsible agent behavior: always prepare full publish package first.
         if not bool((data or {}).get("_package_ready")):
             pkg = await self.build_publish_package(platform, data or {})
@@ -159,6 +164,11 @@ class ECommerceAgent(BaseAgent):
             else:
                 data = dict(data or {})
         data = optimize_listing_payload(platform, data or {})
+        if knowledge:
+            data["_platform_knowledge_context"] = {
+                "recent_successes": list((knowledge.get("success_runbooks") or [])[-3:]),
+                "recent_failures": list((knowledge.get("failure_runbooks") or [])[-3:]),
+            }
         if data.get("allow_existing_update"):
             target_id = str(data.get("target_product_id") or data.get("target_listing_id") or data.get("target_slug") or "").strip()
             if not target_id:
@@ -224,6 +234,13 @@ class ECommerceAgent(BaseAgent):
                     )
             result = await plat.publish(data)
             status = result.get("status") if isinstance(result, dict) else None
+            normalized = normalize_platform_result(result or {}, platform=platform, action="publish")
+            contract = validate_platform_result_contract(normalized, require_evidence_for_success=True)
+            recipe = platform_recipe(platform)
+            recipe_ok = True
+            recipe_reason = ""
+            if recipe:
+                recipe_ok, recipe_reason = WorkflowRecipeExecutor._validate_acceptance(result or {}, recipe, data or {})
             accepted_statuses = {"ok", "success", "published", "created"}
             if bool(getattr(settings, "AUTONOMY_ACCEPT_INTERMEDIATE_PUBLISH_STATUSES", False)):
                 accepted_statuses.update({"prepared", "created", "draft"})
@@ -234,12 +251,30 @@ class ECommerceAgent(BaseAgent):
                     extra={"event": "listing_failed", "context": {"platform": platform, "status": status}},
                 )
                 return TaskResult(success=False, error=err or f"publish_failed:{status}", output=result)
+            if not contract.ok:
+                err = f"platform_contract_invalid:{','.join(contract.errors)}"
+                logger.warning(
+                    f"Листинг НЕ принят по контракту на {platform}",
+                    extra={"event": "listing_contract_failed", "context": {"platform": platform, "errors": contract.errors, "status": status}},
+                )
+                return TaskResult(success=False, error=err, output=normalized)
+            if recipe and not recipe_ok:
+                logger.warning(
+                    f"Листинг НЕ принят по recipe gate на {platform}",
+                    extra={"event": "listing_recipe_failed", "context": {"platform": platform, "reason": recipe_reason, "status": status}},
+                )
+                return TaskResult(success=False, error=recipe_reason or "publish_recipe_gate_failed", output=result)
             logger.info(
                 f"Листинг создан на {platform}",
                 extra={"event": "listing_created", "context": {"platform": platform}},
             )
             if isinstance(result, dict) and data.get("_publish_contributors"):
                 result["contributors"] = list(data.get("_publish_contributors") or [])
+            if isinstance(result, dict) and knowledge:
+                result["platform_knowledge_summary"] = {
+                    "success_count": len(knowledge.get("success_runbooks") or []),
+                    "failure_count": len(knowledge.get("failure_runbooks") or []),
+                }
             return TaskResult(success=True, output=result)
         except Exception as e:
             return TaskResult(success=False, error=f"Ошибка создания листинга на {platform}: {e}")

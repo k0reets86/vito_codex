@@ -10,7 +10,15 @@ class TestECommerceAgent:
     @pytest.fixture
     def mock_platform(self):
         platform = MagicMock()
-        platform.publish = AsyncMock(return_value={"listing_id": "123", "url": "https://example.com/123"})
+        platform.publish = AsyncMock(
+            return_value={
+                "platform": "gumroad",
+                "status": "created",
+                "listing_id": "123",
+                "id": "123",
+                "url": "https://example.com/123",
+            }
+        )
         platform.get_analytics = AsyncMock(return_value={"sales": 5, "revenue": 50.0})
         platform.health_check = AsyncMock(return_value=True)
         return platform
@@ -73,7 +81,14 @@ class TestECommerceAgent:
     async def test_create_listing_printful_allows_no_preview_files(self, mock_llm_router, mock_memory, mock_finance, mock_comms):
         from agents.ecommerce_agent import ECommerceAgent
         printful = MagicMock()
-        printful.publish = AsyncMock(return_value={"platform": "printful", "status": "created", "id": "pf_1"})
+        printful.publish = AsyncMock(
+            return_value={
+                "platform": "printful",
+                "status": "created",
+                "id": "pf_1",
+                "url": "https://printful.example/store/pf_1",
+            }
+        )
         agent = ECommerceAgent(
             llm_router=mock_llm_router,
             memory=mock_memory,
@@ -98,6 +113,93 @@ class TestECommerceAgent:
         )
         result = await agent.create_listing("printful", {"sync_product": {"name": "VITO POD"}})
         assert result.success is False
+
+    @pytest.mark.asyncio
+    async def test_create_listing_etsy_draft_without_screenshot_fails_recipe_gate(self, mock_llm_router, mock_memory, mock_finance, mock_comms, tmp_path):
+        from agents.ecommerce_agent import ECommerceAgent
+
+        cover = tmp_path / "cover.png"
+        cover.write_text("png", encoding="utf-8")
+        pdf = tmp_path / "file.pdf"
+        pdf.write_text("pdf", encoding="utf-8")
+
+        etsy = MagicMock()
+        etsy.authenticate = AsyncMock(return_value=True)
+        etsy.publish = AsyncMock(
+            return_value={
+                "platform": "etsy",
+                "status": "draft",
+                "listing_id": "123",
+                "url": "https://www.etsy.com/listing/123",
+            }
+        )
+        agent = ECommerceAgent(
+            llm_router=mock_llm_router,
+            memory=mock_memory,
+            finance=mock_finance,
+            comms=mock_comms,
+            platforms={"etsy": etsy},
+        )
+        result = await agent.create_listing(
+            "etsy",
+            {
+                "_package_ready": True,
+                "title": "Etsy test",
+                "description": "A" * 120,
+                "price": 5,
+                "pdf_path": str(pdf),
+                "cover_path": str(cover),
+                "thumb_path": str(cover),
+                "draft_only": True,
+            },
+        )
+        assert result.success is False
+        assert "acceptance_gate_missing_required_evidence" in str(result.error)
+
+    @pytest.mark.asyncio
+    async def test_create_listing_etsy_draft_with_screenshot_passes_gate(self, mock_llm_router, mock_memory, mock_finance, mock_comms, tmp_path):
+        from agents.ecommerce_agent import ECommerceAgent
+
+        cover = tmp_path / "cover.png"
+        cover.write_text("png", encoding="utf-8")
+        pdf = tmp_path / "file.pdf"
+        pdf.write_text("pdf", encoding="utf-8")
+        shot = tmp_path / "shot.png"
+        shot.write_text("png", encoding="utf-8")
+
+        etsy = MagicMock()
+        etsy.authenticate = AsyncMock(return_value=True)
+        etsy.publish = AsyncMock(
+            return_value={
+                "platform": "etsy",
+                "status": "draft",
+                "listing_id": "123",
+                "url": "https://www.etsy.com/listing/123",
+                "screenshot_path": str(shot),
+            }
+        )
+        agent = ECommerceAgent(
+            llm_router=mock_llm_router,
+            memory=mock_memory,
+            finance=mock_finance,
+            comms=mock_comms,
+            platforms={"etsy": etsy},
+        )
+        result = await agent.create_listing(
+            "etsy",
+            {
+                "_package_ready": True,
+                "title": "Etsy test",
+                "description": "A" * 120,
+                "price": 5,
+                "pdf_path": str(pdf),
+                "cover_path": str(cover),
+                "thumb_path": str(cover),
+                "draft_only": True,
+            },
+        )
+        assert result.success is True
+        assert result.output["listing_id"] == "123"
 
     @pytest.mark.asyncio
     async def test_platform_rules_sync_success(self, agent, monkeypatch):
