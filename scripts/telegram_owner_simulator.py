@@ -299,6 +299,17 @@ def _install_owner_flow_stubs(vito) -> None:
         vito.comms._agent_registry = registry
     if getattr(vito, "conversation_engine", None) is not None:
         vito.conversation_engine.agent_registry = registry
+    llm_router = getattr(vito, "llm_router", None)
+    if llm_router is not None:
+        async def _stubbed_call_llm(prompt: str, *args, **kwargs):
+            text = str(prompt or "")
+            low = text.lower()
+            if "определи intent" in low:
+                return "CONVERSATION"
+            if "ответь владельцу" in low or "owner" in low:
+                return "Ок."
+            return "Ок."
+        llm_router.call_llm = AsyncMock(side_effect=_stubbed_call_llm)
 
 
 async def _amain() -> int:
