@@ -234,6 +234,69 @@ class AmazonKDPPlatform(BasePlatform):
             logger.warning(f"KDP content probe error: {e}", extra={"event": "kdp_content_probe_error"})
             return {"draft_visible": False, "manuscript_uploaded": False, "cover_uploaded": False, "error": str(e), "screenshot_path": screenshot_path}
 
+    async def _probe_linked_formats_via_saved_session(self, ebook_document_id: str) -> dict[str, Any]:
+        if not self._state_file.exists() or not str(ebook_document_id or "").strip():
+            return {"paperback": {}, "hardcover": {}}
+        try:
+            from playwright.async_api import async_playwright
+
+            async with async_playwright() as p:
+                args = [
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--disable-software-rasterizer",
+                    "--renderer-process-limit=1",
+                ]
+                if bool(getattr(settings, "BROWSER_CONSTRAINED_MODE", True)):
+                    args.extend(["--no-zygote", "--single-process"])
+                browser = await p.chromium.launch(headless=True, args=args)
+                context = await browser.new_context(storage_state=str(self._state_file), viewport={"width": 1440, "height": 920})
+                page = await context.new_page()
+                await page.goto("https://kdp.amazon.com/bookshelf", wait_until="domcontentloaded", timeout=120000)
+                await page.wait_for_timeout(3500)
+                data = await page.evaluate(
+                    """(ebookId) => {
+                        const out = { paperback: {}, hardcover: {} };
+                        const body = (document.body.innerText || '');
+                        if (!body) return out;
+                        const anchors = Array.from(document.querySelectorAll('a[href]')).map(a => ({
+                            text: (a.innerText || a.textContent || '').replace(/\\s+/g, ' ').trim(),
+                            href: a.getAttribute('href') || '',
+                            id: a.id || '',
+                        }));
+                        const findHref = (needle) => anchors.find(a => (a.text + ' ' + a.href + ' ' + a.id).toLowerCase().includes(needle)) || null;
+                        const paperbackContent = findHref('edit paperback content');
+                        const paperbackPricing = findHref('edit paperback rights & pricing');
+                        const paperbackDetails = anchors.find(a => (a.href || '').toLowerCase().includes('/title-setup/paperback/') && (a.text || '').toLowerCase().includes('continue setup')) || null;
+                        const hardcoverCreate = anchors.find(a => (a.text || '').toLowerCase().includes('create hardcover')) || null;
+                        const parseDoc = (href) => {
+                            const m = String(href || '').match(/\\/title-setup\\/(?:paperback|hardcover)\\/([^\\/\\?]+)/i);
+                            return m ? m[1] : '';
+                        };
+                        out.paperback = {
+                            present: !!(paperbackContent || paperbackPricing || paperbackDetails),
+                            document_id: parseDoc((paperbackDetails && paperbackDetails.href) || (paperbackContent && paperbackContent.href) || (paperbackPricing && paperbackPricing.href) || ''),
+                            details_url: paperbackDetails ? paperbackDetails.href : '',
+                            content_url: paperbackContent ? paperbackContent.href : '',
+                            pricing_url: paperbackPricing ? paperbackPricing.href : '',
+                            raw_status_hint: /paperback\\s+draft/i.test(body) ? 'draft' : '',
+                        };
+                        out.hardcover = {
+                            present: !!hardcoverCreate,
+                            create_hint: hardcoverCreate ? (hardcoverCreate.href || hardcoverCreate.text || '') : '',
+                        };
+                        return out;
+                    }""",
+                    ebook_document_id,
+                )
+                await context.close()
+                await browser.close()
+                return data if isinstance(data, dict) else {"paperback": {}, "hardcover": {}}
+        except Exception as e:
+            logger.warning(f"KDP linked-formats probe error: {e}", extra={"event": "kdp_linked_formats_probe_error"})
+            return {"paperback": {}, "hardcover": {}, "error": str(e)}
+
     async def authenticate(self) -> bool:
         """Аутентификация через BrowserAgent (KDP login page)."""
         # Preferred path: saved browser session (created by scripts/kdp_auth_helper.py).
@@ -421,6 +484,9 @@ class AmazonKDPPlatform(BasePlatform):
                     royalty_rate=env["KDP_TEST_DRAFT_ROYALTY"],
                     enroll_select=env["KDP_TEST_DRAFT_ENROLL_SELECT"] == "1",
                 )
+            linked_formats: dict[str, Any] = {}
+            if env["KDP_TEST_DRAFT_DOCUMENT_ID"]:
+                linked_formats = await self._probe_linked_formats_via_saved_session(env["KDP_TEST_DRAFT_DOCUMENT_ID"])
             if helper_ok:
                 result = {
                     "platform": "amazon_kdp",
@@ -428,7 +494,7 @@ class AmazonKDPPlatform(BasePlatform):
                     "url": "https://kdp.amazon.com/bookshelf",
                     "id": "",
                     "screenshot_path": str(pricing_meta.get("screenshot_path") or payload.get("bookshelf_screenshot") or payload.get("screenshot") or ""),
-                    "output": {**payload, **pricing_meta, "fields_filled": fields_filled},
+                    "output": {**payload, **pricing_meta, "linked_formats": linked_formats, "fields_filled": fields_filled},
                     "method": "kdp_helper",
                 }
                 self._record_publish_lesson(result, source="amazon_kdp.kdp_helper")
@@ -441,7 +507,7 @@ class AmazonKDPPlatform(BasePlatform):
                     "url": "https://kdp.amazon.com/bookshelf",
                     "id": "",
                     "screenshot_path": str(pricing_meta.get("screenshot_path") or payload.get("bookshelf_screenshot") or payload.get("screenshot") or ""),
-                    "output": {**payload, **pricing_meta, "fields_filled": fields_filled},
+                    "output": {**payload, **pricing_meta, "linked_formats": linked_formats, "fields_filled": fields_filled},
                     "method": "kdp_helper",
                 }
                 self._record_publish_lesson(result, source="amazon_kdp.kdp_helper")
@@ -481,6 +547,7 @@ class AmazonKDPPlatform(BasePlatform):
                         "timeout_fallback": True,
                         **content_probe,
                         **pricing_meta,
+                        "linked_formats": await self._probe_linked_formats_via_saved_session(env["KDP_TEST_DRAFT_DOCUMENT_ID"]),
                     },
                     "method": "kdp_helper_timeout_probe",
                 }
