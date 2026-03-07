@@ -173,6 +173,7 @@ class ConversationEngine:
         deterministic = await self._deterministic_owner_route(text)
         if deterministic is not None:
             try:
+                self._ensure_owner_task_state(text, deterministic.get("intent"))
                 self._add_turn("user", text, Intent.SYSTEM_ACTION if deterministic.get("intent") == Intent.SYSTEM_ACTION.value else Intent.QUESTION)
                 if deterministic.get("response"):
                     self._add_turn("assistant", deterministic["response"])
@@ -183,6 +184,7 @@ class ConversationEngine:
         research_continuation = self._maybe_continue_from_research_state(text)
         if research_continuation is not None:
             try:
+                self._ensure_owner_task_state(text, research_continuation.get("intent"))
                 self._add_turn("user", text, Intent.SYSTEM_ACTION)
                 if research_continuation.get("response"):
                     self._add_turn("assistant", research_continuation["response"])
@@ -234,6 +236,25 @@ class ConversationEngine:
         result["nlu_tones"] = tones
         return result
 
+    def _ensure_owner_task_state(self, text: str, intent_value: str | None) -> None:
+        if not self.owner_task_state:
+            return
+        try:
+            active_before = self.owner_task_state.get_active()
+            intent_str = str(intent_value or "").strip().lower()
+            if intent_str not in {Intent.GOAL_REQUEST.value, Intent.SYSTEM_ACTION.value}:
+                return
+            saved = self.owner_task_state.set_active(
+                text=text,
+                source="telegram",
+                intent=intent_str,
+                force=False,
+            )
+            if active_before and not saved:
+                return
+        except Exception:
+            return
+
     @staticmethod
     def _owner_friendly_action_results(text: str) -> str:
         s = str(text or "").strip()
@@ -260,6 +281,7 @@ class ConversationEngine:
             and self._looks_like_imperative_request(text)
         ):
             actions = [{"action": "run_printful_etsy_sync", "params": {"topic": self._extract_product_topic(text), "auto_publish": True}}]
+            self._ensure_owner_task_state(text, Intent.SYSTEM_ACTION.value)
             out = await self._execute_actions(actions)
             return {
                 "intent": Intent.SYSTEM_ACTION.value,
@@ -280,6 +302,7 @@ class ConversationEngine:
         )
         if platform_key and self._looks_like_imperative_request(text) and self._has_keywords(normalized, platform_op_kw, fuzzy=True):
             actions = [{"action": "run_platform_task", "params": {"platform": platform_key, "request": text}}]
+            self._ensure_owner_task_state(text, Intent.SYSTEM_ACTION.value)
             out = await self._execute_actions(actions)
             return {
                 "intent": Intent.SYSTEM_ACTION.value,
@@ -324,6 +347,7 @@ class ConversationEngine:
         if deep_request and self._has_keywords(normalized, ("анализ", "исслед", "research", "разбор"), fuzzy=True):
             topic = self._extract_research_topic(text)
             actions = [{"action": "run_deep_research", "params": {"topic": topic}}]
+            self._ensure_owner_task_state(text, Intent.SYSTEM_ACTION.value)
             out = await self._execute_actions(actions)
             return {
                 "intent": Intent.SYSTEM_ACTION.value,
@@ -333,6 +357,7 @@ class ConversationEngine:
             }
         if trend_request and trend_verb and self.agent_registry:
             actions = [{"action": "scan_trends", "params": {}}]
+            self._ensure_owner_task_state(text, Intent.SYSTEM_ACTION.value)
             out = await self._execute_actions(actions)
             return {
                 "intent": Intent.SYSTEM_ACTION.value,
@@ -399,6 +424,7 @@ class ConversationEngine:
             else:
                 priority = "HIGH"
             if goal_id:
+                self._ensure_owner_task_state(text, Intent.SYSTEM_ACTION.value)
                 out = await self._execute_actions([{"action": "change_priority", "params": {"goal_id": goal_id, "priority": priority}}])
                 return {
                     "intent": Intent.SYSTEM_ACTION.value,

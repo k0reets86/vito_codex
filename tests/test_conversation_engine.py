@@ -665,6 +665,41 @@ async def test_process_message_allows_research_choice_then_create(mock_llm_route
 
 
 @pytest.mark.asyncio
+async def test_deterministic_deep_research_persists_owner_state_for_follow_up_choice(mock_llm_router, mock_memory, tmp_path):
+    owner_state = OwnerTaskState(path=tmp_path / "owner_task_state.json")
+    registry = MagicMock()
+    registry.dispatch = AsyncMock(side_effect=[
+        MagicMock(
+            success=True,
+            output="Full deep report",
+            metadata={
+                "executive_summary": "Healthy demand found.",
+                "data_sources": ["reddit"],
+                "report_path": "/tmp/report.md",
+                "top_ideas": [
+                    {"rank": 1, "title": "AI Prompt Pack", "score": 88, "platform": "gumroad"},
+                    {"rank": 2, "title": "Printable Planner Bundle", "score": 84, "platform": "etsy"},
+                ],
+                "recommended_product": {"title": "AI Prompt Pack", "score": 88, "platform": "gumroad"},
+            },
+        ),
+        MagicMock(success=True, output={"score": 9, "approved": True}),
+    ])
+    engine = ConversationEngine(
+        llm_router=mock_llm_router,
+        memory=mock_memory,
+        owner_task_state=owner_state,
+        agent_registry=registry,
+    )
+    out1 = await engine.process_message("проведи глубокое исследование ниш цифровых товаров")
+    assert "Глубокое исследование готово" in out1["response"]
+    active = owner_state.get_active() or {}
+    assert "research_options_json" in active
+    out2 = await engine.process_message("2")
+    assert "Зафиксировал вариант 2" in out2["response"]
+
+
+@pytest.mark.asyncio
 async def test_process_message_recommended_choice_honors_platform_override(mock_llm_router, mock_memory, tmp_path):
     owner_state = OwnerTaskState(path=tmp_path / "owner_task_state.json")
     owner_state.set_active("исследуй нишу", source="telegram", intent="system_action", force=True)
