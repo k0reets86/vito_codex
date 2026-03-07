@@ -194,6 +194,7 @@ class AmazonKDPPlatform(BasePlatform):
             env["KDP_TEST_DRAFT_KEYWORDS"] = str(kw or "")
         env["KDP_TEST_DRAFT_MANUSCRIPT"] = str(content.get("manuscript_path") or content.get("pdf_path") or content.get("file_path") or "")
         env["KDP_TEST_DRAFT_COVER"] = str(content.get("cover_path") or content.get("image_path") or "")
+        env["KDP_TEST_DRAFT_DOCUMENT_ID"] = str(content.get("target_document_id") or content.get("target_book_id") or "")
         env["KDP_EMAIL"] = str(getattr(settings, "KDP_EMAIL", "") or os.getenv("KDP_EMAIL") or "")
         env["KDP_PASSWORD"] = str(getattr(settings, "KDP_PASSWORD", "") or os.getenv("KDP_PASSWORD") or "")
         env["KDP_RESUME_ONLY"] = "1"

@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from playwright.async_api import async_playwright
+from PIL import Image
 
 try:
     from config.settings import settings
@@ -24,9 +25,6 @@ def _launch_args() -> list[str]:
         "--disable-dev-shm-usage",
         "--disable-gpu",
         "--disable-software-rasterizer",
-        "--renderer-process-limit=1",
-        "--no-zygote",
-        "--single-process",
     ]
 
 
@@ -90,6 +88,43 @@ async def _body_contains(page, needles: list[str]) -> bool:
     except Exception:
         return False
     return any(str(n or "").strip().lower() in body for n in needles if str(n or "").strip())
+
+
+async def _body_all(page) -> str:
+    try:
+        return ((await page.text_content("body")) or "").lower()
+    except Exception:
+        return ""
+
+
+async def _click_text_any(page, texts: list[str], timeout_ms: int = 2500) -> bool:
+    for txt in texts:
+        try:
+            loc = page.get_by_text(txt, exact=False)
+            if await loc.count() > 0:
+                await loc.first.click(timeout=timeout_ms)
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _prepare_kdp_cover_file(cover_path: str, dbg: Path, stamp: str) -> str:
+    raw = str(cover_path or "").strip()
+    if not raw:
+        return ""
+    src = Path(raw)
+    if not src.exists():
+        return ""
+    if src.suffix.lower() in {".jpg", ".jpeg", ".tif", ".tiff"}:
+        return str(src)
+    try:
+        out = dbg / f"kdp_cover_{stamp}.jpg"
+        img = Image.open(src).convert("RGB")
+        img.save(out, format="JPEG", quality=95)
+        return str(out)
+    except Exception:
+        return str(src)
 
 
 async def _open_kdp_details_flow(page) -> bool:
@@ -232,6 +267,31 @@ async def _open_existing_bookshelf_draft(page, title: str) -> bool:
     return False
 
 
+async def _open_existing_draft_by_document_id(page, document_id: str) -> bool:
+    doc_id = str(document_id or "").strip()
+    if not doc_id:
+        return False
+    url = f"https://kdp.amazon.com/en_US/title-setup/kindle/{doc_id}/details?ref_=kdp_BS_D_ta_ed_main"
+    try:
+        await page.goto(url, wait_until="domcontentloaded", timeout=120000)
+        await page.wait_for_timeout(2200)
+        relogged = await _kdp_relogin_if_needed(page)
+        if relogged:
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=12000)
+            except Exception:
+                pass
+            await page.wait_for_timeout(2500)
+        if "signin" in (page.url or "").lower() or "ap/signin" in (page.url or "").lower():
+            return False
+        if f"/title-setup/kindle/{doc_id}/details" not in (page.url or ""):
+            await page.goto(url, wait_until="domcontentloaded", timeout=120000)
+            await page.wait_for_timeout(1800)
+        return f"/title-setup/kindle/{doc_id}/details" in (page.url or "")
+    except Exception:
+        return False
+
+
 async def _kdp_relogin_if_needed(page) -> bool:
     """Best-effort re-login when KDP asks only for password inside existing Amazon session."""
     cur = (page.url or "").lower()
@@ -277,6 +337,7 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
 
     stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     title = str(os.getenv("KDP_TEST_DRAFT_TITLE", "VITO TEST DRAFT")).strip() or "VITO TEST DRAFT"
+    document_id = str(os.getenv("KDP_TEST_DRAFT_DOCUMENT_ID", "")).strip()
     subtitle = str(os.getenv("KDP_TEST_DRAFT_SUBTITLE", "")).strip()
     author = str(os.getenv("KDP_TEST_DRAFT_AUTHOR", "Vito Bot")).strip() or "Vito Bot"
     description = str(
@@ -292,6 +353,8 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
     manuscript_path = str(os.getenv("KDP_TEST_DRAFT_MANUSCRIPT", "")).strip()
     cover_path = str(os.getenv("KDP_TEST_DRAFT_COVER", "")).strip()
     resume_only = str(os.getenv("KDP_RESUME_ONLY", "")).strip().lower() in {"1", "true", "yes", "on"}
+
+    cover_path = _prepare_kdp_cover_file(cover_path, dbg, stamp)
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=headless, args=_launch_args())
@@ -312,7 +375,11 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
                 return 3
             before_titles = await _bookshelf_titles(page)
 
-            resumed_existing = await _open_existing_bookshelf_draft(page, title)
+            resumed_existing = False
+            if document_id:
+                resumed_existing = await _open_existing_draft_by_document_id(page, document_id)
+            if not resumed_existing:
+                resumed_existing = await _open_existing_bookshelf_draft(page, title)
             if resumed_existing:
                 await _kdp_relogin_if_needed(page)
                 await page.wait_for_timeout(2200)
@@ -589,7 +656,14 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
                 )
                 if manuscript_uploaded:
                     await page.wait_for_timeout(3500)
-                    manuscript_uploaded = not await _body_contains(page, ["upload manuscript"])
+                    await _click_text_any(page, ["Continue with PDF", "I have another format"], timeout_ms=2500)
+                    await page.wait_for_timeout(1200)
+                    body_now = await _body_all(page)
+                    manuscript_uploaded = (
+                        "uploaded successfully" in body_now
+                        or "completed conversion" in body_now
+                        or "uploaded on" in body_now
+                    )
                 # If KDP asks to upload your own cover, try to enable that path.
                 await _click_first(
                     page,
@@ -617,7 +691,11 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
                 )
                 if cover_uploaded:
                     await page.wait_for_timeout(3500)
-                    cover_uploaded = not await _body_contains(page, ["no cover uploaded"])
+                    body_now = await _body_all(page)
+                    cover_uploaded = (
+                        "cover uploaded successfully" in body_now
+                        or ("processing your file" in body_now and "kindle ebook cover" in body_now)
+                    )
                 if manuscript_uploaded or cover_uploaded:
                     await _click_first(
                         page,
