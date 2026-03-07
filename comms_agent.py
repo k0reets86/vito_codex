@@ -171,11 +171,23 @@ def _remember_platform_working_target(platform: str, result: dict[str, Any]) -> 
         current["id"] = rid
     if url:
         current["url"] = url
+    task_root_id = str(
+        result.get("task_root_id")
+        or result.get("project_id")
+        or result.get("listing_work_id")
+        or result.get("publish_work_id")
+        or ""
+    ).strip()
+    if task_root_id:
+        current["task_root_id"] = task_root_id
     status = str(result.get("status") or "").strip().lower()
     is_published = bool(result.get("is_published")) or status == "published"
     if "draft_confirmed" in result:
         current["draft_confirmed"] = bool(result.get("draft_confirmed"))
     current["mutable"] = not is_published
+    current["locked"] = bool(is_published)
+    if is_published:
+        current["locked_reason"] = "published_requires_explicit_target"
     current["status"] = status or current.get("status", "")
     if current:
         current["updated_at"] = datetime.now(timezone.utc).isoformat()

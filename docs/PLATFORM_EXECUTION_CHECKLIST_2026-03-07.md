@@ -15,8 +15,8 @@
 - [x] photos/previews attached
 - [x] tags/SEO/required attributes filled
 - [x] evidence captured
-- [ ] runbook written to knowledge
-- [ ] commit
+- [x] runbook written to knowledge
+- [x] commit
 
 ## 2. Printful -> Etsy browser flow
 - [ ] no false API success

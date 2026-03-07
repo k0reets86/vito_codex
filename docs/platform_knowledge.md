@@ -207,6 +207,41 @@ Stub response: operational output.
   - https://help.etsy.com/hc/en-us/articles/115015628347-How-to-Manage-Your-Digital-Listings
   - https://help.etsy.com/hc/en-us/articles/360000344908-How-to-Add-Photos-and-Video-to-Your-Listings
 
+### Etsy — verified browser runbook (draft 4468093570)
+- Без явного `target_listing_id` и explicit owner intent не редактировать опубликованные листинги.
+- Рабочий режим для цифрового товара: `draft_only=true`, один active draft на задачу.
+- Подтвержденные поля/ветки:
+  - `title`
+  - `description`
+  - `price`
+  - `digital / instant download`
+  - `category`
+  - `tags`
+  - `materials`
+  - `digitalFiles`
+  - `listingImages`
+- Подтвержденный путь для digital file:
+  - editor `#details`
+  - блок `Цифровые файлы`
+  - hidden generic `input[type=file]`
+  - после save в server-state появляется `digitalFiles[].name`
+- Подтвержденный путь для media:
+  - первый `listing-media-upload`
+  - после save изображение появляется в `listingImages[]` / `formattedListingImages[]`
+- Runtime правило:
+  - не считать отсутствие явного визуального “thumbnail change” доказательством провала
+  - сначала проверять SSR/server-state на `digitalFiles` и `listingImages`
+- Для товаров с вариациями использовать отдельную ветку:
+  - если товар не digital-only и Etsy разрешает варианты, включать `Варианты`
+  - заполнять option names (`color`, `size`, etc.)
+  - затем quantity / SKU / per-variant price
+  - для digital-only listings ветка вариантов не используется
+- Дополнительные обязательные проверки:
+  - `listingType == download`
+  - `coreDetails.digitalFulfillment == 0`
+  - `category.id` присутствует
+  - `price` сохранен в `formFields.price`
+
 ### Amazon KDP
 - Keyword-поля: 7 keyword slots (использовать как обязательный минимум при подготовке метаданных).
 - Cover/bleed правила и шаблоны — только по официальному калькулятору KDP.
@@ -323,3 +358,1989 @@ Stub response: operational output.
 ## Confidence Score (0-100)
 - 80 (based on available live sources and evidence density)
 - Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
+
+## gumroad lesson
+
+Status: draft
+Source: test
+URL: https://gumroad.com/l/test-slug
+Summary: Draft updated
+Details: PDF attached, tags pending
+Lessons:
+- Reuse one working draft.
+Anti-patterns:
+- Do not create duplicate drafts.
+Evidence: {"slug": "test-slug"}
+
+## gumroad lesson
+
+Status: draft
+Source: gumroad.publish
+URL: https://gumroad.com/l/euiwxw
+Summary: Gumroad listing run finished with status=draft
+Details: Gumroad publish attempt on slug=euiwxw finished with status=draft. URL=https://gumroad.com/l/euiwxw. Error=none. Files=['the_ai_side_hustle_playbook_v2', 'the_ai_side_hustle_playbook_v2', 'the_ai_side_hustle_playbook_v2', 'the_ai_side_hustle_playbook_v2', 'ai_side_hustle_cover_1280x720', 'the_ai_side_hustle_playbook_v2', 'the_ai_side_hustle_playbook_v2', 'the_ai_side_hustle_playbook_v2', 'the_ai_side_hustle_playbook_v2', 'ai_side_hustle_cover_1280x720', 'the_ai_side_hustle_playbook_v2', 'the_ai_side_hustle_playbook_v2']
+Lessons:
+- Reuse the same working draft by explicit slug/id instead of creating a new listing.
+- Main PDF can be attached during the content/file flow and should be verified in product state.
+- Cover/preview media and the main product file must be treated as separate artifact channels.
+Evidence: {"slug": "euiwxw", "error": "", "files_attached": ["the_ai_side_hustle_playbook_v2", "the_ai_side_hustle_playbook_v2", "the_ai_side_hustle_playbook_v2", "the_ai_side_hustle_playbook_v2", "ai_side_hustle_cover_1280x720", "the_ai_side_hustle_playbook_v2", "the_ai_side_hustle_playbook_v2", "the_ai_side_hustle_playbook_v2", "the_ai_side_hustle_playbook_v2", "ai_side_hustle_cover_1280x720", "the_ai_side_hustle_playbook_v2", "the_ai_side_hustle_playbook_v2"], "product_id": "u7XXhFl4mzL6RlhwNNZJsA=="}
+
+## gumroad lesson
+
+Status: working_runbook
+Source: gumroad.publish
+Summary: Validated Gumroad draft cleanup and media flow on euiwxw
+Details: Use storage_state session. Save endpoint is POST /links/{slug}. Clean duplicate content embeds by updating rich_content/files in payload. Product cover flow is Upload images or videos -> Computer files. Thumbnail can be populated separately and is reflected in thumbnail.url. Draft euiwxw now holds one PDF, one content image, one product cover object, and one thumbnail.
+Lessons:
+- For Gumroad draft maintenance, use storage_state-backed browser session instead of cookie-only probes.
+- Real save endpoint is POST /links/{slug} with JSON product payload including rich_content/files.
+- Content cleanup is safer through payload rewrite than through fragile file row delete UI.
+- Cover upload requires Upload images or videos -> Computer files, not direct file chooser on the first click.
+- Thumbnail presence should be checked via top-level thumbnail.url; cover presence via product.covers.
+Anti-patterns:
+- Do not treat existing_files duplicates as proof that the storefront cover slot is filled.
+- Do not rely on global Edit/Delete locators for file rows in Content; the reliable trigger is the per-row Actions menu.
+- Do not use cookie-only headless probes when storage_state is available; they can falsely land on login.
+Evidence: {"slug": "euiwxw", "files": ["The_AI_Side_Hustle_Playbook_v2.pdf", "ai_side_hustle_cover_1280x720.png"], "thumbnail_set": true, "cover_object_present": true}
+
+## gumroad lesson
+
+Status: distribution_runbook
+Source: gumroad.distribution
+Summary: Use Gumroad listing URL as canonical outbound sales link
+Details: When a Gumroad draft/listing has a stable public URL, reuse that URL as the canonical outbound destination for social distribution. This applies to direct X posts, Reddit link posts, and future Threads multi-post funnels. Social copy can vary by platform, but the destination link should stay canonical for attribution and consistent conversion tracking.
+Lessons:
+- Use the Gumroad listing URL as the primary outbound sales link in X posts.
+- Reuse the same Gumroad URL in Reddit link posts when the goal is traffic to the listing.
+- Future Threads funnels can chain multiple posts and end with the Gumroad URL as the conversion step.
+- Social routing should treat Gumroad as a destination asset, separate from the post text/media artifacts.
+Anti-patterns:
+- Do not generate different destination links for each platform when one canonical Gumroad listing link exists.
+- Do not force platform-specific share intents when a direct social post with media and a canonical link gives better control.
+Evidence: {"listing_url": "https://vitoai.gumroad.com/l/euiwxw", "x_post_url": "https://x.com/bot_vito/status/2030061517727535417", "platforms": ["twitter", "reddit", "threads_future"]}
+
+## gumroad lesson
+
+Status: fresh_artifact_runbook
+Source: artifact_pack.runtime
+Summary: Fresh-only artifact generation enabled for TG publish recipes
+Details: Workflow recipes now set fresh_artifacts_only=True and run_tag. Platform artifact pack generates a new isolated runtime artifact bundle per run: pdf, cover, thumb, social image. This prevents accidental reuse of older output assets during Telegram-driven publish flows.
+Lessons:
+- For Telegram E2E publish tests, generate all assets inside runtime/fresh_artifacts/<run_tag>.
+- Do not reuse legacy output/*.pdf or output/*.png when fresh_artifacts_only=True.
+- Treat PDF, cover, thumb, and social image as a single per-run artifact bundle.
+Anti-patterns:
+- Do not let recipe payloads silently fall back to old test assets from output/.
+- Do not mix assets from different runs in the same publish attempt.
+Evidence: {"mode": "fresh_artifacts_only", "runtime_bundle_example": "runtime/fresh_artifacts/fresh_tg_test_product_tgfreshcheck2"}
+
+## gumroad lesson
+
+Status: draft
+Source: gumroad.publish
+URL: https://gumroad.com/l/euiwxw
+Summary: Gumroad listing run finished with status=draft
+Details: Gumroad publish attempt on slug=euiwxw finished with status=draft. URL=https://gumroad.com/l/euiwxw. Error=missing_attached_types:pdf. Files=[]
+Lessons:
+- Reuse the same working draft by explicit slug/id instead of creating a new listing.
+Anti-patterns:
+- Do not treat image uploads as proof that the main PDF product file is attached.
+Evidence: {"slug": "euiwxw", "error": "missing_attached_types:pdf", "files_attached": [], "product_id": "u7XXhFl4mzL6RlhwNNZJsA==", "task_root_id": "VT2603062351227CCTASK"}
+
+## gumroad lesson
+
+Status: draft
+Source: gumroad.publish
+URL: https://gumroad.com/l/euiwxw
+Summary: Gumroad listing run finished with status=draft
+Details: Gumroad publish attempt on slug=euiwxw finished with status=draft. URL=https://gumroad.com/l/euiwxw. Error=missing_attached_types:pdf. Files=[]
+Lessons:
+- Reuse the same working draft by explicit slug/id instead of creating a new listing.
+Anti-patterns:
+- Do not treat image uploads as proof that the main PDF product file is attached.
+Evidence: {"slug": "euiwxw", "error": "missing_attached_types:pdf", "files_attached": [], "product_id": "u7XXhFl4mzL6RlhwNNZJsA==", "task_root_id": "VT260307000404C84TASK"}
+
+## gumroad lesson
+
+Status: draft
+Source: gumroad.publish
+URL: https://gumroad.com/l/euiwxw
+Summary: Gumroad listing run finished with status=draft
+Details: Gumroad publish attempt on slug=euiwxw finished with status=draft. URL=https://gumroad.com/l/euiwxw. Error=missing_attached_types:pdf. Files=[]
+Lessons:
+- Reuse the same working draft by explicit slug/id instead of creating a new listing.
+Anti-patterns:
+- Do not treat image uploads as proof that the main PDF product file is attached.
+Evidence: {"slug": "euiwxw", "error": "missing_attached_types:pdf", "files_attached": [], "product_id": "u7XXhFl4mzL6RlhwNNZJsA==", "task_root_id": "VT260307001003BCBTASK"}
+
+## gumroad lesson
+
+Status: draft
+Source: gumroad.publish
+URL: https://gumroad.com/l/euiwxw
+Summary: Gumroad listing run finished with status=draft
+Details: Gumroad publish attempt on slug=euiwxw finished with status=draft. URL=https://gumroad.com/l/euiwxw. Error=missing_attached_types:pdf. Files=[]
+Lessons:
+- Reuse the same working draft by explicit slug/id instead of creating a new listing.
+Anti-patterns:
+- Do not treat image uploads as proof that the main PDF product file is attached.
+Evidence: {"slug": "euiwxw", "error": "missing_attached_types:pdf", "files_attached": [], "product_id": "u7XXhFl4mzL6RlhwNNZJsA==", "task_root_id": "VT260307001955150TASK"}
+
+## gumroad lesson
+
+Status: draft
+Source: test
+URL: https://gumroad.com/l/test-slug
+Summary: Draft updated
+Details: PDF attached, tags pending
+Lessons:
+- Reuse one working draft.
+Anti-patterns:
+- Do not create duplicate drafts.
+Evidence: {"slug": "test-slug"}
+
+## amazon_kdp lesson
+
+Status: no_browser
+Source: amazon_kdp.publish
+Summary: KDP publish result: no_browser
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "no_browser", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: no_browser
+Source: amazon_kdp.publish
+Summary: KDP publish result: no_browser
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "no_browser", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=3; description_set=False; keyword_slots_filled=2; manuscript_uploaded=False; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_083636_bookshelf.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": true, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": false, "before_count": 4, "after_count": 4, "fields_filled": 3, "description_set": false, "keyword_slots_filled": 2, "manuscript_uploaded": false, "cover_uploaded": false, "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_083636_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_083636_bookshelf.png"}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.publish.helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=3; description_set=False; keyword_slots_filled=2; manuscript_uploaded=False; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_083636_bookshelf.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": true, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": false, "before_count": 4, "after_count": 4, "fields_filled": 3, "description_set": false, "keyword_slots_filled": 2, "manuscript_uploaded": false, "cover_uploaded": false, "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_083636_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_083636_bookshelf.png"}}
+
+## etsy lesson
+
+Status: needs_browser_login
+Source: etsy.publish.browser
+Summary: Etsy browser publish result: needs_browser_login
+Details: error=Etsy browser session required. Run: python3 scripts/etsy_auth_helper.py browser-capture
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: Etsy browser session required. Run: python3 scripts/etsy_auth_helper.py browser-capture
+Evidence: {"status": "needs_browser_login", "listing_id": null, "url": null, "screenshot_path": null, "draft_only": null, "debug": {}}
+
+## etsy lesson
+
+Status: blocked
+Source: etsy.publish.browser
+Summary: Etsy browser publish result: blocked
+Details: error=create_mode_forbids_existing_update
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: create_mode_forbids_existing_update
+Evidence: {"status": "blocked", "listing_id": null, "url": null, "screenshot_path": null, "draft_only": null, "debug": {}}
+
+## amazon_kdp lesson
+
+Status: no_browser
+Source: amazon_kdp.publish
+Summary: KDP publish result: no_browser
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "no_browser", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=3; description_set=False; keyword_slots_filled=2; manuscript_uploaded=False; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_083735_bookshelf.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": true, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": false, "before_count": 4, "after_count": 4, "fields_filled": 3, "description_set": false, "keyword_slots_filled": 2, "manuscript_uploaded": false, "cover_uploaded": false, "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_083735_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_083735_bookshelf.png"}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.publish.helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=3; description_set=False; keyword_slots_filled=2; manuscript_uploaded=False; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_083735_bookshelf.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": true, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": false, "before_count": 4, "after_count": 4, "fields_filled": 3, "description_set": false, "keyword_slots_filled": 2, "manuscript_uploaded": false, "cover_uploaded": false, "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_083735_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_083735_bookshelf.png"}}
+
+## etsy lesson
+
+Status: needs_browser_login
+Source: etsy.publish.browser
+Summary: Etsy browser publish result: needs_browser_login
+Details: error=Etsy browser session required. Run: python3 scripts/etsy_auth_helper.py browser-capture
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: Etsy browser session required. Run: python3 scripts/etsy_auth_helper.py browser-capture
+Evidence: {"status": "needs_browser_login", "listing_id": null, "url": null, "screenshot_path": null, "draft_only": null, "debug": {}}
+
+## etsy lesson
+
+Status: blocked
+Source: etsy.publish.browser
+Summary: Etsy browser publish result: blocked
+Details: error=create_mode_forbids_existing_update
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: create_mode_forbids_existing_update
+Evidence: {"status": "blocked", "listing_id": null, "url": null, "screenshot_path": null, "draft_only": null, "debug": {}}
+
+## amazon_kdp lesson
+
+Status: no_browser
+Source: amazon_kdp.publish
+Summary: KDP publish result: no_browser
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "no_browser", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## etsy lesson
+
+Status: blocked
+Source: etsy.publish.browser
+Summary: Etsy browser publish result: blocked
+Details: error=create_mode_forbids_existing_update
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: create_mode_forbids_existing_update
+Evidence: {"status": "blocked", "listing_id": null, "url": null, "screenshot_path": null, "draft_only": null, "debug": {}}
+
+## amazon_kdp lesson
+
+Status: no_browser
+Source: amazon_kdp.publish
+Summary: KDP publish result: no_browser
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "no_browser", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## etsy lesson
+
+Status: prepared
+Source: etsy.publish.browser
+URL: https://www.etsy.com/your/shops/me/tools/listings
+Summary: Etsy browser publish result: prepared
+Details: draft_only=True; title_inputs=0; price_inputs=0; file_inputs=0; tag_inputs=0; material_inputs=0; spinner_present=True
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+Evidence: {"status": "prepared", "listing_id": null, "url": "https://www.etsy.com/your/shops/me/tools/listings", "screenshot_path": "/home/vito/vito-agent/runtime/etsy_browser_publish.png", "draft_only": true, "debug": {"title_inputs": 0, "price_inputs": 0, "file_inputs": 0, "tag_inputs": 0, "material_inputs": 0, "spinner_present": true, "body_has_create": false, "title_value": "", "price_value": ""}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=3; description_set=False; keyword_slots_filled=7; manuscript_uploaded=False; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_094941_bookshelf.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": true, "title": "VITO Live Test Asset", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": false, "before_count": 4, "after_count": 4, "fields_filled": 3, "description_set": false, "keyword_slots_filled": 7, "manuscript_uploaded": false, "cover_uploaded": false, "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_094941_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_094941_bookshelf.png"}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.publish.helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=3; description_set=False; keyword_slots_filled=7; manuscript_uploaded=False; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_094941_bookshelf.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": true, "title": "VITO Live Test Asset", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": false, "before_count": 4, "after_count": 4, "fields_filled": 3, "description_set": false, "keyword_slots_filled": 7, "manuscript_uploaded": false, "cover_uploaded": false, "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_094941_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_094941_bookshelf.png"}}
+
+## etsy lesson
+
+Status: prepared
+Source: etsy.publish.browser
+URL: https://www.etsy.com/your/shops/me/tools/listings
+Summary: Etsy browser publish result: prepared
+Details: draft_only=True; title_inputs=1; price_inputs=1; file_inputs=1; tag_inputs=1; material_inputs=1; spinner_present=True
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+Evidence: {"status": "prepared", "listing_id": null, "url": "https://www.etsy.com/your/shops/me/tools/listings", "screenshot_path": "/home/vito/vito-agent/runtime/etsy_browser_publish.png", "draft_only": true, "debug": {"title_inputs": 1, "price_inputs": 1, "file_inputs": 1, "tag_inputs": 1, "material_inputs": 1, "spinner_present": true, "body_has_create": false, "title_value": "", "price_value": ""}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=3; description_set=False; keyword_slots_filled=7; manuscript_uploaded=False; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_095337_bookshelf.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "title": "VITO KDP Live Test", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": false, "before_count": 4, "after_count": 4, "fields_filled": 3, "description_set": false, "keyword_slots_filled": 7, "manuscript_uploaded": false, "cover_uploaded": false, "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_095337_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_095337_bookshelf.png"}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.publish.helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=3; description_set=False; keyword_slots_filled=7; manuscript_uploaded=False; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_095337_bookshelf.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "title": "VITO KDP Live Test", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": false, "before_count": 4, "after_count": 4, "fields_filled": 3, "description_set": false, "keyword_slots_filled": 7, "manuscript_uploaded": false, "cover_uploaded": false, "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_095337_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_095337_bookshelf.png"}}
+
+## amazon_kdp lesson
+
+Status: no_browser
+Source: amazon_kdp.publish
+Summary: KDP publish result: no_browser
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "no_browser", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_after.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "saved_click": true, "title_found_on_bookshelf": false, "title_found_via_search": false, "fields_filled": 4, "screenshot": "runtime/kdp_after.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=3; description_set=False; keyword_slots_filled=2; manuscript_uploaded=False; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_095646_after_save.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": false, "before_count": 4, "after_count": 4, "fields_filled": 3, "description_set": false, "keyword_slots_filled": 2, "manuscript_uploaded": false, "cover_uploaded": false, "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_095646_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_095646_bookshelf.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.publish.helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=3; description_set=False; keyword_slots_filled=2; manuscript_uploaded=False; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_095646_after_save.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": false, "before_count": 4, "after_count": 4, "fields_filled": 3, "description_set": false, "keyword_slots_filled": 2, "manuscript_uploaded": false, "cover_uploaded": false, "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_095646_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_095646_bookshelf.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_after.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "saved_click": true, "title_found_on_bookshelf": false, "title_found_via_search": false, "fields_filled": 4, "screenshot": "runtime/kdp_after.png", "draft_visible": false}}
+
+## etsy lesson
+
+Status: prepared
+Source: etsy.publish.browser
+URL: https://www.etsy.com/your/shops/me/tools/listings
+Summary: Etsy browser publish result: prepared
+Details: error=listing_id_not_detected; draft_only=True; title_inputs=1; price_inputs=1; file_inputs=1; tag_inputs=1; material_inputs=1; spinner_present=True
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: listing_id_not_detected
+Evidence: {"status": "prepared", "listing_id": null, "url": "https://www.etsy.com/your/shops/me/tools/listings", "screenshot_path": "/home/vito/vito-agent/runtime/etsy_browser_publish.png", "draft_only": true, "debug": {"title_inputs": 1, "price_inputs": 1, "file_inputs": 1, "tag_inputs": 1, "material_inputs": 1, "spinner_present": true, "body_has_create": false, "title_value": "", "price_value": ""}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=3; description_set=False; keyword_slots_filled=7; manuscript_uploaded=False; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_095816_after_save.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "title": "KDP live recheck", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": false, "before_count": 4, "after_count": 4, "fields_filled": 3, "description_set": false, "keyword_slots_filled": 7, "manuscript_uploaded": false, "cover_uploaded": false, "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_095816_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_095816_bookshelf.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.publish.helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=3; description_set=False; keyword_slots_filled=7; manuscript_uploaded=False; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_095816_after_save.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "title": "KDP live recheck", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": false, "before_count": 4, "after_count": 4, "fields_filled": 3, "description_set": false, "keyword_slots_filled": 7, "manuscript_uploaded": false, "cover_uploaded": false, "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_095816_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_095816_bookshelf.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: no_browser
+Source: amazon_kdp.publish
+Summary: KDP publish result: no_browser
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "no_browser", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## etsy lesson
+
+Status: prepared
+Source: etsy.publish.browser
+URL: https://www.etsy.com/your/shops/me/tools/listings
+Summary: Etsy browser publish result: prepared
+Details: error=listing_id_not_detected; draft_only=True; title_inputs=1; price_inputs=1; file_inputs=1; tag_inputs=1; material_inputs=1; spinner_present=True
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: listing_id_not_detected
+Evidence: {"status": "prepared", "listing_id": null, "url": "https://www.etsy.com/your/shops/me/tools/listings", "screenshot_path": "/home/vito/vito-agent/runtime/etsy_browser_publish.png", "draft_only": true, "debug": {"title_inputs": 1, "price_inputs": 1, "file_inputs": 1, "tag_inputs": 1, "material_inputs": 1, "spinner_present": true, "body_has_create": false, "title_value": "", "price_value": ""}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_after.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "saved_click": true, "title_found_on_bookshelf": false, "title_found_via_search": false, "fields_filled": 4, "screenshot": "runtime/kdp_after.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_after.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "saved_click": true, "title_found_on_bookshelf": false, "title_found_via_search": false, "fields_filled": 4, "screenshot": "runtime/kdp_after.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=False
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "saved_click": false, "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "fields_filled": 4, "bookshelf_screenshot": "runtime/kdp_bookshelf.png"}}
+
+## etsy lesson
+
+Status: prepared
+Source: etsy.publish.browser
+URL: https://www.etsy.com/your/shops/me/tools/listings
+Summary: Etsy browser publish result: prepared
+Details: error=editor_not_ready; draft_only=True; title_inputs=1; price_inputs=1; file_inputs=1; tag_inputs=1; material_inputs=1; spinner_present=True
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: editor_not_ready
+Evidence: {"status": "prepared", "listing_id": null, "url": "https://www.etsy.com/your/shops/me/tools/listings", "screenshot_path": "/home/vito/vito-agent/runtime/etsy_browser_publish.png", "draft_only": true, "debug": {"title_inputs": 1, "price_inputs": 1, "file_inputs": 1, "tag_inputs": 1, "material_inputs": 1, "spinner_present": true, "body_has_create": false, "title_value": "", "price_value": ""}}
+
+## etsy lesson
+
+Status: prepared
+Source: etsy.publish.browser
+URL: https://www.etsy.com/your/shops/me/tools/listings
+Summary: Etsy browser publish result: prepared
+Details: error=editor_not_ready; draft_only=True; title_inputs=1; price_inputs=1; file_inputs=1; tag_inputs=1; material_inputs=1; spinner_present=True
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: editor_not_ready
+Evidence: {"status": "prepared", "listing_id": null, "url": "https://www.etsy.com/your/shops/me/tools/listings", "screenshot_path": "/home/vito/vito-agent/runtime/etsy_browser_publish.png", "draft_only": true, "debug": {"title_inputs": 1, "price_inputs": 1, "file_inputs": 1, "tag_inputs": 1, "material_inputs": 1, "spinner_present": true, "body_has_create": false, "title_value": "", "price_value": ""}}
+
+## etsy lesson
+
+Status: blocked
+Source: etsy.publish.browser
+Summary: Etsy browser publish result: blocked
+Details: error=create_mode_forbids_existing_update
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: create_mode_forbids_existing_update
+Evidence: {"status": "blocked", "listing_id": null, "url": null, "screenshot_path": null, "draft_only": null, "debug": {}}
+
+## etsy lesson
+
+Status: blocked
+Source: etsy.publish.browser
+Summary: Etsy browser publish result: blocked
+Details: error=create_mode_forbids_existing_update
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: create_mode_forbids_existing_update
+Evidence: {"status": "blocked", "listing_id": null, "url": null, "screenshot_path": null, "draft_only": null, "debug": {}}
+
+## etsy lesson
+
+Status: needs_browser_login
+Source: etsy.publish.browser
+Summary: Etsy browser publish result: needs_browser_login
+Details: error=Etsy browser session required. Run: python3 scripts/etsy_auth_helper.py browser-capture
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: Etsy browser session required. Run: python3 scripts/etsy_auth_helper.py browser-capture
+Evidence: {"status": "needs_browser_login", "listing_id": null, "url": null, "screenshot_path": null, "draft_only": null, "debug": {}}
+
+## etsy lesson
+
+Status: blocked
+Source: etsy.publish.browser
+Summary: Etsy browser publish result: blocked
+Details: error=create_mode_forbids_existing_update
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: create_mode_forbids_existing_update
+Evidence: {"status": "blocked", "listing_id": null, "url": null, "screenshot_path": null, "draft_only": null, "debug": {}}
+
+## etsy lesson
+
+Status: draft
+Source: etsy.publish.browser
+URL: https://www.etsy.com/listing/4468011530
+Summary: Etsy browser publish result: draft
+Details: listing_id=4468011530; draft_only=True
+Lessons:
+- Используй один рабочий listing_id и не считай create успешным без listing_id.
+- Etsy browser flow должен отдельно проверять editor URL, listing_id и screenshot evidence.
+Evidence: {"status": "draft", "listing_id": "4468011530", "url": "https://www.etsy.com/listing/4468011530", "screenshot_path": "/home/vito/vito-agent/runtime/etsy_browser_publish.png", "draft_only": true, "debug": {}}
+
+## amazon_kdp lesson
+
+Status: no_browser
+Source: amazon_kdp.publish
+Summary: KDP publish result: no_browser
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "no_browser", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=4; description_set=True; keyword_slots_filled=2; manuscript_uploaded=False; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=False
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_105316_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "title": "Book Toolkit", "saved_click": false, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "before_count": 4, "after_count": 4, "fields_filled": 4, "description_set": true, "keyword_slots_filled": 2, "manuscript_uploaded": false, "cover_uploaded": false, "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_105316_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_105316_bookshelf.png"}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.publish.helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=4; description_set=True; keyword_slots_filled=2; manuscript_uploaded=False; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=False
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_105316_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "title": "Book Toolkit", "saved_click": false, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "before_count": 4, "after_count": 4, "fields_filled": 4, "description_set": true, "keyword_slots_filled": 2, "manuscript_uploaded": false, "cover_uploaded": false, "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_105316_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_105316_bookshelf.png"}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_after.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "saved_click": true, "title_found_on_bookshelf": false, "title_found_via_search": false, "fields_filled": 4, "screenshot": "runtime/kdp_after.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=False
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "saved_click": false, "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "fields_filled": 4, "bookshelf_screenshot": "runtime/kdp_bookshelf.png"}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_after.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "saved_click": true, "title_found_on_bookshelf": false, "title_found_via_search": false, "fields_filled": 4, "screenshot": "runtime/kdp_after.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=False
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "saved_click": false, "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "fields_filled": 4, "bookshelf_screenshot": "runtime/kdp_bookshelf.png"}}
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: 2deaff64f3e4 -> c9da33d7475b.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"60f945135085461eb555ac63c39789d7","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## twitter rules update
+
+Source: https://developer.x.com/en/docs
+Detected rules/content change by hash diff: 9b0624041616 -> 6dcd13436059.
+Excerpt: X Developer Platform - X Skip to main content X home page English Search... ⌘ K Ask AI Support Developer Console Developer Console Search... Navigation Getting Started X Developer Platform Home X API X Ads API XDKs Tutorials Use Cases Success Stories Status Changelog Developer Console Forums GitHub Getting Started Overview Fundamentals Apps Developer Console Authentication Counting Characters Rate Limits X IDs Security Partners &amp; Customers Partner Directory Customer Directory Request Access Resources Tools and Libraries Tutorials Newsletter Livestreams Billing Support Developer Terms Getting Started X Developer Platform Copy page Build with X’s real-time data and APIs Copy page Pay-per-usage pricing: Now Available Pay only for what you use. Plus, earn free xAI API credits when you purc
+
+## etsy lesson
+
+Status: needs_browser_login
+Source: etsy.publish.browser
+Summary: Etsy browser publish result: needs_browser_login
+Details: error=Etsy browser session required. Run: python3 scripts/etsy_auth_helper.py browser-capture
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: Etsy browser session required. Run: python3 scripts/etsy_auth_helper.py browser-capture
+Evidence: {"status": "needs_browser_login", "listing_id": null, "url": null, "screenshot_path": null, "draft_only": null, "debug": {}}
+
+## etsy lesson
+
+Status: blocked
+Source: etsy.publish.browser
+Summary: Etsy browser publish result: blocked
+Details: error=create_mode_forbids_existing_update
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: create_mode_forbids_existing_update
+Evidence: {"status": "blocked", "listing_id": null, "url": null, "screenshot_path": null, "draft_only": null, "debug": {}}
+
+## etsy lesson
+
+Status: blocked
+Source: etsy.publish.browser
+Summary: Etsy browser publish result: blocked
+Details: error=create_mode_forbids_existing_update
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: create_mode_forbids_existing_update
+Evidence: {"status": "blocked", "listing_id": null, "url": null, "screenshot_path": null, "draft_only": null, "debug": {}}
+
+## etsy lesson
+
+Status: needs_browser_login
+Source: etsy.publish.browser
+Summary: Etsy browser publish result: needs_browser_login
+Details: error=Etsy browser session required. Run: python3 scripts/etsy_auth_helper.py browser-capture
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: Etsy browser session required. Run: python3 scripts/etsy_auth_helper.py browser-capture
+Evidence: {"status": "needs_browser_login", "listing_id": null, "url": null, "screenshot_path": null, "draft_only": null, "debug": {}}
+
+## etsy lesson
+
+Status: blocked
+Source: etsy.publish.browser
+Summary: Etsy browser publish result: blocked
+Details: error=create_mode_forbids_existing_update
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: create_mode_forbids_existing_update
+Evidence: {"status": "blocked", "listing_id": null, "url": null, "screenshot_path": null, "draft_only": null, "debug": {}}
+
+## etsy lesson
+
+Status: draft
+Source: etsy.publish.browser
+URL: https://www.etsy.com/listing/4468011530
+Summary: Etsy browser publish result: draft
+Details: listing_id=4468011530; draft_only=True
+Lessons:
+- Используй один рабочий listing_id и не считай create успешным без listing_id.
+- Etsy browser flow должен отдельно проверять editor URL, listing_id и screenshot evidence.
+Evidence: {"status": "draft", "listing_id": "4468011530", "url": "https://www.etsy.com/listing/4468011530", "screenshot_path": "/home/vito/vito-agent/runtime/etsy_browser_publish.png", "draft_only": true, "debug": {}}
+
+## amazon_kdp lesson
+
+Status: no_browser
+Source: amazon_kdp.publish
+Summary: KDP publish result: no_browser
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "no_browser", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=0
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_124618_resume_only_not_found.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "error": "resume_only_existing_draft_not_found", "title": "Book Toolkit", "url": "https://kdp.amazon.com/en_US/bookshelf", "screenshot": "runtime/remote_auth/kdp_draft_20260307_124618_resume_only_not_found.png", "fields_filled": 0, "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.publish.helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=0
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_124618_resume_only_not_found.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "error": "resume_only_existing_draft_not_found", "title": "Book Toolkit", "url": "https://kdp.amazon.com/en_US/bookshelf", "screenshot": "runtime/remote_auth/kdp_draft_20260307_124618_resume_only_not_found.png", "fields_filled": 0, "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_after.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "saved_click": true, "title_found_on_bookshelf": false, "title_found_via_search": false, "fields_filled": 4, "screenshot": "runtime/kdp_after.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=False
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "saved_click": false, "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "fields_filled": 4, "bookshelf_screenshot": "runtime/kdp_bookshelf.png"}}
+
+## amazon_kdp lesson
+
+Status: no_browser
+Source: amazon_kdp.publish
+Summary: KDP publish result: no_browser
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "no_browser", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=0
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_124854_resume_only_not_found.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "error": "resume_only_existing_draft_not_found", "title": "Book Toolkit", "url": "https://kdp.amazon.com/en_US/bookshelf", "screenshot": "runtime/remote_auth/kdp_draft_20260307_124854_resume_only_not_found.png", "fields_filled": 0, "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.publish.helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=0
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_124854_resume_only_not_found.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "error": "resume_only_existing_draft_not_found", "title": "Book Toolkit", "url": "https://kdp.amazon.com/en_US/bookshelf", "screenshot": "runtime/remote_auth/kdp_draft_20260307_124854_resume_only_not_found.png", "fields_filled": 0, "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_after.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "saved_click": true, "title_found_on_bookshelf": false, "title_found_via_search": false, "fields_filled": 4, "screenshot": "runtime/kdp_after.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=False
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "saved_click": false, "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "fields_filled": 4, "bookshelf_screenshot": "runtime/kdp_bookshelf.png"}}
+
+## amazon_kdp lesson
+
+Status: no_browser
+Source: amazon_kdp.publish
+Summary: KDP publish result: no_browser
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "no_browser", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=0
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_124938_resume_only_not_found.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "error": "resume_only_existing_draft_not_found", "title": "Book Toolkit", "url": "https://kdp.amazon.com/en_US/bookshelf", "screenshot": "runtime/remote_auth/kdp_draft_20260307_124938_resume_only_not_found.png", "fields_filled": 0, "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.publish.helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=0
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_124938_resume_only_not_found.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "error": "resume_only_existing_draft_not_found", "title": "Book Toolkit", "url": "https://kdp.amazon.com/en_US/bookshelf", "screenshot": "runtime/remote_auth/kdp_draft_20260307_124938_resume_only_not_found.png", "fields_filled": 0, "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_after.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "saved_click": true, "title_found_on_bookshelf": false, "title_found_via_search": false, "fields_filled": 4, "screenshot": "runtime/kdp_after.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=False
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "saved_click": false, "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "fields_filled": 4, "bookshelf_screenshot": "runtime/kdp_bookshelf.png"}}
+
+## amazon_kdp lesson
+
+Status: no_browser
+Source: amazon_kdp.publish
+Summary: KDP publish result: no_browser
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "no_browser", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=0
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_125137_resume_only_not_found.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "error": "resume_only_existing_draft_not_found", "title": "Book Toolkit", "url": "https://kdp.amazon.com/en_US/bookshelf", "screenshot": "runtime/remote_auth/kdp_draft_20260307_125137_resume_only_not_found.png", "fields_filled": 0, "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.publish.helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=0
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_125137_resume_only_not_found.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "error": "resume_only_existing_draft_not_found", "title": "Book Toolkit", "url": "https://kdp.amazon.com/en_US/bookshelf", "screenshot": "runtime/remote_auth/kdp_draft_20260307_125137_resume_only_not_found.png", "fields_filled": 0, "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_after.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "saved_click": true, "title_found_on_bookshelf": false, "title_found_via_search": false, "fields_filled": 4, "screenshot": "runtime/kdp_after.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=False
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "saved_click": false, "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "fields_filled": 4, "bookshelf_screenshot": "runtime/kdp_bookshelf.png"}}
+
+## amazon_kdp lesson
+
+Status: no_browser
+Source: amazon_kdp.publish
+Summary: KDP publish result: no_browser
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "no_browser", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=0
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_125311_resume_only_not_found.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "error": "resume_only_existing_draft_not_found", "title": "Book Toolkit", "url": "https://kdp.amazon.com/en_US/bookshelf", "screenshot": "runtime/remote_auth/kdp_draft_20260307_125311_resume_only_not_found.png", "fields_filled": 0, "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.publish.helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=0
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_125311_resume_only_not_found.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "error": "resume_only_existing_draft_not_found", "title": "Book Toolkit", "url": "https://kdp.amazon.com/en_US/bookshelf", "screenshot": "runtime/remote_auth/kdp_draft_20260307_125311_resume_only_not_found.png", "fields_filled": 0, "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_after.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "saved_click": true, "title_found_on_bookshelf": false, "title_found_via_search": false, "fields_filled": 4, "screenshot": "runtime/kdp_after.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=False
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "saved_click": false, "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "fields_filled": 4, "bookshelf_screenshot": "runtime/kdp_bookshelf.png"}}
+
+## amazon_kdp lesson
+
+Status: no_browser
+Source: amazon_kdp.publish
+Summary: KDP publish result: no_browser
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "no_browser", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=0
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_130406_resume_only_not_found.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "error": "resume_only_existing_draft_not_found", "title": "Book Toolkit", "url": "https://kdp.amazon.com/en_US/bookshelf", "screenshot": "runtime/remote_auth/kdp_draft_20260307_130406_resume_only_not_found.png", "fields_filled": 0, "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.publish.helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=0
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_130406_resume_only_not_found.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "error": "resume_only_existing_draft_not_found", "title": "Book Toolkit", "url": "https://kdp.amazon.com/en_US/bookshelf", "screenshot": "runtime/remote_auth/kdp_draft_20260307_130406_resume_only_not_found.png", "fields_filled": 0, "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_after.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "saved_click": true, "title_found_on_bookshelf": false, "title_found_via_search": false, "fields_filled": 4, "screenshot": "runtime/kdp_after.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=False
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "saved_click": false, "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "fields_filled": 4, "bookshelf_screenshot": "runtime/kdp_bookshelf.png"}}
+
+## amazon_kdp lesson
+
+Status: no_browser
+Source: amazon_kdp.publish
+Summary: KDP publish result: no_browser
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "no_browser", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=0
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_130533_resume_only_not_found.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "error": "resume_only_existing_draft_not_found", "title": "Book Toolkit", "url": "https://kdp.amazon.com/en_US/bookshelf", "screenshot": "runtime/remote_auth/kdp_draft_20260307_130533_resume_only_not_found.png", "fields_filled": 0, "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.publish.helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=0
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_130533_resume_only_not_found.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "error": "resume_only_existing_draft_not_found", "title": "Book Toolkit", "url": "https://kdp.amazon.com/en_US/bookshelf", "screenshot": "runtime/remote_auth/kdp_draft_20260307_130533_resume_only_not_found.png", "fields_filled": 0, "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_after.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "saved_click": true, "title_found_on_bookshelf": false, "title_found_via_search": false, "fields_filled": 4, "screenshot": "runtime/kdp_after.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=False
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "saved_click": false, "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "fields_filled": 4, "bookshelf_screenshot": "runtime/kdp_bookshelf.png"}}
+
+## amazon_kdp lesson
+
+Status: no_browser
+Source: amazon_kdp.publish
+Summary: KDP publish result: no_browser
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "no_browser", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=0
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_130716_resume_only_not_found.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "error": "resume_only_existing_draft_not_found", "title": "Book Toolkit", "url": "https://kdp.amazon.com/en_US/bookshelf", "screenshot": "runtime/remote_auth/kdp_draft_20260307_130716_resume_only_not_found.png", "fields_filled": 0, "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.publish.helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=0
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_130716_resume_only_not_found.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "error": "resume_only_existing_draft_not_found", "title": "Book Toolkit", "url": "https://kdp.amazon.com/en_US/bookshelf", "screenshot": "runtime/remote_auth/kdp_draft_20260307_130716_resume_only_not_found.png", "fields_filled": 0, "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_after.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "saved_click": true, "title_found_on_bookshelf": false, "title_found_via_search": false, "fields_filled": 4, "screenshot": "runtime/kdp_after.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=False
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "saved_click": false, "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "fields_filled": 4, "bookshelf_screenshot": "runtime/kdp_bookshelf.png"}}
+
+## amazon_kdp lesson
+
+Status: no_browser
+Source: amazon_kdp.publish
+Summary: KDP publish result: no_browser
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "no_browser", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=6; description_set=True; keyword_slots_filled=2; manuscript_uploaded=True; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+- Файлы manuscript/cover должны проверяться отдельно от metadata save.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_130952_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "before_count": 4, "after_count": 4, "fields_filled": 6, "description_set": true, "keyword_slots_filled": 2, "manuscript_uploaded": true, "cover_uploaded": false, "pricing_page_seen": false, "pricing_saved": false, "pricing_us_set": false, "pricing_url": "", "price_us": "2.99", "royalty_rate": "35_PERCENT", "enroll_select": false, "manuscript_path": "runtime/remote_auth/kdp_manuscript_20260307_130952.epub", "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_130952_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_130952_books
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.publish.helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=6; description_set=True; keyword_slots_filled=2; manuscript_uploaded=True; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+- Файлы manuscript/cover должны проверяться отдельно от metadata save.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_130952_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "before_count": 4, "after_count": 4, "fields_filled": 6, "description_set": true, "keyword_slots_filled": 2, "manuscript_uploaded": true, "cover_uploaded": false, "pricing_page_seen": false, "pricing_saved": false, "pricing_us_set": false, "pricing_url": "", "price_us": "2.99", "royalty_rate": "35_PERCENT", "enroll_select": false, "manuscript_path": "runtime/remote_auth/kdp_manuscript_20260307_130952.epub", "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_130952_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_130952_books
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_after.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "saved_click": true, "title_found_on_bookshelf": false, "title_found_via_search": false, "fields_filled": 4, "screenshot": "runtime/kdp_after.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=False
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "saved_click": false, "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "fields_filled": 4, "bookshelf_screenshot": "runtime/kdp_bookshelf.png"}}
+
+## amazon_kdp lesson
+
+Status: no_browser
+Source: amazon_kdp.publish
+Summary: KDP publish result: no_browser
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "no_browser", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=6; description_set=True; keyword_slots_filled=2; manuscript_uploaded=True; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+- Файлы manuscript/cover должны проверяться отдельно от metadata save.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_132107_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "before_count": 4, "after_count": 4, "fields_filled": 6, "description_set": true, "keyword_slots_filled": 2, "manuscript_uploaded": true, "cover_uploaded": false, "pricing_page_seen": false, "pricing_saved": false, "pricing_us_set": false, "pricing_url": "", "price_us": "2.99", "royalty_rate": "35_PERCENT", "enroll_select": false, "manuscript_path": "runtime/remote_auth/kdp_manuscript_20260307_132107.epub", "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_132107_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_132107_books
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.publish.helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=6; description_set=True; keyword_slots_filled=2; manuscript_uploaded=True; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+- Файлы manuscript/cover должны проверяться отдельно от metadata save.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_132107_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "before_count": 4, "after_count": 4, "fields_filled": 6, "description_set": true, "keyword_slots_filled": 2, "manuscript_uploaded": true, "cover_uploaded": false, "pricing_page_seen": false, "pricing_saved": false, "pricing_us_set": false, "pricing_url": "", "price_us": "2.99", "royalty_rate": "35_PERCENT", "enroll_select": false, "manuscript_path": "runtime/remote_auth/kdp_manuscript_20260307_132107.epub", "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_132107_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_132107_books
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_after.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "saved_click": true, "title_found_on_bookshelf": false, "title_found_via_search": false, "fields_filled": 4, "screenshot": "runtime/kdp_after.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=False
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "saved_click": false, "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "fields_filled": 4, "bookshelf_screenshot": "runtime/kdp_bookshelf.png"}}
+
+## amazon_kdp lesson
+
+Status: no_browser
+Source: amazon_kdp.publish
+Summary: KDP publish result: no_browser
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "no_browser", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=6; description_set=True; keyword_slots_filled=2; manuscript_uploaded=True; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+- Файлы manuscript/cover должны проверяться отдельно от metadata save.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_132255_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "before_count": 4, "after_count": 4, "fields_filled": 6, "description_set": true, "keyword_slots_filled": 2, "manuscript_uploaded": true, "cover_uploaded": false, "pricing_page_seen": false, "pricing_saved": false, "pricing_us_set": false, "pricing_url": "", "price_us": "2.99", "royalty_rate": "35_PERCENT", "enroll_select": false, "manuscript_path": "runtime/remote_auth/kdp_manuscript_20260307_132255.epub", "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_132255_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_132255_books
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.publish.helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=6; description_set=True; keyword_slots_filled=2; manuscript_uploaded=True; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+- Файлы manuscript/cover должны проверяться отдельно от metadata save.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_132255_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "before_count": 4, "after_count": 4, "fields_filled": 6, "description_set": true, "keyword_slots_filled": 2, "manuscript_uploaded": true, "cover_uploaded": false, "pricing_page_seen": false, "pricing_saved": false, "pricing_us_set": false, "pricing_url": "", "price_us": "2.99", "royalty_rate": "35_PERCENT", "enroll_select": false, "manuscript_path": "runtime/remote_auth/kdp_manuscript_20260307_132255.epub", "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_132255_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_132255_books
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_after.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "saved_click": true, "title_found_on_bookshelf": false, "title_found_via_search": false, "fields_filled": 4, "screenshot": "runtime/kdp_after.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=False
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "saved_click": false, "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "fields_filled": 4, "bookshelf_screenshot": "runtime/kdp_bookshelf.png"}}
+
+## amazon_kdp lesson
+
+Status: no_browser
+Source: amazon_kdp.publish
+Summary: KDP publish result: no_browser
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "no_browser", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=6; description_set=True; keyword_slots_filled=2; manuscript_uploaded=True; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+- Файлы manuscript/cover должны проверяться отдельно от metadata save.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_133809_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "before_count": 4, "after_count": 4, "fields_filled": 6, "description_set": true, "keyword_slots_filled": 2, "manuscript_uploaded": true, "cover_uploaded": false, "pricing_page_seen": false, "pricing_saved": false, "pricing_us_set": false, "pricing_url": "", "price_us": "2.99", "royalty_rate": "35_PERCENT", "enroll_select": false, "manuscript_path": "runtime/remote_auth/kdp_manuscript_20260307_133809.epub", "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_133809_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_133809_books
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.publish.helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=6; description_set=True; keyword_slots_filled=2; manuscript_uploaded=True; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+- Файлы manuscript/cover должны проверяться отдельно от metadata save.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_133809_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "before_count": 4, "after_count": 4, "fields_filled": 6, "description_set": true, "keyword_slots_filled": 2, "manuscript_uploaded": true, "cover_uploaded": false, "pricing_page_seen": false, "pricing_saved": false, "pricing_us_set": false, "pricing_url": "", "price_us": "2.99", "royalty_rate": "35_PERCENT", "enroll_select": false, "manuscript_path": "runtime/remote_auth/kdp_manuscript_20260307_133809.epub", "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_133809_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_133809_books
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_after.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "saved_click": true, "title_found_on_bookshelf": false, "title_found_via_search": false, "fields_filled": 4, "screenshot": "runtime/kdp_after.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=False
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "saved_click": false, "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "fields_filled": 4, "bookshelf_screenshot": "runtime/kdp_bookshelf.png"}}
+
+## amazon_kdp lesson
+
+Status: no_browser
+Source: amazon_kdp.publish
+Summary: KDP publish result: no_browser
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "no_browser", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=6; description_set=True; keyword_slots_filled=2; manuscript_uploaded=True; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+- Файлы manuscript/cover должны проверяться отдельно от metadata save.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_134152_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "before_count": 4, "after_count": 4, "fields_filled": 6, "description_set": true, "keyword_slots_filled": 2, "manuscript_uploaded": true, "cover_uploaded": false, "pricing_page_seen": false, "pricing_saved": false, "pricing_us_set": false, "pricing_url": "", "price_us": "2.99", "royalty_rate": "35_PERCENT", "enroll_select": false, "manuscript_path": "runtime/remote_auth/kdp_manuscript_20260307_134152.epub", "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_134152_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_134152_books
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.publish.helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=6; description_set=True; keyword_slots_filled=2; manuscript_uploaded=True; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+- Файлы manuscript/cover должны проверяться отдельно от metadata save.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_134152_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "before_count": 4, "after_count": 4, "fields_filled": 6, "description_set": true, "keyword_slots_filled": 2, "manuscript_uploaded": true, "cover_uploaded": false, "pricing_page_seen": false, "pricing_saved": false, "pricing_us_set": false, "pricing_url": "", "price_us": "2.99", "royalty_rate": "35_PERCENT", "enroll_select": false, "manuscript_path": "runtime/remote_auth/kdp_manuscript_20260307_134152.epub", "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_134152_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_134152_books
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_after.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "saved_click": true, "title_found_on_bookshelf": false, "title_found_via_search": false, "fields_filled": 4, "screenshot": "runtime/kdp_after.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=False
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "saved_click": false, "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "fields_filled": 4, "bookshelf_screenshot": "runtime/kdp_bookshelf.png"}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=8; description_set=True; keyword_slots_filled=7; manuscript_uploaded=True; cover_uploaded=True; title_found_on_bookshelf=True; title_found_via_search=True; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+- Файлы manuscript/cover должны проверяться отдельно от metadata save.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_134151_after_save.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "title": "KDP helper probe 4", "saved_click": true, "url": "https://kdp.amazon.com/en_US/title-setup/kindle/A167ALU3N7G6TV/pricing?ref_=kdp_BS_D_p_ed_pricing", "title_found_on_bookshelf": true, "title_found_via_search": true, "draft_visible": true, "before_count": 0, "after_count": 0, "fields_filled": 8, "description_set": true, "keyword_slots_filled": 7, "manuscript_uploaded": true, "cover_uploaded": true, "pricing_page_seen": true, "pricing_saved": true, "pricing_us_set": true, "pricing_url": "https://kdp.amazon.com/en_US/title-setup/kindle/A167ALU3N7G6TV/pricing?ref_=kdp_BS_D_p_ed_pricing", "price_us": "2.99", "royalty_rate": "35_PERCENT", "enroll_select": false, "manuscript_path": "runtime/remote_auth/kdp_manuscript_20260307_134151.epub", "note": "resume_only_direct_document_
+
+## amazon_kdp lesson
+
+Status: no_browser
+Source: amazon_kdp.publish
+Summary: KDP publish result: no_browser
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "no_browser", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=6; description_set=True; keyword_slots_filled=2; manuscript_uploaded=True; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+- Файлы manuscript/cover должны проверяться отдельно от metadata save.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_134337_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "before_count": 4, "after_count": 4, "fields_filled": 6, "description_set": true, "keyword_slots_filled": 2, "manuscript_uploaded": true, "cover_uploaded": false, "pricing_page_seen": false, "pricing_saved": false, "pricing_us_set": false, "pricing_url": "", "price_us": "2.99", "royalty_rate": "35_PERCENT", "enroll_select": false, "manuscript_path": "runtime/remote_auth/kdp_manuscript_20260307_134337.epub", "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_134337_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_134337_books
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.publish.helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=6; description_set=True; keyword_slots_filled=2; manuscript_uploaded=True; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+- Файлы manuscript/cover должны проверяться отдельно от metadata save.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_134337_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "before_count": 4, "after_count": 4, "fields_filled": 6, "description_set": true, "keyword_slots_filled": 2, "manuscript_uploaded": true, "cover_uploaded": false, "pricing_page_seen": false, "pricing_saved": false, "pricing_us_set": false, "pricing_url": "", "price_us": "2.99", "royalty_rate": "35_PERCENT", "enroll_select": false, "manuscript_path": "runtime/remote_auth/kdp_manuscript_20260307_134337.epub", "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_134337_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_134337_books
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_after.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "saved_click": true, "title_found_on_bookshelf": false, "title_found_via_search": false, "fields_filled": 4, "screenshot": "runtime/kdp_after.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=False
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "saved_click": false, "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "fields_filled": 4, "bookshelf_screenshot": "runtime/kdp_bookshelf.png"}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=8; description_set=True; keyword_slots_filled=7; manuscript_uploaded=True; cover_uploaded=True; title_found_on_bookshelf=True; title_found_via_search=True; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+- Файлы manuscript/cover должны проверяться отдельно от metadata save.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_134336_after_save.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "title": "KDP helper probe 4", "saved_click": true, "url": "https://kdp.amazon.com/en_US/title-setup/kindle/A167ALU3N7G6TV/content", "title_found_on_bookshelf": true, "title_found_via_search": true, "draft_visible": true, "before_count": 0, "after_count": 0, "fields_filled": 8, "description_set": true, "keyword_slots_filled": 7, "manuscript_uploaded": true, "cover_uploaded": true, "pricing_page_seen": true, "pricing_saved": true, "pricing_us_set": true, "pricing_url": "https://kdp.amazon.com/en_US/title-setup/kindle/A167ALU3N7G6TV/pricing?ref_=kdp_BS_D_p_ed_pricing", "price_us": "2.99", "royalty_rate": "35_PERCENT", "enroll_select": false, "manuscript_path": "runtime/remote_auth/kdp_manuscript_20260307_134336.epub", "note": "resume_only_direct_document_verification", "screenshot"
+
+## amazon_kdp lesson
+
+Status: no_browser
+Source: amazon_kdp.publish
+Summary: KDP publish result: no_browser
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "no_browser", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=6; description_set=True; keyword_slots_filled=2; manuscript_uploaded=True; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+- Файлы manuscript/cover должны проверяться отдельно от metadata save.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_135657_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "before_count": 4, "after_count": 4, "fields_filled": 6, "description_set": true, "keyword_slots_filled": 2, "manuscript_uploaded": true, "cover_uploaded": false, "pricing_page_seen": false, "pricing_saved": false, "pricing_us_set": false, "pricing_url": "", "price_us": "2.99", "royalty_rate": "35_PERCENT", "enroll_select": false, "manuscript_path": "runtime/remote_auth/kdp_manuscript_20260307_135657.epub", "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_135657_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_135657_books
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.publish.helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=6; description_set=True; keyword_slots_filled=2; manuscript_uploaded=True; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+- Файлы manuscript/cover должны проверяться отдельно от metadata save.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_135657_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "before_count": 4, "after_count": 4, "fields_filled": 6, "description_set": true, "keyword_slots_filled": 2, "manuscript_uploaded": true, "cover_uploaded": false, "pricing_page_seen": false, "pricing_saved": false, "pricing_us_set": false, "pricing_url": "", "price_us": "2.99", "royalty_rate": "35_PERCENT", "enroll_select": false, "manuscript_path": "runtime/remote_auth/kdp_manuscript_20260307_135657.epub", "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_135657_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_135657_books
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_after.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "saved_click": true, "title_found_on_bookshelf": false, "title_found_via_search": false, "fields_filled": 4, "screenshot": "runtime/kdp_after.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=False
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "saved_click": false, "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "fields_filled": 4, "bookshelf_screenshot": "runtime/kdp_bookshelf.png"}}
+
+## amazon_kdp lesson
+
+Status: blocked
+Source: amazon_kdp.publish
+Summary: KDP publish result: blocked
+Details: error=new_draft_requires_explicit_allow_new_draft
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+- Ошибка: new_draft_requires_explicit_allow_new_draft
+Evidence: {"status": "blocked", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: blocked
+Source: amazon_kdp.publish
+Summary: KDP publish result: blocked
+Details: error=new_draft_requires_explicit_allow_new_draft
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+- Ошибка: new_draft_requires_explicit_allow_new_draft
+Evidence: {"status": "blocked", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_after.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "saved_click": true, "title_found_on_bookshelf": false, "title_found_via_search": false, "fields_filled": 4, "screenshot": "runtime/kdp_after.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=False
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "saved_click": false, "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "fields_filled": 4, "bookshelf_screenshot": "runtime/kdp_bookshelf.png"}}
+
+## amazon_kdp lesson
+
+Status: blocked
+Source: amazon_kdp.publish
+Summary: KDP publish result: blocked
+Details: error=new_draft_requires_explicit_allow_new_draft
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+- Ошибка: new_draft_requires_explicit_allow_new_draft
+Evidence: {"status": "blocked", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: blocked
+Source: amazon_kdp.publish
+Summary: KDP publish result: blocked
+Details: error=new_draft_requires_explicit_allow_new_draft
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+- Ошибка: new_draft_requires_explicit_allow_new_draft
+Evidence: {"status": "blocked", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=6; description_set=True; keyword_slots_filled=2; manuscript_uploaded=True; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+- Файлы manuscript/cover должны проверяться отдельно от metadata save.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_135907_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "before_count": 4, "after_count": 4, "fields_filled": 6, "description_set": true, "keyword_slots_filled": 2, "manuscript_uploaded": true, "cover_uploaded": false, "pricing_page_seen": false, "pricing_saved": false, "pricing_us_set": false, "pricing_url": "", "price_us": "2.99", "royalty_rate": "35_PERCENT", "enroll_select": false, "manuscript_path": "runtime/remote_auth/kdp_manuscript_20260307_135907.epub", "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_135907_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_135907_books
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.publish.helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=6; description_set=True; keyword_slots_filled=2; manuscript_uploaded=True; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+- Файлы manuscript/cover должны проверяться отдельно от metadata save.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_135907_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "before_count": 4, "after_count": 4, "fields_filled": 6, "description_set": true, "keyword_slots_filled": 2, "manuscript_uploaded": true, "cover_uploaded": false, "pricing_page_seen": false, "pricing_saved": false, "pricing_us_set": false, "pricing_url": "", "price_us": "2.99", "royalty_rate": "35_PERCENT", "enroll_select": false, "manuscript_path": "runtime/remote_auth/kdp_manuscript_20260307_135907.epub", "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_135907_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_135907_books
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_after.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "saved_click": true, "title_found_on_bookshelf": false, "title_found_via_search": false, "fields_filled": 4, "screenshot": "runtime/kdp_after.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=False
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "saved_click": false, "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "fields_filled": 4, "bookshelf_screenshot": "runtime/kdp_bookshelf.png"}}
+
+## amazon_kdp lesson
+
+Status: blocked
+Source: amazon_kdp.publish
+Summary: KDP publish result: blocked
+Details: error=new_draft_requires_explicit_allow_new_draft
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+- Ошибка: new_draft_requires_explicit_allow_new_draft
+Evidence: {"status": "blocked", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: blocked
+Source: amazon_kdp.publish
+Summary: KDP publish result: blocked
+Details: error=new_draft_requires_explicit_allow_new_draft
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+- Ошибка: new_draft_requires_explicit_allow_new_draft
+Evidence: {"status": "blocked", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: blocked
+Source: amazon_kdp.publish
+Summary: KDP publish result: blocked
+Details: error=new_draft_requires_explicit_allow_new_draft
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+- Ошибка: new_draft_requires_explicit_allow_new_draft
+Evidence: {"status": "blocked", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: blocked
+Source: amazon_kdp.publish
+Summary: KDP publish result: blocked
+Details: error=new_draft_requires_explicit_allow_new_draft
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+- Ошибка: new_draft_requires_explicit_allow_new_draft
+Evidence: {"status": "blocked", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=6; description_set=True; keyword_slots_filled=2; manuscript_uploaded=True; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+- Файлы manuscript/cover должны проверяться отдельно от metadata save.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_143022_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "before_count": 4, "after_count": 4, "fields_filled": 6, "description_set": true, "keyword_slots_filled": 2, "manuscript_uploaded": true, "cover_uploaded": false, "pricing_page_seen": false, "pricing_saved": false, "pricing_us_set": false, "pricing_url": "", "price_us": "2.99", "royalty_rate": "35_PERCENT", "enroll_select": false, "manuscript_path": "runtime/remote_auth/kdp_manuscript_20260307_143022.epub", "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_143022_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_143022_books
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.publish.helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=6; description_set=True; keyword_slots_filled=2; manuscript_uploaded=True; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+- Файлы manuscript/cover должны проверяться отдельно от metadata save.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_143022_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "before_count": 4, "after_count": 4, "fields_filled": 6, "description_set": true, "keyword_slots_filled": 2, "manuscript_uploaded": true, "cover_uploaded": false, "pricing_page_seen": false, "pricing_saved": false, "pricing_us_set": false, "pricing_url": "", "price_us": "2.99", "royalty_rate": "35_PERCENT", "enroll_select": false, "manuscript_path": "runtime/remote_auth/kdp_manuscript_20260307_143022.epub", "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_143022_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_143022_books
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_after.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "saved_click": true, "title_found_on_bookshelf": false, "title_found_via_search": false, "fields_filled": 4, "screenshot": "runtime/kdp_after.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=False
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "saved_click": false, "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "fields_filled": 4, "bookshelf_screenshot": "runtime/kdp_bookshelf.png", "linked_formats": {}}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=1; description_set=False; keyword_slots_filled=0; manuscript_uploaded=False; cover_uploaded=False; title_found_on_bookshelf=True; title_found_via_search=True; saved_click=False
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_143021_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "title": "KDP helper probe 4", "saved_click": false, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": true, "title_found_via_search": true, "draft_visible": true, "before_count": 0, "after_count": 0, "fields_filled": 1, "description_set": false, "keyword_slots_filled": 0, "manuscript_uploaded": false, "cover_uploaded": false, "pricing_page_seen": false, "pricing_saved": false, "pricing_us_set": false, "pricing_url": "https://kdp.amazon.com/en_US/bookshelf", "price_us": "2.99", "royalty_rate": "35_PERCENT", "enroll_select": false, "manuscript_path": "runtime/remote_auth/kdp_manuscript_20260307_143021.epub", "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_143021_after_save.png", "bookshelf_screenshot": "runti
+
+## amazon_kdp lesson
+
+Status: blocked
+Source: amazon_kdp.publish
+Summary: KDP publish result: blocked
+Details: error=new_draft_requires_explicit_allow_new_draft
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+- Ошибка: new_draft_requires_explicit_allow_new_draft
+Evidence: {"status": "blocked", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: blocked
+Source: amazon_kdp.publish
+Summary: KDP publish result: blocked
+Details: error=new_draft_requires_explicit_allow_new_draft
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+- Ошибка: new_draft_requires_explicit_allow_new_draft
+Evidence: {"status": "blocked", "url": null, "screenshot_path": null, "method": null, "output": {}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=6; description_set=True; keyword_slots_filled=2; manuscript_uploaded=True; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+- Файлы manuscript/cover должны проверяться отдельно от metadata save.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_143123_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "before_count": 4, "after_count": 4, "fields_filled": 6, "description_set": true, "keyword_slots_filled": 2, "manuscript_uploaded": true, "cover_uploaded": false, "pricing_page_seen": false, "pricing_saved": false, "pricing_us_set": false, "pricing_url": "", "price_us": "2.99", "royalty_rate": "35_PERCENT", "enroll_select": false, "manuscript_path": "runtime/remote_auth/kdp_manuscript_20260307_143123.epub", "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_143123_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_143123_books
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.publish.helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=6; description_set=True; keyword_slots_filled=2; manuscript_uploaded=True; cover_uploaded=False; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=True
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+- Сохраняй draft через helper и проверяй появление на Bookshelf.
+- Файлы manuscript/cover должны проверяться отдельно от metadata save.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/remote_auth/kdp_draft_20260307_143123_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "title": "Book Toolkit", "saved_click": true, "url": "https://kdp.amazon.com/en_US/bookshelf", "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "before_count": 4, "after_count": 4, "fields_filled": 6, "description_set": true, "keyword_slots_filled": 2, "manuscript_uploaded": true, "cover_uploaded": false, "pricing_page_seen": false, "pricing_saved": false, "pricing_us_set": false, "pricing_url": "", "price_us": "2.99", "royalty_rate": "35_PERCENT", "enroll_select": false, "manuscript_path": "runtime/remote_auth/kdp_manuscript_20260307_143123.epub", "note": "strict_bookshelf_verification", "screenshot": "runtime/remote_auth/kdp_draft_20260307_143123_after_save.png", "bookshelf_screenshot": "runtime/remote_auth/kdp_draft_20260307_143123_books
+
+## amazon_kdp lesson
+
+Status: prepared
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: prepared
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=False; saved_click=True
+Anti-patterns:
+- Не считай KDP успехом без bookshelf evidence или helper proof.
+Evidence: {"status": "prepared", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_after.png", "method": "kdp_helper", "output": {"ok": false, "ok_soft": false, "saved_click": true, "title_found_on_bookshelf": false, "title_found_via_search": false, "fields_filled": 4, "screenshot": "runtime/kdp_after.png", "draft_visible": false}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=False
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "saved_click": false, "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "fields_filled": 4, "bookshelf_screenshot": "runtime/kdp_bookshelf.png", "linked_formats": {}}}
+
+## amazon_kdp lesson
+
+Status: draft
+Source: amazon_kdp.kdp_helper
+URL: https://kdp.amazon.com/bookshelf
+Summary: KDP publish result: draft
+Details: fields_filled=4; title_found_on_bookshelf=False; title_found_via_search=True; saved_click=False
+Lessons:
+- Подтверждай KDP-черновик только через bookshelf proof или helper evidence.
+Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screenshot_path": "runtime/kdp_bookshelf.png", "method": "kdp_helper", "output": {"ok": true, "ok_soft": true, "saved_click": false, "title_found_on_bookshelf": false, "title_found_via_search": true, "draft_visible": true, "fields_filled": 4, "bookshelf_screenshot": "runtime/kdp_bookshelf.png", "linked_formats": {}}}
+
+## etsy lesson
+
+Status: draft
+Source: etsy.publish.browser
+URL: https://www.etsy.com/listing/4468011530
+Summary: Etsy browser publish result: draft
+Details: listing_id=4468011530; draft_only=True
+Lessons:
+- Используй один рабочий listing_id и не считай create успешным без listing_id.
+- Etsy browser flow должен отдельно проверять editor URL, listing_id и screenshot evidence.
+Evidence: {"status": "draft", "listing_id": "4468011530", "url": "https://www.etsy.com/listing/4468011530", "screenshot_path": "/home/vito/vito-agent/runtime/etsy_browser_publish.png", "draft_only": true, "debug": {}}
+
+## etsy lesson
+
+Status: draft
+Source: etsy.publish.browser
+URL: https://www.etsy.com/listing/4468011530
+Summary: Etsy browser publish result: draft
+Details: listing_id=4468011530; draft_only=True
+Lessons:
+- Используй один рабочий listing_id и не считай create успешным без listing_id.
+- Etsy browser flow должен отдельно проверять editor URL, listing_id и screenshot evidence.
+Evidence: {"status": "draft", "listing_id": "4468011530", "url": "https://www.etsy.com/listing/4468011530", "screenshot_path": "/home/vito/vito-agent/runtime/etsy_browser_publish.png", "draft_only": true, "debug": {}}
+
+## etsy lesson
+
+Status: draft
+Source: etsy.publish.browser
+URL: https://www.etsy.com/listing/4468011530
+Summary: Etsy browser publish result: draft
+Details: listing_id=4468011530; draft_only=True
+Lessons:
+- Используй один рабочий listing_id и не считай create успешным без listing_id.
+- Etsy browser flow должен отдельно проверять editor URL, listing_id и screenshot evidence.
+Evidence: {"status": "draft", "listing_id": "4468011530", "url": "https://www.etsy.com/listing/4468011530", "screenshot_path": "/home/vito/vito-agent/runtime/etsy_browser_publish.png", "draft_only": true, "debug": {}}
+
+## etsy lesson
+
+Status: blocked
+Source: etsy.publish.browser
+Summary: Etsy browser publish result: blocked
+Details: error=draft_only_requires_existing_draft
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: draft_only_requires_existing_draft
+Evidence: {"status": "blocked", "listing_id": null, "url": null, "screenshot_path": null, "draft_only": null, "debug": {}}
+
+## etsy lesson
+
+Status: blocked
+Source: etsy.publish.browser
+Summary: Etsy browser publish result: blocked
+Details: error=draft_only_requires_existing_draft
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: draft_only_requires_existing_draft
+Evidence: {"status": "blocked", "listing_id": null, "url": null, "screenshot_path": null, "draft_only": null, "debug": {}}
+
+## etsy lesson
+
+Status: prepared
+Source: etsy.publish.browser
+URL: https://www.etsy.com/your/shops/me/tools/listings
+Summary: Etsy browser publish result: prepared
+Details: error=editor_not_ready; draft_only=False; title_inputs=1; price_inputs=1; file_inputs=1; tag_inputs=1; material_inputs=1; spinner_present=True
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: editor_not_ready
+Evidence: {"status": "prepared", "listing_id": null, "url": "https://www.etsy.com/your/shops/me/tools/listings", "screenshot_path": "/home/vito/vito-agent/runtime/etsy_browser_publish.png", "draft_only": false, "debug": {"title_inputs": 1, "price_inputs": 1, "file_inputs": 1, "tag_inputs": 1, "material_inputs": 1, "spinner_present": true, "body_has_create": false, "title_value": "", "price_value": ""}}
+
+## etsy lesson
+
+Status: draft
+Source: etsy.publish.browser
+URL: https://www.etsy.com/listing/4468093584
+Summary: Etsy browser publish result: draft
+Details: listing_id=4468093584; draft_only=True
+Lessons:
+- Используй один рабочий listing_id и не считай create успешным без listing_id.
+- Etsy browser flow должен отдельно проверять editor URL, listing_id и screenshot evidence.
+Evidence: {"status": "draft", "listing_id": "4468093584", "url": "https://www.etsy.com/listing/4468093584", "screenshot_path": "/home/vito/vito-agent/runtime/etsy_browser_publish.png", "draft_only": true, "debug": {}}
+
+## etsy lesson
+
+Status: draft
+Source: etsy.publish.browser
+URL: https://www.etsy.com/listing/4468093570
+Summary: Etsy browser publish result: draft
+Details: listing_id=4468093570; draft_only=True
+Lessons:
+- Используй один рабочий listing_id и не считай create успешным без listing_id.
+- Etsy browser flow должен отдельно проверять editor URL, listing_id и screenshot evidence.
+Evidence: {"status": "draft", "listing_id": "4468093570", "url": "https://www.etsy.com/listing/4468093570", "screenshot_path": "/home/vito/vito-agent/runtime/etsy_browser_publish.png", "draft_only": true, "debug": {}}
+
+## etsy lesson
+
+Status: draft
+Source: etsy.publish.browser
+URL: https://www.etsy.com/listing/4468093570
+Summary: Etsy browser publish result: draft
+Details: listing_id=4468093570; draft_only=True
+Lessons:
+- Используй один рабочий listing_id и не считай create успешным без listing_id.
+- Etsy browser flow должен отдельно проверять editor URL, listing_id и screenshot evidence.
+Evidence: {"status": "draft", "listing_id": "4468093570", "url": "https://www.etsy.com/listing/4468093570", "screenshot_path": "/home/vito/vito-agent/runtime/etsy_browser_publish.png", "draft_only": true, "debug": {}}
