@@ -820,6 +820,94 @@ class CommsAgent:
         except Exception:
             pass
 
+    @staticmethod
+    def _build_research_pipeline_action(item: dict[str, Any], fallback_topic: str) -> dict[str, Any]:
+        topic = str(item.get("title") or fallback_topic or "Digital Product").strip()[:180]
+        platform = str(item.get("platform") or "gumroad").strip().lower() or "gumroad"
+        return {
+            "action": "run_product_pipeline",
+            "params": {
+                "topic": topic,
+                "platforms": [platform],
+                "auto_publish": False,
+            },
+        }
+
+    def _remember_research_selection(self, idx: int, item: dict[str, Any]) -> None:
+        if not self._owner_task_state or not isinstance(item, dict):
+            return
+        try:
+            platform = str(item.get("platform") or "").strip().lower()
+            self._owner_task_state.enrich_active(
+                selected_research_option=int(idx or 0),
+                selected_research_json=json.dumps(item, ensure_ascii=False),
+                selected_research_title=str(item.get("title") or "")[:180],
+                selected_research_platform=platform,
+            )
+        except Exception:
+            pass
+
+    def _prime_research_pending_actions(
+        self,
+        *,
+        topic: str,
+        ideas: list[dict[str, Any]],
+        recommended: dict[str, Any] | None = None,
+        origin_text: str = "",
+    ) -> None:
+        actions: list[dict[str, Any]] = []
+        normalized_ideas: list[dict[str, Any]] = []
+        recommended_rank = 1
+        rec_title = str((recommended or {}).get("title") or "").strip().lower()
+        rec_platform = str((recommended or {}).get("platform") or "").strip().lower()
+        for pos, raw in enumerate(ideas[:5], start=1):
+            if not isinstance(raw, dict):
+                continue
+            item = dict(raw)
+            rank = int(item.get("rank", pos) or pos)
+            item["rank"] = rank
+            normalized_ideas.append(item)
+            actions.append(self._build_research_pipeline_action(item, topic))
+            if rec_title and str(item.get("title") or "").strip().lower() == rec_title:
+                if not rec_platform or str(item.get("platform") or "").strip().lower() == rec_platform:
+                    recommended_rank = rank
+        if not actions:
+            actions = [
+                {
+                    "action": "run_product_pipeline",
+                    "params": {"topic": topic, "platforms": ["gumroad"], "auto_publish": False},
+                }
+            ]
+            normalized_ideas = [{"rank": 1, "title": topic, "platform": "gumroad"}]
+            recommended_rank = 1
+        self._pending_system_action = {
+            "kind": "research_options",
+            "actions": actions,
+            "ideas": normalized_ideas,
+            "recommended_index": int(recommended_rank or 1),
+            "origin_text": origin_text or topic,
+        }
+
+    def _select_pending_research_option(self, idx: int) -> dict[str, Any] | None:
+        payload = self._pending_system_action or {}
+        if str(payload.get("kind") or "").strip().lower() != "research_options":
+            return None
+        actions = list(payload.get("actions") or [])
+        ideas = list(payload.get("ideas") or [])
+        if idx < 1 or idx > len(actions):
+            return None
+        chosen_action = actions[idx - 1]
+        chosen_item = ideas[idx - 1] if idx - 1 < len(ideas) and isinstance(ideas[idx - 1], dict) else {}
+        self._remember_research_selection(idx, chosen_item)
+        self._pending_system_action = {
+            "kind": "research_options",
+            "actions": [chosen_action],
+            "ideas": [chosen_item] if chosen_item else [],
+            "recommended_index": 1,
+            "origin_text": f"choice:{idx}",
+        }
+        return chosen_item if isinstance(chosen_item, dict) else None
+
     def _has_fresh_service_context(self, max_age_minutes: int = 180) -> bool:
         if not self._last_service_context:
             return False
@@ -2447,14 +2535,23 @@ class CommsAgent:
         strict_cmds = bool(getattr(settings, "TELEGRAM_STRICT_COMMANDS", True)) and not self._autonomy_max_enabled()
         if self._pending_system_action:
             if (not strict_cmds) and text.isdigit():
-                actions = list((self._pending_system_action or {}).get("actions") or [])
                 idx = int(text)
+                picked = self._select_pending_research_option(idx)
+                if picked is not None:
+                    await self.send_message(f"Принял вариант {idx}. Запускаю.", level="result")
+                    await self._execute_pending_system_action()
+                    return
+                actions = list((self._pending_system_action or {}).get("actions") or [])
                 if 1 <= idx <= len(actions):
                     self._pending_system_action = {"actions": [actions[idx - 1]], "origin_text": f"choice:{idx}"}
                     await self.send_message(f"Принял вариант {idx}. Запускаю.", level="result")
                     await self._execute_pending_system_action()
                     return
             if self._is_yes_token(lower):
+                payload = self._pending_system_action or {}
+                if str(payload.get("kind") or "").strip().lower() == "research_options":
+                    rec_idx = int(payload.get("recommended_index") or 1)
+                    self._select_pending_research_option(rec_idx)
                 await self._execute_pending_system_action()
                 return
             if self._is_no_token(lower):
@@ -4304,8 +4401,16 @@ class CommsAgent:
             return
         if self._pending_system_action:
             if (not strict_cmds) and text.isdigit():
-                actions = list((self._pending_system_action or {}).get("actions") or [])
                 idx = int(text)
+                picked = self._select_pending_research_option(idx)
+                if picked is not None:
+                    await update.message.reply_text(
+                        f"Принял вариант {idx}. Запускаю.",
+                        reply_markup=self._main_keyboard(),
+                    )
+                    await self._execute_pending_system_action(update)
+                    return
+                actions = list((self._pending_system_action or {}).get("actions") or [])
                 if 1 <= idx <= len(actions):
                     self._pending_system_action = {"actions": [actions[idx - 1]], "origin_text": f"choice:{idx}"}
                     await update.message.reply_text(
@@ -4315,6 +4420,10 @@ class CommsAgent:
                     await self._execute_pending_system_action(update)
                     return
             if self._is_yes_token(lower):
+                payload = self._pending_system_action or {}
+                if str(payload.get("kind") or "").strip().lower() == "research_options":
+                    rec_idx = int(payload.get("recommended_index") or 1)
+                    self._select_pending_research_option(rec_idx)
                 await self._execute_pending_system_action(update)
                 return
             if self._is_no_token(lower):
@@ -4982,44 +5091,30 @@ class CommsAgent:
                 except Exception:
                     pass
                 if self._conversation_engine:
-                    actions = []
+                    ideas: list[dict[str, Any]] = []
+                    recommended_item: dict[str, Any] | None = None
                     if self._owner_task_state:
                         try:
                             active = self._owner_task_state.get_active() or {}
                             raw = str(active.get("research_options_json") or "").strip()
                             if raw:
-                                ideas = json.loads(raw)
-                                if isinstance(ideas, list):
-                                    for item in ideas[:5]:
-                                        if not isinstance(item, dict):
-                                            continue
-                                        actions.append(
-                                            {
-                                                "action": "run_product_pipeline",
-                                                "params": {
-                                                    "topic": str(item.get("title") or text)[:180],
-                                                    "platforms": [str(item.get("platform") or "gumroad").strip().lower() or "gumroad"],
-                                                    "auto_publish": False,
-                                                },
-                                            }
-                                        )
+                                parsed = json.loads(raw)
+                                if isinstance(parsed, list):
+                                    ideas = [dict(item) for item in parsed[:5] if isinstance(item, dict)]
+                            rec_raw = str(active.get("research_recommended_json") or "").strip()
+                            if rec_raw:
+                                rec_val = json.loads(rec_raw)
+                                if isinstance(rec_val, dict):
+                                    recommended_item = dict(rec_val)
                         except Exception:
-                            actions = []
-                    if not actions:
-                        actions = [
-                            {
-                                "action": "run_product_pipeline",
-                                "params": {
-                                    "topic": text,
-                                    "platforms": ["gumroad"],
-                                    "auto_publish": False,
-                                },
-                            }
-                        ]
-                    self._pending_system_action = {
-                        "actions": actions,
-                        "origin_text": f"deep:{text}",
-                    }
+                            ideas = []
+                            recommended_item = None
+                    self._prime_research_pending_actions(
+                        topic=text,
+                        ideas=ideas,
+                        recommended=recommended_item,
+                        origin_text=f"deep:{text}",
+                    )
                     await update.message.reply_text(
                         "Если ок — напиши «да» для рекомендованного варианта или просто номер варианта для точного запуска.",
                         reply_markup=self._main_keyboard(),

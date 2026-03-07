@@ -294,6 +294,75 @@ async def test_cmd_deep_persists_research_options_and_pending_actions(comms, moc
     assert comms._pending_system_action is not None
     assert len(comms._pending_system_action["actions"]) == 2
     assert comms._pending_system_action["actions"][1]["params"]["platforms"] == ["etsy"]
+    assert comms._pending_system_action["recommended_index"] == 1
+
+
+@pytest.mark.asyncio
+async def test_cmd_deep_yes_executes_recommended_research_option(comms, mock_update, tmp_path):
+    mock_update.message.text = "/deep digital planners"
+    comms._judge_protocol = MagicMock()
+    comms._judge_protocol.evaluate_niche = AsyncMock(return_value={"ok": True})
+    comms._judge_protocol.format_verdict_for_telegram = MagicMock(return_value="Quick verdict")
+    comms._agent_registry = MagicMock()
+    comms._agent_registry.dispatch = AsyncMock(side_effect=[
+        TaskResult(
+            success=True,
+            output="Full deep report",
+            metadata={
+                "report_path": "/tmp/research.md",
+                "top_ideas": [
+                    {"rank": 1, "title": "Prompt Pack", "score": 89, "platform": "gumroad"},
+                    {"rank": 2, "title": "Planner", "score": 91, "platform": "etsy"},
+                ],
+                "recommended_product": {"title": "Planner", "score": 91, "platform": "etsy"},
+            },
+        ),
+        TaskResult(success=True, output={"approved": True, "score": 88}),
+    ])
+    comms._conversation_engine = MagicMock()
+    comms._owner_task_state = OwnerTaskState(path=tmp_path / "owner_task_state.json")
+    comms._owner_task_state.set_active("исследуй нишу", source="telegram", intent="system_action", force=True)
+    comms._execute_pending_system_action = AsyncMock()
+
+    await comms._cmd_deep(mock_update, MagicMock())
+
+    mock_update.message.text = "да"
+    await comms._on_message(mock_update, MagicMock())
+
+    active = comms._owner_task_state.get_active() or {}
+    assert int(active.get("selected_research_option") or 0) == 2
+    assert "Planner" in str(active.get("selected_research_title") or "")
+    comms._execute_pending_system_action.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_on_message_numeric_research_choice_syncs_owner_state(comms, mock_update, tmp_path):
+    comms._owner_task_state = OwnerTaskState(path=tmp_path / "owner_task_state.json")
+    comms._owner_task_state.set_active("исследуй нишу", source="telegram", intent="system_action", force=True)
+    comms._pending_system_action = {
+        "kind": "research_options",
+        "actions": [
+            {"action": "run_product_pipeline", "params": {"topic": "Prompt Pack", "platforms": ["gumroad"], "auto_publish": False}},
+            {"action": "run_product_pipeline", "params": {"topic": "Planner", "platforms": ["etsy"], "auto_publish": False}},
+        ],
+        "ideas": [
+            {"rank": 1, "title": "Prompt Pack", "score": 89, "platform": "gumroad"},
+            {"rank": 2, "title": "Planner", "score": 81, "platform": "etsy"},
+        ],
+        "recommended_index": 1,
+        "origin_text": "deep:test",
+    }
+    comms._execute_pending_system_action = AsyncMock()
+    mock_update.message.text = "2"
+
+    with patch("comms_agent.settings.TELEGRAM_STRICT_COMMANDS", False):
+        await comms._on_message(mock_update, MagicMock())
+
+    active = comms._owner_task_state.get_active() or {}
+    assert int(active.get("selected_research_option") or 0) == 2
+    assert str(active.get("selected_research_platform") or "") == "etsy"
+    assert "Planner" in str(active.get("selected_research_title") or "")
+    comms._execute_pending_system_action.assert_awaited_once()
 
 
 def test_build_recipe_payload_prefers_draft_first_for_etsy(comms, monkeypatch):

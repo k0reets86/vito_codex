@@ -147,6 +147,12 @@ def _builtin(name: str) -> list[Step]:
             Step("OL12", "опубликуй тестовый пост в твиттер с картинкой, ссылкой и тегами", ["twitter"], ["traceback", "exception"]),
             Step("OL13", "опубликуй тестовый пин в пинтерест", ["pinterest"], ["traceback", "exception"]),
         ]
+    if key == "phase_owner_research_chain":
+        return [
+            Step("RC01", "проведи глубокое исследование ниш цифровых товаров", ["глубокое исследование", "топ-варианты", "рекомендую"], ["traceback", "exception"]),
+            Step("RC02", "2", ["вариант 2", "зафиксировал"], ["traceback", "exception"]),
+            Step("RC03", "создавай на etsy", ["собираю", "etsy"], ["traceback", "exception"]),
+        ]
     raise ValueError(f"Unknown scenario: {name}")
 
 

@@ -2357,9 +2357,12 @@ class ConversationEngine:
         if not create_like or not isinstance(selected, dict):
             return None
         platforms = self._extract_platforms(text)
+        explicit_platform_request = bool(platforms)
         default_platform = str(selected.get("platform") or "").strip().lower()
-        if default_platform and default_platform not in platforms:
+        if not explicit_platform_request and default_platform and default_platform not in platforms:
             platforms = [default_platform] + [p for p in platforms if p != default_platform]
+        if not platforms:
+            platforms = [default_platform or "gumroad"]
         topic = str(selected.get("title") or active.get("selected_research_title") or active.get("text") or "Digital Product Starter Kit").strip()
         try:
             self.owner_task_state.enrich_active(

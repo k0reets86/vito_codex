@@ -665,6 +665,25 @@ async def test_process_message_allows_research_choice_then_create(mock_llm_route
 
 
 @pytest.mark.asyncio
+async def test_process_message_recommended_choice_honors_platform_override(mock_llm_router, mock_memory, tmp_path):
+    owner_state = OwnerTaskState(path=tmp_path / "owner_task_state.json")
+    owner_state.set_active("исследуй нишу", source="telegram", intent="system_action", force=True)
+    owner_state.enrich_active(
+        research_options_json=json.dumps([
+            {"rank": 1, "title": "Prompt Pack", "score": 89, "platform": "gumroad"},
+            {"rank": 2, "title": "Printable Planner", "score": 84, "platform": "etsy"},
+        ], ensure_ascii=False),
+        research_recommended_json=json.dumps({"title": "Prompt Pack", "score": 89, "platform": "gumroad"}, ensure_ascii=False),
+    )
+    engine = ConversationEngine(llm_router=mock_llm_router, memory=mock_memory, owner_task_state=owner_state)
+    out = await engine.process_message("делай рекомендованный на etsy")
+    assert out["intent"] == "system_action"
+    params = out["actions"][0]["params"]
+    assert params["topic"] == "Prompt Pack"
+    assert params["platforms"][0] == "etsy"
+
+
+@pytest.mark.asyncio
 async def test_execute_actions_blocks_unknown_action_without_auto_self_improve(mock_llm_router, mock_memory):
     registry = MagicMock()
     registry.dispatch = AsyncMock()
