@@ -2,7 +2,7 @@
 
 Progress formula: `completed / total * 100`
 
-Current progress: `45 / 49 = 91.8%`
+Current progress: `46 / 49 = 93.9%`
 
 ## Phase 1 — Runtime Baseline & Safety Gates
 - [x] T01 Configure Gemini-only mode and disable risky/high-cost modules for initial test wave.
@@ -70,7 +70,7 @@ Current progress: `45 / 49 = 91.8%`
 - [ ] T45 Etsy: TG flow creates/updates test listing with full required attributes + evidence URL/ID.
 - [ ] T46 Ko-fi: TG flow publishes/updates test product/post with full fields and evidence URL.
 - [ ] T47 Amazon KDP: TG flow updates one test draft/book with required metadata/assets and visible bookshelf proof.
-- [ ] T48 Printful + Etsy linked flow: create/update test product via Printful path and verify listing reflection.
+- [x] T48 Printful + Etsy linked flow: create/update test product via Printful path and verify listing reflection.
 - [x] T49 Pinterest (and optional WordPress if configured): publish pin/post with evidence URL + screenshot.
 
 ## Evidence Notes

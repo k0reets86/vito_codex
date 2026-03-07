@@ -251,8 +251,8 @@ class EtsyPlatform(BasePlatform):
                                     title_inputs: q("textarea[name='title'], textarea#listing-title-input, input[name='title'], input[data-test-id='listing-title-input']"),
                                     price_inputs: q("input#listing-price-input, input[name='variations.configuration.price'], input[name='price']"),
                                     file_inputs: q("input[type='file']"),
-                                    tag_inputs: q("input[name='tags'], input[id*='tag'], input[placeholder*='tag' i]"),
-                                    material_inputs: q("input[name='materials'], input[id*='material'], input[placeholder*='material' i]"),
+                                    tag_inputs: q("input#listing-tags-input, input[name='tags'], input[id*='tag'], input[placeholder*='tag' i]"),
+                                    material_inputs: q("input#listing-materials-input, input[name='materials'], input[id*='material'], input[placeholder*='material' i]"),
                                     spinner_present: q("[data-clg-id='WtSpinner'], .wt-spinner") > 0,
                                     body_has_create: (document.body.innerText || '').toLowerCase().includes('создание объявления'),
                                     title_value: val("textarea[name='title'], textarea#listing-title-input, input[name='title'], input[data-test-id='listing-title-input']"),
@@ -376,7 +376,7 @@ class EtsyPlatform(BasePlatform):
                             "Etsy browser flow reusing latest existing draft",
                             extra={"event": "etsy_reuse_existing_draft", "context": {"listing_id": target_listing_id}},
                         )
-                    elif draft_only:
+                    elif draft_only and operation not in {"create", "new"}:
                         result = {
                             "platform": "etsy",
                             "status": "blocked",
@@ -836,7 +836,7 @@ class EtsyPlatform(BasePlatform):
                         pass
                 if tags:
                     tags_norm = [str(t).strip()[:20] for t in tags[:13] if str(t).strip()]
-                    for sel in ("input[name='tags']", "input[id*='tag']", "input[placeholder*='tag' i]"):
+                    for sel in ("input#listing-tags-input", "input[name='tags']", "input[id*='tag']", "input[placeholder*='tag' i]"):
                         try:
                             loc = page.locator(sel)
                             if await loc.count():
@@ -844,7 +844,18 @@ class EtsyPlatform(BasePlatform):
                                 for tg in tags_norm:
                                     try:
                                         await loc.first.fill(tg, timeout=1400)
-                                        await page.keyboard.press("Enter")
+                                        added = False
+                                        for add_sel in ("#listing-tags-button", "button:has-text('Добавить')", "button:has-text('Add')"):
+                                            add_btn = page.locator(add_sel)
+                                            if await add_btn.count():
+                                                try:
+                                                    await add_btn.first.click(timeout=1200)
+                                                    added = True
+                                                    break
+                                                except Exception:
+                                                    continue
+                                        if not added:
+                                            await page.keyboard.press("Enter")
                                         await page.wait_for_timeout(120)
                                     except Exception:
                                         continue
@@ -853,7 +864,7 @@ class EtsyPlatform(BasePlatform):
                             continue
                 if materials:
                     materials_norm = [str(t).strip()[:45] for t in materials[:10] if str(t).strip()]
-                    for sel in ("input[name='materials']", "input[id*='material']", "input[placeholder*='material' i]"):
+                    for sel in ("input#listing-materials-input", "input[name='materials']", "input[id*='material']", "input[placeholder*='material' i]"):
                         try:
                             loc = page.locator(sel)
                             if await loc.count():
@@ -861,7 +872,18 @@ class EtsyPlatform(BasePlatform):
                                 for mt in materials_norm:
                                     try:
                                         await loc.first.fill(mt, timeout=1400)
-                                        await page.keyboard.press("Enter")
+                                        added = False
+                                        for add_sel in ("#listing-materials-button", "button:has-text('Добавить')", "button:has-text('Add')"):
+                                            add_btn = page.locator(add_sel)
+                                            if await add_btn.count():
+                                                try:
+                                                    await add_btn.first.click(timeout=1200)
+                                                    added = True
+                                                    break
+                                                except Exception:
+                                                    continue
+                                        if not added:
+                                            await page.keyboard.press("Enter")
                                         await page.wait_for_timeout(120)
                                     except Exception:
                                         continue
@@ -1635,7 +1657,7 @@ class EtsyPlatform(BasePlatform):
     async def publish(self, content: dict) -> dict:
         """Create a draft listing (requires OAuth2 token for write)."""
         if self._mode in {"browser", "browser_only"}:
-            # Safety default for tests: keep listing as draft unless explicitly confirmed.
+            # Safety default: browser flow must stay in draft mode unless owner explicitly confirms publish.
             if not bool((content or {}).get("publish_confirmed")):
                 content = dict(content or {})
                 content["draft_only"] = True

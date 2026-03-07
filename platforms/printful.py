@@ -10,6 +10,7 @@ import aiohttp
 from config.logger import get_logger
 from config.paths import PROJECT_ROOT
 from config.settings import settings
+from modules.platform_knowledge import record_platform_lesson
 from platforms.base_platform import BasePlatform
 from modules.execution_facts import ExecutionFacts
 
@@ -63,7 +64,16 @@ class PrintfulPlatform(BasePlatform):
                 await page.goto("https://www.printful.com/dashboard/store", wait_until="domcontentloaded", timeout=90000)
                 await page.wait_for_timeout(3500)
                 cur = (page.url or "").lower()
-                if any(x in cur for x in ("/login", "/signin", "captcha", "challenge")):
+                page_body = ""
+                try:
+                    page_body = ((await page.locator("body").inner_text()) or "").lower()
+                except Exception:
+                    page_body = ""
+                if ("/login" in cur or "/signin" in cur) or (
+                    ("sign in" in page_body or "log in" in page_body)
+                    and "cancel membership" not in page_body
+                    and "new order" not in page_body
+                ):
                     return {
                         "platform": "printful",
                         "status": "needs_browser_login",
@@ -72,71 +82,283 @@ class PrintfulPlatform(BasePlatform):
                         "url": page.url,
                     }
 
-                # Try to open product templates page for connected store.
-                templates_href = ""
-                try:
-                    templates_href = await page.evaluate(
-                        """() => {
-                            const links = Array.from(document.querySelectorAll('a[href]'));
-                            const x = links.find(a => (a.getAttribute('href') || '').includes('/dashboard/product-templates/published/'));
-                            return x ? (x.getAttribute('href') || '') : '';
-                        }"""
-                    ) or ""
-                except Exception:
-                    templates_href = ""
-                if templates_href:
-                    if templates_href.startswith("/"):
-                        templates_href = f"https://www.printful.com{templates_href}"
-                    await page.goto(templates_href, wait_until="domcontentloaded", timeout=90000)
-                    await page.wait_for_timeout(2500)
-
-                target_title = str((content or {}).get("sync_product", {}).get("name") or "").strip()
-                created = False
+                target_title = str((content or {}).get("sync_product", {}).get("name") or "VITO Printful Product").strip()
+                target_description = str((content or {}).get("sync_product", {}).get("description") or "").strip()
+                target_tags = [str(x).strip() for x in ((content or {}).get("sync_product", {}) or {}).get("tags", []) if str(x).strip()]
+                product_route = str((content or {}).get("product_url") or "").strip() or (
+                    "https://www.printful.com/dashboard/custom/stationery/notebooks/"
+                    "hardcover-bound-notebook-journalbook"
+                )
+                image_path = (
+                    str((content or {}).get("image_path") or "").strip()
+                    or str((content or {}).get("cover_path") or "").strip()
+                )
                 action_url = ""
+                template_id = ""
+                my_products_url = ""
+                etsy_edit_url = ""
+                created = False
 
-                # Best-effort click on "Create product".
-                for sel in (
-                    'a:has-text("Create product")',
-                    'button:has-text("Create product")',
-                    'a[href*="/dashboard/custom-products"]',
-                ):
-                    try:
-                        loc = page.locator(sel)
-                        if await loc.count():
-                            await loc.first.click(timeout=2500)
-                            await page.wait_for_timeout(2500)
-                            action_url = page.url
-                            if "/dashboard/custom/" in (page.url or "").lower():
-                                created = True
-                                break
-                    except Exception:
-                        continue
+                async def _abs(href: str) -> str:
+                    if href.startswith("/"):
+                        return f"https://www.printful.com{href}"
+                    return href
 
-                # Capture any stable "my products" url as evidence anchor.
-                product_url = ""
-                try:
-                    product_url = await page.evaluate(
-                        """() => {
-                            const links = Array.from(document.querySelectorAll('a[href]'));
-                            const x = links.find(a => (a.getAttribute('href') || '').includes('/dashboard/product-templates/published/'));
-                            return x ? (x.getAttribute('href') || '') : '';
-                        }"""
-                    ) or ""
-                except Exception:
-                    product_url = ""
-                if product_url and product_url.startswith("/"):
-                    product_url = f"https://www.printful.com{product_url}"
-
-                # Optional title typing if name field is visible after create click.
-                if created and target_title:
-                    try:
-                        for sel in ('input[name="name"]', 'input[placeholder*="name" i]', 'input[aria-label*="name" i]'):
+                async def _click_first(selectors: tuple[str, ...], *, timeout: int = 4000) -> bool:
+                    for sel in selectors:
+                        try:
                             loc = page.locator(sel)
                             if await loc.count():
-                                await loc.first.fill(target_title[:120])
-                                break
+                                await loc.first.click(timeout=timeout)
+                                return True
+                        except Exception:
+                            continue
+                    return False
+
+                async def _continue_publish_step() -> bool:
+                    for sel in (
+                        "button:has-text('Continue')",
+                        "button:has-text('Next')",
+                        "[data-testid='publish-modal-button-next']",
+                    ):
+                        try:
+                            loc = page.locator(sel)
+                            if await loc.count():
+                                btn = loc.last
+                                if await btn.is_enabled():
+                                    await btn.click(timeout=3000)
+                                    await page.wait_for_timeout(1500)
+                                    return True
+                        except Exception:
+                            continue
+                    return False
+
+                async def _resolve_my_products_url() -> str:
+                    try:
+                        href = await page.evaluate(
+                            """() => {
+                                const links = Array.from(document.querySelectorAll('a[href]'));
+                                const x = links.find(a => (a.getAttribute('href') || '').includes('/dashboard/product-templates/published/'));
+                                return x ? (x.getAttribute('href') || '') : '';
+                            }"""
+                        ) or ""
+                        return await _abs(href) if href else ""
+                    except Exception:
+                        return ""
+
+                async def _find_synced_product(my_url: str, desired_title: str) -> dict[str, str]:
+                    out = {"my_products_url": my_url or "", "etsy_edit_url": "", "product_title": "", "edit_url": ""}
+                    if not my_url:
+                        return out
+                    try:
+                        await page.goto(my_url, wait_until="domcontentloaded", timeout=90000)
+                        await page.wait_for_timeout(3500)
+                        found = await page.evaluate(
+                            """(titleNeedle) => {
+                                const rows = Array.from(document.querySelectorAll('a[href], tr, div'));
+                                const needle = String(titleNeedle || '').trim().toLowerCase();
+                                const links = Array.from(document.querySelectorAll('a[href]'));
+                                let etsyEdit = '';
+                                let editUrl = '';
+                                let productTitle = '';
+                                for (const a of links) {
+                                    const txt = (a.textContent || '').trim();
+                                    const href = a.href || '';
+                                    if (/etsy\\.com\\/your\\/shops\\/.+\\/tools\\/listings\\//i.test(href)) {
+                                        etsyEdit = href;
+                                        const row = a.closest('tr, li, div');
+                                        if (row) {
+                                            const rowTxt = (row.textContent || '').trim();
+                                            if (needle && rowTxt.toLowerCase().includes(needle)) {
+                                                productTitle = txt || rowTxt.split('\\n')[0] || '';
+                                                const editA = Array.from(row.querySelectorAll('a[href]')).find(x => /\\/dashboard\\/product-templates\\/published\\//i.test(x.href || ''));
+                                                if (editA) editUrl = editA.href || '';
+                                                return { etsy_edit_url: etsyEdit, edit_url: editUrl, product_title: productTitle };
+                                            }
+                                        }
+                                    }
+                                }
+                                for (const row of rows) {
+                                    const rowTxt = (row.textContent || '').trim();
+                                    if (!needle || !rowTxt.toLowerCase().includes(needle)) continue;
+                                    const anchors = Array.from(row.querySelectorAll?.('a[href]') || []);
+                                    const etsy = anchors.find(a => /etsy\\.com\\/your\\/shops\\/.+\\/tools\\/listings\\//i.test(a.href || ''));
+                                    const edit = anchors.find(a => /\\/dashboard\\/product-templates\\/published\\//i.test(a.href || ''));
+                                    return {
+                                        etsy_edit_url: etsy ? (etsy.href || '') : '',
+                                        edit_url: edit ? (edit.href || '') : '',
+                                        product_title: rowTxt.split('\\n')[0] || '',
+                                    };
+                                }
+                                return { etsy_edit_url: etsyEdit, edit_url: editUrl, product_title: productTitle };
+                            }""",
+                            desired_title,
+                        )
+                        if isinstance(found, dict):
+                            out.update({k: str(v or "") for k, v in found.items()})
+                    except Exception:
+                        return out
+                    return out
+
+                existing_linked = await _find_synced_product(await _resolve_my_products_url(), target_title)
+                if existing_linked.get("etsy_edit_url"):
+                    result = {
+                        "platform": "printful",
+                        "status": "published",
+                        "url": existing_linked.get("my_products_url") or "",
+                        "mode": "browser_only",
+                        "screenshot_path": shot,
+                        "html_path": html_dump,
+                        "store_type": self._store_type or "",
+                        "title": target_title[:200],
+                        "template_id": "",
+                        "etsy_edit_url": existing_linked.get("etsy_edit_url") or "",
+                    }
+                    try:
+                        ExecutionFacts().record(
+                            action="platform:publish",
+                            status="published",
+                            detail=f"printful synced existing title={target_title[:80]}",
+                            evidence=existing_linked.get("etsy_edit_url") or existing_linked.get("my_products_url") or "",
+                            source="printful.publish.browser",
+                            evidence_dict=result,
+                        )
+                        record_platform_lesson(
+                            "printful",
+                            status="published",
+                            summary="Existing synced Printful product reused by title.",
+                            details="My Products already contained linked Etsy item; browser adapter reused it instead of creating duplicates.",
+                            url=existing_linked.get("etsy_edit_url") or existing_linked.get("my_products_url") or "",
+                            lessons=[
+                                "Перед созданием нового Printful товара проверяй My Products по title.",
+                                "Если найден linked Etsy item с Edit in Etsy, считай связку подтвержденной и не плодить дубликаты.",
+                            ],
+                            anti_patterns=[
+                                "Не пытайся создавать новый linked product, если synced item уже существует для той же задачи.",
+                            ],
+                            evidence=result,
+                            source="printful.publish.browser",
+                        )
                     except Exception:
                         pass
+                    return result
+
+                # Open exact product route instead of catalog shells.
+                await page.goto(product_route, wait_until="domcontentloaded", timeout=90000)
+                await page.wait_for_timeout(3000)
+                action_url = page.url or product_route
+
+                # Start product designer.
+                await _click_first((
+                    "button:has-text('Start designing')",
+                    "a:has-text('Start designing')",
+                ))
+                await page.wait_for_timeout(4000)
+
+                # Upload artwork.
+                if image_path and os.path.isfile(image_path):
+                    try:
+                        file_inputs = page.locator("input[type='file']")
+                        if await file_inputs.count():
+                            await file_inputs.first.set_input_files(image_path, timeout=7000)
+                            await page.wait_for_timeout(3500)
+                    except Exception:
+                        pass
+
+                # Apply uploaded design to product from file library card.
+                if image_path:
+                    image_name = Path(image_path).name
+                    try:
+                        applied = await page.evaluate(
+                            """(fileName) => {
+                                const cards = Array.from(document.querySelectorAll('button, a, div'));
+                                for (const node of cards) {
+                                    const text = (node.textContent || '').trim();
+                                    if (!text || !text.includes(fileName)) continue;
+                                    let root = node;
+                                    for (let i = 0; i < 4 && root; i++, root = root.parentElement) {
+                                        const btns = root ? Array.from(root.querySelectorAll('button')) : [];
+                                        const applyBtn = btns.find(b => /apply/i.test((b.textContent || '').trim()));
+                                        if (applyBtn) {
+                                            applyBtn.click();
+                                            return true;
+                                        }
+                                    }
+                                }
+                                const fallback = Array.from(document.querySelectorAll('button')).find(
+                                    b => /apply/i.test((b.textContent || '').trim())
+                                );
+                                if (fallback) {
+                                    fallback.click();
+                                    return true;
+                                }
+                                return false;
+                            }""",
+                            image_name,
+                        )
+                        if applied:
+                            await page.wait_for_timeout(2500)
+                    except Exception:
+                        pass
+
+                # Save template and capture template id.
+                await _click_first(("button:has-text('Save template')",), timeout=5000)
+                await page.wait_for_timeout(5000)
+                mt = page.url or ""
+                mm = None
+                try:
+                    import re as _re
+                    mm = _re.search(r"/dashboard/product-templates/(\d+)", mt)
+                except Exception:
+                    mm = None
+                if mm:
+                    template_id = mm.group(1)
+                    created = True
+
+                # Open publish wizard from template page.
+                await _click_first(("button:has-text('Publish')", "a:has-text('Publish')"), timeout=5000)
+                await page.wait_for_timeout(2500)
+                await _continue_publish_step()  # Mockups
+                await _continue_publish_step()  # Pricing
+
+                # Details step.
+                try:
+                    title_input = page.locator("#product-push-title-input")
+                    if await title_input.count():
+                        await title_input.first.fill(target_title[:120])
+                    desc_input = page.locator("#product-push-description-input")
+                    if await desc_input.count():
+                        await desc_input.first.fill(target_description[:999])
+                    if target_tags:
+                        tag_input = page.locator("#product-push-tags-input-field_tag")
+                        if await tag_input.count():
+                            await tag_input.first.fill(", ".join(target_tags[:13]))
+                            await page.wait_for_timeout(500)
+                except Exception:
+                    pass
+
+                # Final publish to connected Etsy store.
+                await _click_first(
+                    (
+                        "button[data-testid='publish-modal-button-next']",
+                        "button:has-text('Publish')",
+                        "a:has-text('Publish')",
+                    ),
+                    timeout=5000,
+                )
+                await page.wait_for_timeout(8000)
+
+                # Post-publish verification on My Products page.
+                my_products_url = await _resolve_my_products_url()
+                linked = await _find_synced_product(my_products_url, target_title)
+                etsy_edit_url = linked.get("etsy_edit_url") or ""
+
+                if etsy_edit_url:
+                    result_status = "published"
+                    result_url = my_products_url or page.url
+                else:
+                    result_status = "created" if created else "prepared"
+                    result_url = my_products_url or action_url or page.url
 
                 try:
                     Path(html_dump).write_text(await page.content(), encoding="utf-8")
@@ -147,8 +369,6 @@ class PrintfulPlatform(BasePlatform):
                 except Exception:
                     pass
 
-                current_url = page.url or ""
-                current_url_lower = current_url.lower()
                 page_title = ""
                 try:
                     page_title = (await page.title()) or ""
@@ -159,27 +379,6 @@ class PrintfulPlatform(BasePlatform):
                     page_body = (await page.locator("body").inner_text())[:4000]
                 except Exception:
                     page_body = ""
-                has_editor_signal = any(
-                    token in current_url_lower
-                    for token in (
-                        "/dashboard/custom/",
-                        "/dashboard/store/products/",
-                        "/dashboard/product-templates/edit/",
-                    )
-                )
-                has_creation_signal = any(
-                    token in page_body.lower()
-                    for token in (
-                        "product template",
-                        "add product details",
-                        "mockup generator",
-                        "product details",
-                    )
-                )
-                if not has_editor_signal and not has_creation_signal and "product catalog" in page_title.lower():
-                    created = False
-                result_status = "created" if created and (has_editor_signal or has_creation_signal) else "prepared"
-                result_url = product_url or action_url or page.url
                 result = {
                     "platform": "printful",
                     "status": result_status,
@@ -189,6 +388,8 @@ class PrintfulPlatform(BasePlatform):
                     "html_path": html_dump,
                     "store_type": self._store_type or "",
                     "title": page_title[:200],
+                    "template_id": template_id,
+                    "etsy_edit_url": etsy_edit_url,
                 }
                 try:
                     ExecutionFacts().record(
@@ -198,6 +399,27 @@ class PrintfulPlatform(BasePlatform):
                         evidence=result_url,
                         source="printful.publish.browser",
                         evidence_dict={"platform": "printful", "status": result_status, "url": result_url},
+                    )
+                except Exception:
+                    pass
+                try:
+                    record_platform_lesson(
+                        "printful",
+                        status=result_status,
+                        summary=f"Browser publish finished with status={result_status}.",
+                        details=f"title={target_title[:120]} template_id={template_id or 'n/a'}",
+                        url=etsy_edit_url or result_url,
+                        lessons=[
+                            "Подтверждай linked Etsy success через My Products -> Edit in Etsy.",
+                            "Для Printful->Etsy browser flow реальным успехом считается synced product с Etsy edit URL.",
+                        ] if result_status == "published" else [
+                            "Если linked Etsy URL не найден, это еще не закрытый publish flow.",
+                        ],
+                        anti_patterns=[
+                            "Не считай publish успешным только по открытому wizard без synced product evidence.",
+                        ] if result_status != "published" else [],
+                        evidence=result,
+                        source="printful.publish.browser",
                     )
                 except Exception:
                     pass
