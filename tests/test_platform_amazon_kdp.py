@@ -59,22 +59,29 @@ class TestKDPPublish:
     @pytest.mark.asyncio
     async def test_publish_no_browser(self, kdp_no_browser):
         result = await kdp_no_browser.publish({"title": "Book"})
-        assert result["status"] == "no_browser"
+        assert result["status"] == "blocked"
+        assert result["error"] == "new_draft_requires_explicit_allow_new_draft"
 
     @pytest.mark.asyncio
     async def test_publish_with_browser(self, kdp):
         result = await kdp.publish({"title": "Book"})
-        assert result["status"] in {"draft", "published", "prepared"}
+        assert result["status"] == "blocked"
+        assert result["error"] == "new_draft_requires_explicit_allow_new_draft"
 
     @pytest.mark.asyncio
     async def test_publish_no_browser_records_platform_lesson(self, kdp_no_browser, monkeypatch):
         calls = []
         monkeypatch.setattr("platforms.amazon_kdp.record_platform_lesson", lambda service, **kwargs: calls.append((service, kwargs)))
         result = await kdp_no_browser.publish({"title": "Book"})
-        assert result["status"] == "no_browser"
+        assert result["status"] == "blocked"
         assert calls
         assert calls[-1][0] == "amazon_kdp"
-        assert calls[-1][1]["status"] == "no_browser"
+        assert calls[-1][1]["status"] == "blocked"
+
+    @pytest.mark.asyncio
+    async def test_publish_with_explicit_new_draft_flag_uses_runtime(self, kdp):
+        result = await kdp.publish({"title": "Book", "allow_new_draft": True})
+        assert result["status"] in {"draft", "published", "prepared"}
 
     @pytest.mark.asyncio
     async def test_kdp_helper_requires_visible_draft_for_draft_status(self, kdp, monkeypatch):
