@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 from dataclasses import dataclass
@@ -35,6 +36,7 @@ class PublisherQueue:
         self.platforms = platforms or {}
         self.sqlite_path = sqlite_path or settings.SQLITE_PATH
         self.facts = ExecutionFacts(sqlite_path=self.sqlite_path)
+        self.publish_timeout_seconds = int(getattr(settings, "PUBLISH_JOB_TIMEOUT_SECONDS", 240) or 240)
         self._init_db()
 
     def _conn(self):
@@ -209,7 +211,7 @@ class PublisherQueue:
             return {"job_id": job_id, "platform": platform, "status": final, "error": err}
 
         try:
-            result = await pl.publish(payload)
+            result = await asyncio.wait_for(pl.publish(payload), timeout=self.publish_timeout_seconds)
             normalized = normalize_platform_result(result or {}, platform=platform, action="publish")
             contract = validate_platform_result_contract(normalized, require_evidence_for_success=True)
             if not contract.ok:
@@ -244,6 +246,8 @@ class PublisherQueue:
                 err = "missing_evidence"
             else:
                 err = str(normalized.get("error", f"publish_status:{st}"))
+        except asyncio.TimeoutError:
+            err = f"publish_timeout:{self.publish_timeout_seconds}s"
         except Exception as e:
             err = str(e)
 

@@ -18,9 +18,11 @@ import aiohttp
 from config.logger import get_logger
 from config.paths import PROJECT_ROOT
 from config.settings import settings
+from modules.display_bootstrap import ensure_display
 from modules.execution_facts import ExecutionFacts
 from modules.listing_optimizer import optimize_listing_payload
 from modules.platform_knowledge import record_platform_lesson
+from modules.xvfb_session import XvfbSession
 from platforms.base_platform import BasePlatform
 
 logger = get_logger("etsy", agent="etsy")
@@ -204,24 +206,74 @@ class EtsyPlatform(BasePlatform):
         browser = None
         context = None
         page = None
+        xvfb = None
         try:
             async with async_playwright() as p:
-                browser = await p.chromium.launch(
-                    headless=os.getenv("VITO_BROWSER_HEADLESS", "1").lower() not in {"0", "false", "no"},
-                    args=[
-                        "--no-sandbox",
-                        "--disable-dev-shm-usage",
-                        "--disable-gpu",
-                        "--disable-software-rasterizer",
-                        "--disable-blink-features=AutomationControlled",
-                    ],
-                )
+                force_headless = os.getenv("VITO_FORCE_HEADLESS", "0").lower() in {"1", "true", "yes", "on"}
+                launch_args = [
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--disable-software-rasterizer",
+                    "--disable-blink-features=AutomationControlled",
+                ]
+                if not force_headless:
+                    xvfb = XvfbSession(enabled=True)
+                    xvfb.start()
+                    if not str(os.getenv("DISPLAY", "")).strip():
+                        ensure_display()
+                try:
+                    browser = await p.chromium.launch(
+                        headless=force_headless or os.getenv("VITO_BROWSER_HEADLESS", "1").lower() not in {"0", "false", "no"},
+                        args=launch_args,
+                    )
+                except Exception:
+                    browser = await p.chromium.launch(headless=True, args=launch_args)
                 context = await browser.new_context(
                     storage_state=str(self._storage_state_path),
                     viewport={"width": 1366, "height": 900},
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
                 )
                 page = await context.new_page()
+                async def _editor_debug() -> dict[str, Any]:
+                    try:
+                        return await page.evaluate(
+                            """() => {
+                                const q = (sel) => document.querySelectorAll(sel).length;
+                                const val = (sel) => {
+                                    const el = document.querySelector(sel);
+                                    return el ? String(el.value || el.textContent || '').slice(0, 180) : '';
+                                };
+                                return {
+                                    title_inputs: q("textarea[name='title'], textarea#listing-title-input, input[name='title'], input[data-test-id='listing-title-input']"),
+                                    price_inputs: q("input#listing-price-input, input[name='variations.configuration.price'], input[name='price']"),
+                                    file_inputs: q("input[type='file']"),
+                                    tag_inputs: q("input[name='tags'], input[id*='tag'], input[placeholder*='tag' i]"),
+                                    material_inputs: q("input[name='materials'], input[id*='material'], input[placeholder*='material' i]"),
+                                    spinner_present: q("[data-clg-id='WtSpinner'], .wt-spinner") > 0,
+                                    body_has_create: (document.body.innerText || '').toLowerCase().includes('создание объявления'),
+                                    title_value: val("textarea[name='title'], textarea#listing-title-input, input[name='title'], input[data-test-id='listing-title-input']"),
+                                    price_value: val("input#listing-price-input, input[name='variations.configuration.price'], input[name='price']"),
+                                };
+                            }"""
+                        )
+                    except Exception:
+                        return {}
+
+                async def _wait_editor_ready(timeout_ms: int = 20000) -> dict[str, Any]:
+                    try:
+                        await page.wait_for_function(
+                            """() => {
+                                const spinner = document.querySelector("[data-clg-id='WtSpinner'], .wt-spinner");
+                                const title = document.querySelector("textarea[name='title'], textarea#listing-title-input, input[name='title'], input[data-test-id='listing-title-input']");
+                                const price = document.querySelector("input#listing-price-input, input[name='variations.configuration.price'], input[name='price']");
+                                return (!spinner && (!!title || !!price)) || (!!title && !!price);
+                            }""",
+                            timeout=timeout_ms,
+                        )
+                    except Exception:
+                        pass
+                    return await _editor_debug()
                 response_urls: list[str] = []
                 try:
                     page.on("response", lambda resp: response_urls.append(str(getattr(resp, "url", "") or "")))
@@ -264,19 +316,7 @@ class EtsyPlatform(BasePlatform):
                             await page.wait_for_timeout(350)
                     except Exception:
                         continue
-                # Wait until editor inputs replace initial spinner shell.
-                try:
-                    await page.wait_for_function(
-                        """() => {
-                            const spinner = document.querySelector("[data-clg-id='WtSpinner'], .wt-spinner");
-                            const title = document.querySelector("textarea[name='title'], textarea#listing-title-input, input[name='title'], input[data-test-id='listing-title-input']");
-                            const price = document.querySelector("input#listing-price-input, input[name='variations.configuration.price'], input[name='price']");
-                            return (!spinner) || !!title || !!price;
-                        }""",
-                        timeout=20000,
-                    )
-                except Exception:
-                    pass
+                editor_probe = await _wait_editor_ready(timeout_ms=20000)
                 await page.wait_for_timeout(1500)
                 current = page.url.lower()
                 if (not allow_existing_update) and "/tools/listings" in current and "/listing-editor/" not in current and "/create" not in current:
@@ -323,6 +363,25 @@ class EtsyPlatform(BasePlatform):
                                     break
                         except Exception:
                             continue
+                editor_probe = await _wait_editor_ready(timeout_ms=12000)
+                if bool(editor_probe.get("spinner_present")) and int(editor_probe.get("title_inputs") or 0) == 0:
+                    try:
+                        await page.reload(wait_until="domcontentloaded", timeout=90000)
+                        try:
+                            await page.wait_for_load_state("networkidle", timeout=10000)
+                        except Exception:
+                            pass
+                        await page.wait_for_timeout(2200)
+                        editor_probe = await _wait_editor_ready(timeout_ms=12000)
+                    except Exception:
+                        pass
+                if bool(editor_probe.get("spinner_present")) and int(editor_probe.get("title_inputs") or 0) == 0:
+                    try:
+                        await page.goto(target_url, wait_until="domcontentloaded", timeout=90000)
+                        await page.wait_for_timeout(2500)
+                        editor_probe = await _wait_editor_ready(timeout_ms=12000)
+                    except Exception:
+                        pass
                 if "/signin" in current or "/oauth" in current:
                     result = {
                         "platform": "etsy",
@@ -1122,6 +1181,8 @@ class EtsyPlatform(BasePlatform):
                     }
                     self._record_browser_lesson(result, source="etsy.publish.browser")
                     return result
+                editor_debug = editor_probe or await _editor_debug()
+                editor_not_ready = bool(editor_debug.get("spinner_present"))
                 result = {
                     "platform": "etsy",
                     "status": "prepared",
@@ -1132,26 +1193,8 @@ class EtsyPlatform(BasePlatform):
                     "note": "Draft editor opened and fields filled; listing_id not detected yet.",
                     "publish_clicked": bool(publish_clicked),
                     "draft_only": bool(draft_only),
-                    "debug": await page.evaluate(
-                        """() => {
-                            const q = (sel) => document.querySelectorAll(sel).length;
-                            const val = (sel) => {
-                                const el = document.querySelector(sel);
-                                return el ? String(el.value || el.textContent || '').slice(0, 180) : '';
-                            };
-                            return {
-                                title_inputs: q("textarea[name='title'], textarea#listing-title-input, input[name='title'], input[data-test-id='listing-title-input']"),
-                                price_inputs: q("input#listing-price-input, input[name='variations.configuration.price'], input[name='price']"),
-                                file_inputs: q("input[type='file']"),
-                                tag_inputs: q("input[name='tags'], input[id*='tag'], input[placeholder*='tag' i]"),
-                                material_inputs: q("input[name='materials'], input[id*='material'], input[placeholder*='material' i]"),
-                                spinner_present: q("[data-clg-id='WtSpinner'], .wt-spinner") > 0,
-                                body_has_create: (document.body.innerText || '').toLowerCase().includes('создание объявления'),
-                                title_value: val("textarea[name='title'], textarea#listing-title-input, input[name='title'], input[data-test-id='listing-title-input']"),
-                                price_value: val("input#listing-price-input, input[name='variations.configuration.price'], input[name='price']"),
-                            };
-                        }"""
-                    ),
+                    "error": "editor_not_ready" if editor_not_ready else "listing_id_not_detected",
+                    "debug": editor_debug,
                 }
                 self._record_browser_lesson(result, source="etsy.publish.browser")
                 return result
@@ -1173,6 +1216,11 @@ class EtsyPlatform(BasePlatform):
             try:
                 if browser is not None:
                     await browser.close()
+            except Exception:
+                pass
+            try:
+                if xvfb is not None:
+                    xvfb.stop()
             except Exception:
                 pass
 

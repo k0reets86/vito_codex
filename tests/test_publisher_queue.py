@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from modules.publisher_queue import PublisherQueue
@@ -21,6 +23,12 @@ class _FailPlatform:
 class _NoEvidencePlatform:
     async def publish(self, payload: dict) -> dict:
         return {"platform": "x", "status": "published"}
+
+
+class _SlowPlatform:
+    async def publish(self, payload: dict) -> dict:
+        await asyncio.sleep(0.05)
+        return {"platform": "x", "status": "prepared", "url": "https://example.com/late"}
 
 
 @pytest.mark.asyncio
@@ -56,3 +64,14 @@ async def test_publisher_queue_missing_evidence_fails(tmp_path):
     pq.enqueue("twitter", {"text": "hello"}, max_attempts=1)
     r = await pq.process_once()
     assert r and r["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_publisher_queue_times_out_stuck_publish(tmp_path):
+    db = str(tmp_path / "pq4.db")
+    pq = PublisherQueue(platforms={"twitter": _SlowPlatform()}, sqlite_path=db)
+    pq.publish_timeout_seconds = 0.01
+    pq.enqueue("twitter", {"text": "hello"}, max_attempts=1)
+    r = await pq.process_once()
+    assert r and r["status"] == "failed"
+    assert "publish_timeout" in r["error"]

@@ -67,6 +67,51 @@ async def _set_input_file(page, selectors: list[str], file_path: str, timeout_ms
     return False
 
 
+async def _open_kdp_details_flow(page) -> bool:
+    for _ in range(4):
+        try:
+            if await page.locator("input[name='bookTitle'], input#bookTitle, input[aria-label*='Book title']").count() > 0:
+                return True
+        except Exception:
+            pass
+        body = ""
+        try:
+            body = ((await page.text_content("body")) or "").lower()
+        except Exception:
+            body = ""
+        clicked = await _click_first(
+            page,
+            [
+                "button:has-text('Create eBook')",
+                "a:has-text('Create eBook')",
+                "button:has-text('Create Kindle eBook')",
+                "a:has-text('Create Kindle eBook')",
+                "button:has-text('Kindle eBook')",
+                "a:has-text('Kindle eBook')",
+                "text=Create eBook",
+                "text=Create Kindle eBook",
+                "button:has-text('Paperback')",
+                "a:has-text('Paperback')",
+            ],
+            timeout_ms=3000,
+        )
+        if clicked:
+            await page.wait_for_timeout(2200)
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=10000)
+            except Exception:
+                pass
+            continue
+        if "what would you like to create?" not in body and "/create" not in (page.url or "").lower():
+            await page.wait_for_timeout(1200)
+        else:
+            break
+    try:
+        return await page.locator("input[name='bookTitle'], input#bookTitle, input[aria-label*='Book title']").count() > 0
+    except Exception:
+        return False
+
+
 async def _bookshelf_titles(page) -> list[str]:
     try:
         items = await page.evaluate(
@@ -197,24 +242,24 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
 
             await page.wait_for_timeout(1200)
 
-            # Step 2: choose ebook/paperback flow
-            chosen = await _click_first(
-                page,
-                [
-                    "a:has-text('Create Kindle eBook')",
-                    "button:has-text('Create Kindle eBook')",
-                    "a:has-text('Kindle eBook')",
-                    "button:has-text('Kindle eBook')",
-                    "a:has-text('Paperback')",
-                    "button:has-text('Paperback')",
-                ],
-            )
-            if not chosen:
-                # sometimes direct flow opens immediately
-                pass
-
+            # Step 2: choose ebook/paperback flow and ensure details form is actually opened.
+            chosen = await _open_kdp_details_flow(page)
             await page.wait_for_timeout(2200)
             await _kdp_relogin_if_needed(page)
+            if not chosen:
+                await page.screenshot(path=str(dbg / f"kdp_draft_{stamp}_create_flow_not_opened.png"), full_page=True)
+                print(
+                    json.dumps(
+                        {
+                            "ok": False,
+                            "error": "create_flow_not_opened",
+                            "url": page.url,
+                            "screenshot": str(dbg / f"kdp_draft_{stamp}_create_flow_not_opened.png"),
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+                return 3
 
             # Step 3: fill metadata on details page (best effort).
             await _fill_first(
@@ -412,7 +457,9 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
             fields_filled += 1 if bool(manuscript_uploaded) else 0
             fields_filled += 1 if bool(cover_uploaded) else 0
             ok = bool(saved and (has_title or appeared_new or search_hit))
-            ok_soft = bool(saved and page.url and "bookshelf" in page.url)
+            # "saved and landed on bookshelf" is not enough; the draft must be visible
+            # either by exact title, search hit, or a genuinely new bookshelf row.
+            ok_soft = bool(saved and (has_title or appeared_new or search_hit))
             result = {
                 "ok": bool(ok),
                 "ok_soft": bool(ok_soft),

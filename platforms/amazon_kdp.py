@@ -212,9 +212,10 @@ class AmazonKDPPlatform(BasePlatform):
                 except Exception:
                     payload = {}
             helper_ok = bool(payload.get("ok"))
-            helper_soft_ok = bool(payload.get("ok_soft")) or bool(payload.get("saved_click"))
+            helper_soft_ok = bool(payload.get("ok_soft"))
             fields_filled = int(payload.get("fields_filled") or 0)
-            if fields_filled <= 0 and helper_soft_ok:
+            title_visible = bool(payload.get("title_found_on_bookshelf")) or bool(payload.get("title_found_via_search"))
+            if fields_filled <= 0 and helper_soft_ok and title_visible:
                 fields_filled = 1
             if helper_ok:
                 result = {
@@ -229,7 +230,7 @@ class AmazonKDPPlatform(BasePlatform):
                 self._record_publish_lesson(result, source="amazon_kdp.kdp_helper")
                 self._record_execution_fact(result)
                 return result
-            if helper_soft_ok:
+            if helper_soft_ok and title_visible:
                 result = {
                     "platform": "amazon_kdp",
                     "status": "draft",
@@ -248,7 +249,7 @@ class AmazonKDPPlatform(BasePlatform):
                 "url": "https://kdp.amazon.com/bookshelf",
                 "id": "",
                 "screenshot_path": str(payload.get("screenshot") or ""),
-                "output": (payload | {"fields_filled": fields_filled}) if payload else {"stdout": stdout[-1200:], "stderr": stderr[-1200:], "cmd": " ".join(shlex.quote(x) for x in cmd), "fields_filled": 0},
+                "output": (payload | {"fields_filled": fields_filled, "draft_visible": bool(title_visible)}) if payload else {"stdout": stdout[-1200:], "stderr": stderr[-1200:], "cmd": " ".join(shlex.quote(x) for x in cmd), "fields_filled": 0, "draft_visible": False},
                 "method": "kdp_helper",
             }
             self._record_publish_lesson(result, source="amazon_kdp.kdp_helper")
