@@ -82,7 +82,7 @@ class PrintfulPlatform(BasePlatform):
                         "url": page.url,
                     }
 
-                target_title = str((content or {}).get("sync_product", {}).get("name") or "VITO Printful Product").strip()
+                target_title = str((content or {}).get("sync_product", {}).get("name") or "Working Printful Product").strip()
                 target_description = str((content or {}).get("sync_product", {}).get("description") or "").strip()
                 target_tags = [str(x).strip() for x in ((content or {}).get("sync_product", {}) or {}).get("tags", []) if str(x).strip()]
                 product_route = str((content or {}).get("product_url") or "").strip() or (
@@ -553,7 +553,7 @@ class PrintfulPlatform(BasePlatform):
             return {"platform": "printful", "status": "error", "error": "no_store_connected"}
         sync_product = dict((content or {}).get("sync_product") or {})
         if not sync_product.get("name"):
-            sync_product["name"] = "VITO Sync Product"
+            sync_product["name"] = "Working Sync Product"
         payload = {
             "sync_product": sync_product,
             "sync_variants": list((content or {}).get("sync_variants") or []),
@@ -646,7 +646,7 @@ class PrintfulPlatform(BasePlatform):
             if str(via_sync.get("status") or "") == "created":
                 return via_sync
             browser_out = await self._publish_via_browser(content or {})
-            if str(browser_out.get("status") or "") in {"created", "prepared"}:
+            if str(browser_out.get("status") or "") in {"published", "created", "prepared"}:
                 browser_out["sync_probe"] = probe
                 browser_out["sync_attempt"] = via_sync
                 return browser_out
