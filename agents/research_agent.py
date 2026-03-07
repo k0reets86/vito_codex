@@ -358,6 +358,7 @@ class ResearchAgent(BaseAgent):
             sources=list(real_data.keys()),
         )
         structured = self._extract_structured_research(response, topic, list(real_data.keys()))
+        research_route_plan = self.llm_router.get_research_route_plan() if hasattr(self.llm_router, "get_research_route_plan") else {}
         # 4. Generate executive summary for owner
         executive_summary = self._format_executive_summary(response, topic, structured=structured)
         report_path = save_full_report(
@@ -380,6 +381,7 @@ class ResearchAgent(BaseAgent):
                     "task_root_id": task_root_id,
                     "overall_score": structured.get("overall_score", 0),
                     "recommended_title": ((structured.get("recommended_product") or {}).get("title") or "")[:200],
+                    "research_router_mode": str(research_route_plan.get("mode") or ""),
                 },
             )
             self.memory.save_skill(
@@ -404,6 +406,7 @@ class ResearchAgent(BaseAgent):
                 "recommended_product": structured.get("recommended_product") or {},
                 "top_ideas": structured.get("top_ideas") or [],
                 "structured_research": structured,
+                "research_route_plan": research_route_plan,
             },
         )
 

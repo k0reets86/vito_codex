@@ -79,6 +79,25 @@ def test_select_model_research(router):
     assert result.model.provider == "perplexity"
 
 
+def test_research_route_plan_test_mode(router, monkeypatch):
+    monkeypatch.setattr(settings, "RESEARCH_ROUTER_MODE", "test", raising=False)
+    plan = router.get_research_route_plan()
+    assert plan["mode"] == "gemini_test"
+    assert plan["raw_research"]["model_key"] == "gemini-flash"
+    assert plan["synthesis"]["model_key"] == "gemini-flash"
+    assert plan["judge"]["model_key"] == "gemini-flash"
+
+
+def test_research_route_plan_battle_mode(router, monkeypatch):
+    monkeypatch.setattr(settings, "RESEARCH_ROUTER_MODE", "battle", raising=False)
+    monkeypatch.setattr(settings, "LLM_FORCE_GEMINI_FREE", False, raising=False)
+    plan = router.get_research_route_plan()
+    assert plan["mode"] == "battle"
+    assert plan["raw_research"]["model_key"] == "perplexity"
+    assert plan["synthesis"]["model_key"] == "claude-sonnet"
+    assert plan["judge"]["model_key"] == "gpt-5"
+
+
 def test_select_model_routine(router):
     result = router.select_model(TaskType.ROUTINE)
     assert "gemini" in result.model.model_id.lower()  # Gemini 2.5 Flash Lite must be first (free tier)

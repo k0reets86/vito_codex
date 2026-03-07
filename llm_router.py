@@ -398,6 +398,38 @@ class LLMRouter:
         # If allowlist/denylist accidentally blocks all candidates, prefer free Gemini fallback.
         return ["gemini-flash"]
 
+    def get_research_route_plan(self) -> dict[str, Any]:
+        """Return explicit research-stage router plan without forcing live activation.
+
+        This formalizes the desired future split:
+        - raw_research
+        - synthesis
+        - judge
+        while keeping current single-call TaskType.RESEARCH behavior intact.
+        """
+        mode = str(getattr(settings, "RESEARCH_ROUTER_MODE", "test") or "test").strip().lower()
+        force_free = bool(getattr(settings, "LLM_FORCE_GEMINI_FREE", False))
+        if force_free or mode in {"test", "gemini", "gemini_only", "gemini-test"}:
+            return {
+                "mode": "gemini_test",
+                "active_for_single_call": "gemini-flash",
+                "raw_research": {"model_key": "gemini-flash", "role": "collect and summarize evidence cheaply"},
+                "synthesis": {"model_key": "gemini-flash", "role": "build ranked operator report"},
+                "judge": {"model_key": "gemini-flash", "role": "final quality/risk pass"},
+            }
+        return {
+            "mode": "battle",
+            "active_for_single_call": "perplexity",
+            "raw_research": {"model_key": "perplexity", "role": "web-grounded evidence collection"},
+            "synthesis": {"model_key": "claude-sonnet", "role": "turn evidence into structured monetization report"},
+            "judge": {"model_key": "gpt-5", "role": "second-opinion quality/risk decision"},
+            "fallbacks": {
+                "raw_research": ["gemini-flash"],
+                "synthesis": ["gpt-5", "gemini-flash"],
+                "judge": ["claude-opus", "gemini-flash"],
+            },
+        }
+
     def select_model(
         self, task_type: TaskType, estimated_tokens: int = 2000, context: str = ""
     ) -> RouteResult:

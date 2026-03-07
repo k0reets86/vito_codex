@@ -155,6 +155,7 @@ class Settings:
     LLM_ROUTER_MODE: str = os.getenv("LLM_ROUTER_MODE", "prod")
     LLM_FORCE_GEMINI_FREE: bool = os.getenv("LLM_FORCE_GEMINI_FREE", "false").lower() in ("1", "true", "yes", "on")
     LLM_FORCE_GEMINI_MODEL: str = os.getenv("LLM_FORCE_GEMINI_MODEL", "gemini-2.5-flash")
+    RESEARCH_ROUTER_MODE: str = os.getenv("RESEARCH_ROUTER_MODE", "test")
     GEMINI_FREE_MAX_RPM: int = int(os.getenv("GEMINI_FREE_MAX_RPM", "15") or 15)
     GEMINI_FREE_TEXT_RPD: int = int(os.getenv("GEMINI_FREE_TEXT_RPD", "1000") or 1000)
     GEMINI_FREE_SEARCH_RPD: int = int(os.getenv("GEMINI_FREE_SEARCH_RPD", "1500") or 1500)
