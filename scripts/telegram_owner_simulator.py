@@ -186,6 +186,18 @@ def _builtin(name: str) -> list[Step]:
             Step("TN14", "мм не это. давай рекомндованый", ["рекомен", "собира", "draft"], ["traceback", "exception"]),
             Step("TN15", "что от меня надо?", ["нужен", "код", "ничего", "если"], ["traceback", "exception"]),
         ]
+    if key == "phase_owner_live_safe_noisy":
+        return [
+            Step("LSN01", "проведи глуюокое исслдование ниш цыфровых тваров", ["исслед", "вариант", "рекомен"], ["traceback", "exception"]),
+            Step("LSN02", "дай топ 5 и оценкй по 100", ["100", "вариант", "рекомен"], ["traceback", "exception"]),
+            Step("LSN03", "почему имнно 2й или 1й лучш", ["почему", "спрос", "конкур"], ["traceback", "exception"]),
+            Step("LSN04", "сводку по плтфрмам кароч", ["etsy", "gumroad", "kdp"], ["traceback", "exception"]),
+            Step("LSN05", "что щас делаеш", ["работ", "задач"], ["traceback", "exception"]),
+            Step("LSN06", "что от меня надо?", ["ничего", "если"], ["traceback", "exception"]),
+            Step("LSN07", "погода берл", ["берлин", "погод"], ["traceback", "exception"]),
+            Step("LSN08", "котор щас врем в берлине", ["берлин", "время"], ["traceback", "exception"]),
+            Step("LSN09", "рецепт паст, быст", ["паста", "ингреди"], ["traceback", "exception"]),
+        ]
     raise ValueError(f"Unknown scenario: {name}")
 
 
