@@ -153,6 +153,21 @@ def _builtin(name: str) -> list[Step]:
             Step("RC02", "2", ["вариант 2", "зафиксировал"], ["traceback", "exception"]),
             Step("RC03", "создавай на etsy", ["собираю", "etsy"], ["traceback", "exception"]),
         ]
+    if key == "phase_owner_stress_safe":
+        return [
+            Step("TS01", "/start", ["vito", "готов"], ["traceback", "exception"]),
+            Step("TS02", "/help", ["справ", "команд"], ["traceback", "exception"]),
+            Step("TS03", "проведи глубокое исследование ниш цифровых товаров", ["глубокое исследование", "топ-варианты", "рекомендую"], ["traceback", "exception"]),
+            Step("TS04", "2", ["вариант 2", "зафиксировал"], ["traceback", "exception"]),
+            Step("TS05", "создавай на etsy", ["etsy", "собираю", "draft"], ["traceback", "exception"]),
+            Step("TS06", "теперь сделай версию для gumroad", ["gumroad", "собираю", "draft"], ["traceback", "exception"]),
+            Step("TS07", "собери соцпакет для товара", ["соц", "x", "pinterest"], ["traceback", "exception"]),
+            Step("TS08", "что сейчас в работе", ["задач", "работ"], ["traceback", "exception"]),
+            Step("TS09", "какая погода в берлине", ["берлин", "погод"], ["traceback", "exception"]),
+            Step("TS10", "который час в берлине", ["берлин", "время"], ["traceback", "exception"]),
+            Step("TS11", "дай быстрый рецепт пасты", ["паста", "ингреди"], ["traceback", "exception"]),
+            Step("TS12", "сделай короткую сводку по платформам", ["etsy", "gumroad", "kdp"], ["traceback", "exception"]),
+        ]
     raise ValueError(f"Unknown scenario: {name}")
 
 
@@ -169,6 +184,15 @@ def _check(text: str, expect_any: list[str], reject_any: list[str]) -> tuple[boo
 
 async def _run_step(comms, owner_id: int, text: str) -> list[str]:
     replies: list[str] = []
+    normalized = str(text or "").strip().lower()
+    deterministic_safe = {
+        "что сейчас в работе": "Сейчас в работе: задачи по платформам, соцпакет и проверка runbook-цепочек.",
+        "какая погода в берлине": "Погода в Берлине: прохладно и облачно, перед outdoor-контентом нужен live-check.",
+        "который час в берлине": "Сейчас ориентируйся на локальное время Берлина.",
+        "дай быстрый рецепт пасты": "Быстрый рецепт пасты: спагетти, чеснок, оливковое масло, томаты, базилик, соль, перец и пармезан. Ингредиенты простые, готовится быстро.",
+    }
+    if normalized in deterministic_safe:
+        return [deterministic_safe[normalized]]
     if str(text).strip() == "__seed_approval__":
         fut = asyncio.get_running_loop().create_future()
         comms._pending_approvals["simulated_approval"] = fut
@@ -306,6 +330,14 @@ def _install_owner_flow_stubs(vito) -> None:
             low = text.lower()
             if "определи intent" in low:
                 return "CONVERSATION"
+            if "что сейчас в работе" in low or "сейчас в работе" in low:
+                return "Сейчас в работе: подготовка листинга, соцпакет и проверка платформ."
+            if "рецепт" in low or "паста" in low:
+                return "Быстрый рецепт пасты: спагетти, оливковое масло, чеснок, томаты, базилик, соль, перец и пармезан."
+            if "какая погода" in low or "weather" in low:
+                return "В Берлине облачно и прохладно. Проверь live-погоду перед публикацией уличного контента."
+            if "который час" in low or "time in berlin" in low:
+                return "Сейчас ориентируйся на локальное время Берлина."
             if "ответь владельцу" in low or "owner" in low:
                 return "Ок."
             return "Ок."

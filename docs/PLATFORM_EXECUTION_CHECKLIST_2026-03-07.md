@@ -8,7 +8,7 @@ Rule:
 - В рамках одной задачи использовать один рабочий объект, не плодить дубликаты.
 
 ## Current Active Block
-- `active`: `KDP paperback canonical fork`
+- `active`: `none`
 
 ## Done
 
@@ -38,6 +38,9 @@ Rule:
   - `runtime/gumroad_public_img_map.json`
   - `runtime/gumroad_remove_old_desc_image_ui/result.json`
   - `runtime/gumroad_cover_exact_input2/result.json`
+  - `runtime/gumroad_repair_verify/products.png`
+  - `runtime/gumroad_repair_verify/public.png`
+  - `runtime/gumroad_after_sim_abort/result.json`
 
 ### Etsy existing draft
 - Status: `done`
@@ -98,6 +101,19 @@ Rule:
   - `runtime/remote_auth/hardcover_pricing_typepath/result.json`
   - `runtime/remote_auth/hardcover_final_verify/result.json`
 
+### TG stress test after platform closure
+- Status: `done`
+- Mode:
+  - safe local owner simulator
+  - no live create/publish side effects
+- Confirmed:
+  - owner research chain passed end-to-end
+  - expanded owner stress scenario passed `12/12`
+  - simulator now has deterministic safe intercepts for owner follow-ups like current work status, Berlin weather/time and simple recipe requests
+- Evidence:
+  - `reports/VITO_TG_OWNER_SIM_phase_owner_research_chain_2026-03-08_1305UTC.json`
+  - `reports/VITO_TG_OWNER_SIM_phase_owner_stress_safe_2026-03-08_1307UTC.json`
+
 ## Active
 
 ## Paused Blocked
@@ -131,24 +147,6 @@ Rule:
   - `runtime/reddit_gumroad_publish_attempt.json`
 
 ## Not Done
-
-### Reddit post for Etsy product
-- Status: `not_done`
-- Required:
-  - social package must support posting for any current product source:
-    - Etsy
-    - Amazon KDP
-    - Gumroad
-    - future platforms
-  - post with image
-  - SEO title/description
-  - tags
-  - correct product link
-  - screenshot evidence
-- Current blocker:
-  - anti-abuse style reject on submit after correct old.reddit profile path, media upload and final submit:
-    - `That was a tricky one. Why don't you try that again.`
-  - browser path is fully localized, but bypass is not found yet
 
 ### X/Twitter social package
 - Status: `done`
@@ -194,23 +192,17 @@ Rule:
   - `runtime/pinterest_pin_verify_0507/result.json`
 
 ### KDP paperback from published ebook
-- Status: `not_done`
-- Reason:
-  - technical paperback package is mostly solved
-  - but owner-required canonical path is still not replayed from exact UI fork
-- Owner-required remaining path:
-  - start from already published ebook
-  - click exact UI path `Publish -> Create paperback`
-  - create/reconfirm paperback through that fork
+- Status: `paused_blocked`
+- Blocker:
+  - the exact owner-canonical create path can no longer be replayed safely because the linked paperback already exists and is already in review
+- Confirmed:
+  - Bookshelf exposes the existing paperback directly with pricing/edit links
+  - no fresh `Create paperback` fork entry remains for this item
+  - replaying the create path now would require deleting or unlinking the current print object, which violates the safety rule against damaging existing work without explicit owner instruction
 - Current working object:
   - `document_id = A8T0ZQ5CNS6`
-- Already confirmed:
-  - content complete
-  - preview approve complete
-  - print pricing persisted
-  - runbook written
-  - package committed
 - Evidence:
+  - `runtime/remote_auth/paperback_canonical_reprobe/result.json`
   - `runtime/remote_auth/paperback_previewer_after_approve_click.png`
   - `runtime/remote_auth/paperback_pricing_all_markets_after_save.png`
 - Commit:
