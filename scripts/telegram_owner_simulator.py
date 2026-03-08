@@ -177,6 +177,24 @@ def _builtin(name: str) -> list[Step]:
             Step("NNR11", "опублкй тест пост в твиттер с кртинкой ссылкой и тгами", ["twitter"], ["traceback", "exception"]),
             Step("NNR12", "опублкй тест пин в пинтерест с сылкой", ["pinterest"], ["traceback", "exception"]),
         ]
+    if key == "phase_owner_full_live_no_reddit":
+        return [
+            Step("FL01", "проведи глубокое исследование ниш цифровых товаров", ["исслед", "вариант", "рекомен"], ["traceback", "exception"]),
+            Step("FL02", "2", ["вариант 2", "зафикс", "принял"], ["traceback", "exception"]),
+            Step("FL03", "зайдт на амазн", ["amazon", "вход", "логин"], ["traceback", "exception"]),
+            Step("FL04", "зайди на етси", ["etsy", "вход", "логин"], ["traceback", "exception"]),
+            Step("FL05", "зайди на гумр", ["gumroad", "вход", "логин"], ["traceback", "exception"]),
+            Step("FL06", "зайди на кофи", ["ko-fi", "kofi", "вход"], ["traceback", "exception"]),
+            Step("FL07", "зайди на пинтрест", ["pinterest", "вход", "логин"], ["traceback", "exception"]),
+            Step("FL08", "сделай чернвик твара на гумроад, все поля теги опсиание и файлы", ["gumroad"], ["traceback", "exception"]),
+            Step("FL09", "сделай черновик листнга на етси, все поля теги опсание и файл", ["etsy"], ["traceback", "exception"]),
+            Step("FL10", "сделай чернвик книги на амазон кдп, заполни метаднные и файлы", ["amazon", "kdp"], ["traceback", "exception"]),
+            Step("FL11", "сделай товар в кофи и заполни все поля", ["ko-fi", "kofi"], ["traceback", "exception"]),
+            Step("FL12", "сделай принт черз принтфул и проверь связку с етси", ["printful"], ["traceback", "exception"]),
+            Step("FL13", "опублкй тест пост в твиттер с кртинкой ссылкой и тгами", ["twitter"], ["traceback", "exception"]),
+            Step("FL14", "опублкй тест пин в пинтерест с сылкой", ["pinterest"], ["traceback", "exception"]),
+            Step("FL15", "сделай короткую сводку по платформам", ["etsy", "gumroad", "kdp"], ["traceback", "exception"]),
+        ]
     if key == "phase_owner_research_chain":
         return [
             Step("RC01", "проведи глубокое исследование ниш цифровых товаров", ["глубокое исследование", "топ-варианты", "рекомендую"], ["traceback", "exception"]),
