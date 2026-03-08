@@ -2850,6 +2850,18 @@ Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screen
 - Confirmed on final pin page: outbound Etsy link and visible description text.
 - Confirmed in publish-state HTML: title `AI Side Hustle Starter Kit for Creators`, description, and `WebsiteField=https://www.etsy.com/listing/4468093584`.
 - Important nuance: final pin page may render profile name (`Vito`) as the visible heading even when title is saved in the creation state. Do not treat missing visible H1 title as missing metadata without checking publish-state HTML and outbound link.
+- Confirmed owner cleanup path:
+  - open the pin page as owner
+  - click the visible top-left `Другие действия` button for the current pin, not the repeated buttons on recommended pins
+  - choose `Изменить пин`
+  - inside the edit state use `Удалить`
+  - confirm deletion and then reopen the direct pin URL
+  - successful deletion resolves to `show_error=true` / `Не удается найти эту идею`
+- Do not consider Pinterest clean while multiple live pin URLs remain in the profile.
+- Cleanup verification must include:
+  - direct public pin URL
+  - owner profile page pin links
+  - final surviving pin page with description and outbound product link
 
 ### Reddit
 - Correct browser path is old.reddit profile submit: `https://old.reddit.com/user/<username>/submit`.

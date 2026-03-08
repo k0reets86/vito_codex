@@ -221,17 +221,23 @@ Rule:
   - outbound link to current product
   - screenshot evidence
   - reusable runbook for future products/platforms
- - Confirmed:
-  - live Etsy-source pin exists:
+- Confirmed:
+  - one live working pin remains:
     - `https://www.pinterest.com/pin/1134203487424108921`
-  - live Gumroad-source pin exists:
-    - `https://www.pinterest.com/pin/1134203487424140507`
+  - duplicate live pins were removed through owner edit flow:
+    - `1134203487424140507`
+    - `1134203487424108589`
+    - `1134203487424138402`
   - final pin page shows real description block
-  - final pin page shows outbound product link button
- - publish state stores the intended title/description/url
- - Evidence:
+  - final pin page shows outbound Etsy product link button
+  - profile now exposes only the single remaining live pin plus its analytics route
+- publish state stores the intended title/description/url
+- Evidence:
   - `runtime/pinterest_pin_verify_8921.json`
-  - `runtime/pinterest_pin_verify_0507/result.json`
+  - `runtime/pinterest_delete_duplicate_0507/result.json`
+  - `runtime/pinterest_delete_1134203487424108589/result.json`
+  - `runtime/pinterest_delete_1134203487424138402/result.json`
+  - `runtime/pinterest_after_cleanup_verify/result.json`
 
 ## Commit Log For This Checklist Wave
 - `5445436` — KDP paperback runbook and pricing flow
