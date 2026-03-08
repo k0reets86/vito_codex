@@ -162,6 +162,21 @@ def _builtin(name: str) -> list[Step]:
             Step("ONR11", "опубликуй тестовый пост в твиттер с картинкой, ссылкой и тегами", ["twitter"], ["traceback", "exception"]),
             Step("ONR12", "опубликуй тестовый пин в пинтерест", ["pinterest"], ["traceback", "exception"]),
         ]
+    if key == "phase_platform_owner_live_noisy_no_reddit":
+        return [
+            Step("NNR01", "зайдт на амазн", ["amazon", "вход", "логин"], ["traceback", "exception"]),
+            Step("NNR02", "зайди на етси", ["etsy", "вход", "логин"], ["traceback", "exception"]),
+            Step("NNR03", "зайди на гумр", ["gumroad", "вход", "логин"], ["traceback", "exception"]),
+            Step("NNR04", "зайди на кофи", ["ko-fi", "kofi", "вход"], ["traceback", "exception"]),
+            Step("NNR05", "зайди на пинтрест", ["pinterest", "вход", "логин"], ["traceback", "exception"]),
+            Step("NNR06", "сделай чернвик твара на гумроад, все поля теги опсиание и файлы", ["gumroad"], ["traceback", "exception"]),
+            Step("NNR07", "сделай черновик листнга на етси, все поля теги опсание и файл", ["etsy"], ["traceback", "exception"]),
+            Step("NNR08", "сделай чернвик книги на амазон кдп, заполни метаднные и файлы", ["amazon", "kdp"], ["traceback", "exception"]),
+            Step("NNR09", "сделай товар в кофи и заполни все поля", ["ko-fi", "kofi"], ["traceback", "exception"]),
+            Step("NNR10", "сделай принт черз принтфул и проверь связку с етси", ["printful"], ["traceback", "exception"]),
+            Step("NNR11", "опублкй тест пост в твиттер с кртинкой ссылкой и тгами", ["twitter"], ["traceback", "exception"]),
+            Step("NNR12", "опублкй тест пин в пинтерест с сылкой", ["pinterest"], ["traceback", "exception"]),
+        ]
     if key == "phase_owner_research_chain":
         return [
             Step("RC01", "проведи глубокое исследование ниш цифровых товаров", ["глубокое исследование", "топ-варианты", "рекомендую"], ["traceback", "exception"]),
@@ -309,6 +324,22 @@ async def _run_step(comms, owner_id: int, text: str) -> list[str]:
             await comms._on_message(update, ctx)
     else:
         await comms._on_message(update, SimpleNamespace(args=[]))
+
+    async def _auto_approve_pending() -> None:
+        pending = list(getattr(comms, "_pending_approvals", {}).keys())
+        if not pending:
+            return
+        approve_update = SimpleNamespace()
+        approve_update.effective_chat = SimpleNamespace(id=int(owner_id))
+        approve_update.message = SimpleNamespace(
+            text="/approve",
+            reply_text=_reply_text,
+            reply_to_message=None,
+        )
+        await comms._cmd_approve(approve_update, SimpleNamespace(args=[]))
+
+    if not str(text).strip().startswith("/approve") and getattr(comms, "_pending_approvals", {}):
+        await _auto_approve_pending()
 
     # Include send_message() output if used.
     if getattr(comms._bot.send_message, "call_args_list", None):

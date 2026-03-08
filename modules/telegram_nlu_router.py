@@ -9,7 +9,7 @@ def _topic_from_explicit_platform_request(src: str, low: str) -> str:
     text = str(src or "").strip()
     if not text:
         return ""
-    if not any(tok in low for tok in ("товар", "листинг", "книг", "кдп", "etsy", "этси", "етси", "gumroad", "гумроад", "amazon", "амаз", "printful", "принтфул", "ko-fi", "kofi", "ко фи", "пост", "пин", "reddit", "реддит", "twitter", "твиттер", "pinterest", "пинтерест")):
+    if not any(tok in low for tok in ("товар", "листинг", "книг", "кдп", "etsy", "этси", "етси", "gumroad", "гумроад", "гумр", "amazon", "амаз", "printful", "принтфул", "ko-fi", "kofi", "ко фи", "кофи", "пост", "пин", "reddit", "реддит", "twitter", "твиттер", "твитер", "pinterest", "пинтерест", "пинтрест")):
         return ""
     cleaned = re.sub(
         r"(?i)\b(создай|создавай|сделай|заполни|подготовь|оформи|редактируй|обнови|опубликуй|запусти|проверь|версию|связку|черновик|draft|на|через|и|потом)\b",
@@ -17,7 +17,7 @@ def _topic_from_explicit_platform_request(src: str, low: str) -> str:
         text,
     )
     cleaned = re.sub(
-        r"(?i)\b(etsy|этси|етси|gumroad|гумроад|amazon|амазон|амаз|kdp|кдп|printful|принтфул|ko-fi|kofi|ко\s*фи|reddit|реддит|twitter|твиттер|x\.com|pinterest|пинтерест)\b",
+        r"(?i)\b(etsy|этси|етси|gumroad|гумроад|гумр|amazon|амазон|амаз|kdp|кдп|printful|принтфул|ko-fi|kofi|ко\s*фи|кофи|reddit|реддит|twitter|твиттер|твитер|x\.com|pinterest|пинтерест|пинтрест)\b",
         " ",
         cleaned,
     )
@@ -219,12 +219,12 @@ def _route_social_package(low: str, active: dict[str, Any]) -> dict[str, Any] | 
 def _extract_platforms(low: str) -> list[str]:
     mapping = [
         ("etsy", ("etsy", "этси", "етси")),
-        ("gumroad", ("gumroad", "gumr", "гумроад", "гамроад")),
-        ("amazon_kdp", ("kdp", "amazon", "амазон", "амаз", "кдп")),
-        ("kofi", ("ko-fi", "kofi", "ко фи", "ко-фи")),
+        ("gumroad", ("gumroad", "gumr", "гумроад", "гамроад", "гумр")),
+        ("amazon_kdp", ("kdp", "amazon", "амазон", "амаз", "кдп", "кдп.")),
+        ("kofi", ("ko-fi", "kofi", "ко фи", "ко-фи", "кофи")),
         ("printful", ("printful", "принтфул")),
-        ("twitter", ("twitter", "x.com", "x ", "твиттер")),
-        ("pinterest", ("pinterest", "пинтерест")),
+        ("twitter", ("twitter", "x.com", "x ", "твиттер", "твитер")),
+        ("pinterest", ("pinterest", "пинтерест", "пинтрест")),
         ("reddit", ("reddit", "реддит")),
     ]
     out: list[str] = []
@@ -289,7 +289,25 @@ def _route_platform_followup(low: str, active: dict[str, Any]) -> dict[str, Any]
     platforms = explicit_platforms
     draft_only = any(tok in low for tok in ("чернов", "не публи", "draft"))
     wants_recommended = any(tok in low for tok in ("рекомен", "рекомнд", "recommended"))
-    actionish = any(tok in low for tok in ("давай", "сделай", "созда", "запуска", "версию", "теперь", "еще", "ещё", "на "))
+    actionish = any(
+        tok in low
+        for tok in (
+            "давай",
+            "сделай",
+            "созда",
+            "запуска",
+            "версию",
+            "теперь",
+            "еще",
+            "ещё",
+            "на ",
+            "опубли",
+            "опубл",
+            "закинь",
+            "тест пост",
+            "тест пин",
+        )
+    )
 
     if draft_only and not platforms:
         return {

@@ -149,3 +149,20 @@ def test_route_owner_dialogue_printful_followup_does_not_echo_garbage_topic():
     assert result["intent"] == "system_action"
     assert result["platforms"] == ["etsy", "printful"]
     assert "принт с" not in result["response"].lower()
+
+
+def test_route_owner_dialogue_handles_noisy_gumroad_login_shortcut():
+    result = route_owner_dialogue("зайди на гумр", {})
+    assert result is not None
+    assert "gumroad" in result["response"].lower()
+
+
+def test_route_owner_dialogue_handles_noisy_pinterest_and_twitter_publish_requests():
+    pin = route_owner_dialogue("опублкй тест пин в пинтрест с сылкой", {})
+    tw = route_owner_dialogue("опублкй тест пост в твитер с кртинкой ссылкой и тгами", {})
+    assert pin is not None
+    assert tw is not None
+    assert pin["intent"] == "system_action"
+    assert tw["intent"] == "system_action"
+    assert "pinterest" in pin["response"].lower()
+    assert "twitter" in tw["response"].lower()
