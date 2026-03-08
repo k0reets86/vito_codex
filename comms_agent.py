@@ -133,6 +133,27 @@ def _platform_working_target(platform: str) -> dict[str, Any]:
     return dict((_load_working_platform_targets().get(str(platform or "").strip().lower()) or {}))
 
 
+def _working_target_matches_task(current: dict[str, Any], task_root_id: str) -> bool:
+    if not isinstance(current, dict) or not current:
+        return False
+    current_task_root = str(current.get("task_root_id") or "").strip()
+    target_id = str(
+        current.get("id")
+        or current.get("target_slug")
+        or current.get("target_listing_id")
+        or current.get("target_document_id")
+        or current.get("target_product_id")
+        or ""
+    ).strip()
+    if not target_id:
+        return False
+    if not bool(current.get("mutable", True)):
+        return False
+    if not current_task_root:
+        return False
+    return bool(task_root_id) and current_task_root == str(task_root_id).strip()
+
+
 def _remember_platform_working_target(platform: str, result: dict[str, Any]) -> None:
     p = str(platform or "").strip().lower()
     if not p or not isinstance(result, dict):
@@ -899,6 +920,42 @@ class CommsAgent:
             "recommended_index": int(recommended_rank or 1),
             "origin_text": origin_text or topic,
         }
+
+    def _prime_research_pending_actions_from_owner_state(self, origin_text: str) -> bool:
+        if self._pending_system_action or not self._owner_task_state:
+            return False
+        try:
+            active = self._owner_task_state.get_active() or {}
+            raw = str(active.get("research_options_json") or "").strip()
+            if not raw:
+                return False
+            parsed = json.loads(raw)
+            if not isinstance(parsed, list) or not parsed:
+                return False
+            ideas = [dict(item) for item in parsed[:5] if isinstance(item, dict)]
+            if not ideas:
+                return False
+            recommended_item: dict[str, Any] | None = None
+            rec_raw = str(active.get("research_recommended_json") or "").strip()
+            if rec_raw:
+                rec_val = json.loads(rec_raw)
+                if isinstance(rec_val, dict):
+                    recommended_item = dict(rec_val)
+            topic = str(
+                active.get("selected_research_title")
+                or active.get("text")
+                or (ideas[0].get("title") if isinstance(ideas[0], dict) else "")
+                or "Digital Product"
+            ).strip()
+            self._prime_research_pending_actions(
+                topic=topic,
+                ideas=ideas,
+                recommended=recommended_item,
+                origin_text=origin_text,
+            )
+            return True
+        except Exception:
+            return False
 
     def _select_pending_research_option(self, idx: int) -> dict[str, Any] | None:
         payload = self._pending_system_action or {}
@@ -2546,7 +2603,11 @@ class CommsAgent:
             return
         strict_cmds = bool(getattr(settings, "TELEGRAM_STRICT_COMMANDS", True)) and not self._autonomy_max_enabled()
         if self._pending_system_action:
-            if (not strict_cmds) and text.isdigit():
+            pending_kind = str((self._pending_system_action or {}).get("kind") or "").strip().lower()
+            allow_numeric_choice = text.isdigit() and (
+                (not strict_cmds) or pending_kind == "research_options"
+            )
+            if allow_numeric_choice:
                 idx = int(text)
                 picked = self._select_pending_research_option(idx)
                 if picked is not None:
@@ -2586,6 +2647,21 @@ class CommsAgent:
                 if not future.done():
                     future.set_result(False)
                 await self.send_message("Отклонено.", level="approval")
+                return
+
+        if text.isdigit() and self._prime_research_pending_actions_from_owner_state(text):
+            idx = int(text)
+            picked = self._select_pending_research_option(idx)
+            if picked is not None:
+                title = str(picked.get("title") or "").strip()
+                score = int(picked.get("score", 0) or 0)
+                await self.send_message(
+                    (
+                        f"Зафиксировал вариант {idx}: {title} ({score}/100). "
+                        "Если запускать сразу, напиши: «создавай» или укажи платформу."
+                    ),
+                    level="result",
+                )
                 return
 
         if (not strict_cmds) and any(x in lower for x in ("llm_mode ", "режим llm", "режим lmm", "llm режим")):
@@ -2782,15 +2858,19 @@ class CommsAgent:
                         goal.status = GoalStatus.WAITING_APPROVAL
                         self._goal_engine._persist_goal(goal)
                     response = result.get("response", f"Цель создана: {goal.title}")
+                    response = self._owner_goal_response_override(text, response, goal.title)
                     if result.get("needs_approval"):
                         response += "\n\nПодтверди запуск: да/нет."
                     response = self._decorate_with_numeric_hint(response, result.get("actions", []))
+                    response = self._normalize_owner_control_reply(text, response)
                     self._remember_choice_context(response)
                     await self.send_message(response, level="result")
                 elif result.get("response"):
                     response = self._decorate_with_numeric_hint(result["response"], result.get("actions", []))
+                    response = self._normalize_owner_control_reply(text, response)
                     self._remember_choice_context(response)
                     await self.send_message(response, level="result")
+                    self._prime_research_pending_actions_from_owner_state(text)
                     if result.get("actions") and result.get("needs_confirmation"):
                         if self._autonomy_max_enabled() and self._conversation_engine:
                             out = await self._conversation_engine._execute_actions(result.get("actions", []))
@@ -2992,6 +3072,34 @@ class CommsAgent:
         out = re.sub(r"\n{3,}", "\n\n", out)
         if not out:
             return "Принял задачу в работу. Дам краткий прогресс и вернусь с результатом."
+        return out
+
+    def _owner_goal_response_override(self, source_text: str, default_response: str, goal_title: str) -> str:
+        text = str(source_text or "").strip().lower()
+        response = str(default_response or "").strip()
+        goal = str(goal_title or "").strip()
+        platform = ""
+        try:
+            platform = str(self._extract_platform_key(source_text) or "").strip().lower()
+        except Exception:
+            platform = ""
+        if platform and any(tok in text for tok in ("создавай", "сделай", "запускай", "публикуй")):
+            return f"Собираю и запускаю работу на {platform}: {goal or response}."
+        return response
+
+    def _normalize_owner_control_reply(self, source_text: str, response_text: str) -> str:
+        src = str(source_text or "").strip().lower()
+        out = str(response_text or "").strip()
+        if src.isdigit():
+            idx = int(src)
+            return f"Зафиксировал вариант {idx}. Жду следующую команду."
+        platform = ""
+        try:
+            platform = str(self._extract_platform_key(source_text) or "").strip().lower()
+        except Exception:
+            platform = ""
+        if platform and any(tok in src for tok in ("создавай", "сделай", "запускай", "публикуй")):
+            return f"Собираю и запускаю работу на {platform}."
         return out
 
     async def _reject_stranger(self, update: Update) -> bool:
@@ -3662,8 +3770,8 @@ class CommsAgent:
                 self._owner_task_state.enrich_active(task_root_id=task_root_id, **artifact_ids)
             except Exception:
                 pass
-        topic = _extract_topic_from_request(request_text, "AI Digital Product Kit")
-        base_title = topic if len(topic) >= 8 else f"VITO Recipe Test {run_tag}: AI Digital Product Kit"
+        topic = _extract_topic_from_request(request_text, "Digital Product Kit")
+        base_title = topic if len(topic) >= 8 else f"Working Draft {run_tag}: Digital Product Kit"
 
         payload: dict[str, Any] = {
             "dry_run": not live,
@@ -3679,7 +3787,7 @@ class CommsAgent:
             "metadata_work_id": artifact_ids.get("metadata_id", ""),
             "title": base_title[:140],
             "name": base_title[:140],
-            "content": "VITO recipe test content with structured value, SEO keywords, and clear CTA.",
+            "content": "Structured product content with clear value, searchable keywords, and a concise CTA.",
             "text": f"{base_title}: SEO-ready digital product workflow with proof checks.",
             "description": (
                 "SEO-ready test listing generated by VITO. Includes structured benefits, target audience, "
@@ -3689,12 +3797,12 @@ class CommsAgent:
             "price": 5,
             "category": "Digital",
             "tags": ["ai", "automation", "digital product", "templates", "productivity"],
-            "seo_title": "AI Digital Product Kit for Creators",
-            "seo_description": "SEO-optimized test listing for marketplace publish flow validation.",
+            "seo_title": "Digital Product Kit for Creators",
+            "seo_description": "SEO-optimized listing prepared for marketplace conversion and workflow validation.",
             "url": "https://example.com/vito-test",
-            "hashtags": ["#VITO", "#AITools", "#DigitalProduct"],
-            "author": "VITO Studio",
-            "subtitle": "Practical AI workflow kit for creators",
+            "hashtags": ["#DigitalProduct", "#CreatorBusiness", "#OnlineSales"],
+            "author": "Editorial Team",
+            "subtitle": "Practical workflow kit for creators",
             "materials": ["pdf", "digital download", "instant download", "planner pages"],
             "preview_paths": [],
         }
@@ -3704,13 +3812,13 @@ class CommsAgent:
             payload["subreddit"] = str(os.getenv("REDDIT_TEST_SUBREDDIT", f"u_{uname}" if uname else "test"))
             payload["text"] = (
                 f"{base_title}. Research -> listing -> publish pipeline. "
-                "Details: https://example.com/vito-test #VITO #Research"
+                "Details: https://example.com/vito-test #Research #DigitalProduct"
             )
             payload["url"] = ""
             payload["image_url"] = ""
         if platform == "gumroad":
             target_slug = str(working_target.get("target_slug") or "").strip()
-            reuse_existing = bool(target_slug) and bool(working_target.get("mutable", True))
+            reuse_existing = bool(target_slug) and _working_target_matches_task(working_target, task_root_id)
             payload.update(
                 {
                     "allow_existing_update": reuse_existing,
@@ -3722,7 +3830,7 @@ class CommsAgent:
             )
         if platform == "etsy":
             target_listing_id = str(working_target.get("target_listing_id") or "").strip()
-            if target_listing_id and bool(working_target.get("mutable", True)):
+            if target_listing_id and _working_target_matches_task(working_target, task_root_id):
                 payload.update(
                     {
                         "allow_existing_update": True,
@@ -3734,7 +3842,7 @@ class CommsAgent:
             payload["draft_only"] = True
         if platform == "amazon_kdp":
             target_document_id = str(working_target.get("target_document_id") or "").strip()
-            if not bool(working_target.get("mutable", True)):
+            if not _working_target_matches_task(working_target, task_root_id):
                 target_document_id = ""
             payload["operation"] = "update" if target_document_id else "create_or_update_draft"
             if target_document_id:
@@ -3748,11 +3856,11 @@ class CommsAgent:
         if platform == "twitter":
             payload["text"] = (
                 f"{base_title} https://example.com/vito-test "
-                "#VITO #AI #DigitalProducts"
+                "#DigitalProducts #CreatorBusiness #OnlineSales"
             )[:280]
         if platform == "kofi":
             target_product_id = str(working_target.get("target_product_id") or "").strip()
-            if target_product_id and bool(working_target.get("mutable", True)):
+            if target_product_id and _working_target_matches_task(working_target, task_root_id):
                 payload.update(
                     {
                         "allow_existing_update": True,
@@ -3763,7 +3871,7 @@ class CommsAgent:
                 )
         if platform == "printful":
             target_product_id = str(working_target.get("target_product_id") or "").strip()
-            if not bool(working_target.get("mutable", True)):
+            if not _working_target_matches_task(working_target, task_root_id):
                 target_product_id = ""
             payload.update(
                 {
@@ -4412,7 +4520,11 @@ class CommsAgent:
                 await update.message.reply_text("Ок, отменил.", reply_markup=self._main_keyboard())
             return
         if self._pending_system_action:
-            if (not strict_cmds) and text.isdigit():
+            pending_kind = str((self._pending_system_action or {}).get("kind") or "").strip().lower()
+            allow_numeric_choice = text.isdigit() and (
+                (not strict_cmds) or pending_kind == "research_options"
+            )
+            if allow_numeric_choice:
                 idx = int(text)
                 picked = self._select_pending_research_option(idx)
                 if picked is not None:
@@ -4482,6 +4594,21 @@ class CommsAgent:
                     self._pending_schedule_update = None
                     return
             # If not a valid selection, continue normal flow
+
+        if text.isdigit() and self._prime_research_pending_actions_from_owner_state(text):
+            idx = int(text)
+            picked = self._select_pending_research_option(idx)
+            if picked is not None:
+                title = str(picked.get("title") or "").strip()
+                score = int(picked.get("score", 0) or 0)
+                await update.message.reply_text(
+                    (
+                        f"Зафиксировал вариант {idx}: {title} ({score}/100). "
+                        "Если запускать сразу, напиши: «создавай» или укажи платформу."
+                    ),
+                    reply_markup=self._main_keyboard(),
+                )
+                return
 
         if not strict_cmds:
             text = self._expand_short_choice(text)
@@ -4651,16 +4778,20 @@ class CommsAgent:
                         goal.status = GoalStatus.WAITING_APPROVAL
                         self._goal_engine._persist_goal(goal)
                     response = result.get("response", f"Цель создана: {goal.title}")
+                    response = self._owner_goal_response_override(text_for_engine, response, goal.title)
                     if result.get("needs_approval"):
                         response += "\n\nПодтверди запуск: да/нет."
                     response = self._decorate_with_numeric_hint(response, result.get("actions", []))
+                    response = self._normalize_owner_control_reply(text_for_engine, response)
                     response = self._humanize_owner_text(response)
                     self._remember_choice_context(response)
                     await update.message.reply_text(response, reply_markup=self._main_keyboard())
                 elif result.get("response"):
                     response = self._decorate_with_numeric_hint(result["response"], result.get("actions", []))
+                    response = self._normalize_owner_control_reply(text_for_engine, response)
                     self._remember_choice_context(response)
                     await self._send_response(update, response)
+                    self._prime_research_pending_actions_from_owner_state(text_for_engine)
                     if result.get("actions") and result.get("needs_confirmation"):
                         if self._autonomy_max_enabled() and self._conversation_engine:
                             out = await self._conversation_engine._execute_actions(result.get("actions", []))
@@ -4735,10 +4866,7 @@ class CommsAgent:
         if idx <= 0:
             return text
         self._pending_choice_context = None
-        return (
-            f"Выбираю вариант {idx}. Продолжай выполнять задачу автономно, "
-            f"без дополнительных подтверждений, если нет критического риска."
-        )
+        return f"Вариант {idx}. Зафиксируй выбор и жди следующую команду."
 
     def _decorate_with_numeric_hint(self, response: str, actions: list[dict] | None) -> str:
         text = str(response or "").strip()

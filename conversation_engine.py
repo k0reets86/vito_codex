@@ -324,6 +324,25 @@ class ConversationEngine:
         if self._has_keywords(normalized, status_kw, fuzzy=True):
             return {"intent": Intent.QUESTION.value, "response": self._quick_status()}
 
+        platform_summary_kw = ("сводк", "summary", "overview")
+        platform_kw = ("платформ", "platforms")
+        if self._has_keywords(normalized, platform_summary_kw, fuzzy=True) and self._has_keywords(normalized, platform_kw, fuzzy=True):
+            active = self.owner_task_state.get_active() if self.owner_task_state else {}
+            topic = str(
+                (active or {}).get("selected_research_title")
+                or (active or {}).get("text")
+                or "текущему продукту"
+            ).strip()
+            return {
+                "intent": Intent.QUESTION.value,
+                "response": (
+                    f"Короткая сводка по платформам для {topic}:\n"
+                    "- Etsy: основной marketplace-листинг и упаковка карточки товара.\n"
+                    "- Gumroad: прямая продажа цифрового продукта с файлом и предпросмотром.\n"
+                    "- KDP: книжная версия для Kindle/print, если продукт идет как книга или workbook."
+                ),
+            }
+
         net_kw = ("интернет", "network", "сеть", "доступ к интернет", "online")
         check_kw = ("проверь", "check", "есть ли", "доступ")
         if self._has_keywords(normalized, net_kw, fuzzy=True) and self._has_keywords(normalized, check_kw, fuzzy=True):
