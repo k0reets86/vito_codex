@@ -197,7 +197,7 @@ class EtsyPlatform(BasePlatform):
             self._record_browser_lesson(result, source="etsy.publish.browser")
             return result
 
-        title = str(content.get("title") or "VITO Etsy Product").strip()
+        title = str(content.get("title") or "Working Etsy Product").strip()
         description = str(content.get("description") or "").strip()
         price = str(content.get("price") or "5")
         tags = content.get("tags") or []

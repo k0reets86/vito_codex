@@ -26,16 +26,16 @@ PUBLISH_SELECTORS = [
 ]
 
 PRODUCT_TAB_SELECTORS = [
-    'button:has-text("Product")',
-    'a:has-text("Product")',
+    '[role="tablist"] a[role="tab"][href*="/edit"]',
+    '[role="tablist"] [role="tab"]:has-text("Product")',
 ]
 
 CONTENT_TAB_SELECTORS = [
-    'button:has-text("Content")',
-    'a:has-text("Content")',
+    '[role="tablist"] a[role="tab"][href*="/edit/content"]',
+    '[role="tablist"] [role="tab"]:has-text("Content")',
 ]
 
 SHARE_TAB_SELECTORS = [
-    'button:has-text("Share")',
-    'a:has-text("Share")',
+    '[role="tablist"] a[role="tab"][href*="/edit/share"]',
+    '[role="tablist"] [role="tab"]:has-text("Share")',
 ]
