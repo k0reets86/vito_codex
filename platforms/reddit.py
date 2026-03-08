@@ -8,6 +8,7 @@ import hashlib
 import os
 import re
 import time
+import json
 from pathlib import Path
 
 from config.logger import get_logger
@@ -312,13 +313,32 @@ class RedditPlatform(BasePlatform):
                         "storage_state": str(self._storage_state_path),
                     }
                 title_selector = "textarea[name='title']"
-                if not await page.locator(title_selector).count():
-                    # Fallback for newer compose variants.
-                    for candidate in ("textarea[placeholder*='Title']", "input[name='title']", "h3 + div textarea"):
-                        if await page.locator(candidate).count():
-                            title_selector = candidate
-                            break
-                await page.fill(title_selector, title[:300], timeout=2500)
+                used_shadow_compose = False
+                if not post_to_profile and await page.locator("faceplate-textarea-input[name='title']").count():
+                    used_shadow_compose = True
+                    await page.locator("faceplate-textarea-input[name='title']").evaluate(
+                        """(host, value) => {
+                            const ta = host?.shadowRoot?.querySelector('#innerTextArea');
+                            if (!ta) return;
+                            ta.focus();
+                            ta.value = String(value || '');
+                            ta.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, data: ta.value, inputType: 'insertText' }));
+                            ta.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+                            ta.blur();
+                            try { host.onInput?.({ target: ta }); } catch (_) {}
+                            host.setAttribute('faceplate-validity', 'valid');
+                            host.setAttribute('faceplate-dirty', '');
+                        }""",
+                        title[:300],
+                    )
+                else:
+                    if not await page.locator(title_selector).count():
+                        # Fallback for newer compose variants.
+                        for candidate in ("textarea[placeholder*='Title']", "input[name='title']", "h3 + div textarea"):
+                            if await page.locator(candidate).count():
+                                title_selector = candidate
+                                break
+                    await page.fill(title_selector, title[:300], timeout=2500)
                 if prefer_image_post:
                     uploaded = False
                     for sel in (
@@ -347,20 +367,109 @@ class RedditPlatform(BasePlatform):
                     except Exception:
                         pass
                 else:
+                    if used_shadow_compose and await page.locator("shreddit-composer#post-composer_bodytext").count():
+                        try:
+                            await page.evaluate(
+                                """(body) => {
+                                    const host = document.querySelector('shreddit-composer#post-composer_bodytext');
+                                    const editor = host?.querySelector('[contenteditable="true"]');
+                                    if (editor) {
+                                        editor.focus();
+                                        editor.textContent = String(body || '');
+                                        editor.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, data: editor.textContent, inputType: 'insertText' }));
+                                        editor.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+                                        editor.blur();
+                                    }
+                                    try { host?._internals?.setFormValue?.(String(body || '')); } catch (_) {}
+                                    host?.setAttribute('faceplate-validity', 'valid');
+                                    host?.setAttribute('faceplate-dirty', '');
+                                }""",
+                                body[:40000],
+                            )
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            await page.fill("textarea[name='text']", body[:40000], timeout=2500)
+                        except Exception:
+                            pass
+                if used_shadow_compose and not post_to_profile:
                     try:
-                        await page.fill("textarea[name='text']", body[:40000], timeout=2500)
+                        flair_label = str(content.get("flair_label", "") or content.get("flair_text", "")).strip()
+                        if not flair_label and subreddit.lower() == "sideprojects":
+                            flair_label = "Showcase: Purchase Required" if link_url else "Feedback Request"
+                        if flair_label:
+                            await page.evaluate(
+                                """(label) => {
+                                    const host = document.querySelector('r-post-flairs-modal#post-flair-modal');
+                                    const root = host?.shadowRoot;
+                                    if (!host || !root) return false;
+                                    root.querySelector('#reddit-post-flair-button')?.click();
+                                    root.querySelector('#view-all-flairs-button')?.click();
+                                    const target = Array.from(root.querySelectorAll('faceplate-radio-input[name="flairId"]')).find((el) => {
+                                        const text = (el.textContent || '').trim().toLowerCase();
+                                        return text.includes(String(label || '').trim().toLowerCase());
+                                    });
+                                    if (!target) return false;
+                                    const value = target.getAttribute('value') || '';
+                                    target.click();
+                                    target.setAttribute('checked', '');
+                                    target.setAttribute('aria-checked', 'true');
+                                    try { host.onFlairChange?.({ target, detail: { value } }); } catch (_) {}
+                                    try { host.__flairId = value; } catch (_) {}
+                                    const hidden = root.querySelector('input[name="flairText"]');
+                                    if (hidden) hidden.value = (target.textContent || '').trim();
+                                    root.querySelector('#post-flair-modal-apply-button')?.click();
+                                    host.setAttribute('faceplate-validity', 'valid');
+                                    host.setAttribute('faceplate-dirty', '');
+                                    return true;
+                                }""",
+                                flair_label,
+                            )
+                    except Exception:
+                        pass
+                    try:
+                        await page.evaluate(
+                            """() => {
+                                const form = document.querySelector('r-post-composer-form#post-submit-form');
+                                if (form) form.isDirty = true;
+                                const btn = document.querySelector('r-post-form-submit-button#submit-post-button');
+                                if (btn) btn.__disabled = false;
+                            }"""
+                        )
                     except Exception:
                         pass
                 posted = False
-                for sel in ("button:has-text('Post')", "button[name='submit']", "button[type='submit']", "input[type='submit']"):
+                if used_shadow_compose and not post_to_profile:
                     try:
-                        btn = page.locator(sel)
-                        if await btn.count():
-                            await btn.first.click(timeout=2500)
+                        async with page.expect_response(
+                            lambda r: "svc/shreddit/graphql" in r.url and "CreatePost" in str(r.request.post_data or ""),
+                            timeout=15000,
+                        ) as resp_info:
+                            await page.locator("#inner-post-submit-button").click(timeout=2500)
+                        resp = await resp_info.value
+                        payload = {}
+                        try:
+                            payload = json.loads(await resp.text())
+                        except Exception:
+                            payload = {}
+                        create_data = (((payload or {}).get("data") or {}).get("createSubredditPost") or {})
+                        permalink = str((((create_data or {}).get("post") or {}).get("permalink") or "")).strip()
+                        if permalink:
+                            post_url = permalink if permalink.startswith("http") else f"https://www.reddit.com{permalink}"
                             posted = True
-                            break
                     except Exception:
-                        continue
+                        posted = False
+                if not posted:
+                    for sel in ("button:has-text('Post')", "button[name='submit']", "button[type='submit']", "input[type='submit']"):
+                        try:
+                            btn = page.locator(sel)
+                            if await btn.count():
+                                await btn.first.click(timeout=2500)
+                                posted = True
+                                break
+                        except Exception:
+                            continue
                 await page.wait_for_timeout(2500)
                 post_url = str(page.url or "")
                 if "/comments/" not in post_url:

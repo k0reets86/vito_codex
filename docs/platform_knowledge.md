@@ -230,6 +230,47 @@ This block supersedes older notes where they conflict.
 - Sources:
   - https://www.reddit.com/dev/api/
   - https://support.reddithelp.com/hc/en-us/articles/14945211791892-Developer-Platform-Overview
+- Official Reddit spam policy treats repeated or unsolicited posting for exposure/financial gain as spam.
+- Practical posting rules for VITO:
+  - do not use profile posting as the primary distribution route for product promotion
+  - prefer real target communities where the content is on-topic and allowed by local rules
+  - vary copy and avoid repetitive mass-posting across communities
+  - respect subreddit-specific flair, title, link, and media rules before publish
+  - expect Automoderator/spam filters to remove commercial-looking first posts even when technically accepted
+  - if a community is restricted or approval-limited, approved-user/mod settings may be required before posting
+- Verified Reddit blocker for current profile route:
+  - new composer reaches GraphQL successfully
+  - `CreateProfilePost` fails with `PROFILE_SUBREDDIT_NOEXIST`
+  - old.reddit profile/community route can fail with `That was a tricky one. Why don't you try that again.`
+  - when this exact combination is present, stop retrying profile posting and switch to community posting runbook
+- Verified community-first browser runbook (`r/sideprojects`, 2026-03-08):
+  - use subreddit route, not profile route:
+    - `https://www.reddit.com/r/sideprojects/submit/?type=TEXT`
+  - subreddit rules confirmed in sidebar:
+    - `Project Posts Must Include Details`
+    - `No Spam or Excessive Self-Promotion`
+    - `Flair Appropriately`
+  - title field is shadow DOM:
+    - host `faceplate-textarea-input[name='title']`
+    - real input `#innerTextArea` inside `shadowRoot`
+  - body field:
+    - `shreddit-composer#post-composer_bodytext [contenteditable='true']`
+  - exact flair path:
+    - click `#reddit-post-flair-button`
+    - click `#view-all-flairs-button`
+    - select `#post-flair-radio-input-4` = `Showcase: Purchase Required`
+    - click `#post-flair-modal-apply-button`
+  - exact submit path:
+    - inner shadow button `#inner-post-submit-button`
+  - successful GraphQL mutation:
+    - `CreatePost`
+    - response `ok=true`
+    - permalink:
+      `https://www.reddit.com/r/sideprojects/comments/1rob46e/built_a_creator_swipefile_kit_and_want_feedback/`
+  - anti-patterns:
+    - do not use profile posting as main route
+    - do not rely on host attribute writes for title/flair
+    - do not trust `ValidateCreatePostInput` as success; require final `CreatePost ok=true`
 
 ### Operational Rules for VITO
 - Always run auth probe before live publish (`authenticate` + lightweight read endpoint).

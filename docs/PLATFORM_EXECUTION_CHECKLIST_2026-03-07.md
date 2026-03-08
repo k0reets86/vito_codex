@@ -114,8 +114,6 @@ Rule:
   - `reports/VITO_TG_OWNER_SIM_phase_owner_research_chain_2026-03-08_1305UTC.json`
   - `reports/VITO_TG_OWNER_SIM_phase_owner_stress_safe_2026-03-08_1307UTC.json`
 
-## Active
-
 ### Ko-fi
 - Status: `done`
 - Working object:
@@ -145,24 +143,52 @@ Rule:
   - `runtime/kofi_publish_exact3/04_public_verify.png`
   - `runtime/kofi_publish_exact3/result.json`
 
+### Reddit social package
+- Status: `done`
+- Working object:
+  - live community post in `r/sideprojects`
+  - permalink: `https://www.reddit.com/r/sideprojects/comments/1rob46e/built_a_creator_swipefile_kit_and_want_feedback/`
+- Confirmed:
+  - profile posting routes are rejected and must not be used as primary path
+  - community-first route `r/sideprojects/submit/?type=TEXT` works
+  - exact live browser flow required:
+    - fill title through shadow textarea `faceplate-textarea-input[name='title'] -> #innerTextArea`
+    - fill body through `shreddit-composer#post-composer_bodytext [contenteditable='true']`
+    - open flair dialog via `#reddit-post-flair-button`
+    - click `#view-all-flairs-button`
+    - choose `#post-flair-radio-input-4` (`Showcase: Purchase Required`)
+    - click `#post-flair-modal-apply-button`
+    - submit through inner shadow button `#inner-post-submit-button`
+  - server returns GraphQL `CreatePost` with `ok=true`
+  - permalink opens and contains title/body text after reload
+- Evidence:
+  - `runtime/reddit_sideprojects_createpost_final/result.json`
+  - `runtime/reddit_sideprojects_post_verify2/result.json`
+  - `runtime/reddit_sideprojects_ui_flair_real/result.json`
+  - `runtime/reddit_sideprojects_createpost_response2/result.json`
+  - `runtime/reddit_graphql_probe/events.json`
+  - `runtime/reddit_old_profile_link/result.json`
+
 ## Paused Blocked
 
-### Reddit social package
+### KDP paperback from published ebook
 - Status: `paused_blocked`
 - Blocker:
-  - anti-abuse reject after correct browser submit path
+  - the exact owner-canonical create path can no longer be replayed safely because the linked paperback already exists and is already in review
 - Confirmed:
-  - profile submit path is correct
-  - media upload path is correct
-  - final submit still returns:
-    - `That was a tricky one. Why don't you try that again.`
-  - browser fallback with Gumroad source also returns:
-    - `submit_rejected_after_media_upload`
+  - Bookshelf exposes the existing paperback directly with pricing/edit links
+  - no fresh `Create paperback` fork entry remains for this item
+  - replaying the create path now would require deleting or unlinking the current print object, which violates the safety rule against damaging existing work without explicit owner instruction
+- Current working object:
+  - `document_id = A8T0ZQ5CNS6`
 - Evidence:
-  - `runtime/reddit_submit_real_after.txt`
-  - `runtime/reddit_gumroad_publish_attempt.json`
+  - `runtime/remote_auth/paperback_canonical_reprobe/result.json`
+  - `runtime/remote_auth/paperback_previewer_after_approve_click.png`
+  - `runtime/remote_auth/paperback_pricing_all_markets_after_save.png`
+- Commit:
+  - `5445436`
 
-## Not Done
+## Done
 
 ### X/Twitter social package
 - Status: `done`
@@ -202,40 +228,10 @@ Rule:
     - `https://www.pinterest.com/pin/1134203487424140507`
   - final pin page shows real description block
   - final pin page shows outbound product link button
-  - publish state stores the intended title/description/url
+ - publish state stores the intended title/description/url
  - Evidence:
   - `runtime/pinterest_pin_verify_8921.json`
   - `runtime/pinterest_pin_verify_0507/result.json`
-
-### KDP paperback from published ebook
-- Status: `paused_blocked`
-- Blocker:
-  - the exact owner-canonical create path can no longer be replayed safely because the linked paperback already exists and is already in review
-- Confirmed:
-  - Bookshelf exposes the existing paperback directly with pricing/edit links
-  - no fresh `Create paperback` fork entry remains for this item
-  - replaying the create path now would require deleting or unlinking the current print object, which violates the safety rule against damaging existing work without explicit owner instruction
-- Current working object:
-  - `document_id = A8T0ZQ5CNS6`
-- Evidence:
-  - `runtime/remote_auth/paperback_canonical_reprobe/result.json`
-  - `runtime/remote_auth/paperback_previewer_after_approve_click.png`
-  - `runtime/remote_auth/paperback_pricing_all_markets_after_save.png`
-- Commit:
-  - `5445436`
-
-### Gumroad social continuation
-- Status: `done`
-- Required after Gumroad listing exists:
-  - X/Twitter post with image/tags/link
-  - Reddit post with image/tags/link
-  - Pinterest pin with image/link
-- Confirmed:
-  - X post for Gumroad listing:
-    - `https://x.com/bot_vito/status/2030627652764090711`
-  - Pinterest pin for Gumroad listing:
-    - `https://www.pinterest.com/pin/1134203487424140507`
-  - Reddit attempted through correct browser path but is externally blocked and tracked separately under `paused_blocked`
 
 ## Commit Log For This Checklist Wave
 - `5445436` — KDP paperback runbook and pricing flow
