@@ -198,6 +198,17 @@ def _builtin(name: str) -> list[Step]:
             Step("LSN08", "котор щас врем в берлине", ["берлин", "время"], ["traceback", "exception"]),
             Step("LSN09", "рецепт паст, быст", ["паста", "ингреди"], ["traceback", "exception"]),
         ]
+    if key == "phase_platform_live_verify_safe":
+        return [
+            Step("PLV01", "зайди на амазон", ["amazon", "вход", "логин", "kdp"], ["traceback", "exception"]),
+            Step("PLV02", "зайди на этси", ["etsy", "вход", "логин"], ["traceback", "exception"]),
+            Step("PLV03", "зайди на гумроад", ["gumroad", "вход", "логин"], ["traceback", "exception"]),
+            Step("PLV04", "зайди на ко фи", ["ko-fi", "kofi", "вход"], ["traceback", "exception"]),
+            Step("PLV05", "зайди на пинтерест", ["pinterest", "вход", "логин"], ["traceback", "exception"]),
+            Step("PLV06", "статус аккаунта", ["аккаунт", "сесс", "статус"], ["traceback", "exception"]),
+            Step("PLV07", "что сейчас в работе", ["работ", "задач"], ["traceback", "exception"]),
+            Step("PLV08", "сделай короткую сводку по платформам", ["etsy", "gumroad", "kdp"], ["traceback", "exception"]),
+        ]
     raise ValueError(f"Unknown scenario: {name}")
 
 
