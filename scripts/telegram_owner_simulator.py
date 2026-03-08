@@ -168,6 +168,24 @@ def _builtin(name: str) -> list[Step]:
             Step("TS11", "дай быстрый рецепт пасты", ["паста", "ингреди"], ["traceback", "exception"]),
             Step("TS12", "сделай короткую сводку по платформам", ["etsy", "gumroad", "kdp"], ["traceback", "exception"]),
         ]
+    if key == "phase_owner_stress_noisy":
+        return [
+            Step("TN01", "проведи глуюокое исслдование ниш цыфровых тваров", ["исслед", "вариант", "рекомен"], ["traceback", "exception"]),
+            Step("TN02", "2", ["вариант 2", "зафикс", "принял"], ["traceback", "exception"]),
+            Step("TN03", "давай на етси", ["etsy", "собира", "draft"], ["traceback", "exception"]),
+            Step("TN04", "теперь gumr", ["gumroad", "собира", "draft"], ["traceback", "exception"]),
+            Step("TN05", "сдел соц пакет", ["соц", "x", "pinterest"], ["traceback", "exception"]),
+            Step("TN06", "что щас делаеш", ["работ", "задач"], ["traceback", "exception"]),
+            Step("TN07", "а на амаз? но не публикуй пока", ["amazon", "kdp", "чернов", "draft"], ["traceback", "exception"]),
+            Step("TN08", "не, стоп. тока черновик", ["чернов", "draft", "не публи"], ["traceback", "exception"]),
+            Step("TN09", "сводку по плтфрмам кароч", ["etsy", "gumroad", "kdp"], ["traceback", "exception"]),
+            Step("TN10", "погода берл", ["берлин", "погод"], ["traceback", "exception"]),
+            Step("TN11", "котор щас врем в берлине", ["берлин", "время"], ["traceback", "exception"]),
+            Step("TN12", "рецепт паст, быст", ["паста", "ингреди"], ["traceback", "exception"]),
+            Step("TN13", "сделай еще верс для принтфул потом в этси", ["printful", "etsy", "собира"], ["traceback", "exception"]),
+            Step("TN14", "мм не это. давай рекомндованый", ["рекомен", "собира", "draft"], ["traceback", "exception"]),
+            Step("TN15", "что от меня надо?", ["нужен", "код", "ничего", "если"], ["traceback", "exception"]),
+        ]
     raise ValueError(f"Unknown scenario: {name}")
 
 

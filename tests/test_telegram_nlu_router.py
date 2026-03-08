@@ -48,3 +48,74 @@ def test_route_owner_dialogue_handles_platform_summary():
     assert "Etsy" in result["response"]
     assert "Gumroad" in result["response"]
     assert "KDP" in result["response"]
+
+
+def test_route_owner_dialogue_handles_noisy_research_request():
+    result = route_owner_dialogue("проведи глуюокое исслдование ниш цыфровых тваров", {})
+    assert result is not None
+    assert result["intent"] == "system_action"
+    assert "исслед" in result["response"].lower()
+
+
+def test_route_owner_dialogue_handles_short_platform_switch_and_draft_guard():
+    active = {
+        "research_options_json": json.dumps(
+            [{"title": "Planner", "score": 81, "platform": "etsy"}],
+            ensure_ascii=False,
+        ),
+        "selected_research_json": json.dumps({"title": "Planner", "score": 81, "platform": "etsy"}, ensure_ascii=False),
+        "selected_research_title": "Planner",
+    }
+    result = route_owner_dialogue("а на амаз? но не публикуй пока", active)
+    assert result is not None
+    assert result["intent"] == "system_action"
+    assert result["platforms"] == ["amazon_kdp"]
+    assert "черновик" in result["response"].lower()
+    assert "не запускаю" in result["response"].lower()
+
+
+def test_route_owner_dialogue_handles_owner_need_question():
+    result = route_owner_dialogue("что от меня надо?", {})
+    assert result is not None
+    assert result["intent"] == "question"
+    assert "ничего" in result["response"].lower()
+
+
+def test_route_owner_dialogue_handles_followup_platform_shortcut():
+    active = {"text": "Printable Planner Bundle"}
+    result = route_owner_dialogue("давай на етси", active)
+    assert result is not None
+    assert result["intent"] == "system_action"
+    assert result["platforms"] == ["etsy"]
+    assert "etsy" in result["response"].lower()
+    assert "draft" in result["response"].lower()
+
+
+def test_route_owner_dialogue_handles_followup_draft_only_without_platform():
+    active = {"text": "Printable Planner Bundle"}
+    result = route_owner_dialogue("не, стоп. тока черновик", active)
+    assert result is not None
+    assert result["intent"] == "system_action"
+    assert "черновик" in result["response"].lower()
+    assert "без публикации" in result["response"].lower()
+
+
+def test_route_owner_dialogue_handles_followup_recommended():
+    active = {
+        "text": "Printable Planner Bundle",
+        "selected_research_platform": "etsy",
+    }
+    result = route_owner_dialogue("мм не это. давай рекомндованый", active)
+    assert result is not None
+    assert result["intent"] == "system_action"
+    assert "рекоменд" in result["response"].lower()
+    assert "etsy" in result["response"].lower()
+
+
+def test_route_owner_dialogue_handles_followup_recommended_without_topic():
+    active = {}
+    result = route_owner_dialogue("мм не это. давай рекомндованый", active)
+    assert result is not None
+    assert result["intent"] == "system_action"
+    assert "рекоменд" in result["response"].lower()
+    assert "draft" in result["response"].lower()
