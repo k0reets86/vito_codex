@@ -131,4 +131,21 @@ def test_route_owner_dialogue_explicit_platform_request_overrides_old_active_top
     assert result["platforms"] == ["etsy"]
     assert "гумроад" not in result["response"].lower()
     assert "этси" not in result["response"].lower() or "etsy" in result["response"].lower()
-    assert "листинга" in result["response"].lower() or "заполни все поля" in result["response"].lower()
+    assert "printable product starter kit" in result["response"].lower()
+
+
+def test_route_owner_dialogue_platform_create_without_meaningful_topic_uses_clean_default():
+    result = route_owner_dialogue("создай черновик товара на гумроад и заполни все поля, теги, описание и файлы", {})
+    assert result is not None
+    assert result["intent"] == "system_action"
+    assert result["platforms"] == ["gumroad"]
+    assert "товара все поля" not in result["response"].lower()
+    assert "digital product starter kit" in result["response"].lower()
+
+
+def test_route_owner_dialogue_printful_followup_does_not_echo_garbage_topic():
+    result = route_owner_dialogue("создай принт через принтфул и проверь связку с этси", {})
+    assert result is not None
+    assert result["intent"] == "system_action"
+    assert result["platforms"] == ["etsy", "printful"]
+    assert "принт с" not in result["response"].lower()

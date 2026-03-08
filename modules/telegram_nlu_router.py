@@ -22,7 +22,35 @@ def _topic_from_explicit_platform_request(src: str, low: str) -> str:
         cleaned,
     )
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.:;!-")
+    generic_tokens = {
+        "товар", "товара", "листинг", "листинга", "книга", "книги", "принт", "пост", "пин",
+        "все", "поля", "поля,", "теги", "описание", "описания", "файл", "файлы", "метаданные",
+        "связку", "связка", "картинкой", "ссылкой", "тегами",
+    }
+    parts = [re.sub(r"^[^A-Za-zА-Яа-яЁё0-9]+|[^A-Za-zА-Яа-яЁё0-9]+$", "", p) for p in re.split(r"\s+", cleaned)]
+    parts = [p for p in parts if p]
+    if not parts:
+        return ""
+    meaningful = [p for p in parts if p.lower() not in generic_tokens and len(p) > 2]
+    if not meaningful:
+        return ""
+    cleaned = " ".join(meaningful)
     return cleaned[:180].strip()
+
+
+def _default_topic_for_platforms(platforms: list[str]) -> str:
+    first = str((platforms or [""])[0] or "").strip().lower()
+    mapping = {
+        "gumroad": "Digital Product Starter Kit",
+        "etsy": "Printable Product Starter Kit",
+        "amazon_kdp": "Digital Publishing Starter Guide",
+        "kofi": "Digital Download Starter Pack",
+        "printful": "Print Product Starter Design",
+        "twitter": "Product Launch Update",
+        "pinterest": "Product Promotion Pin",
+        "reddit": "Product Launch Discussion",
+    }
+    return mapping.get(first, "Digital Product Starter Kit")
 
 
 def route_owner_dialogue(text: str, active_task: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -250,17 +278,18 @@ def _route_utility_questions(low: str) -> dict[str, Any] | None:
 
 def _route_platform_followup(low: str, active: dict[str, Any]) -> dict[str, Any] | None:
     topic = str(active.get("selected_research_title") or active.get("text") or "").strip()
-    explicit_topic = _topic_from_explicit_platform_request(str(active.get("__current_text") or ""), low)
+    current_text = str(active.get("__current_text") or "")
+    explicit_platforms = _extract_platforms(low)
+    explicit_topic = _topic_from_explicit_platform_request(current_text, low)
     if explicit_topic:
         topic = explicit_topic
+    elif explicit_platforms:
+        topic = ""
 
-    platforms = _extract_platforms(low)
+    platforms = explicit_platforms
     draft_only = any(tok in low for tok in ("чернов", "не публи", "draft"))
     wants_recommended = any(tok in low for tok in ("рекомен", "рекомнд", "recommended"))
     actionish = any(tok in low for tok in ("давай", "сделай", "созда", "запуска", "версию", "теперь", "еще", "ещё", "на "))
-
-    if not topic and not wants_recommended:
-        return None
 
     if draft_only and not platforms:
         return {
@@ -323,6 +352,8 @@ def _route_platform_followup(low: str, active: dict[str, Any]) -> dict[str, Any]
         return None
     if not actionish and not draft_only:
         return None
+    if not topic:
+        topic = _default_topic_for_platforms(platforms)
 
     return {
         "intent": "system_action",

@@ -147,6 +147,21 @@ def _builtin(name: str) -> list[Step]:
             Step("OL12", "опубликуй тестовый пост в твиттер с картинкой, ссылкой и тегами", ["twitter"], ["traceback", "exception"]),
             Step("OL13", "опубликуй тестовый пин в пинтерест", ["pinterest"], ["traceback", "exception"]),
         ]
+    if key == "phase_platform_owner_live_no_reddit":
+        return [
+            Step("ONR01", "зайди на амазон", ["amazon", "вход", "логин"], ["traceback", "exception"]),
+            Step("ONR02", "зайди на этси", ["etsy", "вход", "логин"], ["traceback", "exception"]),
+            Step("ONR03", "зайди на гумроад", ["gumroad", "вход", "логин"], ["traceback", "exception"]),
+            Step("ONR04", "зайди на ко фи", ["ko-fi", "kofi", "вход"], ["traceback", "exception"]),
+            Step("ONR05", "зайди на пинтерест", ["pinterest", "вход", "логин"], ["traceback", "exception"]),
+            Step("ONR06", "создай черновик товара на гумроад и заполни все поля, теги, описание и файлы", ["gumroad"], ["traceback", "exception"]),
+            Step("ONR07", "создай черновик листинга на этси и заполни все поля, теги, описание и файл", ["etsy"], ["traceback", "exception"]),
+            Step("ONR08", "создай черновик книги на амазон кдп и заполни метаданные и файлы", ["amazon", "kdp"], ["traceback", "exception"]),
+            Step("ONR09", "создай товар в ко фи и заполни все поля", ["ko-fi", "kofi"], ["traceback", "exception"]),
+            Step("ONR10", "создай принт через принтфул и проверь связку с этси", ["printful"], ["traceback", "exception"]),
+            Step("ONR11", "опубликуй тестовый пост в твиттер с картинкой, ссылкой и тегами", ["twitter"], ["traceback", "exception"]),
+            Step("ONR12", "опубликуй тестовый пин в пинтерест", ["pinterest"], ["traceback", "exception"]),
+        ]
     if key == "phase_owner_research_chain":
         return [
             Step("RC01", "проведи глубокое исследование ниш цифровых товаров", ["глубокое исследование", "топ-варианты", "рекомендую"], ["traceback", "exception"]),
