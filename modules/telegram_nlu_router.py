@@ -5,10 +5,31 @@ import re
 from typing import Any
 
 
+def _topic_from_explicit_platform_request(src: str, low: str) -> str:
+    text = str(src or "").strip()
+    if not text:
+        return ""
+    if not any(tok in low for tok in ("товар", "листинг", "книг", "кдп", "etsy", "этси", "етси", "gumroad", "гумроад", "amazon", "амаз", "printful", "принтфул", "ko-fi", "kofi", "ко фи", "пост", "пин", "reddit", "реддит", "twitter", "твиттер", "pinterest", "пинтерест")):
+        return ""
+    cleaned = re.sub(
+        r"(?i)\b(создай|создавай|сделай|заполни|подготовь|оформи|редактируй|обнови|опубликуй|запусти|проверь|версию|связку|черновик|draft|на|через|и|потом)\b",
+        " ",
+        text,
+    )
+    cleaned = re.sub(
+        r"(?i)\b(etsy|этси|етси|gumroad|гумроад|amazon|амазон|амаз|kdp|кдп|printful|принтфул|ko-fi|kofi|ко\s*фи|reddit|реддит|twitter|твиттер|x\.com|pinterest|пинтерест)\b",
+        " ",
+        cleaned,
+    )
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.:;!-")
+    return cleaned[:180].strip()
+
+
 def route_owner_dialogue(text: str, active_task: dict[str, Any] | None) -> dict[str, Any] | None:
     src = str(text or "").strip()
     low = src.lower()
     active = dict(active_task or {})
+    active["__current_text"] = src
 
     utility = _route_utility_questions(low)
     if utility:
@@ -229,6 +250,9 @@ def _route_utility_questions(low: str) -> dict[str, Any] | None:
 
 def _route_platform_followup(low: str, active: dict[str, Any]) -> dict[str, Any] | None:
     topic = str(active.get("selected_research_title") or active.get("text") or "").strip()
+    explicit_topic = _topic_from_explicit_platform_request(str(active.get("__current_text") or ""), low)
+    if explicit_topic:
+        topic = explicit_topic
 
     platforms = _extract_platforms(low)
     draft_only = any(tok in low for tok in ("чернов", "не публи", "draft"))

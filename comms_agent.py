@@ -62,6 +62,7 @@ logger = get_logger("comms_agent", agent="comms_agent")
 
 _TELEGRAM_TRACE_DEFAULT = root_path("runtime/telegram_trace.jsonl")
 _WORKING_PLATFORM_TARGETS = PROJECT_ROOT / "runtime" / "working_platform_targets.json"
+_PROTECTED_PLATFORM_TARGETS = PROJECT_ROOT / "runtime" / "protected_platform_targets.json"
 
 
 def _append_telegram_trace_file(path: Path, direction: str, text: str, meta: dict[str, Any] | None = None) -> None:
@@ -131,7 +132,92 @@ def _save_working_platform_targets(data: dict[str, dict[str, Any]]) -> None:
 
 
 def _platform_working_target(platform: str) -> dict[str, Any]:
-    return dict((_load_working_platform_targets().get(str(platform or "").strip().lower()) or {}))
+    p = str(platform or "").strip().lower()
+    out = dict((_load_working_platform_targets().get(p) or {}))
+    if out:
+        out.setdefault("platform", p)
+    return out
+
+
+def _load_protected_platform_targets() -> dict[str, list[dict[str, Any]]]:
+    try:
+        if not _PROTECTED_PLATFORM_TARGETS.exists():
+            return {}
+        data = json.loads(_PROTECTED_PLATFORM_TARGETS.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_protected_platform_targets(data: dict[str, list[dict[str, Any]]]) -> None:
+    try:
+        _PROTECTED_PLATFORM_TARGETS.parent.mkdir(parents=True, exist_ok=True)
+        _PROTECTED_PLATFORM_TARGETS.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _target_identity(current: dict[str, Any]) -> dict[str, str]:
+    if not isinstance(current, dict):
+        return {}
+    out = {
+        "id": str(current.get("id") or "").strip(),
+        "target_slug": str(current.get("target_slug") or current.get("slug") or "").strip(),
+        "target_listing_id": str(current.get("target_listing_id") or current.get("listing_id") or "").strip(),
+        "target_document_id": str(current.get("target_document_id") or current.get("document_id") or current.get("book_id") or "").strip(),
+        "target_product_id": str(current.get("target_product_id") or current.get("product_id") or "").strip(),
+        "url": str(current.get("url") or "").strip(),
+    }
+    return {k: v for k, v in out.items() if v}
+
+
+def _is_target_protected(platform: str, current: dict[str, Any]) -> bool:
+    p = str(platform or "").strip().lower()
+    if not p or not isinstance(current, dict) or not current:
+        return False
+    cur = _target_identity(current)
+    if not cur:
+        return False
+    protected = _load_protected_platform_targets().get(p) or []
+    for item in protected:
+        if not isinstance(item, dict):
+            continue
+        ref = _target_identity(item)
+        if not ref:
+            continue
+        for key in ("id", "target_slug", "target_listing_id", "target_document_id", "target_product_id", "url"):
+            if cur.get(key) and ref.get(key) and cur.get(key) == ref.get(key):
+                return True
+    return False
+
+
+def _protect_platform_target(platform: str, current: dict[str, Any], *, reason: str = "manual_protect") -> None:
+    p = str(platform or "").strip().lower()
+    if not p or not isinstance(current, dict) or not current:
+        return
+    ref = _target_identity(current)
+    if not ref:
+        return
+    data = _load_protected_platform_targets()
+    items = list(data.get(p) or [])
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        old = _target_identity(item)
+        for key in ("id", "target_slug", "target_listing_id", "target_document_id", "target_product_id", "url"):
+            if ref.get(key) and old.get(key) and ref.get(key) == old.get(key):
+                item["protected_reason"] = str(item.get("protected_reason") or reason)
+                item["updated_at"] = datetime.now(timezone.utc).isoformat()
+                data[p] = items
+                _save_protected_platform_targets(data)
+                return
+    fresh = dict(ref)
+    fresh["platform"] = p
+    fresh["protected_reason"] = str(reason or "manual_protect")
+    fresh["updated_at"] = datetime.now(timezone.utc).isoformat()
+    items.append(fresh)
+    data[p] = items
+    _save_protected_platform_targets(data)
 
 
 def _working_target_matches_task(current: dict[str, Any], task_root_id: str) -> bool:
@@ -149,6 +235,8 @@ def _working_target_matches_task(current: dict[str, Any], task_root_id: str) -> 
     if not target_id:
         return False
     if not bool(current.get("mutable", True)):
+        return False
+    if _is_target_protected(str(current.get("platform") or current.get("_platform") or ""), current):
         return False
     if not current_task_root:
         return False
@@ -189,10 +277,21 @@ def _remember_platform_working_target(platform: str, result: dict[str, Any]) -> 
         current["target_product_id"] = rid
     elif p == "printful" and rid:
         current["target_product_id"] = rid
+    incoming_target = {
+        "id": rid,
+        "url": url,
+        "target_slug": current.get("target_slug"),
+        "target_listing_id": current.get("target_listing_id"),
+        "target_document_id": current.get("target_document_id"),
+        "target_product_id": current.get("target_product_id"),
+    }
+    if _is_target_protected(p, current) and _target_identity(current) != _target_identity(incoming_target):
+        return
     if rid:
         current["id"] = rid
     if url:
         current["url"] = url
+    current["platform"] = p
     task_root_id = str(
         result.get("task_root_id")
         or result.get("project_id")
@@ -210,6 +309,7 @@ def _remember_platform_working_target(platform: str, result: dict[str, Any]) -> 
     current["locked"] = bool(is_published)
     if is_published:
         current["locked_reason"] = "published_requires_explicit_target"
+        _protect_platform_target(p, current, reason="published_requires_explicit_target")
     current["status"] = status or current.get("status", "")
     if current:
         current["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -3831,7 +3931,7 @@ class CommsAgent:
                 {
                     "allow_existing_update": reuse_existing,
                     "owner_edit_confirmed": reuse_existing,
-                    "target_slug": target_slug,
+                    "target_slug": target_slug if reuse_existing else "",
                     "operation": "update" if reuse_existing else "create",
                     "keep_unpublished": True,
                 }
@@ -3848,6 +3948,8 @@ class CommsAgent:
                     }
                 )
             payload["draft_only"] = True
+            if not payload.get("operation"):
+                payload["operation"] = "create"
         if platform == "amazon_kdp":
             target_document_id = str(working_target.get("target_document_id") or "").strip()
             if not _working_target_matches_task(working_target, task_root_id):

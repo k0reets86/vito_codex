@@ -1221,7 +1221,7 @@ class GumroadPlatform(BasePlatform):
                         await asyncio.sleep(2)
                     if page.url.rstrip("/").endswith("/products"):
                         if allow_existing_update:
-                            slug_from_api = await _open_product_from_products_page(name) or await _open_existing_product(name, allow_update=True)
+                            slug_from_api = await _open_existing_product(name, allow_update=True)
                         else:
                                 new_pid, new_slug = await _find_newly_created_draft()
                                 if new_slug:
@@ -1231,24 +1231,17 @@ class GumroadPlatform(BasePlatform):
                                     await asyncio.sleep(2)
                                     logger.info("Gumroad: adopted draft after submit redirect", extra={"event": "gumroad_adopt_new_draft", "context": {"product_id": new_pid}})
                                 else:
-                                    # API tokens may be unavailable in browser-only mode; try strict name match in UI.
-                                    ui_slug = await _open_product_from_products_page(name, strict_name_match=True)
-                                    if ui_slug:
-                                        slug_from_api = ui_slug
-                                        await page.goto(f"https://gumroad.com/products/{ui_slug}/edit", wait_until="domcontentloaded")
-                                        await asyncio.sleep(2)
-                                    else:
-                                        # One more recovery pass: reopen creator and continue current flow.
-                                        recovered_new = await _open_new_product_via_products_tab()
-                                        if not recovered_new:
-                                            return {
-                                                "platform": "gumroad",
-                                                "status": "daily_limit",
-                                                "error": "new_draft_not_created_no_existing_update_allowed",
-                                                "url": str(page.url or ""),
-                                                "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
-                                            }
-                                        logger.info("Gumroad: recovered create form after products redirect", extra={"event": "gumroad_recovered_after_redirect"})
+                                    # Never adopt a pre-existing listing by title similarity in create mode.
+                                    recovered_new = await _open_new_product_via_products_tab()
+                                    if not recovered_new:
+                                        return {
+                                            "platform": "gumroad",
+                                            "status": "daily_limit",
+                                            "error": "new_draft_not_created_no_existing_update_allowed",
+                                            "url": str(page.url or ""),
+                                            "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
+                                        }
+                                    logger.info("Gumroad: recovered create form after products redirect", extra={"event": "gumroad_recovered_after_redirect"})
                     elif "/products/" not in page.url:
                         if allow_existing_update:
                             slug_from_api = await _open_existing_product(name, allow_update=True)

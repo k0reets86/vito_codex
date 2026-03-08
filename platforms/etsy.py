@@ -187,9 +187,6 @@ class EtsyPlatform(BasePlatform):
             }
             self._record_browser_lesson(result, source="etsy.publish.browser")
             return result
-        if draft_only and not target_listing_id:
-            allow_existing_update = True
-            owner_edit_confirmed = True
         try:
             from playwright.async_api import async_playwright
         except Exception:
@@ -370,20 +367,13 @@ class EtsyPlatform(BasePlatform):
                 except Exception:
                     pass
                 if allow_existing_update and not target_listing_id:
-                    target_listing_id = await _discover_latest_draft_listing_id()
-                    if target_listing_id:
-                        logger.info(
-                            "Etsy browser flow reusing latest existing draft",
-                            extra={"event": "etsy_reuse_existing_draft", "context": {"listing_id": target_listing_id}},
-                        )
-                    elif draft_only and operation not in {"create", "new"}:
-                        result = {
-                            "platform": "etsy",
-                            "status": "blocked",
-                            "error": "draft_only_requires_existing_draft",
-                        }
-                        self._record_browser_lesson(result, source="etsy.publish.browser")
-                        return result
+                    result = {
+                        "platform": "etsy",
+                        "status": "blocked",
+                        "error": "existing_update_requires_target_listing_id",
+                    }
+                    self._record_browser_lesson(result, source="etsy.publish.browser")
+                    return result
                 existing_ids: set[str] = set()
                 if not allow_existing_update:
                     try:

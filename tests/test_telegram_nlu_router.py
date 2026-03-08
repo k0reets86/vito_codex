@@ -119,3 +119,16 @@ def test_route_owner_dialogue_handles_followup_recommended_without_topic():
     assert result["intent"] == "system_action"
     assert "рекоменд" in result["response"].lower()
     assert "draft" in result["response"].lower()
+
+
+def test_route_owner_dialogue_explicit_platform_request_overrides_old_active_topic():
+    active = {
+        "text": "создай черновик товара на гумроад и заполни все поля, теги, описание и файлы",
+    }
+    result = route_owner_dialogue("создай черновик листинга на этси и заполни все поля, теги, описание и файл", active)
+    assert result is not None
+    assert result["intent"] == "system_action"
+    assert result["platforms"] == ["etsy"]
+    assert "гумроад" not in result["response"].lower()
+    assert "этси" not in result["response"].lower() or "etsy" in result["response"].lower()
+    assert "листинга" in result["response"].lower() or "заполни все поля" in result["response"].lower()

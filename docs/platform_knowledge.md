@@ -2963,3 +2963,47 @@ Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":fa
 Source: https://developer.x.com/en/docs
 Detected rules/content change by hash diff: 6dcd13436059 -> c908e8ba300e.
 Excerpt: X Developer Platform - X Skip to main content X home page English Search... ⌘ K Ask AI Support Developer Console Developer Console Search... Navigation Getting Started X Developer Platform Home X API X Ads API XDKs Tutorials Use Cases Success Stories Status Changelog Developer Console Forums GitHub Getting Started Overview Fundamentals Apps Developer Console Authentication Counting Characters Rate Limits X IDs Security Partners &amp; Customers Partner Directory Customer Directory Request Access Resources Tools and Libraries Tutorials Newsletter Livestreams Billing Support Developer Terms Getting Started X Developer Platform Copy page Build with X’s real-time data and APIs Copy page Pay-per-usage pricing: Now Available Pay only for what you use. Plus, earn free xAI API credits when you purc
+
+## etsy lesson
+
+Status: needs_browser_login
+Source: etsy.publish.browser
+Summary: Etsy browser publish result: needs_browser_login
+Details: error=Etsy browser session required. Run: python3 scripts/etsy_auth_helper.py browser-capture
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: Etsy browser session required. Run: python3 scripts/etsy_auth_helper.py browser-capture
+Evidence: {"status": "needs_browser_login", "listing_id": null, "url": null, "screenshot_path": null, "draft_only": null, "debug": {}}
+
+## etsy lesson
+
+Status: blocked
+Source: etsy.publish.browser
+Summary: Etsy browser publish result: blocked
+Details: error=create_mode_forbids_existing_update
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: create_mode_forbids_existing_update
+Evidence: {"status": "blocked", "listing_id": null, "url": null, "screenshot_path": null, "draft_only": null, "debug": {}}
+
+## etsy lesson
+
+Status: needs_browser_login
+Source: etsy.publish.browser
+Summary: Etsy browser publish result: needs_browser_login
+Details: error=Etsy browser session required. Run: python3 scripts/etsy_auth_helper.py browser-capture
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: Etsy browser session required. Run: python3 scripts/etsy_auth_helper.py browser-capture
+Evidence: {"status": "needs_browser_login", "listing_id": null, "url": null, "screenshot_path": null, "draft_only": null, "debug": {}}
+
+## etsy lesson
+
+Status: blocked
+Source: etsy.publish.browser
+Summary: Etsy browser publish result: blocked
+Details: error=create_mode_forbids_existing_update
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: create_mode_forbids_existing_update
+Evidence: {"status": "blocked", "listing_id": null, "url": null, "screenshot_path": null, "draft_only": null, "debug": {}}

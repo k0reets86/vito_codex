@@ -381,6 +381,54 @@ def test_build_recipe_payload_prefers_draft_first_for_etsy(comms, monkeypatch):
     assert str(payload.get("listing_work_id") or "").startswith(str(payload["task_root_id"]))
 
 
+def test_build_recipe_payload_reuses_only_same_task_target_for_gumroad(comms, monkeypatch):
+    monkeypatch.setattr(
+        "comms_agent._platform_working_target",
+        lambda platform: {
+            "platform": "gumroad",
+            "target_slug": "draft-one",
+            "id": "PID1",
+            "task_root_id": "VTFIXEDROOT123",
+            "mutable": True,
+        },
+    )
+    monkeypatch.setattr("comms_agent.ensure_task_lineage", lambda active, text: ("VTFIXEDROOT123", {"project_id": "VTFIXEDROOT123-P1", "listing_id": "VTFIXEDROOT123-L1", "research_id": "VTFIXEDROOT123-R1", "content_id": "VTFIXEDROOT123-C1", "seo_id": "VTFIXEDROOT123-S1", "publish_id": "VTFIXEDROOT123-PUB1", "metadata_id": "VTFIXEDROOT123-M1"}))
+    platform, payload = comms._build_recipe_payload(
+        "gumroad_publish",
+        live=True,
+        request_text="создай новый товар на гумроад и заполни его",
+    )
+    assert platform == "gumroad"
+    assert payload["allow_existing_update"] is True
+    assert payload["target_slug"] == "draft-one"
+    assert payload["operation"] == "update"
+
+
+def test_build_recipe_payload_does_not_reuse_protected_target_even_with_same_task(comms, monkeypatch):
+    monkeypatch.setattr(
+        "comms_agent._platform_working_target",
+        lambda platform: {
+            "platform": "gumroad",
+            "target_slug": "zrvfrg",
+            "id": "OLD1",
+            "task_root_id": "VTFIXEDROOT123",
+            "mutable": False,
+            "locked": True,
+        },
+    )
+    monkeypatch.setattr("comms_agent._is_target_protected", lambda platform, current: True)
+    monkeypatch.setattr("comms_agent.ensure_task_lineage", lambda active, text: ("VTFIXEDROOT123", {"project_id": "VTFIXEDROOT123-P1", "listing_id": "VTFIXEDROOT123-L1", "research_id": "VTFIXEDROOT123-R1", "content_id": "VTFIXEDROOT123-C1", "seo_id": "VTFIXEDROOT123-S1", "publish_id": "VTFIXEDROOT123-PUB1", "metadata_id": "VTFIXEDROOT123-M1"}))
+    platform, payload = comms._build_recipe_payload(
+        "gumroad_publish",
+        live=True,
+        request_text="создай новый товар на гумроад и заполни его",
+    )
+    assert platform == "gumroad"
+    assert payload["allow_existing_update"] is False
+    assert str(payload.get("target_slug") or "") == ""
+    assert payload["operation"] == "create"
+
+
 @pytest.mark.asyncio
 async def test_run_recipe_direct_remembers_working_target(comms, monkeypatch):
     async def _fake_run_once(self, recipe_name, payload, trace_id=""):
@@ -420,6 +468,37 @@ async def test_run_recipe_direct_remembers_partial_target_even_when_failed(comms
     assert out["status"] == "failed"
     assert saved["gumroad"]["target_slug"] == "draft-one"
     assert saved["gumroad"]["id"] == "abc123"
+
+
+def test_remember_platform_working_target_does_not_override_protected_existing(monkeypatch):
+    saved_targets = {
+        "gumroad": {
+            "platform": "gumroad",
+            "target_slug": "zrvfrg",
+            "id": "OLD1",
+            "url": "https://vitoai.gumroad.com/l/zrvfrg",
+            "task_root_id": "VTOLD",
+            "mutable": False,
+            "locked": True,
+        }
+    }
+    monkeypatch.setattr("comms_agent._load_working_platform_targets", lambda: dict(saved_targets))
+    monkeypatch.setattr("comms_agent._is_target_protected", lambda platform, current: True)
+    captured = {}
+    monkeypatch.setattr("comms_agent._save_working_platform_targets", lambda data: captured.update(data))
+    from comms_agent import _remember_platform_working_target
+
+    _remember_platform_working_target(
+        "gumroad",
+        {
+            "status": "draft",
+            "product_id": "NEW1",
+            "slug": "newdraft",
+            "url": "https://gumroad.com/products/newdraft/edit",
+            "task_root_id": "VTNEW",
+        },
+    )
+    assert captured == {}
 
 
 @pytest.mark.asyncio
