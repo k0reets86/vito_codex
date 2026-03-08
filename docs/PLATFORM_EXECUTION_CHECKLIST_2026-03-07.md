@@ -8,7 +8,7 @@ Rule:
 - В рамках одной задачи использовать один рабочий объект, не плодить дубликаты.
 
 ## Current Active Block
-- `active`: `Gumroad social continuation`
+- `active`: `KDP paperback canonical fork`
 
 ## Done
 
@@ -100,25 +100,6 @@ Rule:
 
 ## Active
 
-### Social package for current product source
-- Status: `active`
-- Current product source:
-  - Etsy listing `4468093584`
-- Goal:
-  - X/Twitter post with image, SEO text, tags, product link
-  - Reddit post with image, SEO text, tags, product link
-  - Pinterest pin with visible metadata, image, outbound product link
-  - reusable runbook for any future product source
-- Current confirmed state:
-  - X has a real public post
-  - Pinterest pin has confirmed outbound Etsy link and description, but title is still not закреплен как надо
-  - Reddit submit still hits anti-abuse style reject after media upload
-- Evidence:
-  - `runtime/twitter_profile_probe.json`
-  - `runtime/social_current_probe.json`
-  - `runtime/pinterest_pin_verify_8921.json`
-  - `runtime/reddit_submit_real_after.txt`
-
 ## Paused Blocked
 
 ### Ko-fi
@@ -133,6 +114,21 @@ Rule:
   - `runtime/kofi_screenshot_probe_manage.png`
 - Next unblock condition:
   - challenge-free entry to Ko-fi home/manage with screenshots
+
+### Reddit social package
+- Status: `paused_blocked`
+- Blocker:
+  - anti-abuse reject after correct browser submit path
+- Confirmed:
+  - profile submit path is correct
+  - media upload path is correct
+  - final submit still returns:
+    - `That was a tricky one. Why don't you try that again.`
+  - browser fallback with Gumroad source also returns:
+    - `submit_rejected_after_media_upload`
+- Evidence:
+  - `runtime/reddit_submit_real_after.txt`
+  - `runtime/reddit_gumroad_publish_attempt.json`
 
 ## Not Done
 
@@ -155,7 +151,7 @@ Rule:
   - browser path is fully localized, but bypass is not found yet
 
 ### X/Twitter social package
-- Status: `not_done`
+- Status: `done`
 - Required:
   - social package must support posting for any current product source:
     - Etsy
@@ -167,14 +163,17 @@ Rule:
   - tags
   - correct product link
   - screenshot evidence
-- Already confirmed:
-  - public post exists:
+- Confirmed:
+  - public Etsy-source post exists:
     - `https://x.com/bot_vito/status/2030350266571141526`
-  - remaining work:
-    - fold this into generic reusable social runbook, not one-off proof only
+  - public Gumroad-source post exists:
+    - `https://x.com/bot_vito/status/2030627652764090711`
+  - image, SEO-style text, hashtags and product link are present
+- Evidence:
+  - `runtime/twitter_gumroad_verify/profile.png`
 
 ### Pinterest social package
-- Status: `not_done`
+- Status: `done`
 - Required:
   - properly оформленный pin
   - нормальный visual
@@ -182,15 +181,17 @@ Rule:
   - outbound link to current product
   - screenshot evidence
   - reusable runbook for future products/platforms
-- Already confirmed:
-  - live pin exists:
+ - Confirmed:
+  - live Etsy-source pin exists:
     - `https://www.pinterest.com/pin/1134203487424108921`
-  - publish-state confirms saved title:
-    - `AI Side Hustle Starter Kit for Creators`
-  - outbound Etsy link confirmed
-  - description visible on pin page confirmed
-- Remaining blocker:
-  - title on final pin page is still rendered as `Vito`, not as product title heading
+  - live Gumroad-source pin exists:
+    - `https://www.pinterest.com/pin/1134203487424140507`
+  - final pin page shows real description block
+  - final pin page shows outbound product link button
+  - publish state stores the intended title/description/url
+ - Evidence:
+  - `runtime/pinterest_pin_verify_8921.json`
+  - `runtime/pinterest_pin_verify_0507/result.json`
 
 ### KDP paperback from published ebook
 - Status: `not_done`
@@ -216,11 +217,17 @@ Rule:
   - `5445436`
 
 ### Gumroad social continuation
-- Status: `active`
+- Status: `done`
 - Required after Gumroad listing exists:
   - X/Twitter post with image/tags/link
   - Reddit post with image/tags/link
   - Pinterest pin with image/link
+- Confirmed:
+  - X post for Gumroad listing:
+    - `https://x.com/bot_vito/status/2030627652764090711`
+  - Pinterest pin for Gumroad listing:
+    - `https://www.pinterest.com/pin/1134203487424140507`
+  - Reddit attempted through correct browser path but is externally blocked and tracked separately under `paused_blocked`
 
 ## Commit Log For This Checklist Wave
 - `5445436` — KDP paperback runbook and pricing flow

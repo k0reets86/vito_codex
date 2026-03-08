@@ -1101,6 +1101,36 @@ Evidence:
 - `runtime/remote_auth/hardcover_pricing_typepath/result.json`
 - `runtime/remote_auth/hardcover_final_verify/result.json`
 
+## Social package runbook
+
+Status: mixed
+Source: screenshot-first live verification
+Summary: The reusable social path is now confirmed on `X` and `Pinterest`, while `Reddit` remains externally blocked on final submit.
+
+Confirmed X path:
+- browser post flow can produce a real permalink on the live profile timeline
+- verify on the profile page by matching the new text probe and extracting `/status/...`
+- confirmed Gumroad-source post:
+  - `https://x.com/bot_vito/status/2030627652764090711`
+
+Confirmed Pinterest path:
+- publish-state accepts title, description, outbound link, and image
+- final pin page must be checked by screenshot, not publish response alone
+- owner-view pin page can emphasize profile name more than the product title, but the real description block and outbound link must be visible
+- confirmed Gumroad-source pin:
+  - `https://www.pinterest.com/pin/1134203487424140507`
+
+Confirmed Reddit anti-pattern / blocker:
+- correct browser path, media upload, and final submit can still end in:
+  - `That was a tricky one. Why don't you try that again.`
+- this is an anti-abuse gate, not a selector bug
+- if this happens after the correct path is proven, mark Reddit as `paused_blocked` instead of faking success
+
+Evidence:
+- `runtime/twitter_gumroad_verify/profile.png`
+- `runtime/pinterest_pin_verify_0507/result.json`
+- `runtime/reddit_gumroad_publish_attempt.json`
+
 ## etsy lesson
 
 Status: needs_browser_login
