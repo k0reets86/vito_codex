@@ -132,7 +132,7 @@ class KofiPlatform(BasePlatform):
         except Exception:
             return {"platform": "kofi", "status": "error", "error": "playwright_not_installed"}
 
-        title = str(content.get("title") or "VITO Ko-fi Product").strip()
+        title = str(content.get("title") or "Working Ko-fi Product").strip()
         description = str(content.get("description") or "").strip()
         price = str(content.get("price") or "5").strip()
         shot = str(PROJECT_ROOT / "runtime" / "kofi_browser_publish.png")
@@ -331,95 +331,140 @@ class KofiPlatform(BasePlatform):
                         "url": page.url,
                     }
 
-                for sel in (
-                    "input[name='postImageTitle']",
-                    "input[name='title']",
-                    "input[placeholder*='Title']",
-                    "input[type='text']",
-                ):
+                # Exact confirmed create flow:
+                # 1. Shop settings -> Add Product
+                # 2. Modal step with #Name/#Description/#Type=DIGITAL
+                # 3. Product editor page with Description/Summary + preview image + asset PDF
+                # 4. Hidden terms checkbox + #saveAndPublishButton
+                add_product = page.get_by_role("button", name="Add Product")
+                if await add_product.count():
+                    await add_product.first.click(timeout=4000)
+                    await page.wait_for_timeout(1200)
                     try:
-                        loc = page.locator(sel)
-                        if await loc.count():
-                            await loc.first.fill(title[:120], timeout=1800)
-                            break
+                        await page.evaluate(
+                            """([t, d]) => {
+                                const name = document.querySelector('#Name');
+                                const desc = document.querySelector('#Description');
+                                const type = document.querySelector('#Type');
+                                if (name) name.value = t;
+                                if (desc) desc.value = d;
+                                if (type) {
+                                    type.value = 'DIGITAL';
+                                    type.dispatchEvent(new Event('change', { bubbles: true }));
+                                }
+                            }""",
+                            [title[:120], description[:3000]],
+                        )
+                        nxt = page.locator("#shopModalNextStep")
+                        if await nxt.count():
+                            await nxt.click(timeout=4000)
+                            await page.wait_for_timeout(2200)
                     except Exception:
-                        continue
-                for sel in (
-                    "textarea[name='postImageDescription']",
-                    "textarea[name='description']",
-                    "textarea[placeholder*='Description']",
-                    "textarea",
-                ):
-                    try:
-                        loc = page.locator(sel)
-                        if await loc.count():
-                            await loc.first.fill(description[:3000], timeout=1800)
-                            break
-                    except Exception:
-                        continue
-                for sel in ("input[name='price']", "input[placeholder*='Price']", "input[inputmode='decimal']"):
-                    try:
-                        loc = page.locator(sel)
-                        if await loc.count():
-                            await loc.first.fill(price, timeout=1800)
-                            break
-                    except Exception:
-                        continue
+                        pass
 
-                # If editor controls are not present, treat as blocked/challenge instead of prepared.
+                # If editor controls are not present even after the modal, treat as blocked.
                 try:
-                    title_inputs = await page.locator("input[name='title'], input[type='text']").count()
-                    desc_areas = await page.locator("textarea[name='description'], textarea").count()
-                    action_buttons = await page.locator(
-                        "button:has-text('Publish'), button:has-text('Save'), button:has-text('Create'), button[type='submit']"
-                    ).count()
-                    if title_inputs == 0 and desc_areas == 0 and action_buttons == 0:
-                        return {
-                            "platform": "kofi",
-                            "status": "blocked",
-                            "error": "editor_controls_not_available",
-                            "url": page.url,
-                        }
+                    if "/shop/items/add" not in (page.url or "").lower():
+                        title_inputs = await page.locator("#Name, input[name='title'], input[type='text']").count()
+                        desc_areas = await page.locator("#Description, textarea[name='description'], textarea").count()
+                        action_buttons = await page.locator("#saveAndPublishButton, #saveDraftButton, button, input[type='submit'], input[type='button']").count()
+                        if title_inputs == 0 and desc_areas == 0 and action_buttons == 0:
+                            return {
+                                "platform": "kofi",
+                                "status": "blocked",
+                                "error": "editor_controls_not_available",
+                                "url": page.url,
+                            }
+                except Exception:
+                    pass
+
+                # Fill exact second-step editor fields.
+                try:
+                    desc_input = page.get_by_label("Description", exact=False)
+                    if await desc_input.count():
+                        await desc_input.first.fill(description[:3000], timeout=3000)
+                except Exception:
+                    pass
+                try:
+                    summary_input = page.get_by_label("Product summary", exact=False)
+                    if await summary_input.count():
+                        await summary_input.first.fill((content.get("summary") or description[:240]).strip()[:240], timeout=3000)
+                except Exception:
+                    pass
+                try:
+                    price_input = page.locator("input[type='number'], input[inputmode='decimal'], #price")
+                    if await price_input.count():
+                        await price_input.first.fill(price, timeout=3000)
+                except Exception:
+                    pass
+
+                image_path = str(content.get("image_path") or content.get("cover_path") or "").strip()
+                if image_path:
+                    try:
+                        file_inputs = page.locator("input[type='file']")
+                        if await file_inputs.count():
+                            await file_inputs.nth(0).set_input_files(image_path)
+                            await page.wait_for_timeout(1500)
+                    except Exception:
+                        pass
+
+                asset_path = str(content.get("file_path") or content.get("pdf_path") or "").strip()
+                if asset_path:
+                    try:
+                        async with page.expect_file_chooser(timeout=7000) as fcinfo:
+                            await page.locator("text=Upload a file").click(timeout=4000)
+                        fc = await fcinfo.value
+                        await fc.set_files(asset_path)
+                        await page.wait_for_timeout(1800)
+                    except Exception:
+                        pass
+
+                try:
+                    await page.evaluate(
+                        """() => {
+                            const cb = document.querySelector('#agreeWithShopTerms');
+                            if (cb) {
+                                cb.checked = true;
+                                cb.dispatchEvent(new Event('input', { bubbles: true }));
+                                cb.dispatchEvent(new Event('change', { bubbles: true }));
+                            }
+                        }"""
+                    )
                 except Exception:
                     pass
 
                 clicked = False
-                for txt in ("Publish", "Save", "Create", "Create product", "Post"):
-                    try:
-                        btn = page.get_by_role("button", name=txt)
-                        if await btn.count():
-                            await btn.first.click(timeout=2500)
-                            await page.wait_for_timeout(1500)
-                            clicked = True
-                            break
-                    except Exception:
-                        continue
-                if not clicked:
-                    for sel in (
-                        "button:has-text('Publish')",
-                        "button:has-text('Save')",
-                        "button:has-text('Create')",
-                        "button[type='submit']",
-                        "input[type='submit']",
-                    ):
-                        try:
-                            loc = page.locator(sel)
-                            if await loc.count():
-                                await loc.first.click(timeout=2500)
-                                await page.wait_for_timeout(1500)
-                                clicked = True
-                                break
-                        except Exception:
-                            continue
-
-                # Try extracting created shop-item URL if visible.
-                detected_url = ""
                 try:
-                    href = await page.locator("a[href*='ko-fi.com/s/']").first.get_attribute("href")
-                    if href:
-                        detected_url = href if href.startswith("http") else f"https://ko-fi.com{href}"
+                    exact_publish = page.locator("#saveAndPublishButton")
+                    if await exact_publish.count():
+                        await exact_publish.click(timeout=5000)
+                        await page.wait_for_timeout(4500)
+                        clicked = True
                 except Exception:
-                    pass
+                    clicked = False
+
+                detected_url = ""
+                if clicked:
+                    try:
+                        if "/s/" in (page.url or ""):
+                            detected_url = page.url
+                    except Exception:
+                        pass
+                    try:
+                        href = await page.locator("a[href*='/s/']").first.get_attribute("href")
+                        if href:
+                            detected_url = href if href.startswith("http") else f"https://ko-fi.com{href}"
+                    except Exception:
+                        pass
+                    if not detected_url:
+                        try:
+                            await page.goto("https://ko-fi.com/shop/settings?productType=0", wait_until="domcontentloaded", timeout=90000)
+                            await page.wait_for_timeout(3500)
+                            href = await page.locator("a[href*='/s/']").first.get_attribute("href")
+                            if href:
+                                detected_url = href if href.startswith("http") else f"https://ko-fi.com{href}"
+                        except Exception:
+                            pass
                 if not detected_url:
                     detected_url = created_url
 

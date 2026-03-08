@@ -128,20 +128,37 @@ Use these as defaults unless Gumroad UI indicates different requirements.
 - Free posts are limited to 25 MB per image, while Contributors may embed audio up to 200 MB and rely on external video hosts (YouTube, Vimeo, TikTok) for video content. citeturn7search0
 - Ko-fi enforces payment-provider rules (PayPal/Stripe), so anything disallowed by those partners—unlicensed goods, prohibited services, or trademark violations—risks removal or account suspension; review Ko-fi’s content policy before publishing. citeturn7search8
 
-### Ko-fi — verified browser gate (2026-03-07)
-- Screenshot-first probe with saved browser state confirmed the current live blocker:
-  - `https://ko-fi.com/` -> title `Just a moment...`
-  - `https://ko-fi.com/shop/settings?productType=0` -> title `Just a moment...`
-- Current evidence:
-  - `runtime/kofi_screenshot_probe.json`
-  - `runtime/kofi_screenshot_probe_home.png`
-  - `runtime/kofi_screenshot_probe_manage.png`
-- Interpretation:
-  - current browser session is not enough to pass Ko-fi anti-bot / Cloudflare gate automatically
-  - do not report Ko-fi create/publish as `prepared` or `created` until the challenge is actually passed
-- Runbook rule:
-  - first confirm challenge-free entry to home/manage with screenshots
-  - only after that continue to shop/product editor flow
+### Ko-fi — verified browser create/publish runbook (2026-03-08)
+- Headless/browser-guess path is unreliable; use screenshot-first headed flow.
+- Confirmed exact path:
+  - `https://ko-fi.com/shop/settings?productType=0`
+  - accept cookie banner if present
+  - click `Add Product`
+  - modal step:
+    - set `#Name`
+    - set hidden `#Description`
+    - set `#Type='DIGITAL'`
+    - click `#shopModalNextStep`
+  - editor step on `/shop/items/add`:
+    - fill visible `Description`
+    - fill `Product summary`
+    - preview image goes through the first hidden file input
+    - buyer asset file must be uploaded via `Upload a file` file chooser path, not by filling file inputs blindly
+    - fill price
+    - hidden checkbox `#agreeWithShopTerms` must be set programmatically
+    - final submit is exact input `#saveAndPublishButton`
+- Confirmed published object:
+  - `https://ko-fi.com/s/c6c9031adb`
+- Evidence:
+  - `runtime/kofi_publish_exact3/01_before_submit.png`
+  - `runtime/kofi_publish_exact3/02_after_submit.png`
+  - `runtime/kofi_publish_exact3/03_settings_reload.png`
+  - `runtime/kofi_publish_exact3/04_public_verify.png`
+  - `runtime/kofi_publish_exact3/result.json`
+- Anti-patterns:
+  - do not trust headless-only Cloudflare results as final truth
+  - do not treat generic `Save`/`Publish` button scans as enough on Ko-fi
+  - do not treat plain file inputs as the asset uploader; exact `Upload a file` chooser path is required
 
 ## Payhip — Large Digital Files and Controls
 - Payhip accepts any file format, up to 5 GB per file, with unlimited storage and bandwidth; bundles and multiple asset uploads are supported, and embed buttons extend purchases beyond the website. citeturn8search0turn8search5

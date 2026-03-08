@@ -116,20 +116,36 @@ Rule:
 
 ## Active
 
-## Paused Blocked
-
 ### Ko-fi
-- Status: `paused_blocked`
-- Blocker:
-  - anti-bot / Cloudflare gate
+- Status: `done`
+- Working object:
+  - published product `https://ko-fi.com/s/c6c9031adb`
 - Confirmed:
-  - home page and manage/shop page both land on `Just a moment...`
+  - challenge-free entry to Ko-fi home/manage in headed browser mode
+  - `Add Product` modal opens
+  - exact modal path works:
+    - `#Name`
+    - hidden `#Description`
+    - `#Type = DIGITAL`
+    - `#shopModalNextStep`
+  - item editor opens on `/shop/items/add`
+  - preview image upload works through the first file input
+  - asset PDF upload works only through `Upload a file` file chooser path
+  - required terms checkbox is hidden and must be set via `#agreeWithShopTerms`
+  - final commit button is exact input `#saveAndPublishButton`
+  - publish lands on the public product URL with share modal
+  - product survives reload in shop settings and public page
 - Evidence:
-  - `runtime/kofi_screenshot_probe.json`
-  - `runtime/kofi_screenshot_probe_home.png`
-  - `runtime/kofi_screenshot_probe_manage.png`
-- Next unblock condition:
-  - challenge-free entry to Ko-fi home/manage with screenshots
+  - `runtime/kofi_reprobe/01.png`
+  - `runtime/kofi_reprobe/02.png`
+  - `runtime/kofi_reprobe/03.png`
+  - `runtime/kofi_publish_exact3/01_before_submit.png`
+  - `runtime/kofi_publish_exact3/02_after_submit.png`
+  - `runtime/kofi_publish_exact3/03_settings_reload.png`
+  - `runtime/kofi_publish_exact3/04_public_verify.png`
+  - `runtime/kofi_publish_exact3/result.json`
+
+## Paused Blocked
 
 ### Reddit social package
 - Status: `paused_blocked`
