@@ -56,6 +56,7 @@ from modules.auth_broker import AuthBroker
 from modules.data_lake import DataLake
 from modules.status_snapshot import build_status_snapshot, render_status_snapshot
 from modules.task_lineage import ensure_task_lineage
+from modules.telegram_nlu_router import route_owner_dialogue
 
 logger = get_logger("comms_agent", agent="comms_agent")
 
@@ -3090,7 +3091,10 @@ class CommsAgent:
     def _normalize_owner_control_reply(self, source_text: str, response_text: str) -> str:
         src = str(source_text or "").strip().lower()
         out = str(response_text or "").strip()
+        low_out = out.lower()
         if src.isdigit():
+            if "зафиксировал вариант" in low_out:
+                return out
             idx = int(src)
             return f"Зафиксировал вариант {idx}. Жду следующую команду."
         platform = ""
@@ -3099,7 +3103,11 @@ class CommsAgent:
         except Exception:
             platform = ""
         if platform and any(tok in src for tok in ("создавай", "сделай", "запускай", "публикуй")):
+            if "собираю" in low_out and platform in low_out:
+                return out
             return f"Собираю и запускаю работу на {platform}."
+        if any(tok in src for tok in ("соц", "social", "соцпакет")) and any(tok in low_out for tok in ("x", "pinterest", "соц")):
+            return out
         return out
 
     async def _reject_stranger(self, update: Update) -> bool:

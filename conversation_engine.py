@@ -34,6 +34,7 @@ from modules.conversation_memory import ConversationMemory
 from modules.cancel_state import CancelState
 from modules.owner_task_state import OwnerTaskState
 from modules.status_snapshot import build_status_snapshot, render_status_snapshot
+from modules.telegram_nlu_router import route_owner_dialogue
 from llm_router import LLMRouter, TaskType, MODEL_REGISTRY
 from modules.prompt_guard import wrap_untrusted_text
 
@@ -170,6 +171,34 @@ class ConversationEngine:
                     return {"response": response, "intent": Intent.QUESTION.value}
             except Exception:
                 pass
+        if self.owner_task_state:
+            try:
+                active = self.owner_task_state.get_active() or {}
+            except Exception:
+                active = {}
+            routed = route_owner_dialogue(text, active)
+            if routed is not None:
+                selected = routed.get("selected")
+                selected_idx = int(routed.get("selected_idx") or 0)
+                if selected_idx and isinstance(selected, dict):
+                    try:
+                        self.owner_task_state.enrich_active(
+                            selected_research_option=selected_idx,
+                            selected_research_json=json.dumps(selected, ensure_ascii=False),
+                            selected_research_title=str(selected.get("title") or "")[:180],
+                            selected_research_platform=",".join(routed.get("platforms") or []),
+                        )
+                    except Exception:
+                        pass
+                try:
+                    self._ensure_owner_task_state(text, routed.get("intent"))
+                    self._add_turn("user", text, Intent.SYSTEM_ACTION if routed.get("intent") == Intent.SYSTEM_ACTION.value else Intent.QUESTION)
+                    if routed.get("response"):
+                        self._add_turn("assistant", routed["response"])
+                except Exception:
+                    pass
+                routed["nlu_tones"] = self._detect_tone(text)
+                return routed
         deterministic = await self._deterministic_owner_route(text)
         if deterministic is not None:
             try:
