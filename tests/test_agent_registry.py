@@ -123,6 +123,9 @@ class FakeMemoryAwareAgent(BaseAgent):
                 "status": "ok",
                 "contract_agent": (kwargs.get("__agent_contract") or {}).get("agent"),
                 "memory_agent": (kwargs.get("__agent_memory_context") or {}).get("agent"),
+                "task_root_id": kwargs.get("task_root_id"),
+                "listing_id": kwargs.get("listing_id"),
+                "agent_work_id": kwargs.get("agent_work_id"),
             },
         )
 
@@ -311,6 +314,30 @@ class TestRegistryLifecycle:
         assert result.success is True
         assert result.output["contract_agent"] == "memory_agent"
         assert result.output["memory_agent"] == "memory_agent"
+        assert str(result.output["task_root_id"] or "").startswith("VT")
+        assert str(result.output["listing_id"] or "").startswith(str(result.output["task_root_id"]))
+        assert str(result.output["agent_work_id"] or "").startswith(str(result.output["task_root_id"]))
+        assert str(result.metadata.get("task_root_id") or "").startswith("VT")
+        assert str(result.metadata.get("listing_work_id") or "").startswith(str(result.metadata["task_root_id"]))
+        assert str(result.metadata.get("agent_work_id") or "").startswith(str(result.metadata["task_root_id"]))
+
+    @pytest.mark.asyncio
+    async def test_dispatch_preserves_explicit_task_root_id_across_delegation(self):
+        registry = AgentRegistry()
+        owner = FakeOwnerOrchestratingAgent("owner", ["main_cap"])
+        helper = FakeMemoryAwareAgent("helper", ["helper_cap"])
+        verifier = FakeVerifierAgent("judge", ["quality_review"], approved=True)
+        registry.register(owner)
+        registry.register(helper)
+        registry.register(verifier)
+
+        result = await registry.dispatch("main_cap", task_root_id="VTTESTROOT123ABC")
+        assert result is not None
+        assert result.success is True
+        assert result.metadata.get("task_root_id") == "VTTESTROOT123ABC"
+        assert str(result.metadata.get("agent_work_id") or "").startswith("VTTESTROOT123ABC")
+        delegations = list(result.metadata.get("delegations") or [])
+        assert delegations
 
     def test_get_all_statuses(self):
         registry = AgentRegistry()

@@ -16,6 +16,7 @@ from typing import Optional
 from agents.base_agent import BaseAgent, TaskResult
 from config.logger import get_logger
 from modules.agent_contracts import get_agent_contract
+from modules.agent_lineage import attach_lineage_metadata, ensure_lineage_payload
 from modules.skill_matrix_v2 import build_agent_skill_matrix_v2, validate_agent_skill_matrix_v2
 from modules.step_contract import validate_step_output
 
@@ -215,6 +216,11 @@ class AgentRegistry:
             )
             try:
                 task_kwargs = dict(kwargs)
+                task_kwargs, artifact_map = ensure_lineage_payload(
+                    task_type=task_type,
+                    kwargs=task_kwargs,
+                    responsible_agent=agent.name,
+                )
                 orchestration_plan = {}
                 try:
                     orchestration_plan = agent.build_task_orchestration(task_type, **task_kwargs) or {}
@@ -249,6 +255,17 @@ class AgentRegistry:
                             __orchestration_depth=orchestration_depth + 1,
                             __orchestrated_by=agent.name,
                             __exclude_agents=list(exclude_agents | {agent.name}),
+                            task_root_id=task_kwargs.get("task_root_id"),
+                            project_id=task_kwargs.get("project_id"),
+                            listing_id=task_kwargs.get("listing_id"),
+                            research_id=task_kwargs.get("research_id"),
+                            content_id=task_kwargs.get("content_id"),
+                            seo_id=task_kwargs.get("seo_id"),
+                            publish_id=task_kwargs.get("publish_id"),
+                            metadata_id=task_kwargs.get("metadata_id"),
+                            cover_id=task_kwargs.get("cover_id"),
+                            preview_id=task_kwargs.get("preview_id"),
+                            social_image_id=task_kwargs.get("social_image_id"),
                             **d_kwargs,
                         )
                         delegation_results.append(
@@ -300,7 +317,7 @@ class AgentRegistry:
                             md.setdefault("resources", list(orchestration_plan.get("resources") or []))
                         if contract_errors:
                             md["contract_errors"] = contract_errors
-                        result.metadata = md
+                        result.metadata = attach_lineage_metadata(md, task_kwargs, task_type, responsible_agent=agent.name)
                 except Exception:
                     pass
                 # Owner-level verification step (optional)
