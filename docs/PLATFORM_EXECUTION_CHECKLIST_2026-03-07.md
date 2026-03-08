@@ -8,9 +8,36 @@ Rule:
 - В рамках одной задачи использовать один рабочий объект, не плодить дубликаты.
 
 ## Current Active Block
-- `active`: `Social package for current product source`
+- `active`: `Gumroad social continuation`
 
 ## Done
+
+### Gumroad live package
+- Status: `done`
+- Working object:
+  - draft -> published product `zrvfrg`
+  - product id `EAmYSYLXn0XXHCqMZaYTwg==`
+- Confirmed:
+  - duplicate drafts removed, only one working Gumroad product remains
+  - one main PDF attached and survives reload
+  - top public hero-cover visible above the title
+  - public cover/gallery updated with new generated visuals
+  - dedicated thumbnail uploader path confirmed and thumbnail replaced after reload
+  - stale square image removed from description editor; public page no longer shows the old blank/white block above the title
+  - description and summary survive reload
+  - category/tags survive reload
+  - product is published
+  - public page opens with title, price, description, image and CTA
+- Evidence:
+  - `runtime/gumroad_products_after_cleanup.json`
+  - `runtime/gumroad_zrvfrg_ui_recover.json`
+  - `runtime/gumroad_zrvfrg_desc_after_savecontinue.json`
+  - `runtime/gumroad_zrvfrg_public_probe.json`
+  - `runtime/gumroad_visual_apply/result.json`
+  - `runtime/gumroad_thumb_replace_exact/result.json`
+  - `runtime/gumroad_public_img_map.json`
+  - `runtime/gumroad_remove_old_desc_image_ui/result.json`
+  - `runtime/gumroad_cover_exact_input2/result.json`
 
 ### Etsy existing draft
 - Status: `done`
@@ -42,6 +69,34 @@ Rule:
 - Commits:
   - `3470fe0`
   - `e567541`
+
+### KDP hardcover
+- Status: `done`
+- Working object:
+  - `document_id = A8T0ZQ5CNS6`
+- Confirmed:
+  - one existing hardcover draft reused; no new hardcover drafts created
+  - `Details` saved and survive reload:
+    - title `AI Side Hustle Prompt Journal`
+    - subtitle `A guided workbook for digital product ideas, offers, and launch planning`
+    - author `Editorial Team`
+    - 7 keyword slots filled
+  - `Content` saved and survive reload:
+    - hardcover manuscript uploaded successfully
+    - hardcover wrap cover rebuilt from KDP Cover Calculator dimensions and uploaded successfully
+    - print previewer opened and approval path completed
+  - `Pricing` saved and survives reload:
+    - `US price = 18.99`
+    - no `earlier page issue` remains after preview approval
+  - Bookshelf still shows the same hardcover draft object
+- Evidence:
+  - `runtime/remote_auth/hardcover_error_probe/result.json`
+  - `runtime/remote_auth/kdp_cover_calc_submit/result.json`
+  - `runtime/remote_auth/hardcover_processing_wait/result.json`
+  - `runtime/remote_auth/hardcover_previewer_approve/04_after_approve.png`
+  - `runtime/remote_auth/hardcover_details_fix/result.json`
+  - `runtime/remote_auth/hardcover_pricing_typepath/result.json`
+  - `runtime/remote_auth/hardcover_final_verify/result.json`
 
 ## Active
 
@@ -160,15 +215,8 @@ Rule:
 - Commit:
   - `5445436`
 
-### KDP hardcover
-- Status: `not_done`
-- Required:
-  - use hardcover fork from KDP UI
-  - create one hardcover draft
-  - fill it fully
-
 ### Gumroad social continuation
-- Status: `not_done`
+- Status: `active`
 - Required after Gumroad listing exists:
   - X/Twitter post with image/tags/link
   - Reddit post with image/tags/link

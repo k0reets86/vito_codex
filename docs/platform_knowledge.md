@@ -7,6 +7,19 @@ Updated: 2026-02-23
 - Paperback cover PDF must include bleed: images to edge must extend 0.125" (3.2mm) beyond trim on all sides; safe text/images at least 0.25" (6.4mm) from edge.
 - Spine text only if >79 pages; leave margin around spine text.
 - Hardcover cover requires wrap: extend 0.51" (15mm) beyond edge; keep text/images 0.635" (16mm) from edge; hinge margin 0.4" (10mm).
+- Hardcover browser-first runbook update (2026-03-07):
+  - exact live fork is the Bookshelf button `+ Create hardcover`
+  - live route opens as:
+    - `/en_US/title-setup/hardcover/new/details?existing=<ebook_id>&item=<paperback_item_id>`
+  - `Hardcover Pricing` route is:
+    - `/en_US/title-setup/hardcover/new/pricing?existing=<ebook_id>&item=<paperback_item_id>`
+  - pricing page uses real fields:
+    - `input[name='data[print_book][amazon_channel][us][price_vat_exclusive]']`
+    - same pattern for `uk/de/fr/es/it/nl/pl/se/be/ie`
+  - current external blocker:
+    - hidden modal `Title creation limit exceeded`
+    - text: `You have reached the weekly title creation limit for this format.`
+  - do not report hardcover creation as available until this KDP weekly limit clears
 
 ## Amazon KDP — eBook Cover
 - Format: JPEG or TIFF.
@@ -1039,6 +1052,54 @@ Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":fa
 Source: https://developer.x.com/en/docs
 Detected rules/content change by hash diff: 9b0624041616 -> 6dcd13436059.
 Excerpt: X Developer Platform - X Skip to main content X home page English Search... ⌘ K Ask AI Support Developer Console Developer Console Search... Navigation Getting Started X Developer Platform Home X API X Ads API XDKs Tutorials Use Cases Success Stories Status Changelog Developer Console Forums GitHub Getting Started Overview Fundamentals Apps Developer Console Authentication Counting Characters Rate Limits X IDs Security Partners &amp; Customers Partner Directory Customer Directory Request Access Resources Tools and Libraries Tutorials Newsletter Livestreams Billing Support Developer Terms Getting Started X Developer Platform Copy page Build with X’s real-time data and APIs Copy page Pay-per-usage pricing: Now Available Pay only for what you use. Plus, earn free xAI API credits when you purc
+
+## KDP hardcover runbook
+
+Status: draft_ready
+Source: screenshot-first live verification
+Summary: Existing hardcover draft `A8T0ZQ5CNS6` can be fully filled and saved without creating new objects when the flow is handled in the correct order.
+
+Confirmed order:
+- start from the existing hardcover draft only; do not create another hardcover object
+- `Details` first:
+  - title
+  - subtitle
+  - author
+  - description
+  - 7 keyword slots
+  - save and reload verification
+- `Content` second:
+  - hardcover manuscript must meet print minimum page count; 24 pages fail, 80 pages worked
+  - hardcover wrap cover must match KDP Cover Calculator dimensions exactly
+  - direct upload is valid after choosing the print-ready PDF path
+  - after file uploads, KDP can still block pricing until `Launch Previewer` is opened and approved
+- `Previewer` third:
+  - `Launch Previewer`
+  - wait for previewer to load
+  - click `Approve`
+  - return to content and reload
+- `Pricing` last:
+  - price field path works after preview approval
+  - `Save as Draft` must be verified by reload, not by click alone
+
+Confirmed values on `A8T0ZQ5CNS6`:
+- title: `AI Side Hustle Prompt Journal`
+- subtitle: `A guided workbook for digital product ideas, offers, and launch planning`
+- author: `Editorial Team`
+- US price: `18.99`
+
+Confirmed anti-patterns:
+- do not treat `AI-generated questionnaire` as the main blocker when content page explicitly says preview approval is required
+- do not use approximate hardcover cover sizes; use KDP Cover Calculator dimensions
+- do not keep `Vito Bot` / bot branding in author or title fields
+- do not create another hardcover draft when an existing one is already linked and editable
+
+Evidence:
+- `runtime/remote_auth/kdp_cover_calc_submit/result.json`
+- `runtime/remote_auth/hardcover_previewer_approve/04_after_approve.png`
+- `runtime/remote_auth/hardcover_details_fix/result.json`
+- `runtime/remote_auth/hardcover_pricing_typepath/result.json`
+- `runtime/remote_auth/hardcover_final_verify/result.json`
 
 ## etsy lesson
 
@@ -2707,3 +2768,98 @@ Evidence: {"status": "draft", "url": "https://kdp.amazon.com/bookshelf", "screen
 - Correct final submit button is `button.btn[name="submit"][value="form"]`.
 - Media upload can complete (`Your video has uploaded!`) and still be rejected on final submit with: `That was a tricky one. Why don't you try that again.`
 - This is a confirmed anti-abuse / submit gate, not a selector or auth failure.
+
+## gumroad lesson
+
+Status: draft
+Source: gumroad.publish
+URL: https://gumroad.com/l/mbeihe
+Summary: Gumroad listing run finished with status=draft
+Details: Gumroad publish attempt on slug=mbeihe finished with status=draft. URL=https://gumroad.com/l/mbeihe. Error=none. Files=['the_ai_side_hustle_playbook_v2', 'the_ai_side_hustle_playbook_v2', 'the_ai_side_hustle_playbook_v2']
+Lessons:
+- Reuse the same working draft by explicit slug/id instead of creating a new listing.
+- Main PDF can be attached during the content/file flow and should be verified in product state.
+Evidence: {"slug": "mbeihe", "error": "", "files_attached": ["the_ai_side_hustle_playbook_v2", "the_ai_side_hustle_playbook_v2", "the_ai_side_hustle_playbook_v2"], "product_id": "qLQ3-amBZv9-vZngcOsefw==", "task_root_id": "gumroad-mbeihe-repair"}
+
+## gumroad lesson
+
+Status: draft
+Source: gumroad.publish
+URL: https://gumroad.com/l/zrvfrg
+Summary: Gumroad listing run finished with status=draft
+Details: Gumroad publish attempt on slug=zrvfrg finished with status=draft. URL=https://gumroad.com/l/zrvfrg. Error=tags_not_set. Files=['digital_product_automation_product', 'digital_product_automation_product', 'digital_product_automation_product', 'digital_product_automation_product', 'digital_product_automation_cover_1280x720']
+Lessons:
+- Reuse the same working draft by explicit slug/id instead of creating a new listing.
+- Cover/preview media and the main product file must be treated as separate artifact channels.
+Anti-patterns:
+- Simple click on tag suggestions is not sufficient; Gumroad tag widget needs explicit commit behavior.
+Evidence: {"slug": "zrvfrg", "error": "tags_not_set", "files_attached": ["digital_product_automation_product", "digital_product_automation_product", "digital_product_automation_product", "digital_product_automation_product", "digital_product_automation_cover_1280x720"], "product_id": "EAmYSYLXn0XXHCqMZaYTwg==", "task_root_id": "gumroad-fresh-1772963045"}
+
+## gumroad lesson
+
+Status: draft
+Source: gumroad.publish
+URL: https://gumroad.com/l/zrvfrg
+Summary: Gumroad listing run finished with status=draft
+Details: Gumroad publish attempt on slug=zrvfrg finished with status=draft. URL=https://gumroad.com/l/zrvfrg. Error=tags_not_set. Files=['digital_product_automation_product', 'digital_product_automation_product', 'digital_product_automation_product', 'digital_product_automation_product', 'digital_product_automation_cover_1280x720']
+Lessons:
+- Reuse the same working draft by explicit slug/id instead of creating a new listing.
+- Cover/preview media and the main product file must be treated as separate artifact channels.
+Anti-patterns:
+- Simple click on tag suggestions is not sufficient; Gumroad tag widget needs explicit commit behavior.
+Evidence: {"slug": "zrvfrg", "error": "tags_not_set", "files_attached": ["digital_product_automation_product", "digital_product_automation_product", "digital_product_automation_product", "digital_product_automation_product", "digital_product_automation_cover_1280x720"], "product_id": "EAmYSYLXn0XXHCqMZaYTwg==", "task_root_id": "gumroad-zrvfrg-restore-1772963430"}
+
+## Gumroad — confirmed live package on zrvfrg
+
+Status: published
+Source: screenshot-first live verification
+URL: https://vitoai.gumroad.com/l/zrvfrg
+Summary: One fresh-only Gumroad product was created, cleaned up, completed and published on a single working object.
+
+Confirmed required elements:
+- one active working object only; duplicate drafts must be deleted before continuing work
+- main deliverable must be attached on `Content`, not via product image uploaders
+- `Product` tab handles cover/gallery and thumbnail image
+- `Product` tab description is saved via `Save and continue`, not `Save changes`
+- `Share` tab stores discovery metadata; category may resolve to a concrete child inside the chosen business branch
+- public page must be verified by `screenshot + URL + DOM/state`
+- working editor root is `https://gumroad.com/products/{slug}/edit`; the old `/edit/product` route can return a 404 shell and must not be treated as the live editor
+- cover/gallery uploader on the Product page uses the image input with `accept=.jpeg,.jpg,.png,.gif,.webp` and `multiple=true`
+- real hero-cover slot is not the same as content images: `Cover -> Upload images or videos -> Computer files` opens a dedicated image input with `accept=.jpeg,.jpg,.png,.gif,.mov,.m4v,.mpeg,.mpg,.mp4,.wmv`; this path must be used for the top public hero image
+- thumbnail has its own section and its own uploader path: after clicking `Remove` in the Thumbnail section, a dedicated non-multiple image input appears and must receive the square thumb asset
+- after thumbnail upload, `Save changes` + reload verification are mandatory
+- old visual artifacts can also hide inside the rich-text Description as image nodes; they must be removed through the editor itself (select image node -> Backspace -> `Save and continue`), not by raw DOM surgery
+- on the public page, `vr7rfc0t795evzs6vekodnhzp5if` is the seller avatar, not the product cover
+- confirmed fresh visual assets on `zrvfrg`:
+  - hero-cover on public page: `pviwezyd1qq5215l2vb4f6y96dr1`
+  - public cover/gallery: `emriywhhmvnafmgh8n5lco2ux1eq`, `awqrc0cyxdwclu5777pu1gmeki1g`
+  - thumbnail after reload: `o54mtt4thsznol64l6wwllfxh24o`
+
+Confirmed anti-patterns:
+- do not reuse old Gumroad drafts when the current mode is `fresh-only`
+- do not call direct `POST /links/{slug}` with partial product JSON; it can wipe `files`, `rich_content`, `description`, `tags` and category
+- do not treat repeated create after timeout as safe; first verify whether a real draft already exists
+- do not confuse seller avatar with the listing cover when validating the public page
+
+Required Gumroad checklist going forward:
+- title
+- summary
+- description
+- one main PDF
+- thumbnail / preview image
+- category
+- tags
+- public URL verification
+- optional social continuation only after the live package is confirmed
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: c9da33d7475b -> 7785109a4385.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"b332cd40673b49dcbd367c19ce76db36","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## twitter rules update
+
+Source: https://developer.x.com/en/docs
+Detected rules/content change by hash diff: 6dcd13436059 -> c908e8ba300e.
+Excerpt: X Developer Platform - X Skip to main content X home page English Search... ⌘ K Ask AI Support Developer Console Developer Console Search... Navigation Getting Started X Developer Platform Home X API X Ads API XDKs Tutorials Use Cases Success Stories Status Changelog Developer Console Forums GitHub Getting Started Overview Fundamentals Apps Developer Console Authentication Counting Characters Rate Limits X IDs Security Partners &amp; Customers Partner Directory Customer Directory Request Access Resources Tools and Libraries Tutorials Newsletter Livestreams Billing Support Developer Terms Getting Started X Developer Platform Copy page Build with X’s real-time data and APIs Copy page Pay-per-usage pricing: Now Available Pay only for what you use. Plus, earn free xAI API credits when you purc

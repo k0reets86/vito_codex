@@ -411,13 +411,31 @@ def _prepare_kdp_cover_file(cover_path: str, dbg: Path, stamp: str) -> str:
         return ""
     kind = _kdp_doc_kind()
     if kind in {"paperback", "hardcover"}:
-        target_width_in = 12.304 if kind == "paperback" else 13.0
-        target_height_in = 9.25
+        if kind == "paperback":
+            target_width_in = 12.304
+            target_height_in = 9.25
+            front_w_in = 6.0
+            front_h_in = 9.0
+            front_right_margin_in = 0.15
+            spine_offset_in = 0.28
+            back_title = "Paperback Edition"
+            back_subtitle = "Practical workbook for creators and operators."
+        else:
+            # Official KDP cover calculator output for hardcover, 6x9 in,
+            # black & white, white paper, 80 pages, case laminate.
+            target_width_in = 13.944
+            target_height_in = 10.417
+            front_w_in = 6.197
+            front_h_in = 9.236
+            front_right_margin_in = 0.125
+            spine_offset_in = 0.369 + 0.394
+            back_title = "Hardcover Edition"
+            back_subtitle = "A practical workbook for creators and operators."
         dpi = 300
         canvas_w = int(round(target_width_in * dpi))
         canvas_h = int(round(target_height_in * dpi))
-        front_w = int(round(6.0 * dpi))
-        front_h = int(round(9.0 * dpi))
+        front_w = int(round(front_w_in * dpi))
+        front_h = int(round(front_h_in * dpi))
         out = dbg / f"kdp_cover_{kind}_{stamp}.pdf"
         try:
             img = Image.open(src).convert("RGB")
@@ -426,16 +444,17 @@ def _prepare_kdp_cover_file(cover_path: str, dbg: Path, stamp: str) -> str:
             # Reserve the right side for the front cover and keep left/spine neutral.
             front = img.copy()
             front.thumbnail((front_w, front_h))
-            front_x = canvas_w - front.width - int(round(0.15 * dpi))
+            front_x = canvas_w - front.width - int(round(front_right_margin_in * dpi))
             front_y = max(0, (canvas_h - front.height) // 2)
             canvas.paste(front, (front_x, front_y))
 
-            # Add minimal spine guide and back-cover title so the PDF is not blank.
+            # Add a neutral back cover and visible spine guide so the wrap PDF
+            # is valid even when only front art is generated.
             draw = ImageDraw.Draw(canvas)
-            spine_x = max(0, front_x - int(round(0.28 * dpi)))
+            spine_x = max(0, front_x - int(round(spine_offset_in * dpi)))
             draw.line((spine_x, 0, spine_x, canvas_h), fill=(220, 220, 220), width=3)
-            draw.text((int(round(0.35 * dpi)), int(round(0.45 * dpi))), "Paperback Edition", fill="black")
-            draw.text((int(round(0.35 * dpi)), int(round(0.9 * dpi))), "Practical workbook for creators and operators.", fill="black")
+            draw.text((int(round(0.35 * dpi)), int(round(0.45 * dpi))), back_title, fill="black")
+            draw.text((int(round(0.35 * dpi)), int(round(0.9 * dpi))), back_subtitle, fill="black")
 
             canvas.save(out, format="PDF", resolution=float(dpi))
             return str(out)
@@ -468,7 +487,8 @@ def _prepare_kdp_manuscript_file(manuscript_path: str, dbg: Path, stamp: str, ti
             "Prompt 2: Outline the product and monetization path.",
             "Prompt 3: Build the launch checklist and shipping plan.",
         ]
-        for page_num in range(24):
+        min_pages = 80 if kind == "hardcover" else 24
+        for page_num in range(min_pages):
             img = Image.new("RGB", (1800, 2700), "white")
             draw = ImageDraw.Draw(img)
             y = 140
@@ -891,7 +911,7 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
 
             # author name
             author_first, _, author_last = author.partition(" ")
-            author_last = author_last.strip() or "Bot"
+            author_last = author_last.strip() or "Team"
             first_set = False
             if doc_kind == "kindle":
                 first_set = await _fill_first(
@@ -903,7 +923,7 @@ async def run(storage_path: str, headless: bool, debug_dir: str) -> int:
                         "input#authorFirstName",
                         "input[aria-label*='First name']",
                     ],
-                    author_first or "Vito",
+                    author_first or "Editorial",
                 )
                 if first_set:
                     await _fill_first(

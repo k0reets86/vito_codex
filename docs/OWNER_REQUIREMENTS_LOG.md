@@ -6408,3 +6408,13 @@ OTKNOHMTb CuctemHbie
 - [2026-03-07T00:00:00+00:00] Published objects must stay locked and non-mutable unless the owner explicitly targets them for edit/delete.
 - [2026-03-07T00:00:00+00:00] One task should work with one active platform object; do not multiply drafts/listings/books during the same task.
 - [2026-03-07T00:00:00+00:00] For browser auth flows VITO enters login/password itself and asks the owner for a 2FA code only after the platform actually shows a code prompt.
+- [2026-03-07T23:16:33.028736+00:00] (text) Как тебя зовут
+- [2026-03-07T23:16:41.216615+00:00] (text) А меня
+- [2026-03-07T23:17:10.321447+00:00] (text) Что ты уже знаешь обо мне и моих требованиях
+- [2026-03-07T23:18:02.387117+00:00] (text) Какие задачи висят
+- [2026-03-07T23:19:30.002189+00:00] (text) Ну, промониторь. Нацди узкие и перспективные ниши цифровых товаров которые будем продавать на гумроад этси и Амазон книг
+- [2026-03-07T23:20:19.940590+00:00] (text) Задачи
+- [2026-03-07T23:20:22.142820+00:00] (text) Статус
+- [2026-03-07T23:20:25.362464+00:00] (text) Входы
+- [2026-03-07T23:20:29.732145+00:00] (text) Создать
+- [2026-03-07T23:20:31.001226+00:00] (text) Отчёт
