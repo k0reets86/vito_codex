@@ -11,7 +11,7 @@
   - `done`
   - `paused_blocked`
 
-Общий прогресс: `46%`
+Общий прогресс: `58%`
 
 ## Phase A — Execution Guardrails + Final Verifier
 - [x] Hard object protection для всех platform adapters
@@ -45,12 +45,12 @@
 - Weight: `14%`
 
 ## Phase D — Deep Research Engine
-- [ ] Iterative research loop
-- [ ] raw/synthesis/judge split
-- [ ] Full research artifact persistence
-- [ ] Top ideas + score + risks + platform recommendation
-- [ ] TG delivery of condensed + full report
-- Status: `not_started`
+- [x] Iterative research loop
+- [x] raw/synthesis/judge split
+- [x] Full research artifact persistence
+- [x] Top ideas + score + risks + platform recommendation
+- [x] TG delivery of condensed + full report
+- Status: `done`
 - Weight: `12%`
 
 ## Phase E — MegaBrowser 2.0

@@ -24,22 +24,30 @@ class TestResearchAgent:
 
     @pytest.mark.asyncio
     async def test_deep_research(self, agent):
-        agent.llm_router.call_llm = AsyncMock(return_value=(
-            "## Executive Summary\nResearch findings on topic X\n\n"
-            "```json\n"
-            "{\"topic\":\"digital products market\",\"overall_score\":84,"
-            "\"recommended_product\":{\"title\":\"AI Prompt Pack\",\"score\":84,\"platform\":\"gumroad\",\"format\":\"pdf\",\"price_band\":\"$9-$19\",\"why_now\":\"clear demand\",\"buyer\":\"creators\"},"
-            "\"top_ideas\":[{\"rank\":1,\"title\":\"AI Prompt Pack\",\"score\":84,\"platform\":\"gumroad\",\"format\":\"pdf\",\"price_band\":\"$9-$19\",\"why_now\":\"clear demand\",\"buyer\":\"creators\"}]}\n"
-            "```"
-        ))
+        agent.llm_router.call_llm = AsyncMock(side_effect=[
+            "- community demand is rising\n- creators ask for ready-to-use kits",
+            (
+                "## Executive Summary\nResearch findings on topic X\n\n"
+                "## Sources\n- reddit, google_trends\n\n"
+                "## Confidence Score (0-100)\n- 84\n\n"
+                "```json\n"
+                "{\"topic\":\"digital products market\",\"overall_score\":84,"
+                "\"recommended_product\":{\"title\":\"AI Prompt Pack\",\"score\":84,\"platform\":\"gumroad\",\"format\":\"pdf\",\"price_band\":\"$9-$19\",\"why_now\":\"clear demand\",\"buyer\":\"creators\"},"
+                "\"top_ideas\":[{\"rank\":1,\"title\":\"AI Prompt Pack\",\"score\":84,\"platform\":\"gumroad\",\"format\":\"pdf\",\"price_band\":\"$9-$19\",\"why_now\":\"clear demand\",\"buyer\":\"creators\"}]}\n"
+                "```"
+            ),
+            "{\"score\":88,\"decision\":\"accept\",\"strengths\":[\"grounded\"],\"gaps\":[],\"risk_notes\":[],\"summary\":\"Operator-ready report.\"}",
+        ])
         result = await agent.deep_research("digital products market")
         assert result.success is True
         assert result.output is not None
         assert "## Sources" in result.output
         assert "## Confidence Score" in result.output
+        assert "## Judge Review" in result.output
         assert result.metadata["overall_score"] == 84
         assert result.metadata["recommended_product"]["title"] == "AI Prompt Pack"
         assert result.metadata["top_ideas"][0]["platform"] == "gumroad"
+        assert result.metadata["judge_payload"]["decision"] == "accept"
 
     @pytest.mark.asyncio
     async def test_competitor_analysis(self, agent):
@@ -55,6 +63,10 @@ class TestResearchAgent:
 
     @pytest.mark.asyncio
     async def test_execute_task_research(self, agent):
-        agent.llm_router.call_llm = AsyncMock(return_value="findings")
+        agent.llm_router.call_llm = AsyncMock(side_effect=[
+            "- weak but usable signals",
+            "findings",
+            "{\"score\":70,\"decision\":\"accept\",\"summary\":\"ok\"}",
+        ])
         result = await agent.execute_task("research", topic="AI trends")
         assert result.success is True

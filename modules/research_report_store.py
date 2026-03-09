@@ -20,6 +20,7 @@ def save_full_report(
     task_root_id: str = "",
     sources: list[str] | None = None,
     structured: dict | None = None,
+    sections: dict | None = None,
 ) -> str:
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     root = Path(root_path("runtime", "research_reports"))
@@ -35,6 +36,15 @@ def save_full_report(
             f"{json.dumps(structured, ensure_ascii=False, indent=2)}\n"
             "```\n"
         )
+    extra_sections = ""
+    if isinstance(sections, dict) and sections:
+        chunks: list[str] = []
+        for key, value in sections.items():
+            if not value:
+                continue
+            title = str(key or "").strip().replace("_", " ").title() or "Section"
+            chunks.append(f"\n## {title}\n{str(value).strip()}\n")
+        extra_sections = "".join(chunks)
     text = (
         f"# Deep Research Report\n\n"
         f"- Topic: {topic}\n"
@@ -42,6 +52,7 @@ def save_full_report(
         f"- Sources: {src}\n"
         f"- Generated At (UTC): {datetime.now(timezone.utc).isoformat()}\n\n"
         f"{str(body or '').strip()}\n"
+        f"{extra_sections}"
         f"{structured_block}"
     )
     path.write_text(text, encoding="utf-8")
