@@ -52,6 +52,8 @@ class TaskResult:
 class BaseAgent(ABC):
     """Абстрактный базовый класс для всех 23 агентов VITO."""
 
+    NEEDS: dict[str, list[str]] = {}
+
     def __init__(
         self,
         name: str,
@@ -74,6 +76,9 @@ class BaseAgent(ABC):
         self._total_cost = 0.0
         self._started_at: Optional[datetime] = None
         self.logger = get_logger(f"agent.{name}", agent=name)
+        self._registry = None
+        self.registry = None
+        self._event_bus = None
 
     @property
     @abstractmethod
@@ -88,11 +93,18 @@ class BaseAgent(ABC):
 
     def get_contract(self) -> dict[str, Any]:
         """Operational contract used by routing, memory and skill layers."""
-        return get_agent_contract(
+        contract = get_agent_contract(
             agent_name=self.name,
             capabilities=list(self.capabilities),
             description=self.description,
         )
+        gate_actions = []
+        fn = getattr(self, "execute_task", None)
+        if fn is not None:
+            gate_actions = list(getattr(fn, "__quality_gate_actions__", []) or [])
+        if gate_actions:
+            contract["quality_gate_actions"] = gate_actions
+        return contract
 
     def build_collaboration_context(self, task_type: str = "") -> dict[str, Any]:
         contract = self.get_contract()
@@ -105,6 +117,82 @@ class BaseAgent(ABC):
             "required_evidence": list(contract.get("required_evidence") or []),
             "runtime_enforced": bool(contract.get("runtime_enforced", False)),
         }
+
+    def set_registry(self, registry) -> None:
+        self._registry = registry
+        self.registry = registry
+
+    def set_event_bus(self, event_bus) -> None:
+        self._event_bus = event_bus
+
+    def get_declared_needs(self, task_type: str = "") -> list[str]:
+        mapping = getattr(self, "NEEDS", {}) or {}
+        if not isinstance(mapping, dict):
+            return []
+        merged: list[str] = []
+        for key in (str(task_type or "").strip(), "*", "default"):
+            vals = mapping.get(key)
+            if not isinstance(vals, (list, tuple)):
+                continue
+            for item in vals:
+                s = str(item or "").strip()
+                if s and s not in merged:
+                    merged.append(s)
+        return merged
+
+    async def emit_event(self, event: str, data: Optional[dict[str, Any]] = None) -> None:
+        if not self._event_bus:
+            return
+        try:
+            await self._event_bus.emit(
+                event=str(event or "").strip(),
+                data=dict(data or {}),
+                source_agent=self.name,
+            )
+        except Exception:
+            self.logger.warning(
+                "agent_emit_event_failed",
+                extra={"event": "agent_emit_event_failed", "context": {"agent": self.name, "signal": event}},
+            )
+
+    async def ask(
+        self,
+        capability: str,
+        task_type: str | None = None,
+        silent: bool = True,
+        **kwargs,
+    ):
+        registry = self._registry or self.registry
+        if not registry:
+            if silent:
+                return None
+            raise RuntimeError(f"Registry не подключён к агенту {self.name}")
+        try:
+            await self.emit_event(
+                "agent_ask",
+                {
+                    "capability": str(capability or "").strip(),
+                    "task_type": str(task_type or capability or "").strip(),
+                    "needs": self.get_declared_needs(task_type or capability or ""),
+                },
+            )
+            return await registry.dispatch(
+                task_type or capability,
+                __requested_by=self.name,
+                __request_capability=str(capability or "").strip(),
+                **kwargs,
+            )
+        except Exception as e:
+            self.logger.warning(
+                f"ask({capability}) failed: {e}",
+                extra={"event": "agent_ask_failed", "context": {"agent": self.name, "capability": capability}},
+            )
+            if not silent:
+                raise
+            return None
+
+    async def delegate(self, capability: str, data: dict[str, Any]):
+        return await self.ask(capability, **dict(data or {}))
 
     def build_task_orchestration(self, task_type: str, **kwargs) -> dict:
         """Optional owner-level orchestration plan for this task.

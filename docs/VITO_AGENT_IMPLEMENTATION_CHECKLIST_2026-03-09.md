@@ -11,18 +11,22 @@
   - `done`
   - `paused_blocked`
 
-Общий прогресс: `0%`
+Общий прогресс: `18%`
+
+Жесткое правило:
+- `done` по этому плану возможен только если охвачены все 23 агента, все обязательные связи и все 8 workflow.
+- частичное покрытие не считается завершением.
 
 ## Phase I — Agent Interaction Substrate
-- [ ] `BaseAgent.ask(...)`
-- [ ] `BaseAgent.delegate(...)`
-- [ ] registry привязан ко всем агентам
-- [ ] `NEEDS` / `CAPABILITIES` декларации для всех агентов
-- [ ] runtime validation capability -> benchmark/evidence
-- [ ] event/signal layer для handoff
+- [x] `BaseAgent.ask(...)`
+- [x] `BaseAgent.delegate(...)`
+- [x] registry привязан ко всем агентам
+- [x] `NEEDS` / `CAPABILITIES` декларации для всех агентов
+- [x] runtime validation capability -> benchmark/evidence
+- [x] event/signal layer для handoff
 - [ ] `QualityGate` для publish/listing/content-required действий
-- [ ] backward-compatible rollout для новых handoff paths
-- Status: `not_started`
+- [x] backward-compatible rollout для новых handoff paths
+- Status: `done`
 - Weight: `18%`
 
 ## Phase J — Core Workflow Wiring
@@ -30,6 +34,10 @@
 - [ ] `W02` content publication loop
 - [ ] `W03` monitoring/self-heal loop
 - [ ] `W04` account/auth loop
+- [ ] `W05` social launch loop
+- [ ] `W06` analytics-response loop
+- [ ] `W07` compliance/risk gating loop
+- [ ] `W08` skill growth/self-upgrade loop
 - [ ] runtime traces для handoff chain
 - Status: `not_started`
 - Weight: `18%`
@@ -67,6 +75,7 @@
 - [ ] cross-agent benchmark per family
 - [ ] autonomy/data/evidence/collaboration/recovery scorecard
 - [ ] rerun for all 23 agents
+- [ ] доказуемое покрытие всех 23 агентов без исключений
 - Status: `not_started`
 - Weight: `12%`
 
@@ -75,5 +84,6 @@
 - [ ] QualityJudge domain scoring
 - [ ] VITOCore final responsibility enforcement
 - [ ] block-signals stop unsafe execution
+- [ ] coverage audit for all required interactions
 - Status: `not_started`
 - Weight: `10%`

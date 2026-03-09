@@ -16,6 +16,7 @@ from typing import Optional
 from agents.base_agent import BaseAgent, TaskResult
 from config.logger import get_logger
 from modules.agent_contracts import get_agent_contract
+from modules.agent_event_bus import AgentEventBus
 from modules.agent_lineage import attach_lineage_metadata, ensure_lineage_payload
 from modules.agent_runtime_verifier import validate_agent_runtime_contract
 from modules.skill_matrix_v2 import build_agent_skill_matrix_v2, validate_agent_skill_matrix_v2
@@ -45,15 +46,30 @@ class AgentRegistry:
         self._agents: dict[str, BaseAgent] = {}
         self._last_used: dict[str, float] = {}  # agent_name → timestamp
         self._started: set[str] = set()  # agents that have been start()'d
+        self._event_bus = AgentEventBus()
         logger.info("AgentRegistry инициализирован", extra={"event": "init"})
 
     def register(self, agent: BaseAgent) -> None:
         """Регистрирует агента в реестре (не запускает)."""
         self._agents[agent.name] = agent
+        try:
+            agent.set_registry(self)
+        except Exception:
+            setattr(agent, "registry", self)
+        try:
+            agent.set_event_bus(self._event_bus)
+        except Exception:
+            pass
         logger.info(
             f"Агент зарегистрирован: {agent.name} ({', '.join(agent.capabilities)})",
             extra={"event": "agent_registered", "context": {"agent_name": agent.name}},
         )
+
+    def get_event_bus(self) -> AgentEventBus:
+        return self._event_bus
+
+    def get_recent_agent_events(self, limit: int = 50) -> list[dict]:
+        return self._event_bus.recent(limit=limit)
 
     def unregister(self, name: str) -> Optional[BaseAgent]:
         """Удаляет агента из реестра."""

@@ -373,11 +373,6 @@ class VITO:
         for agent in agents:
             self.registry.register(agent)
 
-        # Wire registry into agents that need it
-        for agent in agents:
-            if isinstance(agent, HRAgent):
-                agent.registry = self.registry
-
         # Store platforms for later injection into decision_loop
         self._platforms_commerce = platforms_commerce
         self._platforms_social = {
