@@ -10,7 +10,7 @@ from typing import Any, Optional
 
 from config.settings import settings
 from modules.execution_facts import ExecutionFacts
-from modules.platform_publish_quality import validate_platform_publish_quality
+from modules.platform_final_verifier import verify_platform_result
 from modules.platform_result_contract import normalize_platform_result, validate_platform_result_contract
 from modules.publish_contract import build_publish_signature
 
@@ -213,23 +213,16 @@ class PublisherQueue:
 
         try:
             result = await asyncio.wait_for(pl.publish(payload), timeout=self.publish_timeout_seconds)
-            normalized = normalize_platform_result(result or {}, platform=platform, action="publish")
-            contract = validate_platform_result_contract(normalized, require_evidence_for_success=True)
-            if not contract.ok:
-                err = f"platform_contract_invalid:{','.join(contract.errors)}"
-                final = "failed" if attempts >= max_attempts else "queued"
-                self._set_status(job_id, final, attempts, error=err)
-                self.facts.record(
-                    action="platform:publish_job",
-                    status="failed",
-                    detail=f"{platform} job_id={job_id} err={err}",
-                    source="publisher_queue",
-                    evidence_dict={"platform": platform, "job_id": job_id, "trace_id": trace_id, "result": normalized},
-                )
-                return {"job_id": job_id, "platform": platform, "status": final, "error": err}
-            quality_ok, quality_errors = validate_platform_publish_quality(platform, result or {}, payload or {})
-            if not quality_ok:
-                err = f"publish_quality_gate_failed:{','.join(quality_errors)}"
+            verification = verify_platform_result(
+                platform,
+                result or {},
+                payload or {},
+                action="publish",
+                require_evidence_for_success=True,
+            )
+            normalized = verification.normalized
+            if not verification.ok:
+                err = ";".join(verification.errors)
                 final = "failed" if attempts >= max_attempts else "queued"
                 self._set_status(job_id, final, attempts, error=err)
                 self.facts.record(

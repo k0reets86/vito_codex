@@ -12,7 +12,7 @@ from agents.base_agent import BaseAgent, TaskResult
 from config.logger import get_logger
 from llm_router import TaskType
 from modules.owner_preference_model import OwnerPreferenceModel
-from modules.platform_publish_quality import validate_platform_publish_quality
+from modules.platform_final_verifier import verify_platform_result
 
 logger = get_logger("vito_core", agent="vito_core")
 
@@ -618,11 +618,17 @@ class VITOCore(BaseAgent):
                     if out.get(k):
                         has_evidence = True
                         break
-                quality_ok, quality_errors = validate_platform_publish_quality(plat, out, listing_data)
-                if not quality_ok:
+                verification = verify_platform_result(
+                    plat,
+                    out,
+                    listing_data,
+                    action="publish",
+                    require_evidence_for_success=True,
+                )
+                if not verification.ok:
                     evidence_ok = False
                     res["ok"] = False
-                    res["error"] = f"publish_quality_gate_failed:{','.join(quality_errors)}"
+                    res["error"] = ";".join(verification.errors)
                     continue
             if not has_evidence:
                 evidence_ok = False

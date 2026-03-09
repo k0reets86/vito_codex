@@ -11,16 +11,16 @@
   - `done`
   - `paused_blocked`
 
-Общий прогресс: `0%`
+Общий прогресс: `18%`
 
 ## Phase A — Execution Guardrails + Final Verifier
-- [ ] Hard object protection для всех platform adapters
-- [ ] Task-root hard binding везде
-- [ ] No implicit fallback to existing objects
-- [ ] Platform DoD contracts in code
-- [ ] Final verifier above adapter/agent/core
-- [ ] Regression tests on false done / duplicate create / protected objects
-- Status: `not_started`
+- [x] Hard object protection для всех platform adapters
+- [x] Task-root hard binding везде
+- [x] No implicit fallback to existing objects
+- [x] Platform DoD contracts in code
+- [x] Final verifier above adapter/agent/core
+- [x] Regression tests on false done / duplicate create / protected objects
+- Status: `done`
 - Weight: `18%`
 
 ## Phase B — Telegram Command Compiler

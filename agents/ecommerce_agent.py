@@ -7,10 +7,9 @@ from pathlib import Path
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from config.settings import settings
+from modules.platform_final_verifier import verify_platform_result
 from modules.listing_optimizer import optimize_listing_payload
 from modules.platform_artifact_pack import build_platform_bundle
-from modules.platform_publish_quality import validate_platform_publish_quality
-from modules.platform_result_contract import normalize_platform_result, validate_platform_result_contract
 from modules.platform_rules_sync import configured_services, sync_platform_rules
 from modules.platform_knowledge import get_service_knowledge
 from modules.workflow_recipes import platform_recipe
@@ -235,8 +234,14 @@ class ECommerceAgent(BaseAgent):
                     )
             result = await plat.publish(data)
             status = result.get("status") if isinstance(result, dict) else None
-            normalized = normalize_platform_result(result or {}, platform=platform, action="publish")
-            contract = validate_platform_result_contract(normalized, require_evidence_for_success=True)
+            verification = verify_platform_result(
+                platform,
+                result or {},
+                data or {},
+                action="publish",
+                require_evidence_for_success=True,
+            )
+            normalized = verification.normalized
             recipe = platform_recipe(platform)
             recipe_ok = True
             recipe_reason = ""
@@ -252,11 +257,11 @@ class ECommerceAgent(BaseAgent):
                     extra={"event": "listing_failed", "context": {"platform": platform, "status": status}},
                 )
                 return TaskResult(success=False, error=err or f"publish_failed:{status}", output=result)
-            if not contract.ok:
-                err = f"platform_contract_invalid:{','.join(contract.errors)}"
+            if not verification.ok:
+                err = ";".join(verification.errors)
                 logger.warning(
-                    f"Листинг НЕ принят по контракту на {platform}",
-                    extra={"event": "listing_contract_failed", "context": {"platform": platform, "errors": contract.errors, "status": status}},
+                    f"Листинг НЕ принят по финальному verifier на {platform}",
+                    extra={"event": "listing_contract_failed", "context": {"platform": platform, "errors": verification.errors, "status": status}},
                 )
                 return TaskResult(success=False, error=err, output=normalized)
             if recipe and not recipe_ok:
@@ -265,14 +270,6 @@ class ECommerceAgent(BaseAgent):
                     extra={"event": "listing_recipe_failed", "context": {"platform": platform, "reason": recipe_reason, "status": status}},
                 )
                 return TaskResult(success=False, error=recipe_reason or "publish_recipe_gate_failed", output=result)
-            quality_ok, quality_errors = validate_platform_publish_quality(platform, result or {}, data or {})
-            if not quality_ok:
-                err = f"publish_quality_gate_failed:{','.join(quality_errors)}"
-                logger.warning(
-                    f"Листинг НЕ принят по quality gate на {platform}",
-                    extra={"event": "listing_quality_failed", "context": {"platform": platform, "errors": quality_errors, "status": status}},
-                )
-                return TaskResult(success=False, error=err, output=result)
             logger.info(
                 f"Листинг создан на {platform}",
                 extra={"event": "listing_created", "context": {"platform": platform}},

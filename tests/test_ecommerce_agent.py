@@ -160,7 +160,7 @@ class TestECommerceAgent:
             },
         )
         assert result.success is False
-        assert "acceptance_gate_missing_required_evidence" in str(result.error)
+        assert "publish_quality_gate_failed:etsy_missing_screenshot" in str(result.error)
 
     @pytest.mark.asyncio
     async def test_create_listing_etsy_draft_with_screenshot_passes_gate(self, mock_llm_router, mock_memory, mock_finance, mock_comms, tmp_path):
