@@ -20,6 +20,7 @@ _BASE_CONTRACT: dict[str, Any] = {
     "primary_kind": "service",
     "owned_outcomes": [],
     "required_evidence": ["status"],
+    "runtime_enforced": False,
     "tool_scopes": [],
     "collaborates_with": [],
     "memory_inputs": ["owner_memory", "skill_memory", "anti_pattern_memory"],
@@ -88,6 +89,7 @@ _CONTRACTS: dict[str, dict[str, Any]] = {
         "role": "listing_owner",
         "owned_outcomes": ["listing_package", "listing_publish", "platform_rules_sync"],
         "required_evidence": ["platform_status", "listing_id_or_url", "artifact_manifest"],
+        "runtime_enforced": True,
         "tool_scopes": ["commerce_platforms", "artifact_pack", "browser_publish"],
         "collaborates_with": ["content_creator", "seo_agent", "marketing_agent", "smm_agent", "quality_judge"],
         "memory_outputs": ["platform_runbooks", "listing_recipes", "platform_constraints"],
@@ -221,6 +223,7 @@ _CONTRACTS: dict[str, dict[str, Any]] = {
         "role": "account_auth_operator",
         "owned_outcomes": ["account_status", "email_code_fetch", "session_support"],
         "required_evidence": ["account", "auth_state"],
+        "runtime_enforced": True,
         "tool_scopes": ["mailbox", "auth_session_state"],
         "collaborates_with": ["browser_agent", "ecommerce_agent", "smm_agent"],
         "memory_outputs": ["auth_runbooks", "session_notes"],
@@ -231,6 +234,7 @@ _CONTRACTS: dict[str, dict[str, Any]] = {
         "primary_kind": "helper",
         "owned_outcomes": ["page_navigation", "form_submission", "browser_evidence"],
         "required_evidence": ["page_url", "dom_signal", "screenshot_or_trace"],
+        "runtime_enforced": True,
         "tool_scopes": ["playwright", "browser_profile", "cookie_sessions"],
         "collaborates_with": ["account_manager", "research_agent", "ecommerce_agent", "smm_agent"],
         "memory_outputs": ["browser_runbooks", "anti_bot_lessons"],
@@ -250,6 +254,7 @@ _CONTRACTS: dict[str, dict[str, Any]] = {
         "primary_kind": "persona",
         "owned_outcomes": ["approval_decision", "quality_score", "revision_feedback"],
         "required_evidence": ["score", "approved", "feedback"],
+        "runtime_enforced": True,
         "tool_scopes": ["llm_router", "quality_policies"],
         "collaborates_with": ["vito_core", "content_creator", "ecommerce_agent", "publisher_agent"],
         "memory_outputs": ["quality_patterns", "rejection_reasons"],
@@ -297,6 +302,8 @@ def validate_agent_contract(contract: dict[str, Any]) -> tuple[bool, list[str]]:
         errors.append("agent_missing")
     if str(contract.get("primary_kind", "")).strip().lower() not in VALID_SKILL_KINDS:
         errors.append("primary_kind_invalid")
+    if not isinstance(contract.get("runtime_enforced", False), bool):
+        errors.append("runtime_enforced_not_bool")
     for key in (
         "owned_outcomes",
         "required_evidence",

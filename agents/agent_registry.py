@@ -17,6 +17,7 @@ from agents.base_agent import BaseAgent, TaskResult
 from config.logger import get_logger
 from modules.agent_contracts import get_agent_contract
 from modules.agent_lineage import attach_lineage_metadata, ensure_lineage_payload
+from modules.agent_runtime_verifier import validate_agent_runtime_contract
 from modules.skill_matrix_v2 import build_agent_skill_matrix_v2, validate_agent_skill_matrix_v2
 from modules.step_contract import validate_step_output
 
@@ -285,8 +286,10 @@ class AgentRegistry:
                 task_kwargs["__owner_orchestrator"] = orchestrated_by
                 task_kwargs["__orchestration_depth"] = orchestration_depth
                 task_kwargs["__responsible_agent"] = agent.name
-                task_kwargs["__agent_contract"] = agent.get_contract()
+                task_contract = agent.get_contract()
+                task_kwargs["__agent_contract"] = task_contract
                 task_kwargs["__agent_memory_context"] = agent.build_memory_context(task_type, limit=4)
+                task_kwargs["__agent_collaboration_context"] = agent.build_collaboration_context(task_type)
                 if isinstance(orchestration_plan, dict) and orchestration_plan:
                     task_kwargs["__orchestration_plan"] = orchestration_plan
 
@@ -303,12 +306,30 @@ class AgentRegistry:
                     if not contract_ok:
                         result.success = False
                         result.error = f"contract_invalid:{','.join(contract_errors)}"
+                runtime_contract_ok = True
+                runtime_contract_errors: list[str] = []
+                if result and result.success:
+                    runtime_chk = validate_agent_runtime_contract(
+                        agent_name=agent.name,
+                        task_type=task_type,
+                        output=result.output,
+                        metadata=result.metadata if isinstance(result.metadata, dict) else {},
+                        contract=task_contract,
+                        orchestration_plan=orchestration_plan if isinstance(orchestration_plan, dict) else {},
+                    )
+                    runtime_contract_ok = runtime_chk.ok
+                    runtime_contract_errors = list(runtime_chk.errors or [])
+                    if not runtime_contract_ok:
+                        result.success = False
+                        result.error = f"runtime_contract_invalid:{','.join(runtime_contract_errors)}"
                 try:
                     if result is not None:
                         md = result.metadata or {}
                         md.setdefault("task_type", task_type)
                         md.setdefault("contract_ok", contract_ok)
+                        md.setdefault("runtime_contract_ok", runtime_contract_ok)
                         md.setdefault("responsible_agent", agent.name)
+                        md.setdefault("collaboration_contract", agent.build_collaboration_context(task_type))
                         if orchestrated_by:
                             md.setdefault("orchestrated_by", orchestrated_by)
                         if delegation_results:
@@ -317,6 +338,8 @@ class AgentRegistry:
                             md.setdefault("resources", list(orchestration_plan.get("resources") or []))
                         if contract_errors:
                             md["contract_errors"] = contract_errors
+                        if runtime_contract_errors:
+                            md["runtime_contract_errors"] = runtime_contract_errors
                         result.metadata = attach_lineage_metadata(md, task_kwargs, task_type, responsible_agent=agent.name)
                 except Exception:
                     pass
@@ -593,6 +616,9 @@ class AgentRegistry:
             status["role"] = contract.get("role")
             status["primary_kind"] = contract.get("primary_kind")
             status["owned_outcomes"] = contract.get("owned_outcomes", [])
+            status["required_evidence"] = contract.get("required_evidence", [])
+            status["collaborates_with"] = contract.get("collaborates_with", [])
+            status["runtime_enforced"] = bool(contract.get("runtime_enforced", False))
             status["workflow_roles"] = contract.get("workflow_roles", {})
             statuses.append(status)
         return statuses

@@ -195,6 +195,26 @@ class TestRegistryDispatch:
         assert "contract_invalid" in (result.error or "")
 
     @pytest.mark.asyncio
+    async def test_dispatch_marks_runtime_contract_invalid_as_failure(self):
+        class _FakeBrowserAgent(BaseAgent):
+            def __init__(self):
+                super().__init__(name="browser_agent", description="browser")
+
+            @property
+            def capabilities(self) -> list[str]:
+                return ["browse"]
+
+            async def execute_task(self, task_type: str, **kwargs) -> TaskResult:
+                return TaskResult(success=True, output={"url": "https://example.com"})
+
+        registry = AgentRegistry()
+        registry.register(_FakeBrowserAgent())
+        result = await registry.dispatch("browse")
+        assert result is not None
+        assert result.success is False
+        assert "runtime_contract_invalid" in str(result.error or "")
+
+    @pytest.mark.asyncio
     async def test_dispatch_no_agent(self):
         registry = AgentRegistry()
         result = await registry.dispatch("nonexistent_cap")
@@ -314,6 +334,7 @@ class TestRegistryLifecycle:
         assert result.success is True
         assert result.output["contract_agent"] == "memory_agent"
         assert result.output["memory_agent"] == "memory_agent"
+        assert result.metadata.get("collaboration_contract", {}).get("agent") == "memory_agent"
         assert str(result.output["task_root_id"] or "").startswith("VT")
         assert str(result.output["listing_id"] or "").startswith(str(result.output["task_root_id"]))
         assert str(result.output["agent_work_id"] or "").startswith(str(result.output["task_root_id"]))

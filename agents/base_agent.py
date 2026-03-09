@@ -94,6 +94,18 @@ class BaseAgent(ABC):
             description=self.description,
         )
 
+    def build_collaboration_context(self, task_type: str = "") -> dict[str, Any]:
+        contract = self.get_contract()
+        return {
+            "agent": self.name,
+            "task_type": str(task_type or "").strip(),
+            "collaborates_with": list(contract.get("collaborates_with") or []),
+            "workflow_roles": dict(contract.get("workflow_roles") or {}),
+            "owned_outcomes": list(contract.get("owned_outcomes") or []),
+            "required_evidence": list(contract.get("required_evidence") or []),
+            "runtime_enforced": bool(contract.get("runtime_enforced", False)),
+        }
+
     def build_task_orchestration(self, task_type: str, **kwargs) -> dict:
         """Optional owner-level orchestration plan for this task.
 

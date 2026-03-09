@@ -58,21 +58,30 @@ class AccountManager(BaseAgent):
         for platform, env_var in PLATFORM_KEYS.items():
             configured = bool(getattr(settings, env_var, ""))
             accounts.append({"platform": platform, "configured": configured, "env_var": env_var})
-        return TaskResult(success=True, output=accounts)
+        return TaskResult(success=True, output={"account": "all", "auth_state": "inventory", "accounts": accounts})
 
     async def check_account(self, platform: str) -> TaskResult:
         env_var = PLATFORM_KEYS.get(platform)
         if not env_var:
-            return TaskResult(success=True, output={"platform": platform, "status": "unknown_platform"})
+            return TaskResult(success=True, output={"account": platform, "auth_state": "unknown_platform", "platform": platform, "status": "unknown_platform"})
         configured = bool(getattr(settings, env_var, ""))
-        return TaskResult(success=True, output={"platform": platform, "configured": configured, "env_var": env_var})
+        return TaskResult(
+            success=True,
+            output={
+                "account": platform,
+                "auth_state": "configured" if configured else "missing_credentials",
+                "platform": platform,
+                "configured": configured,
+                "env_var": env_var,
+            },
+        )
 
     async def monitor_limits(self) -> TaskResult:
         limits = []
         for platform, env_var in PLATFORM_KEYS.items():
             configured = bool(getattr(settings, env_var, ""))
             limits.append({"platform": platform, "configured": configured, "api_limits": "unknown"})
-        return TaskResult(success=True, output=limits)
+        return TaskResult(success=True, output={"account": "all", "auth_state": "limits_snapshot", "limits": limits})
 
     async def fetch_email_code(
         self,
@@ -97,4 +106,4 @@ class AccountManager(BaseAgent):
         )
         if not code:
             return TaskResult(success=False, error="code_not_found")
-        return TaskResult(success=True, output={"code": code, "snippet": snippet})
+        return TaskResult(success=True, output={"account": "gmail", "auth_state": "code_fetched", "code": code, "snippet": snippet})

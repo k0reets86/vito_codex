@@ -11,7 +11,7 @@
   - `done`
   - `paused_blocked`
 
-Общий прогресс: `70%`
+Общий прогресс: `82%`
 
 ## Phase A — Execution Guardrails + Final Verifier
 - [x] Hard object protection для всех platform adapters
@@ -64,12 +64,12 @@
 - Weight: `12%`
 
 ## Phase F — Agent Specialization and Collaboration
-- [ ] Collaboration map for all 23 agents
-- [ ] Owned outcomes / evidence contracts per agent
-- [ ] Weak-agent hardening tier 1
-- [ ] Weak-agent hardening tier 2
-- [ ] Fixed benchmark tasks per agent
-- Status: `not_started`
+- [x] Collaboration map for all 23 agents
+- [x] Owned outcomes / evidence contracts per agent
+- [x] Weak-agent hardening tier 1
+- [x] Weak-agent hardening tier 2
+- [x] Fixed benchmark tasks per agent
+- Status: `done`
 - Weight: `12%`
 
 ## Phase G — Self-Healing and Safe Upgrades
