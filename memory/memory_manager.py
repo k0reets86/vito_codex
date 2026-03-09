@@ -29,6 +29,7 @@ from modules.memory_blocks import MemoryBlocks
 from modules.memory_policy import decide_save, retention_classes
 from modules.platform_knowledge import search_entries as search_platform_knowledge
 from modules.playbook_registry import PlaybookRegistry
+from modules.platform_runbook_packs import build_runbook_packs_for_services
 from modules.prompt_guard import has_prompt_injection_signals, sanitize_untrusted_text
 
 logger = get_logger("memory_manager", agent="memory_manager")
@@ -1084,6 +1085,32 @@ class MemoryManager:
         except Exception:
             platform_memory = []
 
+        runbook_packs = []
+        try:
+            services: list[str] = []
+            for item in platform_memory:
+                svc = str(item.get("service") or "").strip().lower()
+                if svc:
+                    services.append(svc.split()[0])
+            task_low = str(task or "").strip().lower()
+            outcome_low = " ".join([str(x or "").lower() for x in contract.get("owned_outcomes", [])])
+            service_hints = {
+                "etsy": ("etsy", "этси", "етси"),
+                "gumroad": ("gumroad", "гумроад", "гумр"),
+                "amazon_kdp": ("amazon", "амаз", "kdp", "кдп"),
+                "printful": ("printful", "принтфул"),
+                "kofi": ("kofi", "ko-fi", "кофи", "ко фи"),
+                "twitter": ("twitter", "твит", "x.com"),
+                "pinterest": ("pinterest", "пинтерест", "пинтрест"),
+                "reddit": ("reddit", "реддит"),
+            }
+            for service, hints in service_hints.items():
+                if any(h in task_low for h in hints) or any(h in outcome_low for h in hints):
+                    services.append(service)
+            runbook_packs = build_runbook_packs_for_services(services)
+        except Exception:
+            runbook_packs = []
+
         return {
             "agent": agent,
             "task_type": task,
@@ -1094,6 +1121,7 @@ class MemoryManager:
             "recent_facts": facts[:limit],
             "memory_blocks": blocks[:limit],
             "platform_memory": platform_memory[:limit],
+            "runbook_packs": runbook_packs[:limit],
         }
 
     def search_skills(self, query: str, limit: int = 5) -> list[dict]:

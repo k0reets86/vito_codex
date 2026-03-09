@@ -12,6 +12,7 @@ from modules.listing_optimizer import optimize_listing_payload
 from modules.platform_artifact_pack import build_platform_bundle
 from modules.platform_rules_sync import configured_services, sync_platform_rules
 from modules.platform_knowledge import get_service_knowledge
+from modules.platform_runbook_packs import build_service_runbook_pack
 from modules.workflow_recipes import platform_recipe
 from modules.workflow_recipe_executor import WorkflowRecipeExecutor
 
@@ -169,6 +170,7 @@ class ECommerceAgent(BaseAgent):
                 "recent_successes": list((knowledge.get("success_runbooks") or [])[-3:]),
                 "recent_failures": list((knowledge.get("failure_runbooks") or [])[-3:]),
             }
+            data["_platform_runbook_pack"] = build_service_runbook_pack(platform)
         if data.get("allow_existing_update"):
             target_id = str(data.get("target_product_id") or data.get("target_listing_id") or data.get("target_slug") or "").strip()
             if not target_id:
