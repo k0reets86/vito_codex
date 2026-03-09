@@ -5,6 +5,11 @@ import time
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from llm_router import TaskType
+from modules.translation_runtime import (
+    build_consistency_checks,
+    build_listing_localization_notes,
+    build_translation_route,
+)
 
 logger = get_logger("translation_agent", agent="translation_agent")
 SUPPORTED_LANGS = ["en", "de", "ua", "pl"]
@@ -48,8 +53,9 @@ class TranslationAgent(BaseAgent):
         src = self._normalize_lang(source_lang)
         tgt = self._normalize_lang(target_lang)
         raw_text = (text or "").strip()
+        route = build_translation_route(src, tgt, raw_text)
         if src == tgt:
-            return TaskResult(success=True, output=raw_text, metadata={"mode": "identity", **self.get_skill_pack()})
+            return TaskResult(success=True, output=raw_text, metadata={"mode": "identity", **route, **self.get_skill_pack()})
 
         cache_key = f"translate::{src}->{tgt}::{raw_text.lower()}"
         if cache_key in self._cache:
@@ -66,6 +72,8 @@ class TranslationAgent(BaseAgent):
                     "source_lang": src,
                     "target_lang": tgt,
                     "translation_quality_hint": "dictionary_or_prefix_fallback",
+                    "quality_checks": build_consistency_checks(raw_text, local, route["glossary_terms"]),
+                    **route,
                     **self.get_skill_pack(),
                 },
             )
@@ -93,6 +101,8 @@ class TranslationAgent(BaseAgent):
                 "source_lang": src,
                 "target_lang": tgt,
                 "translation_quality_hint": "llm_translation_with_local_fallback",
+                "quality_checks": build_consistency_checks(raw_text, output, route["glossary_terms"]),
+                **route,
                 **self.get_skill_pack(),
             },
         )
@@ -100,8 +110,9 @@ class TranslationAgent(BaseAgent):
     async def localize_listing(self, listing_data: dict, target_lang: str) -> TaskResult:
         tgt = self._normalize_lang(target_lang)
         local = self._local_localize_listing(listing_data, tgt)
+        notes = build_listing_localization_notes(listing_data, tgt)
         if not self.llm_router:
-            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", **self.get_skill_pack()})
+            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", **notes, **self.get_skill_pack()})
 
         text = "\n".join(f"{k}: {v}" for k, v in listing_data.items())
         response = await self._call_llm(
@@ -110,8 +121,8 @@ class TranslationAgent(BaseAgent):
             estimated_tokens=2000,
         )
         if not response:
-            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
-        return TaskResult(success=True, output=response, cost_usd=0.01, metadata={"localized_lang": tgt, **self.get_skill_pack()})
+            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", **notes, **self.get_skill_pack()})
+        return TaskResult(success=True, output=response, cost_usd=0.01, metadata={"localized_lang": tgt, **notes, **self.get_skill_pack()})
 
     async def detect_language(self, text: str) -> TaskResult:
         sample = (text or "")[:500]

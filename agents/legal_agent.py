@@ -5,6 +5,7 @@ import time
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from llm_router import TaskType
+from modules.legal_policy_packs import build_policy_basis
 
 logger = get_logger("legal_agent", agent="legal_agent")
 
@@ -54,11 +55,12 @@ class LegalAgent(BaseAgent):
                 estimated_tokens=2000,
             )
         local = self._local_tos_check(platform)
+        local["policy_basis"] = build_policy_basis(platform)
         if response:
             self._record_expense(0.01, f"TOS check: {platform}")
             local["llm_notes"] = response
-            return TaskResult(success=True, output=local, cost_usd=0.01)
-        return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
+            return TaskResult(success=True, output=local, cost_usd=0.01, metadata=self.get_skill_pack())
+        return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", **self.get_skill_pack()})
 
     async def check_copyright(self, content: str) -> TaskResult:
         response = None
@@ -69,10 +71,11 @@ class LegalAgent(BaseAgent):
                 estimated_tokens=1000,
             )
         local = self._local_copyright_check(content)
+        local["policy_basis"] = build_policy_basis("generic", content)
         if response:
             local["llm_notes"] = response
-            return TaskResult(success=True, output=local)
-        return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
+            return TaskResult(success=True, output=local, metadata=self.get_skill_pack())
+        return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", **self.get_skill_pack()})
 
     async def gdpr_audit(self) -> TaskResult:
         response = None
@@ -83,11 +86,12 @@ class LegalAgent(BaseAgent):
                 estimated_tokens=2000,
             )
         local = self._local_gdpr_audit()
+        local["policy_basis"] = build_policy_basis("generic")
         if response:
             self._record_expense(0.02, "GDPR audit")
             local["llm_notes"] = response
-            return TaskResult(success=True, output=local, cost_usd=0.02)
-        return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
+            return TaskResult(success=True, output=local, cost_usd=0.02, metadata=self.get_skill_pack())
+        return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", **self.get_skill_pack()})
 
     def _local_tos_check(self, platform: str) -> dict:
         p = (platform or "unknown").strip().lower()

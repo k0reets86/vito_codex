@@ -19,6 +19,8 @@ class TestTranslationAgent:
         assert result.success is True
         assert result.metadata["mode"] == "local_fallback"
         assert "skills" in result.metadata
+        assert "quality_checks" in result.metadata
+        assert "glossary_terms" in result.metadata
 
     @pytest.mark.asyncio
     async def test_detect_language_identity_metadata(self, agent):
@@ -27,3 +29,9 @@ class TestTranslationAgent:
         assert result.success is True
         assert "skills" in result.metadata
 
+    @pytest.mark.asyncio
+    async def test_localize_listing_includes_locale_notes(self, agent):
+        agent.llm_router = None
+        result = await agent.localize_listing({"title": "AI Etsy SEO Guide", "description": "Sell better on Etsy"}, "de")
+        assert result.success is True
+        assert result.metadata["locale_profile"]["currency"] == "EUR"

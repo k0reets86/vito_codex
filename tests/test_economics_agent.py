@@ -29,6 +29,7 @@ class TestEconomicsAgent:
         assert result.success is True
         assert isinstance(result.output, dict)
         assert result.output["recommended_tier"] == "standard"
+        assert "market_signal_pack" in result.output
 
     @pytest.mark.asyncio
     async def test_unit_economics(self, agent):
@@ -63,3 +64,4 @@ class TestEconomicsAgent:
         result = await agent.suggest_price("Prompt Bundle")
         assert result.success is True
         assert result.output["pricing_options"]["standard"] > result.output["pricing_options"]["economy"]
+        assert result.output["pricing_confidence"]["confidence_score"] >= 0.7

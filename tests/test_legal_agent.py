@@ -29,6 +29,7 @@ class TestLegalAgent:
         result = await agent.check_tos("etsy")
         assert result.success is True
         assert result.output["platform"] == "etsy"
+        assert "policy_basis" in result.output
 
     @pytest.mark.asyncio
     async def test_check_copyright(self, agent):
@@ -55,3 +56,4 @@ class TestLegalAgent:
         agent.llm_router = None
         result = await agent.check_tos("etsy")
         assert result.success is True
+        assert result.output["policy_basis"]["platform"] == "etsy"

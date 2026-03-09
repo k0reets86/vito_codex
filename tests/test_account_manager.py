@@ -45,3 +45,12 @@ class TestAccountManager:
     async def test_execute_task(self, agent):
         result = await agent.execute_task("account_management")
         assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_fetch_email_code_missing_credentials_returns_remediation(self, agent, monkeypatch):
+        monkeypatch.setattr("agents.account_manager.settings.GMAIL_ADDRESS", "", raising=False)
+        monkeypatch.setattr("agents.account_manager.settings.GMAIL_PASSWORD", "", raising=False)
+        result = await agent.fetch_email_code()
+        assert result.success is True
+        assert result.output["auth_state"] == "missing_credentials"
+        assert "next_actions" in result.output

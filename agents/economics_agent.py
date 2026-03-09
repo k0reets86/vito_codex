@@ -6,6 +6,7 @@ from typing import Any
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from llm_router import TaskType
+from modules.economics_runtime import build_market_signal_pack, build_pricing_confidence
 
 logger = get_logger("economics_agent", agent="economics_agent")
 
@@ -47,8 +48,12 @@ class EconomicsAgent(BaseAgent):
 
     async def suggest_price(self, product: str) -> TaskResult:
         local = self._local_price_recommendation(product)
+        market_signal = build_market_signal_pack(product)
+        confidence = build_pricing_confidence(product)
+        local["market_signal_pack"] = market_signal
+        local["pricing_confidence"] = confidence
         if not self.llm_router:
-            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
+            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", **self.get_skill_pack()})
         response = await self._call_llm(
             task_type=TaskType.STRATEGY,
             prompt=f"Предложи оптимальную цену для продукта: {product}\nУчти: конкурентов, ценность, целевую аудиторию, маржу.\nДай 3 варианта: economy, standard, premium.",
@@ -57,12 +62,14 @@ class EconomicsAgent(BaseAgent):
         if response:
             self._record_expense(0.01, f"Pricing: {product[:50]}")
             local["llm_notes"] = response
-        return TaskResult(success=True, output=local, cost_usd=0.01 if response else 0.0)
+        return TaskResult(success=True, output=local, cost_usd=0.01 if response else 0.0, metadata=self.get_skill_pack())
 
     async def unit_economics(self, product: str) -> TaskResult:
         local = self._local_unit_economics(product)
+        local["market_signal_pack"] = build_market_signal_pack(product)
+        local["pricing_confidence"] = build_pricing_confidence(product)
         if not self.llm_router:
-            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
+            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", **self.get_skill_pack()})
         response = await self._call_llm(
             task_type=TaskType.STRATEGY,
             prompt=f"Рассчитай юнит-экономику для: {product}\nВключи: CAC, LTV, margin, breakeven point, payback period.",
@@ -71,12 +78,13 @@ class EconomicsAgent(BaseAgent):
         if response:
             self._record_expense(0.01, f"Unit economics: {product[:50]}")
             local["llm_notes"] = response
-        return TaskResult(success=True, output=local, cost_usd=0.01 if response else 0.0)
+        return TaskResult(success=True, output=local, cost_usd=0.01 if response else 0.0, metadata=self.get_skill_pack())
 
     async def model_pnl(self, scenario: dict) -> TaskResult:
         local = self._local_pnl(scenario)
+        local["pricing_confidence"] = build_pricing_confidence(str(scenario.get("product") or "Digital product"), scenario)
         if not self.llm_router:
-            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
+            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", **self.get_skill_pack()})
         scenario_text = "\n".join(f"{k}: {v}" for k, v in scenario.items())
         response = await self._call_llm(
             task_type=TaskType.STRATEGY,
@@ -86,7 +94,7 @@ class EconomicsAgent(BaseAgent):
         if response:
             self._record_expense(0.02, "P&L modeling")
             local["llm_notes"] = response
-        return TaskResult(success=True, output=local, cost_usd=0.02 if response else 0.0)
+        return TaskResult(success=True, output=local, cost_usd=0.02 if response else 0.0, metadata=self.get_skill_pack())
 
     def _local_price_recommendation(self, product: str) -> dict[str, Any]:
         name = (product or "Digital product").strip() or "Digital product"

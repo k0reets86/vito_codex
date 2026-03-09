@@ -7,8 +7,8 @@ from typing import Any
 
 _PACKS: dict[str, dict[str, Any]] = {
     "translation_agent": {
-        "skills": ["language_detection", "term_preserving_translation", "listing_localization", "glossary_control"],
-        "evidence": ["source_lang", "target_lang", "mode", "translation_quality_hint"],
+        "skills": ["language_detection", "term_preserving_translation", "listing_localization", "glossary_control", "locale_profile_selection", "consistency_checks"],
+        "evidence": ["source_lang", "target_lang", "mode", "translation_quality_hint", "glossary_terms", "quality_checks"],
         "preferred_workflows": ["W01", "W02"],
     },
     "research_agent": {
@@ -17,8 +17,8 @@ _PACKS: dict[str, dict[str, Any]] = {
         "preferred_workflows": ["W01", "W08"],
     },
     "browser_agent": {
-        "skills": ["screenshot_first_execution", "auth_interrupt_detection", "challenge_detection", "form_upload_navigation"],
-        "evidence": ["url", "screenshot_path", "browser_runtime_profile"],
+        "skills": ["screenshot_first_execution", "auth_interrupt_detection", "challenge_detection", "form_upload_navigation", "selector_mapping_preflight", "browser_recovery_decisions"],
+        "evidence": ["url", "screenshot_path", "browser_runtime_profile", "browser_recovery"],
         "preferred_workflows": ["W01", "W02", "W04"],
     },
     "ecommerce_agent": {
@@ -27,8 +27,8 @@ _PACKS: dict[str, dict[str, Any]] = {
         "preferred_workflows": ["W01"],
     },
     "account_manager": {
-        "skills": ["credential_inventory", "auth_state_reporting", "profile_completion_guidance", "email_code_fetch"],
-        "evidence": ["account", "auth_state", "platform", "next_actions"],
+        "skills": ["credential_inventory", "auth_state_reporting", "profile_completion_guidance", "email_code_fetch", "auth_remediation_packs", "platform_auth_checkpointing"],
+        "evidence": ["account", "auth_state", "platform", "next_actions", "auth_pack"],
         "preferred_workflows": ["W04"],
     },
     "vito_core": {
@@ -60,6 +60,16 @@ _PACKS: dict[str, dict[str, Any]] = {
         "skills": ["failure_signature_detection", "verified_remediation_pipeline", "rollback_on_failed_fix", "quarantine_and_cooldown_control"],
         "evidence": ["method", "resolved", "remediation_candidates", "safe_action_suggestions"],
         "preferred_workflows": ["W03", "W08"],
+    },
+    "economics_agent": {
+        "skills": ["price_band_selection", "margin_assumption_modeling", "competitor_anchor_fusion", "pricing_confidence_estimation"],
+        "evidence": ["pricing_options", "market_signal_pack", "pricing_confidence"],
+        "preferred_workflows": ["W01", "W06"],
+    },
+    "legal_agent": {
+        "skills": ["platform_policy_pack_resolution", "copyright_risk_screening", "gdpr_checklist_generation", "publish_blocker_detection"],
+        "evidence": ["policy_basis", "risk_score", "decision"],
+        "preferred_workflows": ["W01", "W07"],
     },
 }
 

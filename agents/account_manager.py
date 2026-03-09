@@ -5,6 +5,7 @@ from typing import Any, Optional
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from config.settings import settings
+from modules.account_auth_remediation import build_auth_remediation, build_platform_auth_pack
 
 logger = get_logger("account_manager", agent="account_manager")
 
@@ -68,6 +69,7 @@ class AccountManager(BaseAgent):
                 "platform": platform,
                 "configured": configured,
                 "env_var": env_var,
+                "auth_pack": build_platform_auth_pack(platform),
                 "next_actions": [] if configured else [f"set_env:{env_var}", f"profile_check:{platform}"],
             })
         return TaskResult(success=True, output={"account": "all", "auth_state": "inventory", "accounts": accounts, "skill_pack": self.get_skill_pack()})
@@ -77,15 +79,17 @@ class AccountManager(BaseAgent):
         if not env_var:
             return TaskResult(success=True, output={"account": platform, "auth_state": "unknown_platform", "platform": platform, "status": "unknown_platform", "skill_pack": self.get_skill_pack()})
         configured = bool(getattr(settings, env_var, ""))
+        remediation = build_auth_remediation(platform, configured=configured)
         return TaskResult(
             success=True,
             output={
                 "account": platform,
-                "auth_state": "configured" if configured else "missing_credentials",
+                "auth_state": remediation["auth_state"],
                 "platform": platform,
                 "configured": configured,
                 "env_var": env_var,
-                "next_actions": [] if configured else [f"set_env:{env_var}", f"profile_completion:{platform}"],
+                "next_actions": remediation["next_actions"],
+                "auth_pack": remediation["auth_pack"],
                 "profile_completion_hint": f"browser_first_profile_check:{platform}",
                 "skill_pack": self.get_skill_pack(),
             },
@@ -110,15 +114,21 @@ class AccountManager(BaseAgent):
         address = settings.GMAIL_ADDRESS
         password = settings.GMAIL_PASSWORD
         if not address or not password:
-            return TaskResult(success=False, error="GMAIL_ADDRESS/GMAIL_PASSWORD not set")
-        code, snippet = wait_for_code(
-            address=address,
-            password=password,
-            from_filter=from_filter,
-            subject_filter=subject_filter,
-            prefer_link=prefer_link,
-            timeout_sec=timeout_sec,
-        )
+            remediation = build_auth_remediation("gmail", error="missing_credentials", configured=False)
+            return TaskResult(success=True, output={"account": "gmail", **remediation, "skill_pack": self.get_skill_pack()})
+        try:
+            code, snippet = wait_for_code(
+                address=address,
+                password=password,
+                from_filter=from_filter,
+                subject_filter=subject_filter,
+                prefer_link=prefer_link,
+                timeout_sec=timeout_sec,
+            )
+        except Exception as e:
+            remediation = build_auth_remediation("gmail", error=str(e), configured=True)
+            return TaskResult(success=True, output={"account": "gmail", **remediation, "skill_pack": self.get_skill_pack()})
         if not code:
-            return TaskResult(success=False, error="code_not_found")
+            remediation = build_auth_remediation("gmail", error="code_not_found", configured=True)
+            return TaskResult(success=True, output={"account": "gmail", **remediation, "skill_pack": self.get_skill_pack()})
         return TaskResult(success=True, output={"account": "gmail", "auth_state": "code_fetched", "code": code, "snippet": snippet, "skill_pack": self.get_skill_pack()})

@@ -156,6 +156,43 @@ class TestBrowserAgent:
             assert result.output["screenshot_path"]
             assert "browser_runtime_profile" in result.output
 
+    @pytest.mark.asyncio
+    async def test_fill_form_selectorless_preflight_returns_recovery(self, agent):
+        mock_page = AsyncMock()
+        mock_page.goto = AsyncMock()
+        mock_page.inner_text = AsyncMock(return_value="normal page")
+        mock_page.screenshot = AsyncMock()
+        mock_page.close = AsyncMock()
+        mock_context = AsyncMock()
+        mock_context.new_page = AsyncMock(return_value=mock_page)
+        agent._context = mock_context
+        with patch.object(agent, '_ensure_browser', new_callable=AsyncMock):
+            result = await agent.fill_form("https://example.com", {"title": "x"}, service="etsy")
+            assert result.success is True
+            assert result.output["selector_mapping_required"] is True
+            assert "browser_recovery" in result.output
+
+    @pytest.mark.asyncio
+    async def test_register_with_email_preflight_incomplete_is_structured(self, agent):
+        mock_page = AsyncMock()
+        mock_page.goto = AsyncMock()
+        mock_page.inner_text = AsyncMock(return_value="normal page")
+        mock_page.screenshot = AsyncMock()
+        mock_page.url = "https://example.com/register"
+        mock_page.close = AsyncMock()
+        mock_context = AsyncMock()
+        mock_context.new_page = AsyncMock(return_value=mock_page)
+        agent._context = mock_context
+        with patch.object(agent, "_ensure_browser", new_callable=AsyncMock):
+            res = await agent.register_with_email(
+                url="https://example.com/register",
+                form={},
+                submit_selector="",
+                service="etsy",
+            )
+            assert res.success is True
+            assert res.output["registration_state"] == "preflight_incomplete"
+
 
 class TestOOMProtection:
     """Tests for OOM protection mechanisms."""

@@ -25,6 +25,7 @@ from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from config.resource_guard import resource_guard
 from config.settings import settings
+from modules.browser_recovery_runtime import build_browser_recovery, build_form_fill_preflight, looks_like_selector
 from modules.browser_runtime_policy import build_auth_interrupt_output, get_browser_runtime_profile
 
 logger = get_logger("browser_agent", agent="browser_agent")
@@ -540,6 +541,7 @@ class BrowserAgent(BaseAgent):
         try:
             await self._goto_with_policy(page, url, timeout_ms=30000)
             profile = self._runtime_profile(service)
+            preflight = build_form_fill_preflight(data)
             if profile.get("screenshot_first_default") and not screenshot_path:
                 screenshot_path = self._default_screenshot_path(service, "form_fill")
             body_text = ""
@@ -558,8 +560,31 @@ class BrowserAgent(BaseAgent):
                     error="challenge_detected",
                     output={"url": str(getattr(page, "url", url)), "reason": reason, "needs_manual_auth": True, **artifacts},
                 )
+            if preflight["selector_mapping_required"]:
+                shot = ""
+                if screenshot_path:
+                    try:
+                        await page.screenshot(path=screenshot_path, full_page=True)
+                        shot = screenshot_path
+                    except Exception:
+                        pass
+                return TaskResult(
+                    success=True,
+                    output={
+                        "fields_filled": 0,
+                        "total": len(data or {}),
+                        "selector_mapping_required": True,
+                        "preflight": preflight,
+                        "screenshot_path": shot,
+                        "browser_runtime_profile": profile,
+                        "browser_recovery": build_browser_recovery(service, "form_fill", "selector_mapping_required"),
+                        "browser_skill_pack": self.get_skill_pack(),
+                    },
+                )
             filled = 0
             for sel, val in data.items():
+                if not looks_like_selector(sel):
+                    continue
                 try:
                     await page.fill(sel, val)
                     if bool(getattr(settings, "BROWSER_HUMANIZE_ENABLED", True)):
@@ -567,6 +592,27 @@ class BrowserAgent(BaseAgent):
                     filled += 1
                 except Exception:
                     pass
+            if filled == 0:
+                shot = ""
+                if screenshot_path:
+                    try:
+                        await page.screenshot(path=screenshot_path, full_page=True)
+                        shot = screenshot_path
+                    except Exception:
+                        pass
+                return TaskResult(
+                    success=True,
+                    output={
+                        "fields_filled": 0,
+                        "total": len(data or {}),
+                        "selector_mapping_required": True,
+                        "preflight": preflight,
+                        "screenshot_path": shot,
+                        "browser_runtime_profile": profile,
+                        "browser_recovery": build_browser_recovery(service, "form_fill", "no_matching_selectors"),
+                        "browser_skill_pack": self.get_skill_pack(),
+                    },
+                )
             shot = ""
             if screenshot_path:
                 try:
@@ -690,6 +736,32 @@ class BrowserAgent(BaseAgent):
                 )
             # Fill fields
             filled = 0
+            missing_requirements: list[str] = []
+            if not form:
+                missing_requirements.append("form_fields")
+            if not submit_selector:
+                missing_requirements.append("submit_selector")
+            if missing_requirements:
+                shot = ""
+                if screenshot_path:
+                    try:
+                        await page.screenshot(path=screenshot_path, full_page=True)
+                        shot = screenshot_path
+                    except Exception:
+                        pass
+                return TaskResult(
+                    success=True,
+                    output={
+                        "fields_filled": 0,
+                        "registration_state": "preflight_incomplete",
+                        "missing_requirements": missing_requirements,
+                        "screenshot_path": shot,
+                        "url": page.url,
+                        "browser_runtime_profile": profile,
+                        "browser_recovery": build_browser_recovery(service, "register_with_email", "preflight_incomplete"),
+                        "browser_skill_pack": self.get_skill_pack(),
+                    },
+                )
             for sel, val in (form or {}).items():
                 try:
                     await page.fill(sel, val)
