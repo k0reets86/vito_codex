@@ -3103,3 +3103,16 @@ Stub response: operational output.
 ## Confidence Score (0-100)
 - 80 (based on available live sources and evidence density)
 - Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
+
+## printful lesson
+
+Status: prepared
+Source: printful.publish.browser
+URL: https://www.printful.com/dashboard/product-templates/published/17803130
+Summary: Browser publish finished with status=prepared.
+Details: title=VITO readiness Printful template_id=n/a
+Lessons:
+- Если linked Etsy URL не найден, это еще не закрытый publish flow.
+Anti-patterns:
+- Не считай publish успешным только по открытому wizard без synced product evidence.
+Evidence: {"platform": "printful", "status": "prepared", "url": "https://www.printful.com/dashboard/product-templates/published/17803130", "mode": "browser_only", "screenshot_path": "/home/vito/vito-agent/runtime/printful_browser_publish.png", "html_path": "/home/vito/vito-agent/runtime/printful_browser_publish.html", "store_type": "", "title": "My products | Printful", "template_id": "", "etsy_edit_url": ""}
