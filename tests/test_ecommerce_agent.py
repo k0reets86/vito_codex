@@ -17,6 +17,12 @@ class TestECommerceAgent:
                 "listing_id": "123",
                 "id": "123",
                 "url": "https://example.com/123",
+                "main_file_attached": True,
+                "cover_confirmed": True,
+                "preview_confirmed": True,
+                "thumbnail_confirmed": True,
+                "tags_confirmed": True,
+                "image_count": 2,
             }
         )
         platform.get_analytics = AsyncMock(return_value={"sales": 5, "revenue": 50.0})

@@ -127,11 +127,61 @@ class PrintfulPlatform(BasePlatform):
                                 btn = loc.last
                                 if await btn.is_enabled():
                                     await btn.click(timeout=3000)
-                                    await page.wait_for_timeout(1500)
-                                    return True
+                            await page.wait_for_timeout(1500)
+                            return True
                         except Exception:
                             continue
                     return False
+
+                async def _set_publish_pricing() -> bool:
+                    """Set a sane retail price in the pricing step before continuing."""
+                    try:
+                        target_price = str(
+                            (((content or {}).get("sync_product") or {}).get("price"))
+                            or (content or {}).get("price")
+                            or "19.99"
+                        ).strip()
+                        ok = await page.evaluate(
+                            """(price) => {
+                                const candidates = [
+                                  "input[name='pricing-value']",
+                                  "input[name*='pricing']",
+                                  "input[inputmode='decimal']",
+                                  "input[type='number']",
+                                  "input[type='text']",
+                                ];
+                                const visible = (el) => {
+                                  if (!el) return false;
+                                  const r = el.getBoundingClientRect();
+                                  const s = getComputedStyle(el);
+                                  return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+                                };
+                                const inputs = Array.from(new Set(candidates.flatMap((sel) => Array.from(document.querySelectorAll(sel)))))
+                                  .filter(visible);
+                                const priceInputs = inputs.filter((el) => {
+                                  const id = String(el.id || '').toLowerCase();
+                                  const name = String(el.name || '').toLowerCase();
+                                  const ph = String(el.getAttribute('placeholder') || '').toLowerCase();
+                                  const lb = String(el.getAttribute('aria-label') || '').toLowerCase();
+                                  return (
+                                    id.includes('price') || name.includes('price') || ph.includes('price') || lb.includes('price')
+                                  );
+                                });
+                                const target = priceInputs[0] || inputs[0];
+                                if (!target) return false;
+                                target.focus();
+                                target.value = String(price);
+                                target.dispatchEvent(new Event('input', { bubbles: true }));
+                                target.dispatchEvent(new Event('change', { bubbles: true }));
+                                target.blur();
+                                return true;
+                            }""",
+                            target_price,
+                        )
+                        await page.wait_for_timeout(1200)
+                        return bool(ok)
+                    except Exception:
+                        return False
 
                 async def _resolve_my_products_url() -> str:
                     try:
@@ -319,6 +369,7 @@ class PrintfulPlatform(BasePlatform):
                 await _click_first(("button:has-text('Publish')", "a:has-text('Publish')"), timeout=5000)
                 await page.wait_for_timeout(2500)
                 await _continue_publish_step()  # Mockups
+                await _set_publish_pricing()
                 await _continue_publish_step()  # Pricing
 
                 # Details step.

@@ -3007,3 +3007,99 @@ Anti-patterns:
 - Не считай Etsy create успешным только по открытому editor без listing_id.
 - Ошибка: create_mode_forbids_existing_update
 Evidence: {"status": "blocked", "listing_id": null, "url": null, "screenshot_path": null, "draft_only": null, "debug": {}}
+
+## printful lesson
+
+Status: prepared
+Source: printful.publish.browser
+URL: https://www.printful.com/dashboard/product-templates/published/17803130
+Summary: Browser publish finished with status=prepared.
+Details: title=Nihilistic Penguin Trend Notebook template_id=n/a
+Lessons:
+- Если linked Etsy URL не найден, это еще не закрытый publish flow.
+Anti-patterns:
+- Не считай publish успешным только по открытому wizard без synced product evidence.
+Evidence: {"platform": "printful", "status": "prepared", "url": "https://www.printful.com/dashboard/product-templates/published/17803130", "mode": "browser_only", "screenshot_path": "/home/vito/vito-agent/runtime/printful_browser_publish.png", "html_path": "/home/vito/vito-agent/runtime/printful_browser_publish.html", "store_type": "", "title": "My products | Printful", "template_id": "", "etsy_edit_url": ""}
+
+## etsy lesson
+
+Status: prepared
+Source: etsy.publish.browser
+URL: https://www.etsy.com/your/shops/me/tools/listings
+Summary: Etsy browser publish result: prepared
+Details: error=editor_not_ready; draft_only=True; title_inputs=1; price_inputs=1; file_inputs=1; tag_inputs=1; material_inputs=1; spinner_present=True
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: editor_not_ready
+Evidence: {"status": "prepared", "listing_id": null, "url": "https://www.etsy.com/your/shops/me/tools/listings", "screenshot_path": "/home/vito/vito-agent/runtime/etsy_browser_publish.png", "draft_only": true, "debug": {"title_inputs": 1, "price_inputs": 1, "file_inputs": 1, "tag_inputs": 1, "material_inputs": 1, "spinner_present": true, "body_has_create": false, "title_value": "", "price_value": ""}}
+
+## etsy lesson
+
+Status: draft
+Source: etsy.publish.browser
+URL: https://www.etsy.com/listing/4468782941
+Summary: Etsy browser publish result: draft
+Details: listing_id=4468782941; draft_only=True
+Lessons:
+- Используй один рабочий listing_id и не считай create успешным без listing_id.
+- Etsy browser flow должен отдельно проверять editor URL, listing_id и screenshot evidence.
+Evidence: {"status": "draft", "listing_id": "4468782941", "url": "https://www.etsy.com/listing/4468782941", "screenshot_path": "/home/vito/vito-agent/runtime/etsy_browser_publish.png", "draft_only": true, "debug": {}}
+
+## printful lesson
+
+Status: prepared
+Source: printful.publish.browser
+URL: https://www.printful.com/dashboard/product-templates/published/17803130
+Summary: Browser publish finished with status=prepared.
+Details: title=Nihilistic Penguin Trend Notebook template_id=n/a
+Lessons:
+- Если linked Etsy URL не найден, это еще не закрытый publish flow.
+Anti-patterns:
+- Не считай publish успешным только по открытому wizard без synced product evidence.
+Evidence: {"platform": "printful", "status": "prepared", "url": "https://www.printful.com/dashboard/product-templates/published/17803130", "mode": "browser_only", "screenshot_path": "/home/vito/vito-agent/runtime/printful_browser_publish.png", "html_path": "/home/vito/vito-agent/runtime/printful_browser_publish.html", "store_type": "", "title": "My products | Printful", "template_id": "", "etsy_edit_url": ""}
+
+## etsy lesson
+
+Status: needs_browser_login
+Source: etsy.publish.browser
+Summary: Etsy browser publish result: needs_browser_login
+Details: error=Etsy browser session required. Run: python3 scripts/etsy_auth_helper.py browser-capture
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: Etsy browser session required. Run: python3 scripts/etsy_auth_helper.py browser-capture
+Evidence: {"status": "needs_browser_login", "listing_id": null, "url": null, "screenshot_path": null, "draft_only": null, "debug": {}}
+
+## etsy lesson
+
+Status: blocked
+Source: etsy.publish.browser
+Summary: Etsy browser publish result: blocked
+Details: error=create_mode_forbids_existing_update
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: create_mode_forbids_existing_update
+Evidence: {"status": "blocked", "listing_id": null, "url": null, "screenshot_path": null, "draft_only": null, "debug": {}}
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: 7785109a4385 -> ef79ab8603d5.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"32a74bb2660b4145834622d81f0ed49b","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## twitter rules update
+
+Source: https://developer.x.com/en/docs
+Detected rules/content change by hash diff: c908e8ba300e -> 8ebe53b9bd40.
+Excerpt: X Developer Platform - X Skip to main content X home page English Search... ⌘ K Ask AI Support Developer Console Developer Console Search... Navigation Getting Started X Developer Platform Home X API X Ads API XDKs Tutorials Use Cases Success Stories Status Changelog Developer Console Forums GitHub Getting Started Overview Fundamentals Apps Developer Console Authentication Counting Characters Rate Limits X IDs Security Partners &amp; Customers Partner Directory Customer Directory Request Access Resources Tools and Libraries Tutorials Newsletter Livestreams Billing Support Developer Terms Getting Started X Developer Platform Copy page Build with X’s real-time data and APIs Copy page Pay-per-usage pricing: Now Available Pay only for what you use. Plus, earn free xAI API credits when you purc
+
+## Mega test task
+
+## Executive Summary
+Stub response: operational output.
+
+## Sources
+- product_hunt, reddit
+
+## Confidence Score (0-100)
+- 80 (based on available live sources and evidence density)
+- Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
