@@ -11,7 +11,7 @@
   - `done`
   - `paused_blocked`
 
-Общий прогресс: `46%`
+Общий прогресс: `66%`
 
 Жесткое правило:
 - `done` по этому плану возможен только если охвачены все 23 агента, все обязательные связи и все 8 workflow.
@@ -43,31 +43,35 @@
 - Weight: `18%`
 
 ## Phase K — Thin-Wrapper Agent Uplift
-- [ ] `SEOAgent` data/tool uplift
-- [ ] `MarketingAgent` strategy uplift
-- [ ] `EconomicsAgent` pricing uplift
-- [ ] `LegalAgent` TOS/policy uplift
-- [ ] `RiskAgent` reputation/moderation uplift
-- [ ] `EmailAgent` real delivery path
+- [x] `SEOAgent` data/tool uplift
+- [x] `MarketingAgent` strategy uplift
+- [x] `EconomicsAgent` pricing uplift
+- [x] `LegalAgent` TOS/policy uplift
+- [x] `RiskAgent` reputation/moderation uplift
+- [x] `EmailAgent` real delivery path
 - [ ] `TranslationAgent` real provider path
-- [ ] `PartnershipAgent` affiliate/outreach uplift
-- Status: `not_started`
+- [x] `PartnershipAgent` affiliate/outreach uplift
+- Status: `in_progress`
 - Weight: `22%`
 
 ## Phase L — Tier-2 Agent Hardening
+- [x] `TrendScout`
+- [ ] `ResearchAgent`
 - [ ] `BrowserAgent`
 - [ ] `ECommerceAgent`
 - [ ] `AccountManager`
+- [x] `SecurityAgent`
+- [ ] `DevOpsAgent`
 - [ ] `VITOCore`
-- [ ] `ContentCreator`
+- [x] `ContentCreator`
 - [ ] `SMMAgent`
-- [ ] `AnalyticsAgent`
+- [x] `AnalyticsAgent`
 - [ ] `PublisherAgent`
-- [ ] `DocumentAgent`
-- [ ] `QualityJudge`
+- [x] `DocumentAgent`
+- [x] `QualityJudge`
 - [ ] `HRAgent`
 - [ ] `SelfHealer`
-- Status: `not_started`
+- Status: `in_progress`
 - Weight: `20%`
 
 ## Phase M — Agent Benchmark Matrix

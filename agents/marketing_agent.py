@@ -1,6 +1,7 @@
 """MarketingAgent — Agent 04: стратегия, воронки, рекламные тексты."""
 
 import time
+from typing import Any
 
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
@@ -10,13 +11,20 @@ logger = get_logger("marketing_agent", agent="marketing_agent")
 
 
 class MarketingAgent(BaseAgent):
+    NEEDS = {
+        "marketing_strategy": ["research", "seo"],
+        "funnel": ["marketing_strategy"],
+        "ad_copy": ["seo"],
+        "default": [],
+    }
+
     def __init__(self, **kwargs):
         super().__init__(name="marketing_agent", description="Маркетинговая стратегия, воронки продаж, рекламные тексты", **kwargs)
         self._cache: dict[str, str] = {}
 
     @property
     def capabilities(self) -> list[str]:
-        return ["marketing_strategy", "funnel"]
+        return ["marketing_strategy", "funnel", "ad_copy"]
 
     async def execute_task(self, task_type: str, **kwargs) -> TaskResult:
         self._status = AgentStatus.RUNNING
@@ -40,11 +48,11 @@ class MarketingAgent(BaseAgent):
     async def create_strategy(self, product: str, target_audience: str, budget_usd: float = 100) -> TaskResult:
         key = f"strategy::{(product or '').strip().lower()}::{(target_audience or '').strip().lower()}::{float(budget_usd)}"
         if key in self._cache:
-            return TaskResult(success=True, output=self._cache[key], metadata={"cached": True})
+            return TaskResult(success=True, output={"cached_strategy": self._cache[key]}, metadata={"cached": True})
 
         local = self._local_strategy(product, target_audience, budget_usd)
         if not self.llm_router:
-            self._cache[key] = local
+            self._cache[key] = str(local)
             return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
 
         response = await self._call_llm(
@@ -56,13 +64,11 @@ class MarketingAgent(BaseAgent):
             ),
             estimated_tokens=3000,
         )
-        output = response or local
-        cost = 0.0
         if response:
-            cost = 0.03
-            self._record_expense(cost, f"Marketing strategy: {product[:50]}")
-        self._cache[key] = output
-        return TaskResult(success=True, output=output, cost_usd=cost)
+            self._record_expense(0.03, f"Marketing strategy: {product[:50]}")
+            local["llm_notes"] = response
+        self._cache[key] = str(local)
+        return TaskResult(success=True, output=local, cost_usd=0.03 if response else 0.0)
 
     async def design_funnel(self, product: str, stages: list[str] = None) -> TaskResult:
         local = self._local_funnel(product, stages)
@@ -74,9 +80,9 @@ class MarketingAgent(BaseAgent):
             prompt=f"Спроектируй воронку продаж для: {product}\n{stages_str}\nОпиши каждый этап, контент, метрики.",
             estimated_tokens=2500,
         )
-        if not response:
-            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
-        return TaskResult(success=True, output=response, cost_usd=0.02)
+        if response:
+            local["llm_notes"] = response
+        return TaskResult(success=True, output=local, cost_usd=0.02 if response else 0.0)
 
     async def create_ad_copy(self, product: str, platform: str, style: str = "direct") -> TaskResult:
         local = self._local_ad_copy(product, platform, style)
@@ -87,9 +93,9 @@ class MarketingAgent(BaseAgent):
             prompt=f"Напиши рекламный текст для {platform}. Продукт: {product}. Стиль: {style}. 3 варианта.",
             estimated_tokens=1500,
         )
-        if not response:
-            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
-        return TaskResult(success=True, output=response, cost_usd=0.01)
+        if response:
+            local["llm_variants"] = response
+        return TaskResult(success=True, output=local, cost_usd=0.01 if response else 0.0)
 
     async def suggest_channels(self, product: str, budget_usd: float = 100) -> TaskResult:
         local = self._local_channels(product, budget_usd)
@@ -100,77 +106,85 @@ class MarketingAgent(BaseAgent):
             prompt=f"Предложи лучшие маркетинговые каналы для: {product}, бюджет ${budget_usd}.",
             estimated_tokens=1500,
         )
-        return TaskResult(success=True, output=response or local, cost_usd=0.01 if response else 0.0)
+        if response:
+            local["llm_notes"] = response
+        return TaskResult(success=True, output=local, cost_usd=0.01 if response else 0.0)
 
-    def _local_strategy(self, product: str, target_audience: str, budget_usd: float) -> str:
+    def _local_strategy(self, product: str, target_audience: str, budget_usd: float) -> dict[str, Any]:
         product_name = (product or "Digital product").strip()
         audience = (target_audience or "broad audience").strip()
         budget = max(float(budget_usd or 0), 0.0)
         paid = round(budget * 0.45, 2)
         content = round(budget * 0.35, 2)
         experiments = round(max(budget - paid - content, 0.0), 2)
-        return (
-            "Marketing strategy (local fallback)\n"
-            f"Product: {product_name}\n"
-            f"Target audience: {audience}\n"
-            f"Budget: ${budget:.2f}\n"
-            "Channel mix:\n"
-            f"- Paid acquisition: ${paid} (Meta/TikTok search testing)\n"
-            f"- Content/SEO: ${content} (landing + short content + lead magnet)\n"
-            f"- Experiments: ${experiments} (new angle/A-B tests)\n"
-            "KPI:\n"
-            "- CTR >= 1.5%\n"
-            "- Landing CR >= 2.5%\n"
-            "- CAC <= target margin threshold\n"
-            "Timeline:\n"
-            "- Week 1: message-market fit + baseline creatives\n"
-            "- Week 2-3: scale winning channel + add retargeting\n"
-            "- Week 4: optimize funnel and cut weak ad sets"
-        )
+        return {
+            "product": product_name,
+            "target_audience": audience,
+            "budget_usd": budget,
+            "offer_angle": f"{product_name} helps {audience} get a faster repeatable result.",
+            "channel_mix": [
+                {"channel": "paid_acquisition", "budget_usd": paid, "focus": "Meta/TikTok creative testing"},
+                {"channel": "content_seo", "budget_usd": content, "focus": "landing page + search capture"},
+                {"channel": "experiments", "budget_usd": experiments, "focus": "new hooks and A/B tests"},
+            ],
+            "kpis": {
+                "ctr_target": ">= 1.5%",
+                "landing_cr_target": ">= 2.5%",
+                "cac_goal": "below target contribution margin",
+            },
+            "timeline": [
+                "Week 1: message-market fit + baseline creatives",
+                "Week 2-3: scale the best channel + retargeting",
+                "Week 4: optimize funnel and cut weak ad sets",
+            ],
+        }
 
-    def _local_funnel(self, product: str, stages: list[str] | None) -> str:
+    def _local_funnel(self, product: str, stages: list[str] | None) -> dict[str, Any]:
         product_name = (product or "Digital product").strip()
         ordered = stages or ["awareness", "interest", "desire", "action"]
-        lines = [f"Funnel for {product_name} (local fallback):"]
+        mapped = []
         for stage in ordered:
             s = stage.strip().lower()
             if s == "awareness":
-                lines.append("- awareness: short videos/posts + lead hook, metric: reach, CTR")
+                mapped.append({"stage": "awareness", "assets": ["short videos", "hooks"], "metric": "reach/CTR"})
             elif s == "interest":
-                lines.append("- interest: demo/value post + email capture, metric: opt-in rate")
+                mapped.append({"stage": "interest", "assets": ["demo", "value post", "lead magnet"], "metric": "opt-in rate"})
             elif s == "desire":
-                lines.append("- desire: proof/case study + objections handling, metric: checkout starts")
+                mapped.append({"stage": "desire", "assets": ["proof", "case study", "objection handling"], "metric": "checkout starts"})
             elif s == "action":
-                lines.append("- action: offer + urgency + simple checkout, metric: conversion rate")
+                mapped.append({"stage": "action", "assets": ["offer", "urgency", "checkout CTA"], "metric": "conversion rate"})
             else:
-                lines.append(f"- {s}: define content asset, trigger and success metric")
-        return "\n".join(lines)
+                mapped.append({"stage": s, "assets": ["custom asset"], "metric": "custom metric"})
+        return {"product": product_name, "stages": mapped}
 
-    def _local_ad_copy(self, product: str, platform: str, style: str) -> str:
+    def _local_ad_copy(self, product: str, platform: str, style: str) -> dict[str, Any]:
         p = (product or "Digital product").strip()
         net = (platform or "social").strip()
         tone = (style or "direct").strip()
-        return (
-            f"Ad copy for {net} ({tone}, local fallback)\n"
-            f"1) Stop wasting time. {p} gives you a ready workflow in minutes.\n"
-            f"2) Built for speed: {p} helps you launch faster and cleaner.\n"
-            f"3) Get results this week with {p}. Simple setup, immediate value."
-        )
+        return {
+            "platform": net,
+            "style": tone,
+            "variants": [
+                f"Stop wasting time. {p} gives you a ready workflow in minutes.",
+                f"Built for speed: {p} helps you launch faster and cleaner.",
+                f"Get results this week with {p}. Simple setup, immediate value.",
+            ],
+        }
 
-    def _local_channels(self, product: str, budget_usd: float) -> str:
+    def _local_channels(self, product: str, budget_usd: float) -> dict[str, Any]:
         budget = max(float(budget_usd or 0), 0.0)
         if budget < 100:
             profile = "low-budget"
-            channels = "SEO long-tail, communities, email capture, creator collabs"
+            channels = ["seo_long_tail", "communities", "email_capture", "creator_collabs"]
         elif budget < 1000:
             profile = "mid-budget"
-            channels = "Meta/TikTok tests, retargeting, SEO cluster pages, newsletter sponsorship"
+            channels = ["meta_tests", "tiktok_tests", "retargeting", "seo_clusters", "newsletter_sponsorship"]
         else:
             profile = "growth-budget"
-            channels = "multi-channel ads, creator network, affiliate program, conversion CRO sprint"
-        return (
-            f"Channel recommendation (local fallback)\n"
-            f"Product: {(product or 'Digital product').strip()}\n"
-            f"Budget: ${budget:.2f} ({profile})\n"
-            f"Recommended channels: {channels}"
-        )
+            channels = ["multi_channel_ads", "creator_network", "affiliate_program", "cro_sprint"]
+        return {
+            "product": (product or "Digital product").strip(),
+            "budget_usd": budget,
+            "budget_profile": profile,
+            "recommended_channels": channels,
+        }

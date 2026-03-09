@@ -42,6 +42,15 @@ def _get_reddit_rss_feeds() -> list[str]:
 
 
 class TrendScout(BaseAgent):
+    NEEDS = {
+        "trend_scan": ["research"],
+        "niche_research": ["trend_scan"],
+        "google_news": ["research"],
+        "rss_scan": [],
+        "reddit_scan": ["research"],
+        "default": [],
+    }
+
     def __init__(self, browser_agent=None, **kwargs):
         super().__init__(name="trend_scout", description="Сканирование трендов, исследование ниш", **kwargs)
         self.browser_agent = browser_agent
@@ -240,13 +249,23 @@ class TrendScout(BaseAgent):
 
     async def suggest_niches(self) -> TaskResult:
         if not self.llm_router:
-            return TaskResult(success=False, error="LLM Router недоступен")
+            return TaskResult(success=True, output=self._local_niches(), metadata={"mode": "local_fallback"})
         prompt = "Предложи 5-7 перспективных ниш для цифровых продуктов (ebooks, templates, курсы, SaaS). Для каждой укажи: название, уровень конкуренции, потенциал монетизации, рекомендуемые продукты."
         response = await self._call_llm(task_type=TaskType.STRATEGY, prompt=prompt, estimated_tokens=2500)
         if not response:
-            return TaskResult(success=False, error="LLM не вернул ответ")
+            return TaskResult(success=True, output=self._local_niches(), metadata={"mode": "local_fallback"})
         self._record_expense(0.03, "Suggest niches")
         return TaskResult(success=True, output=response, cost_usd=0.03)
+
+    def _local_niches(self) -> dict[str, Any]:
+        return {
+            "niches": [
+                {"name": "creator swipe files", "competition": "medium", "monetization": "high", "products": ["playbook", "template pack"]},
+                {"name": "ai workflow kits", "competition": "high", "monetization": "high", "products": ["prompt bundle", "notion system"]},
+                {"name": "micro-learning guides", "competition": "medium", "monetization": "medium", "products": ["ebook", "email course"]},
+            ],
+            "source_mode": "local_fallback",
+        }
 
     async def scan_google_news(self, query: str, language: str = "en") -> TaskResult:
         """Сканирование Google News через Custom Search API (tbm=nws)."""

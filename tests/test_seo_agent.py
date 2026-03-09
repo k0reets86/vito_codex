@@ -27,18 +27,23 @@ class TestSEOAgent:
         agent.llm_router.call_llm = AsyncMock(return_value="Keywords: python tutorial, learn python, python basics")
         result = await agent.keyword_research("python programming")
         assert result.success is True
+        assert isinstance(result.output, dict)
+        assert "primary_keywords" in result.output
 
     @pytest.mark.asyncio
     async def test_optimize_content(self, agent):
         agent.llm_router.call_llm = AsyncMock(return_value="Optimized content with keywords")
         result = await agent.optimize_content("Original article", ["python", "tutorial"])
         assert result.success is True
+        assert isinstance(result.output, dict)
+        assert "recommended_changes" in result.output
 
     @pytest.mark.asyncio
     async def test_generate_meta(self, agent):
         agent.llm_router.call_llm = AsyncMock(return_value='{"title": "Best Python Guide", "description": "Learn Python"}')
         result = await agent.generate_meta("Article about Python", ["python"])
         assert result.success is True
+        assert result.output["title"] == "Best Python Guide"
 
     @pytest.mark.asyncio
     async def test_execute_task(self, agent):
@@ -55,3 +60,4 @@ class TestSEOAgent:
             tags=["ai", "prompts"],
         )
         assert result.success is True
+        assert result.output["evidence"]["tag_count"] >= 2

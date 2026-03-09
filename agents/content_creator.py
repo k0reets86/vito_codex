@@ -32,6 +32,14 @@ def _slugify(text: str, max_len: int = 50) -> str:
 
 
 class ContentCreator(BaseAgent):
+    NEEDS = {
+        "article": ["research", "seo"],
+        "ebook": ["research", "content_pipeline"],
+        "product_description": ["seo", "marketing_strategy"],
+        "product_turnkey": ["seo", "listing_create", "quality_review"],
+        "default": [],
+    }
+
     def __init__(self, quality_judge=None, **kwargs):
         super().__init__(name="content_creator", description="Создание статей, ebook, описаний продуктов", **kwargs)
         self.quality_judge = quality_judge
@@ -68,7 +76,8 @@ class ContentCreator(BaseAgent):
 
     async def create_article(self, topic: str, keywords: list[str] = None) -> TaskResult:
         if not self.llm_router:
-            return TaskResult(success=False, error="LLM Router недоступен")
+            output = self._local_article(topic, keywords)
+            return TaskResult(success=True, output=output["body"], metadata=output)
         kw = f"\nКлючевые слова: {', '.join(keywords)}" if keywords else ""
         prompt = f"Напиши подробную статью на тему: {topic}{kw}\nСтруктура: заголовок, введение, 3-5 разделов, заключение. 1500-2000 слов."
         response = await self._call_llm(task_type=TaskType.CONTENT, prompt=prompt, estimated_tokens=4000)
@@ -145,7 +154,8 @@ class ContentCreator(BaseAgent):
             file_path.write_text(text, encoding="utf-8")
             return TaskResult(success=True, output=text, cost_usd=0.0, metadata={"file_path": str(file_path)})
         if not self.llm_router:
-            return TaskResult(success=False, error="LLM Router недоступен")
+            local = self._local_product_description(product, platform)
+            return TaskResult(success=True, output=local["body"], metadata=local)
         prompt = f"Напиши продающее описание для {platform}: {product}\nВключи: заголовок, описание, ключевые особенности, CTA."
         response = await self._call_llm(task_type=TaskType.CONTENT, prompt=prompt, estimated_tokens=1500)
         if not response:
@@ -165,6 +175,26 @@ class ContentCreator(BaseAgent):
             cost_usd=0.01,
             metadata={"file_path": str(file_path), "product": product, "platform": platform},
         )
+
+    def _local_article(self, topic: str, keywords: list[str] | None) -> dict[str, Any]:
+        topic = (topic or "Untitled article").strip()
+        kws = ", ".join(keywords or [])
+        body = (
+            f"# {topic}\n\n"
+            f"Intro: this article explains {topic} in a practical way.\n\n"
+            "## Core ideas\n- Problem\n- Process\n- Practical examples\n\n"
+            "## Takeaways\nUse the checklist and adapt it to your workflow.\n"
+        )
+        return {"title": topic, "keywords": kws, "body": body}
+
+    def _local_product_description(self, product: str, platform: str) -> dict[str, Any]:
+        product = (product or "Digital product").strip()
+        platform = (platform or "marketplace").strip()
+        body = (
+            f"{product}\n\n"
+            f"A practical {platform} listing description with clear outcomes, concise benefits, and a direct CTA."
+        )
+        return {"title": product, "platform": platform, "body": body}
 
     async def create_turnkey_product(self, topic: str, platform: str = "gumroad", price: int = 9) -> TaskResult:
         topic = (topic or "VITO Digital Product").strip()

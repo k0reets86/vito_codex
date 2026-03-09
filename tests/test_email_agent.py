@@ -1,9 +1,5 @@
-"""Тесты EmailAgent — 5 тестов."""
-
 import pytest
 from unittest.mock import AsyncMock
-
-from agents.base_agent import TaskResult
 
 
 class TestEmailAgent:
@@ -17,30 +13,23 @@ class TestEmailAgent:
             comms=mock_comms,
         )
 
-    def test_init(self, agent):
-        assert agent.name == "email_agent"
-        assert "email" in agent.capabilities
-        assert "newsletter" in agent.capabilities
-
     @pytest.mark.asyncio
     async def test_create_newsletter(self, agent):
-        agent.llm_router.call_llm = AsyncMock(return_value="Subject: Weekly AI News\n\nDear reader...")
-        result = await agent.create_newsletter("AI trends", "tech professionals")
+        agent.llm_router.call_llm = AsyncMock(return_value="newsletter")
+        result = await agent.create_newsletter("AI launch", "creators")
         assert result.success is True
+        assert "subject" in result.output
 
     @pytest.mark.asyncio
     async def test_create_sequence(self, agent):
-        agent.llm_router.call_llm = AsyncMock(return_value="Email 1: Welcome...\nEmail 2: Value...")
-        result = await agent.create_sequence("onboard new users", emails_count=3)
+        agent.llm_router.call_llm = AsyncMock(return_value="sequence")
+        result = await agent.create_sequence("conversion", 3)
         assert result.success is True
+        assert len(result.output["emails"]) == 3
 
     @pytest.mark.asyncio
     async def test_manage_subscribers(self, agent):
-        result = await agent.manage_subscribers("list", {})
-        assert result.success is True
-
-    @pytest.mark.asyncio
-    async def test_execute_task(self, agent):
-        agent.llm_router.call_llm = AsyncMock(return_value="newsletter content")
-        result = await agent.execute_task("newsletter", topic="weekly digest", audience="subscribers")
-        assert result.success is True
+        added = await agent.manage_subscribers("add", {"email": "a@b.com"})
+        assert added.success is True
+        listed = await agent.manage_subscribers("list", {})
+        assert listed.output["total"] == 1

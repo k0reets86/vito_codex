@@ -28,18 +28,21 @@ class TestLegalAgent:
         agent.llm_router.call_llm = AsyncMock(return_value="TOS compliant: yes")
         result = await agent.check_tos("etsy")
         assert result.success is True
+        assert result.output["platform"] == "etsy"
 
     @pytest.mark.asyncio
     async def test_check_copyright(self, agent):
         agent.llm_router.call_llm = AsyncMock(return_value="No copyright issues detected")
         result = await agent.check_copyright("Original content about Python")
         assert result.success is True
+        assert "verdict" in result.output
 
     @pytest.mark.asyncio
     async def test_gdpr_audit(self, agent):
         agent.llm_router.call_llm = AsyncMock(return_value="GDPR audit: compliant")
         result = await agent.gdpr_audit()
         assert result.success is True
+        assert result.output["overall"] == "partial"
 
     @pytest.mark.asyncio
     async def test_execute_task(self, agent):

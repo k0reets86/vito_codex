@@ -1,7 +1,7 @@
 """LegalAgent — Agent 11: проверка TOS, авторских прав, GDPR."""
 
 import time
-from typing import Any, Optional
+
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from llm_router import TaskType
@@ -10,6 +10,13 @@ logger = get_logger("legal_agent", agent="legal_agent")
 
 
 class LegalAgent(BaseAgent):
+    NEEDS = {
+        "check_tos": ["research"],
+        "check_copyright": ["documentation"],
+        "gdpr_audit": ["security"],
+        "default": [],
+    }
+
     def __init__(self, **kwargs):
         super().__init__(name="legal_agent", description="Юридический: TOS, авторские права, GDPR", **kwargs)
 
@@ -46,10 +53,12 @@ class LegalAgent(BaseAgent):
                 prompt=f"Проанализируй Terms of Service платформы {platform}.\nПроверь: можно ли продавать AI-контент, ограничения, риски бана, комиссии.\nДай краткий вердикт: compliant/risk/violation.",
                 estimated_tokens=2000,
             )
+        local = self._local_tos_check(platform)
         if response:
             self._record_expense(0.01, f"TOS check: {platform}")
-            return TaskResult(success=True, output=response, cost_usd=0.01)
-        return TaskResult(success=True, output=self._local_tos_check(platform), metadata={"mode": "local_fallback"})
+            local["llm_notes"] = response
+            return TaskResult(success=True, output=local, cost_usd=0.01)
+        return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
 
     async def check_copyright(self, content: str) -> TaskResult:
         response = None
@@ -59,9 +68,11 @@ class LegalAgent(BaseAgent):
                 prompt=f"Проверь контент на потенциальные нарушения авторских прав:\n{content[:2000]}\nОтветь: safe/risk/violation с пояснением.",
                 estimated_tokens=1000,
             )
+        local = self._local_copyright_check(content)
         if response:
-            return TaskResult(success=True, output=response)
-        return TaskResult(success=True, output=self._local_copyright_check(content), metadata={"mode": "local_fallback"})
+            local["llm_notes"] = response
+            return TaskResult(success=True, output=local)
+        return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
 
     async def gdpr_audit(self) -> TaskResult:
         response = None
@@ -71,10 +82,12 @@ class LegalAgent(BaseAgent):
                 prompt="Проведи GDPR-аудит для AI-бизнеса, который:\n- Собирает email подписчиков\n- Хранит данные в PostgreSQL\n- Использует внешние API\nДай чеклист соответствия.",
                 estimated_tokens=2000,
             )
+        local = self._local_gdpr_audit()
         if response:
             self._record_expense(0.02, "GDPR audit")
-            return TaskResult(success=True, output=response, cost_usd=0.02)
-        return TaskResult(success=True, output=self._local_gdpr_audit(), metadata={"mode": "local_fallback"})
+            local["llm_notes"] = response
+            return TaskResult(success=True, output=local, cost_usd=0.02)
+        return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
 
     def _local_tos_check(self, platform: str) -> dict:
         p = (platform or "unknown").strip().lower()

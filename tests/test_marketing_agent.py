@@ -3,8 +3,6 @@
 import pytest
 from unittest.mock import AsyncMock
 
-from agents.base_agent import TaskResult
-
 
 class TestMarketingAgent:
     @pytest.fixture
@@ -27,6 +25,8 @@ class TestMarketingAgent:
         agent.llm_router.call_llm = AsyncMock(return_value="Marketing strategy: target millennials...")
         result = await agent.create_strategy("Digital Planner", "millennials", budget_usd=100)
         assert result.success is True
+        assert isinstance(result.output, dict)
+        assert result.output["target_audience"] == "millennials"
 
     @pytest.mark.asyncio
     async def test_design_funnel(self, agent):
@@ -39,6 +39,8 @@ class TestMarketingAgent:
         agent.llm_router.call_llm = AsyncMock(return_value="Discover the ultimate planner!")
         result = await agent.create_ad_copy("Digital Planner", "facebook")
         assert result.success is True
+        assert isinstance(result.output, dict)
+        assert len(result.output["variants"]) == 3
 
     @pytest.mark.asyncio
     async def test_execute_task(self, agent):
@@ -58,6 +60,6 @@ class TestMarketingAgent:
         )
         strategy = await agent.create_strategy("Planner", "creators", budget_usd=120)
         assert strategy.success is True
-        assert "local fallback" in strategy.output.lower()
+        assert strategy.output["target_audience"] == "creators"
         ad_copy = await agent.create_ad_copy("Planner", "facebook")
         assert ad_copy.success is True

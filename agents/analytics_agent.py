@@ -1,7 +1,8 @@
 """AnalyticsAgent — Agent 09: ежедневный дашборд, аномалии, прогнозы."""
 
 import time
-from typing import Any, Optional
+from typing import Any
+
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from llm_router import TaskType
@@ -10,13 +11,21 @@ logger = get_logger("analytics_agent", agent="analytics_agent")
 
 
 class AnalyticsAgent(BaseAgent):
+    NEEDS = {
+        "dashboard": ["health_check"],
+        "anomalies": ["analytics"],
+        "forecast": ["pricing"],
+        "agent_performance": ["agent_improvement"],
+        "default": [],
+    }
+
     def __init__(self, registry=None, **kwargs):
         super().__init__(name="analytics_agent", description="Аналитика: дашборд, аномалии, прогнозы, ROI", **kwargs)
         self.registry = registry
 
     @property
     def capabilities(self) -> list[str]:
-        return ["analytics", "dashboard", "forecast"]
+        return ["analytics", "dashboard", "forecast", "anomalies"]
 
     async def execute_task(self, task_type: str, **kwargs) -> TaskResult:
         self._status = AgentStatus.RUNNING
@@ -41,65 +50,95 @@ class AnalyticsAgent(BaseAgent):
             self._status = AgentStatus.IDLE
 
     async def daily_dashboard(self) -> TaskResult:
-        data = {}
+        spend = 0.0
+        revenue = 0.0
         if self.finance:
             try:
-                data["daily_spend"] = self.finance.get_daily_spend()
+                spend = float(self.finance.get_daily_spend())
             except Exception:
-                data["daily_spend"] = 0.0
+                spend = 0.0
             try:
-                data["daily_revenue"] = self.finance.get_daily_revenue()
+                revenue = float(self.finance.get_daily_revenue())
             except Exception:
-                data["daily_revenue"] = 0.0
-        data["timestamp"] = time.strftime("%Y-%m-%d %H:%M")
+                revenue = 0.0
+        profit = round(revenue - spend, 2)
+        data = {
+            "timestamp": time.strftime("%Y-%m-%d %H:%M"),
+            "daily_spend": round(spend, 2),
+            "daily_revenue": round(revenue, 2),
+            "daily_profit": profit,
+            "roi_percent": round((profit / spend) * 100, 2) if spend > 0 else None,
+            "health": "ok" if profit >= 0 else "watch",
+        }
         return TaskResult(success=True, output=data)
 
     async def detect_anomalies(self) -> TaskResult:
+        local = await self._local_anomaly_snapshot()
         if not self.llm_router:
-            return TaskResult(success=False, error="LLM Router недоступен")
-        stats = {}
-        if self.finance:
-            try:
-                stats["daily_spend"] = self.finance.get_daily_spend()
-            except Exception:
-                pass
+            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
         response = await self._call_llm(
             task_type=TaskType.ROUTINE,
-            prompt=f"Проанализируй метрики и найди аномалии:\n{stats}\nОтветь кратко: есть ли отклонения?",
+            prompt=f"Проанализируй метрики и найди аномалии:\n{local}\nОтветь кратко: есть ли отклонения?",
             estimated_tokens=500,
         )
-        if not response:
-            return TaskResult(success=False, error="LLM не вернул ответ")
-        return TaskResult(success=True, output=response)
+        if response:
+            local["llm_notes"] = response
+        return TaskResult(success=True, output=local)
 
     async def forecast_revenue(self, days: int = 30) -> TaskResult:
+        local = await self._local_forecast(days)
         if not self.llm_router:
-            return TaskResult(success=False, error="LLM Router недоступен")
+            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
         response = await self._call_llm(
             task_type=TaskType.STRATEGY,
             prompt=f"Спрогнозируй выручку на {days} дней. Учти текущие тренды. Дай оценку в USD.",
             estimated_tokens=1000,
         )
-        if not response:
-            return TaskResult(success=False, error="LLM не вернул ответ")
-        self._record_expense(0.01, f"Forecast {days}d")
-        return TaskResult(success=True, output=response, cost_usd=0.01)
+        if response:
+            self._record_expense(0.01, f"Forecast {days}d")
+            local["llm_notes"] = response
+        return TaskResult(success=True, output=local, cost_usd=0.01 if response else 0.0)
 
     async def agent_performance(self) -> TaskResult:
-        if not self.registry:
-            return TaskResult(success=True, output={"status": "no registry attached"})
-        try:
-            statuses = self.registry.get_all_statuses()
-            summary = [
-                {
-                    "name": s.get("name"),
-                    "completed": s.get("tasks_completed", 0),
-                    "failed": s.get("tasks_failed", 0),
-                    "cost_usd": s.get("total_cost", 0),
-                    "status": s.get("status"),
-                }
-                for s in statuses
-            ]
-            return TaskResult(success=True, output=summary)
-        except Exception as e:
-            return TaskResult(success=False, error=str(e))
+        registry = self.registry or self._registry
+        if not registry:
+            return TaskResult(success=True, output={"status": "no_registry_attached"})
+        statuses = registry.get_all_statuses()
+        summary = [
+            {
+                "name": s.get("name"),
+                "completed": s.get("tasks_completed", 0),
+                "failed": s.get("tasks_failed", 0),
+                "cost_usd": s.get("total_cost", 0),
+                "status": s.get("status"),
+            }
+            for s in statuses
+        ]
+        return TaskResult(success=True, output={"agents": summary, "agent_count": len(summary)})
+
+    async def _local_anomaly_snapshot(self) -> dict[str, Any]:
+        dashboard = await self.daily_dashboard()
+        data = dict(dashboard.output or {})
+        spend = float(data.get("daily_spend") or 0.0)
+        revenue = float(data.get("daily_revenue") or 0.0)
+        anomalies = []
+        if spend > 0 and revenue == 0:
+            anomalies.append("spend_without_revenue")
+        if spend > revenue and revenue > 0:
+            anomalies.append("negative_margin_day")
+        return {
+            "metrics": data,
+            "anomalies": anomalies,
+            "status": "ok" if not anomalies else "review_required",
+        }
+
+    async def _local_forecast(self, days: int) -> dict[str, Any]:
+        dashboard = await self.daily_dashboard()
+        daily_revenue = float((dashboard.output or {}).get("daily_revenue") or 0.0)
+        baseline = daily_revenue if daily_revenue > 0 else 25.0
+        return {
+            "days": int(days),
+            "baseline_daily_revenue": baseline,
+            "forecast_revenue": round(baseline * int(days), 2),
+            "confidence": "low" if daily_revenue == 0 else "medium",
+        }

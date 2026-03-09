@@ -3,6 +3,7 @@
 import json
 import re
 import time
+from typing import Any
 
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
@@ -13,13 +14,21 @@ logger = get_logger("seo_agent", agent="seo_agent")
 
 
 class SEOAgent(BaseAgent):
+    NEEDS = {
+        "keyword_research": ["research"],
+        "seo": ["content_pipeline"],
+        "generate_meta": ["seo"],
+        "listing_seo_pack": ["listing_create"],
+        "default": [],
+    }
+
     def __init__(self, **kwargs):
         super().__init__(name="seo_agent", description="SEO-оптимизация, keyword research, мета-теги", **kwargs)
         self._cache: dict[str, str] = {}
 
     @property
     def capabilities(self) -> list[str]:
-        return ["seo", "keyword_research", "listing_seo_pack"]
+        return ["seo", "keyword_research", "listing_seo_pack", "generate_meta"]
 
     async def execute_task(self, task_type: str, **kwargs) -> TaskResult:
         self._status = AgentStatus.RUNNING
@@ -50,7 +59,8 @@ class SEOAgent(BaseAgent):
     async def keyword_research(self, topic: str, language: str = "en") -> TaskResult:
         key = f"kw::{language}::{(topic or '').strip().lower()}"
         if key in self._cache:
-            return TaskResult(success=True, output=self._cache[key], metadata={"cached": True})
+            cached = self._safe_json_loads(self._cache[key]) or {"raw": self._cache[key]}
+            return TaskResult(success=True, output=cached, metadata={"cached": True})
 
         base = self._local_keyword_research(topic, language=language)
         response = None
@@ -64,11 +74,12 @@ class SEOAgent(BaseAgent):
                 ),
                 estimated_tokens=1200,
             )
-        output = response or base
+        output = dict(base)
         if response:
             cost = 0.01
             self._record_expense(cost, f"Keyword research: {topic[:50]}")
-        self._cache[key] = output
+            output["llm_notes"] = str(response)
+        self._cache[key] = json.dumps(output, ensure_ascii=False)
         return TaskResult(success=True, output=output, cost_usd=cost)
 
     async def optimize_content(self, content: str, keywords: list[str]) -> TaskResult:
@@ -83,24 +94,30 @@ class SEOAgent(BaseAgent):
         if not response:
             return TaskResult(success=True, output=local)
         self._record_expense(0.01, "SEO optimize content")
-        return TaskResult(success=True, output=response, cost_usd=0.01)
+        local["llm_rewrite"] = response
+        return TaskResult(success=True, output=local, cost_usd=0.01)
 
     async def analyze_rankings(self, url: str) -> TaskResult:
+        local = {
+            "url": url,
+            "status": "review_required",
+            "checks": ["title", "meta_description", "headers", "internal_links", "indexability"],
+        }
         if not self.llm_router:
-            return TaskResult(success=False, error="LLM Router недоступен")
+            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
         response = await self._call_llm(
             task_type=TaskType.RESEARCH,
             prompt=f"Проанализируй SEO для URL: {url}. Оцени on-page факторы, дай рекомендации.",
             estimated_tokens=2000,
         )
-        if not response:
-            return TaskResult(success=False, error="LLM не вернул ответ")
-        return TaskResult(success=True, output=response, cost_usd=0.01)
+        if response:
+            local["llm_notes"] = response
+        return TaskResult(success=True, output=local, cost_usd=0.01 if response else 0.0)
 
     async def generate_meta(self, content: str, keywords: list[str]) -> TaskResult:
         local = self._local_meta(content, keywords)
         if not self.llm_router:
-            return TaskResult(success=True, output=json.dumps(local, ensure_ascii=False))
+            return TaskResult(success=True, output=local)
         response = await self._call_llm(
             task_type=TaskType.CONTENT,
             prompt=(
@@ -110,45 +127,13 @@ class SEOAgent(BaseAgent):
             estimated_tokens=900,
         )
         if not response:
-            return TaskResult(success=True, output=json.dumps(local, ensure_ascii=False))
-        return TaskResult(success=True, output=response, cost_usd=0.005)
-
-    def _local_keyword_research(self, topic: str, language: str = "en") -> str:
-        tokens = [t for t in re.split(r"[^a-zA-Z0-9а-яА-Я]+", (topic or "").lower()) if len(t) > 2]
-        seed = " ".join(tokens[:4]) or "digital product"
-        primary = [seed, f"{seed} ideas", f"{seed} guide", f"best {seed}", f"{seed} examples"]
-        long_tail = [
-            f"how to start with {seed}",
-            f"{seed} for beginners",
-            f"best tools for {seed}",
-            f"{seed} templates download",
-            f"profitable {seed} niche",
-        ]
-        lsi = [f"{seed} strategy", f"{seed} checklist", f"{seed} workflow", f"{seed} trends", f"{seed} tips"]
-        return (
-            f"PRIMARY ({language}):\n- " + "\n- ".join(primary)
-            + "\n\nLONG_TAIL:\n- " + "\n- ".join(long_tail)
-            + "\n\nLSI:\n- " + "\n- ".join(lsi)
-        )
-
-    def _local_optimize_content(self, content: str, keywords: list[str]) -> str:
-        body = (content or "").strip() or "(empty content)"
-        keys = [k.strip() for k in (keywords or []) if str(k).strip()][:8]
-        lines = ["SEO Optimization (local fallback):"]
-        if keys:
-            lines.append("- Target keywords: " + ", ".join(keys))
-        lines.append("- Add 1 keyword in H1, 1 in first paragraph, 2-3 naturally in body.")
-        lines.append("- Keep sentence length short and include one bullet list.")
-        lines.append("\nReworked draft:\n" + body[:3000])
-        return "\n".join(lines)
-
-    def _local_meta(self, content: str, keywords: list[str]) -> dict[str, str]:
-        clean = re.sub(r"\s+", " ", (content or "")).strip()
-        kw = (keywords[0] if keywords else "Digital Product").strip()[:30]
-        title = f"{kw} Guide | Actionable Steps"[:60]
-        desc_base = clean[:120] if clean else f"Learn {kw} with practical steps and templates."
-        description = (desc_base + " Start now.")[:160]
-        return {"title": title, "description": description}
+            return TaskResult(success=True, output=local)
+        meta = self._safe_json_loads(response)
+        if isinstance(meta, dict):
+            local.update({k: str(v) for k, v in meta.items() if str(v).strip()})
+        else:
+            local["llm_notes"] = response
+        return TaskResult(success=True, output=local, cost_usd=0.005)
 
     async def listing_seo_pack(self, platform: str, title: str, description: str, tags: list[str] | None = None) -> TaskResult:
         payload = optimize_listing_payload(
@@ -171,5 +156,68 @@ class SEOAgent(BaseAgent):
             "category": payload.get("category"),
             "seo_score": payload.get("seo_score"),
             "publish_ready": payload.get("publish_ready"),
+            "evidence": {
+                "title_len": len(str(payload.get("title") or "")),
+                "description_len": len(str(payload.get("description") or "")),
+                "tag_count": len(payload.get("tags") or []),
+                "keyword_count": len(payload.get("keywords") or []),
+            },
         }
         return TaskResult(success=True, output=pack)
+
+    def _local_keyword_research(self, topic: str, language: str = "en") -> dict[str, Any]:
+        tokens = [t for t in re.split(r"[^a-zA-Z0-9а-яА-Я]+", (topic or "").lower()) if len(t) > 2]
+        seed = " ".join(tokens[:4]) or "digital product"
+        primary = [seed, f"{seed} ideas", f"{seed} guide", f"best {seed}", f"{seed} examples"]
+        long_tail = [
+            f"how to start with {seed}",
+            f"{seed} for beginners",
+            f"best tools for {seed}",
+            f"{seed} templates download",
+            f"profitable {seed} niche",
+        ]
+        lsi = [f"{seed} strategy", f"{seed} checklist", f"{seed} workflow", f"{seed} trends", f"{seed} tips"]
+        return {
+            "topic": topic,
+            "language": language,
+            "primary_keywords": primary,
+            "long_tail_keywords": long_tail,
+            "lsi_keywords": lsi,
+            "search_intent": "commercial_informational",
+            "recommended_usage": {
+                "title": primary[:2],
+                "tags": long_tail[:5],
+                "body": lsi[:5],
+            },
+        }
+
+    def _local_optimize_content(self, content: str, keywords: list[str]) -> dict[str, Any]:
+        body = (content or "").strip() or "(empty content)"
+        keys = [k.strip() for k in (keywords or []) if str(k).strip()][:8]
+        return {
+            "target_keywords": keys,
+            "recommended_changes": [
+                "Add one target keyword to H1",
+                "Place one target keyword in the first paragraph",
+                "Use 2-3 target keywords naturally in the body",
+                "Add one bullet list for scanability",
+                "Keep average sentence length short",
+            ],
+            "draft_preview": body[:3000],
+            "seo_readiness": 72 if keys else 48,
+        }
+
+    def _local_meta(self, content: str, keywords: list[str]) -> dict[str, str]:
+        clean = re.sub(r"\s+", " ", (content or "")).strip()
+        kw = (keywords[0] if keywords else "Digital Product").strip()[:30]
+        title = f"{kw} Guide | Actionable Steps"[:60]
+        desc_base = clean[:120] if clean else f"Learn {kw} with practical steps and templates."
+        description = (desc_base + " Start now.")[:160]
+        return {"title": title, "description": description}
+
+    def _safe_json_loads(self, value: str) -> dict[str, Any] | None:
+        try:
+            data = json.loads(str(value or "").strip())
+        except Exception:
+            return None
+        return data if isinstance(data, dict) else None
