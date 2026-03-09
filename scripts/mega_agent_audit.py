@@ -290,55 +290,64 @@ async def run_megatest() -> dict[str, Any]:
     by_name = {a.name: a for a in agents}
 
     rows: list[dict[str, Any]] = []
-    for agent_name, agent in sorted(by_name.items()):
-        cls = class_map.get(type(agent).__name__)
-        static = _static_score_for_class(cls) if cls else StaticScore(0, 0, 0, 0, 0, 0)
-        caps = list(agent.capabilities or [])
-        runtime_caps = _runtime_capabilities(agent_name, caps)
+    try:
+        for agent_name, agent in sorted(by_name.items()):
+            cls = class_map.get(type(agent).__name__)
+            static = _static_score_for_class(cls) if cls else StaticScore(0, 0, 0, 0, 0, 0)
+            caps = list(agent.capabilities or [])
+            runtime_caps = _runtime_capabilities(agent_name, caps)
 
-        runtime_rows: list[dict[str, Any]] = []
-        for cap in runtime_caps:
-            kwargs = _sample_kwargs(agent_name, cap)
+            runtime_rows: list[dict[str, Any]] = []
+            for cap in runtime_caps:
+                kwargs = _sample_kwargs(agent_name, cap)
+                try:
+                    result = await asyncio.wait_for(agent.execute_task(cap, **kwargs), timeout=25)
+                    ok_shape = isinstance(result, TaskResult)
+                    err = str(getattr(result, "error", "") or "")
+                    runtime_rows.append(
+                        {
+                            "capability": cap,
+                            "task_success": bool(result.success) if ok_shape else False,
+                            "result_shape_ok": ok_shape,
+                            "error": err[:240],
+                            "non_wrapper_path": not ("неизвестный task_type" in err.lower() or "unknown task_type" in err.lower()),
+                        }
+                    )
+                except Exception as e:
+                    runtime_rows.append(
+                        {
+                            "capability": cap,
+                            "task_success": False,
+                            "result_shape_ok": False,
+                            "error": str(e)[:240],
+                            "non_wrapper_path": False,
+                        }
+                    )
+
+            runtime_ok = any(
+                r["result_shape_ok"] and r["non_wrapper_path"] and r["task_success"]
+                for r in runtime_rows
+            )
+            combat_ready = bool(static.score10 >= 6 and runtime_ok and len(caps) > 0)
+            rows.append(
+                {
+                    "agent": agent_name,
+                    "class": type(agent).__name__,
+                    "capabilities": caps,
+                    "runtime_capabilities_checked": runtime_caps,
+                    "static": static.__dict__,
+                    "runtime": runtime_rows,
+                    "combat_ready": combat_ready,
+                }
+            )
+    finally:
+        async def _safe_stop(agent: BaseAgent) -> None:
             try:
-                result = await asyncio.wait_for(agent.execute_task(cap, **kwargs), timeout=25)
-                ok_shape = isinstance(result, TaskResult)
-                err = str(getattr(result, "error", "") or "")
-                runtime_rows.append(
-                    {
-                        "capability": cap,
-                        "task_success": bool(result.success) if ok_shape else False,
-                        "result_shape_ok": ok_shape,
-                        "error": err[:240],
-                        "non_wrapper_path": not ("неизвестный task_type" in err.lower() or "unknown task_type" in err.lower()),
-                    }
-                )
-            except Exception as e:
-                runtime_rows.append(
-                    {
-                        "capability": cap,
-                        "task_success": False,
-                        "result_shape_ok": False,
-                        "error": str(e)[:240],
-                        "non_wrapper_path": False,
-                    }
-                )
+                await asyncio.wait_for(agent.stop(), timeout=3)
+            except Exception:
+                pass
 
-        runtime_ok = any(
-            r["result_shape_ok"] and r["non_wrapper_path"] and r["task_success"]
-            for r in runtime_rows
-        )
-        combat_ready = bool(static.score10 >= 6 and runtime_ok and len(caps) > 0)
-        rows.append(
-            {
-                "agent": agent_name,
-                "class": type(agent).__name__,
-                "capabilities": caps,
-                "runtime_capabilities_checked": runtime_caps,
-                "static": static.__dict__,
-                "runtime": runtime_rows,
-                "combat_ready": combat_ready,
-            }
-        )
+        await asyncio.gather(*[_safe_stop(agent) for agent in reversed(agents)], return_exceptions=True)
 
     total = len(rows)
     ready = sum(1 for r in rows if r["combat_ready"])

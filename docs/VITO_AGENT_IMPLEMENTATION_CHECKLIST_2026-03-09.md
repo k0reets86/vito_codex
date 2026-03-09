@@ -11,7 +11,7 @@
   - `done`
   - `paused_blocked`
 
-Общий прогресс: `78%`
+Общий прогресс: `90%`
 
 Жесткое правило:
 - `done` по этому плану возможен только если охвачены все 23 агента, все обязательные связи и все 8 workflow.
@@ -75,12 +75,12 @@
 - Weight: `20%`
 
 ## Phase M — Agent Benchmark Matrix
-- [ ] fixed benchmark per agent
-- [ ] cross-agent benchmark per family
-- [ ] autonomy/data/evidence/collaboration/recovery scorecard
-- [ ] rerun for all 23 agents
-- [ ] доказуемое покрытие всех 23 агентов без исключений
-- Status: `not_started`
+- [x] fixed benchmark per agent
+- [x] cross-agent benchmark per family
+- [x] autonomy/data/evidence/collaboration/recovery scorecard
+- [x] rerun for all 23 agents
+- [x] доказуемое покрытие всех 23 агентов без исключений
+- Status: `done`
 - Weight: `12%`
 
 ## Phase N — Final Judge and Responsibility Graph
