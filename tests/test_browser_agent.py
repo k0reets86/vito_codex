@@ -121,6 +121,41 @@ class TestBrowserAgent:
             assert res.success is True
             assert res.output.get("verified") is True
 
+    @pytest.mark.asyncio
+    async def test_navigate_returns_auth_interrupt_for_kdp_mfa(self, agent):
+        mock_page = AsyncMock()
+        mock_page.goto = AsyncMock(return_value=MagicMock(status=200))
+        mock_page.title = AsyncMock(return_value="Two-Step Verification")
+        mock_page.url = "https://www.amazon.com/ap/mfa"
+        mock_page.inner_text = AsyncMock(return_value="Two-Step Verification")
+        mock_page.screenshot = AsyncMock()
+        mock_page.close = AsyncMock()
+        mock_context = AsyncMock()
+        mock_context.new_page = AsyncMock(return_value=mock_page)
+        agent._context = mock_context
+        with patch.object(agent, '_ensure_browser', new_callable=AsyncMock):
+            result = await agent.navigate("https://www.amazon.com/ap/mfa", service="amazon_kdp")
+            assert result.success is False
+            assert result.error == "auth_interrupt"
+            assert result.output["auth_interrupt"]["type"] == "otp_required"
+
+    @pytest.mark.asyncio
+    async def test_fill_form_uses_default_screenshot_for_screenshot_first_service(self, agent):
+        mock_page = AsyncMock()
+        mock_page.goto = AsyncMock()
+        mock_page.inner_text = AsyncMock(return_value="normal page")
+        mock_page.fill = AsyncMock()
+        mock_page.screenshot = AsyncMock()
+        mock_page.close = AsyncMock()
+        mock_context = AsyncMock()
+        mock_context.new_page = AsyncMock(return_value=mock_page)
+        agent._context = mock_context
+        with patch.object(agent, '_ensure_browser', new_callable=AsyncMock):
+            result = await agent.fill_form("https://www.etsy.com", {"#title": "x"}, service="etsy")
+            assert result.success is True
+            assert result.output["screenshot_path"]
+            assert "browser_runtime_profile" in result.output
+
 
 class TestOOMProtection:
     """Tests for OOM protection mechanisms."""

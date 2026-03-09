@@ -2068,6 +2068,12 @@ async def test_verify_service_auth_prefers_browser_storage_for_generic_service(m
     assert "storage_state" in detail.lower()
 
 
+def test_auth_interrupt_prompt_includes_profile_route(comms):
+    text = comms._auth_interrupt_prompt("amazon_kdp")
+    assert "6 цифр" in text
+    assert "kdp.amazon.com/account" in text
+
+
 # ── request_approval с inline кнопками ──
 
 @pytest.mark.asyncio

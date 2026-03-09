@@ -53,6 +53,7 @@ from config.settings import settings
 from modules.owner_preference_model import OwnerPreferenceModel
 from modules.owner_pref_metrics import OwnerPreferenceMetrics
 from modules.auth_broker import AuthBroker
+from modules.browser_runtime_policy import get_browser_runtime_profile, get_profile_completion_runbook, storage_state_path_for_service
 from modules.data_lake import DataLake
 from modules.status_snapshot import build_status_snapshot, render_status_snapshot
 from modules.task_lineage import ensure_task_lineage
@@ -1656,25 +1657,12 @@ class CommsAgent:
 
     def _service_storage_state_path(self, service: str) -> Path | None:
         svc = str(service or "").strip().lower()
+        p = storage_state_path_for_service(svc)
+        if p is not None:
+            return p
         raw = ""
-        if svc == "amazon_kdp":
-            raw = str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json") or "runtime/kdp_storage_state.json")
-        elif svc == "etsy":
-            raw = str(getattr(settings, "ETSY_STORAGE_STATE_FILE", "runtime/etsy_storage_state.json") or "runtime/etsy_storage_state.json")
-        elif svc == "kofi":
-            raw = str(getattr(settings, "KOFI_STORAGE_STATE_FILE", "runtime/kofi_storage_state.json") or "runtime/kofi_storage_state.json")
-        elif svc == "printful":
-            raw = str(getattr(settings, "PRINTFUL_STORAGE_STATE_FILE", "runtime/printful_storage_state.json") or "runtime/printful_storage_state.json")
-        elif svc == "gumroad":
-            raw = str(getattr(settings, "GUMROAD_STORAGE_STATE_FILE", "runtime/gumroad_storage_state.json") or "runtime/gumroad_storage_state.json")
-        elif svc == "twitter":
-            raw = str(getattr(settings, "TWITTER_STORAGE_STATE_FILE", "runtime/twitter_storage_state.json") or "runtime/twitter_storage_state.json")
-        elif svc == "reddit":
-            raw = str(getattr(settings, "REDDIT_STORAGE_STATE_FILE", "runtime/reddit_storage_state.json") or "runtime/reddit_storage_state.json")
-        elif svc == "threads":
+        if svc == "threads":
             raw = str(getattr(settings, "THREADS_STORAGE_STATE_FILE", "runtime/threads_storage_state.json") or "runtime/threads_storage_state.json")
-        elif svc == "pinterest":
-            raw = str(getattr(settings, "PINTEREST_STORAGE_STATE_FILE", "runtime/pinterest_storage_state.json") or "runtime/pinterest_storage_state.json")
         elif svc == "instagram":
             raw = str(getattr(settings, "INSTAGRAM_STORAGE_STATE_FILE", "runtime/instagram_storage_state.json") or "runtime/instagram_storage_state.json")
         elif svc == "facebook":
@@ -1687,10 +1675,19 @@ class CommsAgent:
             raw = str(getattr(settings, "YOUTUBE_STORAGE_STATE_FILE", "runtime/youtube_storage_state.json") or "runtime/youtube_storage_state.json")
         if not raw:
             return None
-        p = Path(raw)
-        if not p.is_absolute():
-            p = PROJECT_ROOT / p
-        return p
+        p2 = Path(raw)
+        if not p2.is_absolute():
+            p2 = PROJECT_ROOT / p2
+        return p2
+
+    def _auth_interrupt_prompt(self, service: str) -> str:
+        profile = get_browser_runtime_profile(service)
+        completion = get_profile_completion_runbook(service)
+        base = str(profile.get("otp_prompt") or f"Для {service} нужен ручной вход в browser-сессии.")
+        route = str(completion.get("route") or "").strip()
+        if completion.get("requires_profile_completion") and route:
+            return f"{base} Если платформа упирается в незаполненный профиль, сначала пройди: {route}"
+        return base
 
     def _has_cookie_storage_state(self, service: str, since_iso: str = "") -> tuple[bool, str]:
         p = self._service_storage_state_path(service)
@@ -1764,7 +1761,7 @@ class CommsAgent:
                 return True, "Amazon KDP вход подтверждён и сессия сохранена."
             if "OTP_REQUIRED" in out:
                 self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat()}
-                return False, "Для Amazon нужен код из аутентификатора. Отправь 6 цифр."
+                return False, self._auth_interrupt_prompt("amazon_kdp")
             self._auth_broker.mark_failed(svc, detail="kdp_verify_failed")
             return False, "Не удалось подтвердить вход Amazon автоматически."
         if svc == "printful":

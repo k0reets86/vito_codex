@@ -25,6 +25,7 @@ from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from config.resource_guard import resource_guard
 from config.settings import settings
+from modules.browser_runtime_policy import build_auth_interrupt_output, get_browser_runtime_profile
 
 logger = get_logger("browser_agent", agent="browser_agent")
 
@@ -397,10 +398,35 @@ class BrowserAgent(BaseAgent):
             pass
         return out
 
-    async def navigate(self, url: str) -> TaskResult:
+    def _runtime_profile(self, service: str) -> dict[str, Any]:
+        return get_browser_runtime_profile(service)
+
+    def _default_screenshot_path(self, service: str, task_type: str) -> str:
+        svc = str(service or "generic").strip().lower() or "generic"
+        task = str(task_type or "step").strip().lower() or "step"
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        return f"/tmp/{svc}_{task}_{ts}.png"
+
+    async def navigate(self, url: str, service: str = "") -> TaskResult:
         page = await self._new_page()
         try:
             response = await self._goto_with_policy(page, url, timeout_ms=30000)
+            profile = self._runtime_profile(service)
+            body_text = ""
+            try:
+                body_text = (await page.inner_text("body") or "")[:4000]
+            except Exception:
+                body_text = ""
+            auth_interrupt = build_auth_interrupt_output(service, url=str(getattr(page, "url", url)), body_text=body_text)
+            if auth_interrupt:
+                if profile.get("screenshot_first_default") and not auth_interrupt.get("screenshot"):
+                    try:
+                        shot = self._default_screenshot_path(service, "auth_interrupt")
+                        await page.screenshot(path=shot, full_page=True)
+                        auth_interrupt["screenshot"] = shot
+                    except Exception:
+                        pass
+                return TaskResult(success=False, error="auth_interrupt", output=auth_interrupt)
             blocked, reason = await self._detect_challenge(page, url)
             if blocked and bool(getattr(settings, "BROWSER_CHALLENGE_BLOCK_MODE", True)):
                 artifacts = await self._capture_failure_artifacts(page, "challenge_detected")
@@ -410,7 +436,15 @@ class BrowserAgent(BaseAgent):
                     output={"url": str(getattr(page, "url", url)), "reason": reason, "needs_manual_auth": True, **artifacts},
                 )
             title = await page.title()
-            return TaskResult(success=True, output={"url": url, "title": title, "status": response.status if response else 0})
+            output = {"url": url, "title": title, "status": response.status if response else 0, "browser_runtime_profile": profile}
+            if profile.get("screenshot_first_default"):
+                try:
+                    shot = self._default_screenshot_path(service, "navigate")
+                    await page.screenshot(path=shot, full_page=True)
+                    output["screenshot_path"] = shot
+                except Exception:
+                    pass
+            return TaskResult(success=True, output=output)
         except Exception as e:
             artifacts = await self._capture_failure_artifacts(page, "navigate_fail")
             return TaskResult(success=False, error=str(e), output={"url": url, **artifacts})
@@ -420,12 +454,20 @@ class BrowserAgent(BaseAgent):
             except Exception:
                 pass
 
-    async def screenshot(self, url: str, path: str = "") -> TaskResult:
+    async def screenshot(self, url: str, path: str = "", service: str = "") -> TaskResult:
         if not path:
             path = f"/tmp/vito_screenshot_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.png"
         page = await self._new_page()
         try:
             await self._goto_with_policy(page, url, timeout_ms=30000)
+            body_text = ""
+            try:
+                body_text = (await page.inner_text("body") or "")[:4000]
+            except Exception:
+                body_text = ""
+            auth_interrupt = build_auth_interrupt_output(service, url=str(getattr(page, "url", url)), body_text=body_text, screenshot_path=path)
+            if auth_interrupt:
+                return TaskResult(success=False, error="auth_interrupt", output=auth_interrupt)
             blocked, reason = await self._detect_challenge(page, url)
             if blocked and bool(getattr(settings, "BROWSER_CHALLENGE_BLOCK_MODE", True)):
                 artifacts = await self._capture_failure_artifacts(page, "challenge_detected")
@@ -435,7 +477,7 @@ class BrowserAgent(BaseAgent):
                     output={"url": str(getattr(page, "url", url)), "reason": reason, "needs_manual_auth": True, **artifacts},
                 )
             await page.screenshot(path=path, full_page=True)
-            return TaskResult(success=True, output={"url": url, "path": path, "size_bytes": os.path.getsize(path)})
+            return TaskResult(success=True, output={"url": url, "path": path, "size_bytes": os.path.getsize(path), "browser_runtime_profile": self._runtime_profile(service)})
         except Exception as e:
             artifacts = await self._capture_failure_artifacts(page, "screenshot_fail")
             return TaskResult(success=False, error=str(e), output={"url": url, **artifacts})
@@ -445,10 +487,18 @@ class BrowserAgent(BaseAgent):
             except Exception:
                 pass
 
-    async def extract_text(self, url: str, selector: str = "body") -> TaskResult:
+    async def extract_text(self, url: str, selector: str = "body", service: str = "") -> TaskResult:
         page = await self._new_page()
         try:
             await self._goto_with_policy(page, url, timeout_ms=30000)
+            body_text = ""
+            try:
+                body_text = (await page.inner_text("body") or "")[:4000]
+            except Exception:
+                body_text = ""
+            auth_interrupt = build_auth_interrupt_output(service, url=str(getattr(page, "url", url)), body_text=body_text)
+            if auth_interrupt:
+                return TaskResult(success=False, error="auth_interrupt", output=auth_interrupt)
             blocked, reason = await self._detect_challenge(page, url)
             if blocked and bool(getattr(settings, "BROWSER_CHALLENGE_BLOCK_MODE", True)):
                 artifacts = await self._capture_failure_artifacts(page, "challenge_detected")
@@ -458,7 +508,11 @@ class BrowserAgent(BaseAgent):
                     output={"url": str(getattr(page, "url", url)), "reason": reason, "needs_manual_auth": True, **artifacts},
                 )
             text = await page.inner_text(selector)
-            return TaskResult(success=True, output="\n".join(l.strip() for l in text.splitlines() if l.strip())[:10000])
+            return TaskResult(
+                success=True,
+                output="\n".join(l.strip() for l in text.splitlines() if l.strip())[:10000],
+                metadata={"browser_runtime_profile": self._runtime_profile(service)},
+            )
         except Exception as e:
             artifacts = await self._capture_failure_artifacts(page, "extract_fail")
             return TaskResult(success=False, error=str(e), output={"url": url, "selector": selector, **artifacts})
@@ -468,10 +522,21 @@ class BrowserAgent(BaseAgent):
             except Exception:
                 pass
 
-    async def fill_form(self, url: str, data: dict[str, str], screenshot_path: str = "") -> TaskResult:
+    async def fill_form(self, url: str, data: dict[str, str], screenshot_path: str = "", service: str = "") -> TaskResult:
         page = await self._new_page()
         try:
             await self._goto_with_policy(page, url, timeout_ms=30000)
+            profile = self._runtime_profile(service)
+            if profile.get("screenshot_first_default") and not screenshot_path:
+                screenshot_path = self._default_screenshot_path(service, "form_fill")
+            body_text = ""
+            try:
+                body_text = (await page.inner_text("body") or "")[:4000]
+            except Exception:
+                body_text = ""
+            auth_interrupt = build_auth_interrupt_output(service, url=str(getattr(page, "url", url)), body_text=body_text, screenshot_path=screenshot_path)
+            if auth_interrupt:
+                return TaskResult(success=False, error="auth_interrupt", output=auth_interrupt)
             blocked, reason = await self._detect_challenge(page, url)
             if blocked and bool(getattr(settings, "BROWSER_CHALLENGE_BLOCK_MODE", True)):
                 artifacts = await self._capture_failure_artifacts(page, "challenge_detected")
@@ -496,7 +561,7 @@ class BrowserAgent(BaseAgent):
                     shot = screenshot_path
                 except Exception:
                     pass
-            return TaskResult(success=True, output={"fields_filled": filled, "total": len(data), "screenshot_path": shot})
+            return TaskResult(success=True, output={"fields_filled": filled, "total": len(data), "screenshot_path": shot, "browser_runtime_profile": profile})
         except Exception as e:
             artifacts = await self._capture_failure_artifacts(page, "form_fail")
             return TaskResult(success=False, error=str(e), output={"url": url, **artifacts})
@@ -506,12 +571,23 @@ class BrowserAgent(BaseAgent):
             except Exception:
                 pass
 
-    async def upload_file(self, url: str, file_path: str, selector: str = 'input[type="file"]', screenshot_path: str = "") -> TaskResult:
+    async def upload_file(self, url: str, file_path: str, selector: str = 'input[type="file"]', screenshot_path: str = "", service: str = "") -> TaskResult:
         if not os.path.isfile(file_path):
             return TaskResult(success=False, error=f"Файл не найден: {file_path}")
         page = await self._new_page()
         try:
             await self._goto_with_policy(page, url, timeout_ms=30000)
+            profile = self._runtime_profile(service)
+            if profile.get("screenshot_first_default") and not screenshot_path:
+                screenshot_path = self._default_screenshot_path(service, "upload_file")
+            body_text = ""
+            try:
+                body_text = (await page.inner_text("body") or "")[:4000]
+            except Exception:
+                body_text = ""
+            auth_interrupt = build_auth_interrupt_output(service, url=str(getattr(page, "url", url)), body_text=body_text, screenshot_path=screenshot_path)
+            if auth_interrupt:
+                return TaskResult(success=False, error="auth_interrupt", output=auth_interrupt)
             blocked, reason = await self._detect_challenge(page, url)
             if blocked and bool(getattr(settings, "BROWSER_CHALLENGE_BLOCK_MODE", True)):
                 artifacts = await self._capture_failure_artifacts(page, "challenge_detected")
@@ -530,7 +606,7 @@ class BrowserAgent(BaseAgent):
                         shot = screenshot_path
                     except Exception:
                         pass
-                return TaskResult(success=True, output={"uploaded": True, "file": file_path, "screenshot_path": shot})
+                    return TaskResult(success=True, output={"uploaded": True, "file": file_path, "screenshot_path": shot, "browser_runtime_profile": profile})
             artifacts = await self._capture_failure_artifacts(page, "upload_selector_missing")
             return TaskResult(success=False, error=f"Селектор не найден: {selector}", output={"url": url, **artifacts})
         except Exception as e:
@@ -556,11 +632,23 @@ class BrowserAgent(BaseAgent):
         screenshot_path: str = "",
         verify_selectors: list[str] | None = None,
         require_verify: bool = False,
+        service: str = "",
     ) -> TaskResult:
         """Generic registration flow: fill form, submit, fetch email code/link, submit."""
         page = await self._new_page()
         try:
             await self._goto_with_policy(page, url, timeout_ms=30000)
+            profile = self._runtime_profile(service)
+            if profile.get("screenshot_first_default") and not screenshot_path:
+                screenshot_path = self._default_screenshot_path(service, "register")
+            body_text = ""
+            try:
+                body_text = (await page.inner_text("body") or "")[:4000]
+            except Exception:
+                body_text = ""
+            auth_interrupt = build_auth_interrupt_output(service, url=str(getattr(page, "url", url)), body_text=body_text, screenshot_path=screenshot_path)
+            if auth_interrupt:
+                return TaskResult(success=False, error="auth_interrupt", output=auth_interrupt)
             blocked, reason = await self._detect_challenge(page, url)
             if blocked and bool(getattr(settings, "BROWSER_CHALLENGE_BLOCK_MODE", True)):
                 artifacts = await self._capture_failure_artifacts(page, "challenge_detected")
@@ -644,11 +732,12 @@ class BrowserAgent(BaseAgent):
                 output={
                     "fields_filled": filled,
                     "code_used": bool(code_val),
-                    "screenshot_path": shot,
-                    "url": page.url,
-                    **ver,
-                },
-            )
+                        "screenshot_path": shot,
+                        "url": page.url,
+                        "browser_runtime_profile": profile,
+                        **ver,
+                    },
+                )
         except Exception as e:
             return TaskResult(success=False, error=str(e))
         finally:
@@ -680,15 +769,15 @@ class BrowserAgent(BaseAgent):
         self._status = AgentStatus.RUNNING
         try:
             if task_type in ("browse", "navigate"):
-                return await self.navigate(kwargs.get("url", ""))
+                return await self.navigate(kwargs.get("url", ""), service=kwargs.get("service", ""))
             elif task_type == "screenshot":
-                return await self.screenshot(kwargs.get("url", ""), kwargs.get("path", ""))
+                return await self.screenshot(kwargs.get("url", ""), kwargs.get("path", ""), service=kwargs.get("service", ""))
             elif task_type in ("web_scrape", "extract_text"):
-                return await self.extract_text(kwargs.get("url", ""), kwargs.get("selector", "body"))
+                return await self.extract_text(kwargs.get("url", ""), kwargs.get("selector", "body"), service=kwargs.get("service", ""))
             elif task_type == "form_fill":
-                return await self.fill_form(kwargs.get("url", ""), kwargs.get("data", {}), kwargs.get("screenshot_path", ""))
+                return await self.fill_form(kwargs.get("url", ""), kwargs.get("data", {}), kwargs.get("screenshot_path", ""), service=kwargs.get("service", ""))
             elif task_type == "upload_file":
-                return await self.upload_file(kwargs.get("url", ""), kwargs.get("file_path", ""), kwargs.get("selector", 'input[type="file"]'), kwargs.get("screenshot_path", ""))
+                return await self.upload_file(kwargs.get("url", ""), kwargs.get("file_path", ""), kwargs.get("selector", 'input[type="file"]'), kwargs.get("screenshot_path", ""), service=kwargs.get("service", ""))
             elif task_type == "register_with_email":
                 return await self.register_with_email(
                     url=kwargs.get("url", ""),
@@ -703,6 +792,7 @@ class BrowserAgent(BaseAgent):
                     screenshot_path=kwargs.get("screenshot_path", ""),
                     verify_selectors=kwargs.get("verify_selectors", []) or [],
                     require_verify=bool(kwargs.get("require_verify", False)),
+                    service=kwargs.get("service", ""),
                 )
             elif task_type == "solve_captcha":
                 page = kwargs.get("page")

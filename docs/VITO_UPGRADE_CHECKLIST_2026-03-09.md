@@ -11,7 +11,7 @@
   - `done`
   - `paused_blocked`
 
-Общий прогресс: `58%`
+Общий прогресс: `70%`
 
 ## Phase A — Execution Guardrails + Final Verifier
 - [x] Hard object protection для всех platform adapters
@@ -54,13 +54,13 @@
 - Weight: `12%`
 
 ## Phase E — MegaBrowser 2.0
-- [ ] Screenshot-first maps for brittle flows
-- [ ] Multi-profile/session isolation
-- [ ] Humanization/anti-bot strategy
-- [ ] OTP/2FA interrupt protocol normalized
-- [ ] Profile completion runbooks
-- [ ] Browser stack evaluation (including patchright path)
-- Status: `not_started`
+- [x] Screenshot-first maps for brittle flows
+- [x] Multi-profile/session isolation
+- [x] Humanization/anti-bot strategy
+- [x] OTP/2FA interrupt protocol normalized
+- [x] Profile completion runbooks
+- [x] Browser stack evaluation (including patchright path)
+- Status: `done`
 - Weight: `12%`
 
 ## Phase F — Agent Specialization and Collaboration
