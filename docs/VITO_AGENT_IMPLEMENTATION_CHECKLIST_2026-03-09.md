@@ -11,7 +11,7 @@
   - `done`
   - `paused_blocked`
 
-Общий прогресс: `90%`
+Общий прогресс: `100%`
 
 Жесткое правило:
 - `done` по этому плану возможен только если охвачены все 23 агента, все обязательные связи и все 8 workflow.
@@ -84,10 +84,10 @@
 - Weight: `12%`
 
 ## Phase N — Final Judge and Responsibility Graph
-- [ ] lead/support/verify/block matrix in runtime
-- [ ] QualityJudge domain scoring
-- [ ] VITOCore final responsibility enforcement
-- [ ] block-signals stop unsafe execution
-- [ ] coverage audit for all required interactions
-- Status: `not_started`
+- [x] lead/support/verify/block matrix in runtime
+- [x] QualityJudge domain scoring
+- [x] VITOCore final responsibility enforcement
+- [x] block-signals stop unsafe execution
+- [x] coverage audit for all required interactions
+- Status: `done`
 - Weight: `10%`

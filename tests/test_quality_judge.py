@@ -58,3 +58,13 @@ class TestQualityJudge:
         assert result.success is True
         assert result.output["approved"] is False
         assert result.output["threshold"] == 8
+
+    @pytest.mark.asyncio
+    async def test_review_returns_domain_scorecard(self, agent):
+        agent.llm_router.call_llm = AsyncMock(
+            return_value='{"score": 8, "feedback": "Good", "issues": [], "domain_scorecard": {"completeness": 8, "evidence": 7, "compliance": 9, "readiness": 8}}'
+        )
+        result = await agent.review("https://example.com proof report with enough detail for listing", "product_pipeline_result")
+        assert result.success is True
+        assert "domain_scorecard" in result.output
+        assert result.output["domain_scorecard"]["completeness"] == 8

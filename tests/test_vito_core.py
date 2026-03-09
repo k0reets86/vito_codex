@@ -118,3 +118,23 @@ class TestVITOCoreProductPipeline:
         result = await core.execute_task("product_pipeline", topic="AI planners", platform="gumroad", auto_publish=False)
         assert result.success is True
         assert "publish_pack" in result.output
+        assert result.metadata["responsibility_decision"]["ok"] is True
+
+    def test_responsibility_audit_reports_full_agent_coverage(self):
+        core = VITOCore()
+        audit = core.build_responsibility_audit()
+        assert audit["all_agents_present"] is True
+        assert audit["coverage_ok"] is True
+
+    @pytest.mark.asyncio
+    async def test_vito_core_blocks_unsafe_success_result(self):
+        registry = AgentRegistry()
+
+        class DummyRegistry:
+            async def dispatch(self, task_type, **kwargs):
+                return TaskResult(success=True, output={"status": "blocked"})
+
+        core = VITOCore(registry=DummyRegistry())
+        result = await core.execute_task("orchestrate", step="создай листинг")
+        assert result.success is False
+        assert "unsafe_execution_blocked" in (result.error or "")

@@ -51,7 +51,8 @@ class QualityJudge(BaseAgent):
         prompt = (
             f"Оцени качество следующего контента (тип: {content_type}).\n\n"
             f"Контент:\n---\n{content[:5000]}\n---\n\n"
-            f"Верни JSON: {{\"score\": 1-10, \"feedback\": \"описание\", \"issues\": [\"проблема1\"]}}\n"
+            f"Верни JSON: {{\"score\": 1-10, \"feedback\": \"описание\", \"issues\": [\"проблема1\"], "
+            f"\"domain_scorecard\": {{\"completeness\": 1-10, \"evidence\": 1-10, \"compliance\": 1-10, \"readiness\": 1-10}}}}\n"
             f"Только JSON."
         )
         response = await self._call_llm(
@@ -77,6 +78,11 @@ class QualityJudge(BaseAgent):
         threshold = max(1, min(10, int(getattr(settings, "QUALITY_JUDGE_APPROVAL_THRESHOLD", APPROVAL_THRESHOLD) or APPROVAL_THRESHOLD)))
         approved = score >= threshold
         result_output = {"score": score, "feedback": data.get("feedback", ""), "approved": approved, "issues": data.get("issues", [])}
+        result_output["domain_scorecard"] = self._normalize_domain_scorecard(
+            data.get("domain_scorecard"),
+            content=str(content or ""),
+            content_type=str(content_type or "article"),
+        )
         result_output["threshold"] = threshold
         logger.info(f"Quality review: score={score}, approved={approved}, threshold={threshold}", extra={"event": "quality_review", "context": result_output})
         return TaskResult(success=True, output=result_output, cost_usd=0.005, duration_ms=duration_ms)
@@ -100,5 +106,37 @@ class QualityJudge(BaseAgent):
             "feedback": "Local heuristic review completed.",
             "approved": score >= threshold,
             "issues": issues,
+            "domain_scorecard": self._normalize_domain_scorecard(None, content=text, content_type=content_type),
             "threshold": threshold,
         }
+
+    def _normalize_domain_scorecard(self, raw: Any, *, content: str, content_type: str) -> dict[str, int]:
+        scorecard = raw if isinstance(raw, dict) else {}
+        text = str(content or "").strip()
+        ctype = str(content_type or "").strip().lower()
+        has_links = "http://" in text or "https://" in text
+        has_depth = len(text) >= 180
+        has_evidence_words = any(x in text.lower() for x in ("source", "evidence", "url", "report", "proof", "file", "tag"))
+        compliance = 8
+        readiness = 8
+        if ctype in {"listing", "product", "product_pipeline_result", "publish", "listing_create"}:
+            if not has_depth:
+                readiness -= 2
+            if not has_evidence_words:
+                readiness -= 2
+            if not has_links and ctype in {"publish", "product_pipeline_result"}:
+                compliance -= 1
+        defaults = {
+            "completeness": 9 if has_depth else 6,
+            "evidence": 8 if has_evidence_words else 5,
+            "compliance": max(1, compliance),
+            "readiness": max(1, readiness),
+        }
+        out: dict[str, int] = {}
+        for key, fallback in defaults.items():
+            try:
+                value = int(scorecard.get(key, fallback))
+            except Exception:
+                value = int(fallback)
+            out[key] = max(1, min(10, value))
+        return out

@@ -11,6 +11,7 @@ from typing import Optional
 from agents.base_agent import BaseAgent, TaskResult
 from config.logger import get_logger
 from llm_router import TaskType
+from modules.agent_responsibility_graph import build_responsibility_coverage_audit, enforce_responsibility_decision, resolve_runtime_responsibility
 from modules.owner_preference_model import OwnerPreferenceModel
 from modules.platform_final_verifier import verify_platform_result
 
@@ -178,6 +179,29 @@ class VITOCore(BaseAgent):
             "capability": capability,
             "runtime_profile": self.build_runtime_profile(capability or "orchestrate"),
         }
+
+    def build_responsibility_audit(self) -> dict:
+        return build_responsibility_coverage_audit()
+
+    def _finalize_with_responsibility(self, task_type: str, result: TaskResult) -> TaskResult:
+        responsibility = enforce_responsibility_decision(task_type, result)
+        md = dict(result.metadata or {})
+        md.setdefault("responsibility", resolve_runtime_responsibility(task_type))
+        md["responsibility_decision"] = {
+            "ok": responsibility.ok,
+            "workflow": responsibility.workflow,
+            "lead": responsibility.lead,
+            "support": responsibility.support,
+            "verify": responsibility.verify,
+            "block": responsibility.block,
+            "block_signals": responsibility.block_signals,
+            "reason": responsibility.reason,
+        }
+        result.metadata = md
+        if result.success and not responsibility.ok:
+            result.success = False
+            result.error = f"unsafe_execution_blocked:{','.join(responsibility.block_signals or ['unknown'])}"
+        return result
 
     async def plan_goal(self, title: str, description: str, memory_context: str = "", skills_context: str = "") -> list[str]:
         """Создаёт план выполнения цели с фокусом на делегирование агентам."""
@@ -700,11 +724,13 @@ class VITOCore(BaseAgent):
         if task_type == "self_improve":
             result = await self._self_improve(step or goal_title or kwargs.get("request", ""))
             result.duration_ms = int((time.monotonic() - start) * 1000)
+            result = self._finalize_with_responsibility(task_type, result)
             self._status_idle()
             return result
         if task_type == "learn_service":
             result = await self.learn_service(kwargs.get("service", step or goal_title or ""))
             result.duration_ms = int((time.monotonic() - start) * 1000)
+            result = self._finalize_with_responsibility(task_type, result)
             self._status_idle()
             return result
         if task_type == "product_pipeline":
@@ -714,6 +740,7 @@ class VITOCore(BaseAgent):
                 auto_publish=bool(kwargs.get("auto_publish", False)),
             )
             result.duration_ms = int((time.monotonic() - start) * 1000)
+            result = self._finalize_with_responsibility(task_type, result)
             self._status_idle()
             return result
 
@@ -727,7 +754,8 @@ class VITOCore(BaseAgent):
                     if result is not None and result.success:
                         duration_ms = int((time.monotonic() - start) * 1000)
                         self._status_idle()
-                        return TaskResult(success=True, output=result.output, duration_ms=duration_ms)
+                        out = TaskResult(success=True, output=result.output, duration_ms=duration_ms, metadata=dict(result.metadata or {}))
+                        return self._finalize_with_responsibility(capability, out)
 
             # Иначе — составляем мини-план и выполняем его
             plan = await self.plan_goal(goal_title or "Owner request", step or task_type)
@@ -757,7 +785,10 @@ class VITOCore(BaseAgent):
                 duration_ms = int((time.monotonic() - start) * 1000)
                 self._status_idle()
                 if any_success:
-                    return TaskResult(success=True, output={"plan": plan, "results": results}, duration_ms=duration_ms)
+                    return self._finalize_with_responsibility(
+                        "orchestrate",
+                        TaskResult(success=True, output={"plan": plan, "results": results}, duration_ms=duration_ms),
+                    )
                 # Fallback if plan produced no successful dispatches
                 if self.llm_router:
                     response = await self._call_llm(
@@ -766,8 +797,14 @@ class VITOCore(BaseAgent):
                         estimated_tokens=500,
                     )
                     if response:
-                        return TaskResult(success=True, output=response[:500], duration_ms=duration_ms)
-                return TaskResult(success=False, error="Orchestrate plan failed", duration_ms=duration_ms)
+                        return self._finalize_with_responsibility(
+                            "orchestrate",
+                            TaskResult(success=True, output=response[:500], duration_ms=duration_ms),
+                        )
+                return self._finalize_with_responsibility(
+                    "orchestrate",
+                    TaskResult(success=False, error="Orchestrate plan failed", duration_ms=duration_ms),
+                )
 
         # 1. Классифицируем
         capability = self.classify_step(step) if step else task_type
@@ -779,6 +816,7 @@ class VITOCore(BaseAgent):
             if result is not None:
                 duration_ms = int((time.monotonic() - start) * 1000)
                 result.duration_ms = duration_ms
+                result = self._finalize_with_responsibility(capability or task_type, result)
                 self._status_idle()
                 return result
 
@@ -793,11 +831,20 @@ class VITOCore(BaseAgent):
             duration_ms = int((time.monotonic() - start) * 1000)
             self._status_idle()
             if response:
-                return TaskResult(success=True, output=response[:500], duration_ms=duration_ms)
-            return TaskResult(success=False, error="LLM не вернул ответ", duration_ms=duration_ms)
+                return self._finalize_with_responsibility(
+                    task_type,
+                    TaskResult(success=True, output=response[:500], duration_ms=duration_ms),
+                )
+            return self._finalize_with_responsibility(
+                task_type,
+                TaskResult(success=False, error="LLM не вернул ответ", duration_ms=duration_ms),
+            )
 
         self._status_idle()
-        return TaskResult(success=False, error="Нет registry и llm_router для выполнения")
+        return self._finalize_with_responsibility(
+            task_type,
+            TaskResult(success=False, error="Нет registry и llm_router для выполнения"),
+        )
 
     def _map_to_task_type(self, text: str) -> TaskType:
         """Маппинг текста шага на TaskType для LLM."""

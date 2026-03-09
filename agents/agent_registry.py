@@ -18,6 +18,7 @@ from config.logger import get_logger
 from modules.agent_contracts import get_agent_contract
 from modules.agent_event_bus import AgentEventBus
 from modules.agent_lineage import attach_lineage_metadata, ensure_lineage_payload
+from modules.agent_responsibility_graph import enforce_responsibility_decision, resolve_runtime_responsibility
 from modules.agent_runtime_verifier import validate_agent_runtime_contract
 from modules.skill_matrix_v2 import build_agent_skill_matrix_v2, validate_agent_skill_matrix_v2
 from modules.step_contract import validate_step_output
@@ -370,9 +371,30 @@ class AgentRegistry:
                             md["contract_errors"] = contract_errors
                         if runtime_contract_errors:
                             md["runtime_contract_errors"] = runtime_contract_errors
+                        md.setdefault("responsibility", resolve_runtime_responsibility(task_type))
                         result.metadata = attach_lineage_metadata(md, task_kwargs, task_type, responsible_agent=agent.name)
                 except Exception:
                     pass
+                if result:
+                    responsibility = enforce_responsibility_decision(task_type, result)
+                    try:
+                        md = result.metadata or {}
+                        md["responsibility_decision"] = {
+                            "ok": responsibility.ok,
+                            "workflow": responsibility.workflow,
+                            "lead": responsibility.lead,
+                            "support": responsibility.support,
+                            "verify": responsibility.verify,
+                            "block": responsibility.block,
+                            "block_signals": responsibility.block_signals,
+                            "reason": responsibility.reason,
+                        }
+                        result.metadata = md
+                    except Exception:
+                        pass
+                    if result.success and not responsibility.ok:
+                        result.success = False
+                        result.error = f"unsafe_execution_blocked:{','.join(responsibility.block_signals or ['unknown'])}"
                 # Owner-level verification step (optional)
                 verify_cap = ""
                 if isinstance(orchestration_plan, dict):
