@@ -11,7 +11,7 @@
   - `done`
   - `paused_blocked`
 
-Общий прогресс: `18%`
+Общий прогресс: `28%`
 
 Жесткое правило:
 - `done` по этому плану возможен только если охвачены все 23 агента, все обязательные связи и все 8 workflow.
@@ -30,16 +30,16 @@
 - Weight: `18%`
 
 ## Phase J — Core Workflow Wiring
-- [ ] `W01` digital product sales loop
-- [ ] `W02` content publication loop
-- [ ] `W03` monitoring/self-heal loop
-- [ ] `W04` account/auth loop
+- [x] `W01` digital product sales loop
+- [x] `W02` content publication loop
+- [x] `W03` monitoring/self-heal loop
+- [x] `W04` account/auth loop
 - [ ] `W05` social launch loop
 - [ ] `W06` analytics-response loop
 - [ ] `W07` compliance/risk gating loop
 - [ ] `W08` skill growth/self-upgrade loop
-- [ ] runtime traces для handoff chain
-- Status: `not_started`
+- [x] runtime traces для handoff chain
+- Status: `in_progress`
 - Weight: `18%`
 
 ## Phase K — Thin-Wrapper Agent Uplift

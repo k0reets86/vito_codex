@@ -166,6 +166,7 @@ class AgentRegistry:
         """Диспетчеризует задачу к подходящему агенту (с lazy start)."""
         orchestration_depth = int(kwargs.pop("__orchestration_depth", 0) or 0)
         orchestrated_by = str(kwargs.pop("__orchestrated_by", "") or "").strip() or None
+        requested_by = str(kwargs.get("__requested_by") or "").strip() or None
         exclude_agents_raw = kwargs.pop("__exclude_agents", [])
         exclude_agents = set(exclude_agents_raw or [])
         agents = self.find_by_capability(task_type)
@@ -226,6 +227,19 @@ class AgentRegistry:
             # Lazy start on first dispatch
             await self._ensure_started(agent)
             self._last_used[agent.name] = time.monotonic()
+            try:
+                await self._event_bus.emit(
+                    "dispatch_start",
+                    {
+                        "task_type": task_type,
+                        "target_agent": agent.name,
+                        "requested_by": requested_by,
+                        "orchestrated_by": orchestrated_by,
+                    },
+                    source_agent=orchestrated_by or requested_by or "registry",
+                )
+            except Exception:
+                pass
 
             logger.info(
                 f"Dispatch: {task_type} → {agent.name}",
@@ -539,10 +553,38 @@ class AgentRegistry:
                 except Exception:
                     pass
                 if result and result.success:
+                    try:
+                        await self._event_bus.emit(
+                            "dispatch_complete",
+                            {
+                                "task_type": task_type,
+                                "target_agent": agent.name,
+                                "success": True,
+                                "requested_by": requested_by,
+                                "orchestrated_by": orchestrated_by,
+                            },
+                            source_agent=orchestrated_by or requested_by or "registry",
+                        )
+                    except Exception:
+                        pass
                     return result
                 last_error = getattr(result, "error", None)
             except Exception as e:
                 last_error = str(e)
+                try:
+                    await self._event_bus.emit(
+                        "dispatch_error",
+                        {
+                            "task_type": task_type,
+                            "target_agent": agent.name,
+                            "error": last_error,
+                            "requested_by": requested_by,
+                            "orchestrated_by": orchestrated_by,
+                        },
+                        source_agent=orchestrated_by or requested_by or "registry",
+                    )
+                except Exception:
+                    pass
                 logger.error(
                     f"Ошибка dispatch {task_type} → {agent.name}: {e}",
                     extra={"event": "dispatch_error"},
