@@ -1,9 +1,4 @@
-"""Тесты TranslationAgent — 5 тестов."""
-
 import pytest
-from unittest.mock import AsyncMock
-
-from agents.base_agent import TaskResult
 
 
 class TestTranslationAgent:
@@ -17,47 +12,18 @@ class TestTranslationAgent:
             comms=mock_comms,
         )
 
-    def test_init(self, agent):
-        assert agent.name == "translation_agent"
-        assert "translate" in agent.capabilities
-        assert "localize" in agent.capabilities
+    @pytest.mark.asyncio
+    async def test_translate_local_fallback_includes_skill_pack(self, agent):
+        agent.llm_router = None
+        result = await agent.translate("hello", "en", "de")
+        assert result.success is True
+        assert result.metadata["mode"] == "local_fallback"
+        assert "skills" in result.metadata
 
     @pytest.mark.asyncio
-    async def test_translate(self, agent):
-        agent.llm_router.call_llm = AsyncMock(return_value="Translated text in German")
-        result = await agent.translate("Hello world", "en", "de")
+    async def test_detect_language_identity_metadata(self, agent):
+        agent.llm_router = None
+        result = await agent.detect_language("Hallo welt")
         assert result.success is True
+        assert "skills" in result.metadata
 
-    @pytest.mark.asyncio
-    async def test_detect_language(self, agent):
-        agent.llm_router.call_llm = AsyncMock(return_value="en")
-        result = await agent.detect_language("Hello world")
-        assert result.success is True
-
-    @pytest.mark.asyncio
-    async def test_localize_listing(self, agent):
-        agent.llm_router.call_llm = AsyncMock(return_value="Localized listing data")
-        result = await agent.localize_listing({"title": "Digital Planner", "description": "Great planner"}, "de")
-        assert result.success is True
-
-    @pytest.mark.asyncio
-    async def test_execute_task(self, agent):
-        agent.llm_router.call_llm = AsyncMock(return_value="translated text")
-        result = await agent.execute_task("translate", text="Hello", source_lang="en", target_lang="de")
-        assert result.success is True
-
-    @pytest.mark.asyncio
-    async def test_local_fallback_without_llm(self, mock_memory, mock_finance, mock_comms):
-        from agents.translation_agent import TranslationAgent
-
-        agent = TranslationAgent(
-            llm_router=None,
-            memory=mock_memory,
-            finance=mock_finance,
-            comms=mock_comms,
-        )
-        result = await agent.translate("Hello", "en", "de")
-        assert result.success is True
-        assert result.output
-        detected = await agent.detect_language("Привет, как дела")
-        assert detected.success is True

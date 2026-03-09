@@ -43,6 +43,14 @@ class ShellError(Exception):
 
 
 class DevOpsAgent(BaseAgent):
+    NEEDS = {
+        "health_check": ["system_state", "sqlite_state"],
+        "backup": ["filesystem_state"],
+        "self_heal": ["failure_substrate", "self_healer"],
+        "shell": ["command_whitelist"],
+        "*": ["ops_runbooks"],
+    }
+
     def __init__(self, **kwargs):
         super().__init__(name="devops_agent", description="Мониторинг здоровья, бэкапы, самовосстановление", **kwargs)
 
@@ -196,7 +204,7 @@ class DevOpsAgent(BaseAgent):
         # Overall
         all_ok = all(c.get("ok", True) for c in checks.values())
         logger.info(f"Health check: {'OK' if all_ok else 'ISSUES'}", extra={"event": "health_check", "context": checks})
-        return TaskResult(success=True, output={"health": "ok" if all_ok else "degraded", "checks": checks})
+        return TaskResult(success=True, output={"health": "ok" if all_ok else "degraded", "checks": checks, "skill_pack": self.get_skill_pack()})
 
     # ── Backup ──
 
@@ -212,7 +220,7 @@ class DevOpsAgent(BaseAgent):
                 shutil.copy2(src, dst)
                 backed_up.append(src)
         logger.info(f"Backup: {len(backed_up)} файлов", extra={"event": "backup_done", "context": {"dir": backup_dir}})
-        return TaskResult(success=True, output={"backup_dir": backup_dir, "files": backed_up})
+        return TaskResult(success=True, output={"backup_dir": backup_dir, "files": backed_up, "skill_pack": self.get_skill_pack()})
 
     # ── Self-heal (теперь использует execute_shell) ──
 
@@ -240,4 +248,4 @@ class DevOpsAgent(BaseAgent):
         if not actions_taken:
             actions_taken.append({"action": "none", "result": f"Проблема '{issue}' зафиксирована, требуется ручной анализ"})
 
-        return TaskResult(success=True, output={"issue": issue, "actions": actions_taken})
+        return TaskResult(success=True, output={"issue": issue, "actions": actions_taken, "skill_pack": self.get_skill_pack()})

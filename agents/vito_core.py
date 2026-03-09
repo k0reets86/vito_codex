@@ -128,6 +128,13 @@ KEYWORD_CAPABILITY_MAP = dict(
 
 class VITOCore(BaseAgent):
     """Agent 00: центральный диспетчер задач."""
+    NEEDS = {
+        "orchestrate": ["agent_registry", "workflow_runtime", "owner_task_state"],
+        "product_pipeline": ["agent_registry", "platform_runbooks", "quality_judge"],
+        "self_improve": ["code_generator", "research_agent", "skill_registry"],
+        "learn_service": ["research_agent", "memory"],
+        "*": ["agent_registry"],
+    }
 
     def __init__(self, registry=None, code_generator=None, self_updater=None, skill_registry=None, **kwargs):
         super().__init__(
@@ -163,6 +170,14 @@ class VITOCore(BaseAgent):
         except Exception:
             pass
         return None
+
+    def build_command_packet(self, step: str) -> dict:
+        capability = self.classify_step(step or "")
+        return {
+            "step": str(step or ""),
+            "capability": capability,
+            "runtime_profile": self.build_runtime_profile(capability or "orchestrate"),
+        }
 
     async def plan_goal(self, title: str, description: str, memory_context: str = "", skills_context: str = "") -> list[str]:
         """Создаёт план выполнения цели с фокусом на делегирование агентам."""
@@ -407,6 +422,7 @@ class VITOCore(BaseAgent):
                     "results": results,
                     "research_sources": research_sources[:10],
                     "research_notes": research_notes,
+                    "skill_pack": self.get_skill_pack(),
                 },
             )
         # Record failed attempt as anti-skill
@@ -459,7 +475,7 @@ class VITOCore(BaseAgent):
                     text=f"{service_name}: {summary[:1000]}",
                     metadata={"type": "platform_knowledge", "service": service_name},
                 )
-            return TaskResult(success=True, output={"service": service_name, "summary": summary[:1000]})
+            return TaskResult(success=True, output={"service": service_name, "summary": summary[:1000], "skill_pack": self.get_skill_pack()})
         except Exception as e:
             return TaskResult(success=False, error=str(e))
 

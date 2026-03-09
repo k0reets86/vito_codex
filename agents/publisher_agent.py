@@ -10,6 +10,11 @@ logger = get_logger("publisher_agent", agent="publisher_agent")
 
 
 class PublisherAgent(BaseAgent):
+    NEEDS = {
+        "publish": ["quality_judge", "publisher_platform", "approval_preview"],
+        "*": ["publisher_runbooks"],
+    }
+
     def __init__(self, quality_judge=None, platforms: dict = None, **kwargs):
         super().__init__(name="publisher_agent", description="Публикация контента: WordPress, Medium", **kwargs)
         self.quality_judge = quality_judge
@@ -80,7 +85,15 @@ class PublisherAgent(BaseAgent):
         try:
             result = await wp.publish({"title": title, "content": content, "tags": tags or []})
             logger.info(f"Опубликовано на WordPress: {title}", extra={"event": "wp_published"})
-            return TaskResult(success=True, output=result)
+            return TaskResult(
+                success=True,
+                output={
+                    "platform": "wordpress",
+                    "publish_result": result,
+                    "quality_score": (quality.output or {}).get("score") if quality.success else None,
+                    "skill_pack": self.get_skill_pack(),
+                },
+            )
         except Exception as e:
             return TaskResult(success=False, error=str(e))
 
@@ -119,6 +132,14 @@ class PublisherAgent(BaseAgent):
             return TaskResult(success=False, error="Medium платформа не подключена")
         try:
             result = await medium.publish({"title": title, "content": content, "tags": tags or []})
-            return TaskResult(success=True, output=result)
+            return TaskResult(
+                success=True,
+                output={
+                    "platform": "medium",
+                    "publish_result": result,
+                    "quality_score": (quality.output or {}).get("score") if quality.success else None,
+                    "skill_pack": self.get_skill_pack(),
+                },
+            )
         except Exception as e:
             return TaskResult(success=False, error=str(e))

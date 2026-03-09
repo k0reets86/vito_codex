@@ -1,0 +1,75 @@
+"""Runtime skill/runbook packs for VITO agents."""
+
+from __future__ import annotations
+
+from typing import Any
+
+
+_PACKS: dict[str, dict[str, Any]] = {
+    "translation_agent": {
+        "skills": ["language_detection", "term_preserving_translation", "listing_localization", "glossary_control"],
+        "evidence": ["source_lang", "target_lang", "mode", "translation_quality_hint"],
+        "preferred_workflows": ["W01", "W02"],
+    },
+    "research_agent": {
+        "skills": ["iterative_market_research", "evidence_digest", "opportunity_scoring", "operator_ready_recommendation"],
+        "evidence": ["report_path", "data_sources", "overall_score", "recommended_product"],
+        "preferred_workflows": ["W01", "W08"],
+    },
+    "browser_agent": {
+        "skills": ["screenshot_first_execution", "auth_interrupt_detection", "challenge_detection", "form_upload_navigation"],
+        "evidence": ["url", "screenshot_path", "browser_runtime_profile"],
+        "preferred_workflows": ["W01", "W02", "W04"],
+    },
+    "ecommerce_agent": {
+        "skills": ["listing_package_assembly", "platform_runbook_resolution", "publish_quality_gating", "platform_rules_sync"],
+        "evidence": ["platform", "status", "contributors", "verification"],
+        "preferred_workflows": ["W01"],
+    },
+    "account_manager": {
+        "skills": ["credential_inventory", "auth_state_reporting", "profile_completion_guidance", "email_code_fetch"],
+        "evidence": ["account", "auth_state", "platform", "next_actions"],
+        "preferred_workflows": ["W04"],
+    },
+    "vito_core": {
+        "skills": ["goal_to_runbook_compilation", "cross_agent_dispatch", "product_pipeline_orchestration", "self_improve_planning"],
+        "evidence": ["capability", "delegations", "final_decision", "task_root_id"],
+        "preferred_workflows": ["W01", "W03", "W08"],
+    },
+    "smm_agent": {
+        "skills": ["platform_native_post_packaging", "hashtag_strategy", "campaign_plan", "approval_safe_social_posting"],
+        "evidence": ["platform", "published", "file_path", "post_package"],
+        "preferred_workflows": ["W05"],
+    },
+    "publisher_agent": {
+        "skills": ["article_publish_packaging", "quality_gate_before_publish", "owner_approval_before_publish", "platform_publish_result_capture"],
+        "evidence": ["platform", "preview_path", "quality_score", "publish_result"],
+        "preferred_workflows": ["W02"],
+    },
+    "hr_agent": {
+        "skills": ["agent_performance_audit", "knowledge_audit", "benchmark_gap_detection", "development_plan_generation"],
+        "evidence": ["agent", "success_rate", "top_risks", "actions"],
+        "preferred_workflows": ["W08"],
+    },
+    "devops_agent": {
+        "skills": ["health_snapshot", "whitelisted_shell_execution", "backup_and_rollback_support", "operational_remediation"],
+        "evidence": ["health", "checks", "backup_dir", "actions"],
+        "preferred_workflows": ["W03"],
+    },
+    "self_healer": {
+        "skills": ["failure_signature_detection", "verified_remediation_pipeline", "rollback_on_failed_fix", "quarantine_and_cooldown_control"],
+        "evidence": ["method", "resolved", "remediation_candidates", "safe_action_suggestions"],
+        "preferred_workflows": ["W03", "W08"],
+    },
+}
+
+
+def get_agent_skill_pack(agent_name: str) -> dict[str, Any]:
+    name = str(agent_name or "").strip().lower()
+    pack = _PACKS.get(name, {})
+    return {
+        "agent": name,
+        "skills": list(pack.get("skills") or []),
+        "evidence": list(pack.get("evidence") or []),
+        "preferred_workflows": list(pack.get("preferred_workflows") or []),
+    }

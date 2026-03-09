@@ -19,6 +19,13 @@ PLATFORM_KEYS = {
 
 
 class AccountManager(BaseAgent):
+    NEEDS = {
+        "account_management": ["credential_inventory", "profile_completion_runbooks"],
+        "check_account": ["credential_inventory"],
+        "email_code": ["inbox_access"],
+        "*": ["account_state_memory"],
+    }
+
     def __init__(self, **kwargs):
         super().__init__(name="account_manager", description="Управление аккаунтами: статус, лимиты, мониторинг", **kwargs)
 
@@ -57,13 +64,18 @@ class AccountManager(BaseAgent):
         accounts = []
         for platform, env_var in PLATFORM_KEYS.items():
             configured = bool(getattr(settings, env_var, ""))
-            accounts.append({"platform": platform, "configured": configured, "env_var": env_var})
-        return TaskResult(success=True, output={"account": "all", "auth_state": "inventory", "accounts": accounts})
+            accounts.append({
+                "platform": platform,
+                "configured": configured,
+                "env_var": env_var,
+                "next_actions": [] if configured else [f"set_env:{env_var}", f"profile_check:{platform}"],
+            })
+        return TaskResult(success=True, output={"account": "all", "auth_state": "inventory", "accounts": accounts, "skill_pack": self.get_skill_pack()})
 
     async def check_account(self, platform: str) -> TaskResult:
         env_var = PLATFORM_KEYS.get(platform)
         if not env_var:
-            return TaskResult(success=True, output={"account": platform, "auth_state": "unknown_platform", "platform": platform, "status": "unknown_platform"})
+            return TaskResult(success=True, output={"account": platform, "auth_state": "unknown_platform", "platform": platform, "status": "unknown_platform", "skill_pack": self.get_skill_pack()})
         configured = bool(getattr(settings, env_var, ""))
         return TaskResult(
             success=True,
@@ -73,6 +85,9 @@ class AccountManager(BaseAgent):
                 "platform": platform,
                 "configured": configured,
                 "env_var": env_var,
+                "next_actions": [] if configured else [f"set_env:{env_var}", f"profile_completion:{platform}"],
+                "profile_completion_hint": f"browser_first_profile_check:{platform}",
+                "skill_pack": self.get_skill_pack(),
             },
         )
 
@@ -81,7 +96,7 @@ class AccountManager(BaseAgent):
         for platform, env_var in PLATFORM_KEYS.items():
             configured = bool(getattr(settings, env_var, ""))
             limits.append({"platform": platform, "configured": configured, "api_limits": "unknown"})
-        return TaskResult(success=True, output={"account": "all", "auth_state": "limits_snapshot", "limits": limits})
+        return TaskResult(success=True, output={"account": "all", "auth_state": "limits_snapshot", "limits": limits, "skill_pack": self.get_skill_pack()})
 
     async def fetch_email_code(
         self,
@@ -106,4 +121,4 @@ class AccountManager(BaseAgent):
         )
         if not code:
             return TaskResult(success=False, error="code_not_found")
-        return TaskResult(success=True, output={"account": "gmail", "auth_state": "code_fetched", "code": code, "snippet": snippet})
+        return TaskResult(success=True, output={"account": "gmail", "auth_state": "code_fetched", "code": code, "snippet": snippet, "skill_pack": self.get_skill_pack()})

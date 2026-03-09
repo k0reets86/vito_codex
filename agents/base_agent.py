@@ -18,6 +18,7 @@ from typing import Any, Optional
 from config.agent_prompts import AGENT_PROMPTS
 from config.logger import get_logger
 from modules.agent_contracts import get_agent_contract
+from modules.agent_skill_packs import get_agent_skill_pack
 
 AGENT_SYSTEM_PREAMBLE = (
     "CONTEXT: You are a specialized module inside VITO orchestrator.\n"
@@ -105,6 +106,18 @@ class BaseAgent(ABC):
         if gate_actions:
             contract["quality_gate_actions"] = gate_actions
         return contract
+
+    def get_skill_pack(self) -> dict[str, Any]:
+        return get_agent_skill_pack(self.name)
+
+    def build_runtime_profile(self, task_type: str = "") -> dict[str, Any]:
+        return {
+            "agent": self.name,
+            "task_type": str(task_type or "").strip(),
+            "contract": self.get_contract(),
+            "skills": self.get_skill_pack(),
+            "needs": self.get_declared_needs(task_type),
+        }
 
     def build_collaboration_context(self, task_type: str = "") -> dict[str, Any]:
         contract = self.get_contract()

@@ -37,6 +37,13 @@ def _get_reddit_rss_feeds() -> list[str]:
 
 
 class ResearchAgent(BaseAgent):
+    NEEDS = {
+        "research": ["platform_runbooks", "trend_sources", "anti_pattern_memory"],
+        "competitor_analysis": ["trend_sources", "pricing_examples"],
+        "market_analysis": ["trend_sources", "buyer_segments"],
+        "*": ["research_memory"],
+    }
+
     def __init__(self, **kwargs):
         super().__init__(
             name="research_agent",
@@ -232,7 +239,23 @@ class ResearchAgent(BaseAgent):
     async def deep_research(self, topic: str, *, task_root_id: str = "") -> TaskResult:
         """Hybrid research: gather evidence, synthesize report, then judge quality."""
         if not self.llm_router:
-            return TaskResult(success=False, error="LLM Router not available")
+            real_data = await self._gather_real_data(topic)
+            if not real_data:
+                return TaskResult(success=False, error="LLM Router not available")
+            fallback = self._build_local_research_fallback(topic, real_data)
+            return TaskResult(
+                success=True,
+                output=fallback,
+                metadata={
+                    "executive_summary": fallback[:500],
+                    "data_sources": list(real_data.keys()),
+                    "overall_score": 45,
+                    "recommended_product": {},
+                    "top_ideas": [],
+                    "structured_research": {"topic": topic, "overall_score": 45, "top_ideas": []},
+                    **self.get_skill_pack(),
+                },
+            )
 
         real_data = await self._gather_real_data(topic)
         research_route_plan = self.llm_router.get_research_route_plan() if hasattr(self.llm_router, "get_research_route_plan") else {}
@@ -304,8 +327,17 @@ class ResearchAgent(BaseAgent):
                 "research_route_plan": research_route_plan,
                 "judge_review": judge_review,
                 "judge_payload": judge_payload,
+                **self.get_skill_pack(),
             },
         )
+
+    @staticmethod
+    def _build_local_research_fallback(topic: str, real_data: dict[str, str]) -> str:
+        lines = [f"## Executive Summary\nFallback evidence digest for: {topic}", "", "## Sources"]
+        for key, value in real_data.items():
+            lines.append(f"- {key}: {value[:220]}")
+        lines.extend(["", "## Confidence Score (0-100)", "- 45", "", "## Risks And Constraints", "- Limited synthesis because LLM route was unavailable."])
+        return "\n".join(lines)
 
     async def _run_raw_research_pass(self, topic: str, real_data: dict[str, str]) -> str:
         data_context = ""

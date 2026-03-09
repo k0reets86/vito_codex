@@ -20,6 +20,13 @@ logger = get_logger("ecommerce_agent", agent="ecommerce_agent")
 
 
 class ECommerceAgent(BaseAgent):
+    NEEDS = {
+        "listing_create": ["platform_runbook_pack", "platform_knowledge", "artifact_pack", "seo_pack"],
+        "publish_package_build": ["content_creator", "seo_agent", "marketing_agent", "smm_agent"],
+        "platform_rules_sync": ["platform_rules"],
+        "*": ["platform_knowledge"],
+    }
+
     def __init__(self, platforms: dict = None, registry=None, **kwargs):
         super().__init__(name="ecommerce_agent", description="Управление листингами (Gumroad, Etsy, Ko-fi)", **kwargs)
         self.platforms = platforms or {}
@@ -79,6 +86,7 @@ class ECommerceAgent(BaseAgent):
             "payload": dict(seed),
             "contributors": [],
             "notes": [],
+            "skill_pack": self.get_skill_pack(),
         }
         topic = str(seed.get("title") or seed.get("name") or "VITO Digital Product").strip()
         price = int(seed.get("price", 9) or 9)
@@ -171,6 +179,7 @@ class ECommerceAgent(BaseAgent):
                 "recent_failures": list((knowledge.get("failure_runbooks") or [])[-3:]),
             }
             data["_platform_runbook_pack"] = build_service_runbook_pack(platform)
+            data["_agent_skill_pack"] = self.get_skill_pack()
         if data.get("allow_existing_update"):
             target_id = str(data.get("target_product_id") or data.get("target_listing_id") or data.get("target_slug") or "").strip()
             if not target_id:
@@ -244,6 +253,11 @@ class ECommerceAgent(BaseAgent):
                 require_evidence_for_success=True,
             )
             normalized = verification.normalized
+            if isinstance(normalized, dict):
+                normalized["verification"] = {
+                    "ok": verification.ok,
+                    "errors": list(verification.errors or []),
+                }
             recipe = platform_recipe(platform)
             recipe_ok = True
             recipe_reason = ""
@@ -283,6 +297,8 @@ class ECommerceAgent(BaseAgent):
                     "success_count": len(knowledge.get("success_runbooks") or []),
                     "failure_count": len(knowledge.get("failure_runbooks") or []),
                 }
+            if isinstance(result, dict):
+                result["agent_skill_pack"] = self.get_skill_pack()
             return TaskResult(success=True, output=result)
         except Exception as e:
             return TaskResult(success=False, error=f"Ошибка создания листинга на {platform}: {e}")

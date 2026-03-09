@@ -15,6 +15,7 @@ from typing import Any, Optional
 from config.logger import get_logger
 from config.settings import settings
 from llm_router import LLMRouter, TaskType
+from modules.agent_skill_packs import get_agent_skill_pack
 from modules.runtime_remediation import (
     record_remediation_candidate,
     record_remediation_promotion,
@@ -43,6 +44,9 @@ class SelfHealer:
     def set_devops_agent(self, devops_agent) -> None:
         """Устанавливает DevOpsAgent (для отложенной инициализации)."""
         self.devops = devops_agent
+
+    def get_skill_pack(self) -> dict[str, Any]:
+        return get_agent_skill_pack("self_healer")
 
     async def handle_error(
         self, agent: str, error: Exception, context: dict[str, Any] | None = None
@@ -75,6 +79,7 @@ class SelfHealer:
                 "resolved": False,
                 "method": "cooldown",
                 "description": f"Ошибка в quarantine cooldown, retry через {left_sec}s",
+                "skill_pack": self.get_skill_pack(),
             }
         if quarantine_until > 0 and quarantine_until <= now:
             self._error_quarantine_until.pop(error_key, None)
@@ -123,6 +128,7 @@ class SelfHealer:
                 "description": similar["resolution"],
                 "safe_action_suggestions": safe_actions,
                 "remediation_candidates": remediation_candidates,
+                "skill_pack": self.get_skill_pack(),
             }
 
         # 2. LLM-анализ + реальное применение fix (если не превышен лимит попыток)
@@ -148,6 +154,7 @@ class SelfHealer:
                     "shell_output": fix_result["output"],
                     "safe_action_suggestions": safe_actions,
                     "remediation_candidates": remediation_candidates,
+                    "skill_pack": self.get_skill_pack(),
                 }
 
         # 3. Эскалация владельцу
@@ -171,6 +178,7 @@ class SelfHealer:
                 "description": f"Эскалировано владельцу после {attempt} попыток; quarantine={cooldown}s",
                 "safe_action_suggestions": safe_actions,
                 "remediation_candidates": remediation_candidates,
+                "skill_pack": self.get_skill_pack(),
             }
 
         # Ещё есть попытки — просто логируем
@@ -185,6 +193,7 @@ class SelfHealer:
             "description": f"Попытка {attempt}/{MAX_AUTO_FIX_ATTEMPTS}, будет повтор",
             "safe_action_suggestions": safe_actions,
             "remediation_candidates": remediation_candidates,
+            "skill_pack": self.get_skill_pack(),
         }
 
     def build_remediation_candidates(

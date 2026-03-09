@@ -127,6 +127,13 @@ window.chrome = window.chrome || { runtime: {} };
 
 
 class BrowserAgent(BaseAgent):
+    NEEDS = {
+        "browse": ["browser_runtime_policy", "auth_interrupt_policy"],
+        "form_fill": ["browser_runtime_policy", "profile_completion_runbooks"],
+        "register_with_email": ["browser_runtime_policy", "account_manager"],
+        "*": ["browser_runtime_policy"],
+    }
+
     _instance: Optional["BrowserAgent"] = None
     _browser = None
     _playwright_inst = None
@@ -436,7 +443,13 @@ class BrowserAgent(BaseAgent):
                     output={"url": str(getattr(page, "url", url)), "reason": reason, "needs_manual_auth": True, **artifacts},
                 )
             title = await page.title()
-            output = {"url": url, "title": title, "status": response.status if response else 0, "browser_runtime_profile": profile}
+            output = {
+                "url": url,
+                "title": title,
+                "status": response.status if response else 0,
+                "browser_runtime_profile": profile,
+                "browser_skill_pack": self.get_skill_pack(),
+            }
             if profile.get("screenshot_first_default"):
                 try:
                     shot = self._default_screenshot_path(service, "navigate")
@@ -561,7 +574,16 @@ class BrowserAgent(BaseAgent):
                     shot = screenshot_path
                 except Exception:
                     pass
-            return TaskResult(success=True, output={"fields_filled": filled, "total": len(data), "screenshot_path": shot, "browser_runtime_profile": profile})
+            return TaskResult(
+                success=True,
+                output={
+                    "fields_filled": filled,
+                    "total": len(data),
+                    "screenshot_path": shot,
+                    "browser_runtime_profile": profile,
+                    "browser_skill_pack": self.get_skill_pack(),
+                },
+            )
         except Exception as e:
             artifacts = await self._capture_failure_artifacts(page, "form_fail")
             return TaskResult(success=False, error=str(e), output={"url": url, **artifacts})
@@ -606,7 +628,16 @@ class BrowserAgent(BaseAgent):
                         shot = screenshot_path
                     except Exception:
                         pass
-                    return TaskResult(success=True, output={"uploaded": True, "file": file_path, "screenshot_path": shot, "browser_runtime_profile": profile})
+                    return TaskResult(
+                        success=True,
+                        output={
+                            "uploaded": True,
+                            "file": file_path,
+                            "screenshot_path": shot,
+                            "browser_runtime_profile": profile,
+                            "browser_skill_pack": self.get_skill_pack(),
+                        },
+                    )
             artifacts = await self._capture_failure_artifacts(page, "upload_selector_missing")
             return TaskResult(success=False, error=f"Селектор не найден: {selector}", output={"url": url, **artifacts})
         except Exception as e:

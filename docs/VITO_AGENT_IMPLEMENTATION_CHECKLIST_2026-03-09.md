@@ -11,7 +11,7 @@
   - `done`
   - `paused_blocked`
 
-Общий прогресс: `66%`
+Общий прогресс: `78%`
 
 Жесткое правило:
 - `done` по этому плану возможен только если охвачены все 23 агента, все обязательные связи и все 8 workflow.
@@ -49,29 +49,29 @@
 - [x] `LegalAgent` TOS/policy uplift
 - [x] `RiskAgent` reputation/moderation uplift
 - [x] `EmailAgent` real delivery path
-- [ ] `TranslationAgent` real provider path
+- [x] `TranslationAgent` real provider path
 - [x] `PartnershipAgent` affiliate/outreach uplift
-- Status: `in_progress`
+- Status: `done`
 - Weight: `22%`
 
 ## Phase L — Tier-2 Agent Hardening
 - [x] `TrendScout`
-- [ ] `ResearchAgent`
-- [ ] `BrowserAgent`
-- [ ] `ECommerceAgent`
-- [ ] `AccountManager`
+- [x] `ResearchAgent`
+- [x] `BrowserAgent`
+- [x] `ECommerceAgent`
+- [x] `AccountManager`
 - [x] `SecurityAgent`
-- [ ] `DevOpsAgent`
-- [ ] `VITOCore`
+- [x] `DevOpsAgent`
+- [x] `VITOCore`
 - [x] `ContentCreator`
-- [ ] `SMMAgent`
+- [x] `SMMAgent`
 - [x] `AnalyticsAgent`
-- [ ] `PublisherAgent`
+- [x] `PublisherAgent`
 - [x] `DocumentAgent`
 - [x] `QualityJudge`
-- [ ] `HRAgent`
-- [ ] `SelfHealer`
-- Status: `in_progress`
+- [x] `HRAgent`
+- [x] `SelfHealer`
+- Status: `done`
 - Weight: `20%`
 
 ## Phase M — Agent Benchmark Matrix

@@ -25,17 +25,21 @@ class TestAccountManager:
     async def test_list_accounts(self, agent):
         result = await agent.list_accounts()
         assert result.success is True
-        assert isinstance(result.output, list)
+        assert result.output["auth_state"] == "inventory"
+        assert isinstance(result.output["accounts"], list)
+        assert "skill_pack" in result.output
 
     @pytest.mark.asyncio
     async def test_check_account(self, agent):
         result = await agent.check_account("gumroad")
         assert result.success is True
+        assert "skill_pack" in result.output
 
     @pytest.mark.asyncio
     async def test_monitor_limits(self, agent):
         result = await agent.monitor_limits()
         assert result.success is True
+        assert result.output["auth_state"] == "limits_snapshot"
 
     @pytest.mark.asyncio
     async def test_execute_task(self, agent):

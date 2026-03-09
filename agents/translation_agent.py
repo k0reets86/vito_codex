@@ -11,6 +11,12 @@ SUPPORTED_LANGS = ["en", "de", "ua", "pl"]
 
 
 class TranslationAgent(BaseAgent):
+    NEEDS = {
+        "translate": ["glossary_memory", "listing_context"],
+        "localize": ["listing_context", "seo_context"],
+        "*": ["language_rules"],
+    }
+
     def __init__(self, **kwargs):
         super().__init__(name="translation_agent", description="Перевод и локализация: EN, DE, UA, PL", **kwargs)
         self._cache: dict[str, str] = {}
@@ -43,16 +49,26 @@ class TranslationAgent(BaseAgent):
         tgt = self._normalize_lang(target_lang)
         raw_text = (text or "").strip()
         if src == tgt:
-            return TaskResult(success=True, output=raw_text, metadata={"mode": "identity"})
+            return TaskResult(success=True, output=raw_text, metadata={"mode": "identity", **self.get_skill_pack()})
 
         cache_key = f"translate::{src}->{tgt}::{raw_text.lower()}"
         if cache_key in self._cache:
-            return TaskResult(success=True, output=self._cache[cache_key], metadata={"cached": True})
+            return TaskResult(success=True, output=self._cache[cache_key], metadata={"cached": True, **self.get_skill_pack()})
 
         local = self._local_translate(raw_text, src, tgt)
         if not self.llm_router:
             self._cache[cache_key] = local
-            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
+            return TaskResult(
+                success=True,
+                output=local,
+                metadata={
+                    "mode": "local_fallback",
+                    "source_lang": src,
+                    "target_lang": tgt,
+                    "translation_quality_hint": "dictionary_or_prefix_fallback",
+                    **self.get_skill_pack(),
+                },
+            )
 
         response = await self._call_llm(
             task_type=TaskType.CONTENT,
@@ -69,13 +85,23 @@ class TranslationAgent(BaseAgent):
             cost = 0.01
             self._record_expense(cost, f"Translate {src}->{tgt}")
         self._cache[cache_key] = output
-        return TaskResult(success=True, output=output, cost_usd=cost)
+        return TaskResult(
+            success=True,
+            output=output,
+            cost_usd=cost,
+            metadata={
+                "source_lang": src,
+                "target_lang": tgt,
+                "translation_quality_hint": "llm_translation_with_local_fallback",
+                **self.get_skill_pack(),
+            },
+        )
 
     async def localize_listing(self, listing_data: dict, target_lang: str) -> TaskResult:
         tgt = self._normalize_lang(target_lang)
         local = self._local_localize_listing(listing_data, tgt)
         if not self.llm_router:
-            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
+            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", **self.get_skill_pack()})
 
         text = "\n".join(f"{k}: {v}" for k, v in listing_data.items())
         response = await self._call_llm(
@@ -85,13 +111,13 @@ class TranslationAgent(BaseAgent):
         )
         if not response:
             return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
-        return TaskResult(success=True, output=response, cost_usd=0.01)
+        return TaskResult(success=True, output=response, cost_usd=0.01, metadata={"localized_lang": tgt, **self.get_skill_pack()})
 
     async def detect_language(self, text: str) -> TaskResult:
         sample = (text or "")[:500]
         local_lang = self._local_detect_language(sample)
         if not self.llm_router:
-            return TaskResult(success=True, output=local_lang, metadata={"mode": "local_fallback"})
+            return TaskResult(success=True, output=local_lang, metadata={"mode": "local_fallback", **self.get_skill_pack()})
 
         response = await self._call_llm(
             task_type=TaskType.ROUTINE,
@@ -99,8 +125,8 @@ class TranslationAgent(BaseAgent):
             estimated_tokens=100,
         )
         if not response:
-            return TaskResult(success=True, output=local_lang, metadata={"mode": "local_fallback"})
-        return TaskResult(success=True, output=self._normalize_lang(response.strip().lower()[:5]))
+            return TaskResult(success=True, output=local_lang, metadata={"mode": "local_fallback", **self.get_skill_pack()})
+        return TaskResult(success=True, output=self._normalize_lang(response.strip().lower()[:5]), metadata=self.get_skill_pack())
 
     def _normalize_lang(self, lang: str) -> str:
         val = (lang or "").strip().lower()

@@ -20,6 +20,12 @@ SOCIAL_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class SMMAgent(BaseAgent):
+    NEEDS = {
+        "social_media": ["social_runbooks", "platform_rules", "asset_pack"],
+        "campaign_plan": ["marketing_agent", "seo_agent"],
+        "*": ["social_runbooks"],
+    }
+
     def __init__(self, platforms: dict | None = None, **kwargs):
         super().__init__(name="smm_agent", description="Управление соцсетями: посты, хэштеги, планирование", **kwargs)
         self._scheduled_posts: list[dict] = []
@@ -57,6 +63,7 @@ class SMMAgent(BaseAgent):
                             "Сделать 1 follow-up через 6-12 часов",
                             "Собрать первые вопросы аудитории в комментариях",
                         ],
+                        "skill_pack": self.get_skill_pack(),
                     },
                 )
             elif task_type == "suggest_hashtags":
@@ -147,6 +154,12 @@ class SMMAgent(BaseAgent):
                             "platform": platform,
                             "published": True,
                             "file_path": str(file_path),
+                            "post_package": {
+                                "platform": platform,
+                                "text": post_text,
+                                "hashtags": self._local_hashtags(content, platform),
+                            },
+                            **self.get_skill_pack(),
                             **publish_result,
                         },
                     )
@@ -168,6 +181,12 @@ class SMMAgent(BaseAgent):
                 "platform": platform,
                 "published": False,
                 "file_path": str(file_path),
+                "post_package": {
+                    "platform": platform,
+                    "text": post_text,
+                    "hashtags": self._local_hashtags(content, platform),
+                },
+                **self.get_skill_pack(),
                 "note": f"No {platform} platform configured" if not platform_obj else "Posting failed",
             },
         )
@@ -186,8 +205,8 @@ class SMMAgent(BaseAgent):
             response = await self._call_llm(task_type=TaskType.CONTENT, prompt=f"Подбери 15-20 хэштегов для {platform} по теме: {content[:500]}", estimated_tokens=500)
         if not response:
             response = self._local_hashtags(content, platform)
-            return TaskResult(success=True, output=response, metadata={"mode": "local_fallback"})
-        return TaskResult(success=True, output=response, cost_usd=0.003)
+            return TaskResult(success=True, output=response, metadata={"mode": "local_fallback", **self.get_skill_pack()})
+        return TaskResult(success=True, output=response, cost_usd=0.003, metadata=self.get_skill_pack())
 
     def _local_post(self, platform: str, content: str, style: str | None = None) -> str:
         topic = (content or "AI automation update").strip()

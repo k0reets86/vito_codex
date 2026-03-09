@@ -10,6 +10,13 @@ logger = get_logger("hr_agent", agent="hr_agent")
 
 
 class HRAgent(BaseAgent):
+    NEEDS = {
+        "performance_evaluation": ["agent_registry", "benchmark_matrix"],
+        "knowledge_audit": ["memory", "platform_registry"],
+        "agent_development": ["agent_benchmark_matrix", "improvement_history"],
+        "*": ["agent_registry"],
+    }
+
     def __init__(self, **kwargs):
         super().__init__(name="hr_agent", description="HR: оценка агентов, рейтинг, оптимизация", **kwargs)
         self.registry = None
@@ -59,6 +66,7 @@ class HRAgent(BaseAgent):
             "tasks_failed": failed,
             "success_rate": round(success_rate, 1),
             "total_cost": agent_data.get("total_cost", 0),
+            "skill_pack": self.get_skill_pack(),
         })
 
     async def agent_ranking(self) -> TaskResult:
@@ -73,7 +81,7 @@ class HRAgent(BaseAgent):
             score = (completed / total * 100) if total > 0 else 0
             ranking.append({"name": s["name"], "score": round(score, 1), "completed": completed, "failed": failed})
         ranking.sort(key=lambda x: x["score"], reverse=True)
-        return TaskResult(success=True, output=ranking)
+        return TaskResult(success=True, output=ranking, metadata={"skill_pack": self.get_skill_pack()})
 
     async def suggest_improvements(self) -> TaskResult:
         statuses = []
@@ -88,8 +96,8 @@ class HRAgent(BaseAgent):
                 estimated_tokens=1500,
             )
         if response:
-            return TaskResult(success=True, output=response)
-        return TaskResult(success=True, output=self._local_improvements(statuses), metadata={"mode": "local_fallback"})
+            return TaskResult(success=True, output={"review": response, "skill_pack": self.get_skill_pack()})
+        return TaskResult(success=True, output=self._local_improvements(statuses), metadata={"mode": "local_fallback", **self.get_skill_pack()})
 
     async def audit_knowledge_base(self) -> TaskResult:
         """Audit knowledge/skills coverage and suggest updates."""
@@ -123,7 +131,7 @@ class HRAgent(BaseAgent):
         response = await self._call_llm(task_type=TaskType.STRATEGY, prompt=prompt, estimated_tokens=800)
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
-        return TaskResult(success=True, output=response)
+        return TaskResult(success=True, output={"knowledge_audit": response, "skill_pack": self.get_skill_pack()})
 
     async def plan_agent_development(self) -> TaskResult:
         """Plan periodic development goals for agents by domain."""
@@ -140,7 +148,7 @@ class HRAgent(BaseAgent):
         response = await self._call_llm(task_type=TaskType.STRATEGY, prompt=prompt, estimated_tokens=900)
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
-        return TaskResult(success=True, output=response)
+        return TaskResult(success=True, output={"development_plan": response, "skill_pack": self.get_skill_pack()})
 
     def _local_improvements(self, statuses: list[dict]) -> dict:
         ranking = []
