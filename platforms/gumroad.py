@@ -2393,6 +2393,12 @@ class GumroadPlatform(BasePlatform):
                         "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
                         "draft_confirmed": draft_confirmed,
                         "files_attached": existing_files_after,
+                        "main_file_attached": product_pdf_count >= 1,
+                        "cover_confirmed": product_image_count >= 1,
+                        "preview_confirmed": product_image_count >= 1,
+                        "thumbnail_confirmed": bool(product_state.get("thumbnail")) if isinstance(product_state, dict) else False,
+                        "tags_confirmed": not bool(meta_validation_error),
+                        "image_count": product_image_count,
                         "error": upload_validation_error or meta_validation_error,
                     }
                 # Guard: if still on /products/new, do not claim success
@@ -2504,6 +2510,13 @@ class GumroadPlatform(BasePlatform):
                         "status": "published",
                         "url": publish_url,
                         "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
+                        "files_attached": existing_files_after,
+                        "main_file_attached": product_pdf_count >= 1,
+                        "cover_confirmed": product_image_count >= 1,
+                        "preview_confirmed": product_image_count >= 1,
+                        "thumbnail_confirmed": bool(product_state.get("thumbnail")) if isinstance(product_state, dict) else False,
+                        "tags_confirmed": not bool(meta_validation_error),
+                        "image_count": product_image_count,
                     }
                 return {
                     "platform": "gumroad",
@@ -2524,6 +2537,13 @@ class GumroadPlatform(BasePlatform):
                             "product_id": product_id,
                             "url": enable_result.get("url"),
                             "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
+                            "files_attached": existing_files_after,
+                            "main_file_attached": product_pdf_count >= 1,
+                            "cover_confirmed": product_image_count >= 1,
+                            "preview_confirmed": product_image_count >= 1,
+                            "thumbnail_confirmed": bool(product_state.get("thumbnail")) if isinstance(product_state, dict) else False,
+                            "tags_confirmed": not bool(meta_validation_error),
+                            "image_count": product_image_count,
                         }
                     return {
                         "platform": "gumroad",
@@ -2579,6 +2599,13 @@ class GumroadPlatform(BasePlatform):
                             "slug": slug or generated_slug,
                             "url": prod.get("short_url", ""),
                             "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
+                            "files_attached": existing_files_after,
+                            "main_file_attached": product_pdf_count >= 1,
+                            "cover_confirmed": product_image_count >= 1,
+                            "preview_confirmed": product_image_count >= 1,
+                            "thumbnail_confirmed": bool(product_state.get("thumbnail")) if isinstance(product_state, dict) else False,
+                            "tags_confirmed": not bool(meta_validation_error),
+                            "image_count": product_image_count,
                         }
                     enable_result = await self.enable_product(pid)
                     if enable_result.get("status") == "published" and (enable_result.get("url") or prod.get("short_url")):
@@ -2590,6 +2617,13 @@ class GumroadPlatform(BasePlatform):
                                 "product_id": pid,
                                 "url": url,
                                 "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
+                                "files_attached": existing_files_after,
+                                "main_file_attached": product_pdf_count >= 1,
+                                "cover_confirmed": product_image_count >= 1,
+                                "preview_confirmed": product_image_count >= 1,
+                                "thumbnail_confirmed": bool(product_state.get("thumbnail")) if isinstance(product_state, dict) else False,
+                                "tags_confirmed": not bool(meta_validation_error),
+                                "image_count": product_image_count,
                             }
                         return {
                             "platform": "gumroad",
@@ -2607,6 +2641,13 @@ class GumroadPlatform(BasePlatform):
                         "slug": slug or generated_slug,
                         "url": prod.get("short_url", ""),
                         "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
+                        "files_attached": existing_files_after,
+                        "main_file_attached": product_pdf_count >= 1,
+                        "cover_confirmed": product_image_count >= 1,
+                        "preview_confirmed": product_image_count >= 1,
+                        "thumbnail_confirmed": bool(product_state.get("thumbnail")) if isinstance(product_state, dict) else False,
+                        "tags_confirmed": not bool(meta_validation_error),
+                        "image_count": product_image_count,
                         "error": enable_result.get("error", "enable_failed"),
                     }
 

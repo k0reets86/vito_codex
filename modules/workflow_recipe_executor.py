@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from modules.platform_publish_quality import validate_platform_publish_quality
 from modules.workflow_recipes import get_workflow_recipe
 
 
@@ -85,6 +86,13 @@ class WorkflowRecipeExecutor:
                     return False, f"numeric_not_gt_zero:{path}"
             except Exception:
                 return False, f"numeric_invalid:{path}"
+        quality_ok, quality_errors = validate_platform_publish_quality(
+            str(recipe.get("platform") or ""),
+            result or {},
+            payload or {},
+        )
+        if not quality_ok:
+            return False, f"publish_quality_gate_failed:{','.join(quality_errors)}"
         return True, ""
 
     async def run_once(self, recipe_name: str, payload: dict[str, Any], trace_id: str = "") -> dict[str, Any]:

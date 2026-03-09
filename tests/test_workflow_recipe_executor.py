@@ -131,6 +131,32 @@ class _QueueKdpDraftWithEvidence:
         return [{"id": self._id, "status": "done", "evidence": "runtime/kdp.png"}]
 
 
+class _QueueEtsyDraftWithScreenshotButNoFileProof:
+    def __init__(self):
+        self._id = 0
+
+    def enqueue(self, platform, payload, max_attempts=1, trace_id=""):
+        self._id += 1
+        return self._id
+
+    async def process_once(self):
+        return {
+            "job_id": self._id,
+            "status": "done",
+            "result": {
+                "status": "draft",
+                "platform": "etsy",
+                "listing_id": "123",
+                "url": "https://www.etsy.com/listing/123",
+                "screenshot_path": "runtime/etsy.png",
+                "editor_audit": {"hasUploadPrompt": True, "image_count": 2, "hasTags": True, "hasMaterials": True},
+            },
+        }
+
+    def list_jobs(self, limit=20):
+        return [{"id": self._id, "status": "done", "evidence": "runtime/etsy.png"}]
+
+
 @pytest.mark.asyncio
 async def test_workflow_recipe_executor_accepts_on_required_evidence():
     exe = WorkflowRecipeExecutor(_QueueOk())
@@ -177,3 +203,15 @@ async def test_workflow_recipe_executor_accepts_kdp_draft_with_evidence_and_fiel
     out = await exe.run_once("kdp_publish", {"dry_run": False}, trace_id="t6")
     assert out["status"] == "accepted"
     assert out["platform"] == "amazon_kdp"
+
+
+@pytest.mark.asyncio
+async def test_workflow_recipe_executor_rejects_etsy_without_file_proof_even_with_screenshot():
+    exe = WorkflowRecipeExecutor(_QueueEtsyDraftWithScreenshotButNoFileProof())
+    out = await exe.run_once(
+        "etsy_publish",
+        {"dry_run": False, "pdf_path": "/tmp/fake.pdf", "tags": ["a"], "materials": ["pdf"]},
+        trace_id="t7",
+    )
+    assert out["status"] == "failed"
+    assert "publish_quality_gate_failed" in out["error"]

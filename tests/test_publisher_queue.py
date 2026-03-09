@@ -25,6 +25,18 @@ class _NoEvidencePlatform:
         return {"platform": "x", "status": "published"}
 
 
+class _EtsyWeakDraftPlatform:
+    async def publish(self, payload: dict) -> dict:
+        return {
+            "platform": "etsy",
+            "status": "draft",
+            "listing_id": "123",
+            "url": "https://www.etsy.com/listing/123",
+            "screenshot_path": "runtime/etsy.png",
+            "editor_audit": {"hasUploadPrompt": True, "image_count": 2, "hasTags": True, "hasMaterials": True},
+        }
+
+
 class _SlowPlatform:
     async def publish(self, payload: dict) -> dict:
         await asyncio.sleep(0.05)
@@ -75,3 +87,13 @@ async def test_publisher_queue_times_out_stuck_publish(tmp_path):
     r = await pq.process_once()
     assert r and r["status"] == "failed"
     assert "publish_timeout" in r["error"]
+
+
+@pytest.mark.asyncio
+async def test_publisher_queue_rejects_platform_quality_gap(tmp_path):
+    db = str(tmp_path / "pq5.db")
+    pq = PublisherQueue(platforms={"etsy": _EtsyWeakDraftPlatform()}, sqlite_path=db)
+    pq.enqueue("etsy", {"pdf_path": "/tmp/fake.pdf", "tags": ["a"], "materials": ["pdf guide"]}, max_attempts=1)
+    r = await pq.process_once()
+    assert r and r["status"] == "failed"
+    assert "publish_quality_gate_failed" in r["error"]

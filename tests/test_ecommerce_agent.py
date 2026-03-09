@@ -198,6 +198,106 @@ class TestECommerceAgent:
                 "draft_only": True,
             },
         )
+        assert result.success is False
+        assert "publish_quality_gate_failed" in str(result.error)
+
+    @pytest.mark.asyncio
+    async def test_create_listing_etsy_requires_file_proof_not_only_screenshot(self, mock_llm_router, mock_memory, mock_finance, mock_comms, tmp_path):
+        from agents.ecommerce_agent import ECommerceAgent
+
+        cover = tmp_path / "cover.png"
+        cover.write_text("png", encoding="utf-8")
+        pdf = tmp_path / "file.pdf"
+        pdf.write_text("pdf", encoding="utf-8")
+        shot = tmp_path / "shot.png"
+        shot.write_text("png", encoding="utf-8")
+
+        etsy = MagicMock()
+        etsy.authenticate = AsyncMock(return_value=True)
+        etsy.publish = AsyncMock(
+            return_value={
+                "platform": "etsy",
+                "status": "draft",
+                "listing_id": "123",
+                "url": "https://www.etsy.com/listing/123",
+                "screenshot_path": str(shot),
+                "editor_audit": {"hasUploadPrompt": True, "image_count": 2, "hasTags": True, "hasMaterials": True},
+            }
+        )
+        agent = ECommerceAgent(
+            llm_router=mock_llm_router,
+            memory=mock_memory,
+            finance=mock_finance,
+            comms=mock_comms,
+            platforms={"etsy": etsy},
+        )
+        result = await agent.create_listing(
+            "etsy",
+            {
+                "_package_ready": True,
+                "title": "Etsy test",
+                "description": "A" * 120,
+                "price": 5,
+                "pdf_path": str(pdf),
+                "cover_path": str(cover),
+                "thumb_path": str(cover),
+                "draft_only": True,
+                "tags": ["tag1"],
+                "materials": ["pdf guide"],
+            },
+        )
+        assert result.success is False
+        assert "publish_quality_gate_failed" in str(result.error)
+
+    @pytest.mark.asyncio
+    async def test_create_listing_etsy_passes_with_file_and_media_proof(self, mock_llm_router, mock_memory, mock_finance, mock_comms, tmp_path):
+        from agents.ecommerce_agent import ECommerceAgent
+
+        cover = tmp_path / "cover.png"
+        cover.write_text("png", encoding="utf-8")
+        pdf = tmp_path / "file.pdf"
+        pdf.write_text("pdf", encoding="utf-8")
+        shot = tmp_path / "shot.png"
+        shot.write_text("png", encoding="utf-8")
+
+        etsy = MagicMock()
+        etsy.authenticate = AsyncMock(return_value=True)
+        etsy.publish = AsyncMock(
+            return_value={
+                "platform": "etsy",
+                "status": "draft",
+                "listing_id": "123",
+                "url": "https://www.etsy.com/listing/123",
+                "screenshot_path": str(shot),
+                "file_attached": True,
+                "image_count": 3,
+                "tags_confirmed": True,
+                "materials_confirmed": True,
+                "editor_audit": {"hasUploadPrompt": False, "image_count": 3, "hasTags": True, "hasMaterials": True},
+            }
+        )
+        agent = ECommerceAgent(
+            llm_router=mock_llm_router,
+            memory=mock_memory,
+            finance=mock_finance,
+            comms=mock_comms,
+            platforms={"etsy": etsy},
+        )
+        result = await agent.create_listing(
+            "etsy",
+            {
+                "_package_ready": True,
+                "title": "Etsy test",
+                "description": "A" * 120,
+                "price": 5,
+                "pdf_path": str(pdf),
+                "cover_path": str(cover),
+                "thumb_path": str(cover),
+                "draft_only": True,
+                "tags": ["tag1"],
+                "materials": ["pdf guide"],
+            },
+        )
         assert result.success is True
         assert result.output["listing_id"] == "123"
 

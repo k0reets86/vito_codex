@@ -9,6 +9,7 @@ from config.logger import get_logger
 from config.settings import settings
 from modules.listing_optimizer import optimize_listing_payload
 from modules.platform_artifact_pack import build_platform_bundle
+from modules.platform_publish_quality import validate_platform_publish_quality
 from modules.platform_result_contract import normalize_platform_result, validate_platform_result_contract
 from modules.platform_rules_sync import configured_services, sync_platform_rules
 from modules.platform_knowledge import get_service_knowledge
@@ -264,6 +265,14 @@ class ECommerceAgent(BaseAgent):
                     extra={"event": "listing_recipe_failed", "context": {"platform": platform, "reason": recipe_reason, "status": status}},
                 )
                 return TaskResult(success=False, error=recipe_reason or "publish_recipe_gate_failed", output=result)
+            quality_ok, quality_errors = validate_platform_publish_quality(platform, result or {}, data or {})
+            if not quality_ok:
+                err = f"publish_quality_gate_failed:{','.join(quality_errors)}"
+                logger.warning(
+                    f"Листинг НЕ принят по quality gate на {platform}",
+                    extra={"event": "listing_quality_failed", "context": {"platform": platform, "errors": quality_errors, "status": status}},
+                )
+                return TaskResult(success=False, error=err, output=result)
             logger.info(
                 f"Листинг создан на {platform}",
                 extra={"event": "listing_created", "context": {"platform": platform}},

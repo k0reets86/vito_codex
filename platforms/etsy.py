@@ -260,6 +260,39 @@ class EtsyPlatform(BasePlatform):
                     except Exception:
                         return {}
 
+                async def _final_editor_audit(expected_pdf_name: str = "") -> dict[str, Any]:
+                    try:
+                        return await page.evaluate(
+                            """(expectedPdfName) => {
+                                const body = (document.body?.innerText || "");
+                                const low = body.toLowerCase();
+                                const imgs = Array.from(document.querySelectorAll("img"))
+                                    .map((img) => String(img.getAttribute("src") || ""))
+                                    .filter((src) => src.includes("etsy") || src.includes("etsystatic"));
+                                const categoryHit =
+                                    low.includes("гиды и справочники") ||
+                                    low.includes("books, movies & music") ||
+                                    low.includes("guides");
+                                const expected = String(expectedPdfName || "").toLowerCase().trim();
+                                return {
+                                    hasDraft: low.includes("черновик") || low.includes("draft"),
+                                    hasInstant: low.includes("мгновенная загрузка") || low.includes("instant download"),
+                                    hasNoUnsaved: !(low.includes("несохран") || low.includes("unsaved")),
+                                    hasTitle: Boolean(document.querySelector("textarea[name='title'], textarea#listing-title-input, input[name='title'], input[data-test-id='listing-title-input']")),
+                                    hasTags: low.includes("теги") || low.includes("meme trend") || low.includes("creator guide"),
+                                    hasMaterials: low.includes("материал") || low.includes("pdf guide") || low.includes("digital download"),
+                                    hasUploadPrompt: low.includes("загрузить файл") || low.includes("upload a digital file") || low.includes("upload digital files"),
+                                    hasPdfName: expected ? low.includes(expected) : false,
+                                    categoryConfirmed: categoryHit,
+                                    imageCount: imgs.length,
+                                    etsyImgs: imgs.slice(0, 10),
+                                };
+                            }""",
+                            Path(expected_pdf_name).name if expected_pdf_name else "",
+                        )
+                    except Exception:
+                        return {}
+
                 async def _wait_editor_ready(timeout_ms: int = 20000) -> dict[str, Any]:
                     try:
                         await page.wait_for_function(
@@ -1288,6 +1321,7 @@ class EtsyPlatform(BasePlatform):
                     except Exception:
                         pass
                 if listing_id:
+                    audit = await _final_editor_audit(digital_file if 'digital_file' in locals() else "")
                     if (not allow_existing_update) and listing_id in existing_ids:
                         result = {
                             "platform": "etsy",
@@ -1322,10 +1356,17 @@ class EtsyPlatform(BasePlatform):
                         "screenshot_path": shot,
                         "draft_only": bool(draft_only),
                         "fallback_existing": bool((not allow_existing_update) and listing_id in existing_ids),
+                        "file_attached": bool(audit.get("hasPdfName")) or (bool(audit) and not bool(audit.get("hasUploadPrompt")) and bool(audit.get("hasInstant"))),
+                        "image_count": int(audit.get("imageCount") or 0),
+                        "tags_confirmed": bool(audit.get("hasTags")),
+                        "materials_confirmed": bool(audit.get("hasMaterials")),
+                        "category_confirmed": bool(audit.get("categoryConfirmed")),
+                        "editor_audit": audit,
                     }
                     self._record_browser_lesson(result, source="etsy.publish.browser")
                     return result
                 if draft_only and allow_existing_update and target_listing_id:
+                    audit = await _final_editor_audit(digital_file if 'digital_file' in locals() else "")
                     fallback_url = f"https://www.etsy.com/listing/{target_listing_id}"
                     result = {
                         "platform": "etsy",
@@ -1337,6 +1378,12 @@ class EtsyPlatform(BasePlatform):
                         "screenshot_path": shot,
                         "draft_only": True,
                         "fallback_existing": True,
+                        "file_attached": bool(audit.get("hasPdfName")) or (bool(audit) and not bool(audit.get("hasUploadPrompt")) and bool(audit.get("hasInstant"))),
+                        "image_count": int(audit.get("imageCount") or 0),
+                        "tags_confirmed": bool(audit.get("hasTags")),
+                        "materials_confirmed": bool(audit.get("hasMaterials")),
+                        "category_confirmed": bool(audit.get("categoryConfirmed")),
+                        "editor_audit": audit,
                     }
                     self._record_browser_lesson(result, source="etsy.publish.browser")
                     return result
