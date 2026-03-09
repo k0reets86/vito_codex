@@ -18,6 +18,7 @@ from typing import Any, Optional
 from config.agent_prompts import AGENT_PROMPTS
 from config.logger import get_logger
 from modules.agent_contracts import get_agent_contract
+from modules.agent_recovery_packs import get_agent_recovery_pack
 from modules.agent_skill_packs import get_agent_skill_pack
 
 AGENT_SYSTEM_PREAMBLE = (
@@ -116,6 +117,7 @@ class BaseAgent(ABC):
             "task_type": str(task_type or "").strip(),
             "contract": self.get_contract(),
             "skills": self.get_skill_pack(),
+            "recovery": get_agent_recovery_pack(self.name),
             "needs": self.get_declared_needs(task_type),
         }
 
