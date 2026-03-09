@@ -280,12 +280,6 @@ def _route_platform_followup(low: str, active: dict[str, Any]) -> dict[str, Any]
     topic = str(active.get("selected_research_title") or active.get("text") or "").strip()
     current_text = str(active.get("__current_text") or "")
     explicit_platforms = _extract_platforms(low)
-    explicit_topic = _topic_from_explicit_platform_request(current_text, low)
-    if explicit_topic:
-        topic = explicit_topic
-    elif explicit_platforms:
-        topic = ""
-
     platforms = explicit_platforms
     draft_only = any(tok in low for tok in ("чернов", "не публи", "draft"))
     wants_recommended = any(tok in low for tok in ("рекомен", "рекомнд", "recommended"))
@@ -308,6 +302,11 @@ def _route_platform_followup(low: str, active: dict[str, Any]) -> dict[str, Any]
             "тест пин",
         )
     )
+    explicit_topic = _topic_from_explicit_platform_request(current_text, low)
+    if explicit_topic and not wants_recommended:
+        topic = explicit_topic
+    elif explicit_platforms and not wants_recommended:
+        topic = ""
 
     if draft_only and not platforms:
         return {
@@ -318,6 +317,25 @@ def _route_platform_followup(low: str, active: dict[str, Any]) -> dict[str, Any]
         }
 
     if wants_recommended:
+        if explicit_platforms:
+            selected_platform = explicit_platforms[0]
+            try:
+                recommended = json.loads(str(active.get("research_recommended_json") or "{}"))
+                if isinstance(recommended, dict):
+                    topic = str(recommended.get("title") or active.get("selected_research_title") or topic).strip()
+            except Exception:
+                pass
+            topic = topic or "рекомендованный продукт"
+            return {
+                "intent": "system_action",
+                "platforms": [selected_platform],
+                "response": f"Собираю и запускаю рекомендованный draft на {selected_platform}: {topic}.",
+                "actions": [{
+                    "action": "run_product_pipeline",
+                    "params": {"topic": topic, "platforms": [selected_platform], "auto_publish": False},
+                }],
+                "needs_confirmation": False,
+            }
         selected_platform = str(active.get("selected_research_platform") or "").strip().lower()
         if not selected_platform:
             try:

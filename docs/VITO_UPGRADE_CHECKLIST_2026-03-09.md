@@ -11,7 +11,7 @@
   - `done`
   - `paused_blocked`
 
-Общий прогресс: `18%`
+Общий прогресс: `32%`
 
 ## Phase A — Execution Guardrails + Final Verifier
 - [x] Hard object protection для всех platform adapters
@@ -24,14 +24,14 @@
 - Weight: `18%`
 
 ## Phase B — Telegram Command Compiler
-- [ ] Отдельный Telegram NLU Router module
-- [ ] Rule-first parse
-- [ ] Gemini 2.5 Flash structured parser
-- [ ] Context window + fuzzy matching
-- [ ] Clarification mode
-- [ ] Response normalization
-- [ ] Noisy TG regressions
-- Status: `not_started`
+- [x] Отдельный Telegram NLU Router module
+- [x] Rule-first parse
+- [x] Gemini 2.5 Flash structured parser
+- [x] Context window + fuzzy matching
+- [x] Clarification mode
+- [x] Response normalization
+- [x] Noisy TG regressions
+- Status: `done`
 - Weight: `14%`
 
 ## Phase C — Memory That Governs Runtime

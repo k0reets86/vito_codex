@@ -34,7 +34,7 @@ from modules.conversation_memory import ConversationMemory
 from modules.cancel_state import CancelState
 from modules.owner_task_state import OwnerTaskState
 from modules.status_snapshot import build_status_snapshot, render_status_snapshot
-from modules.telegram_nlu_router import route_owner_dialogue
+from modules.telegram_command_compiler import compile_owner_message, parse_owner_message_structured
 from llm_router import LLMRouter, TaskType, MODEL_REGISTRY
 from modules.prompt_guard import wrap_untrusted_text
 
@@ -176,8 +176,16 @@ class ConversationEngine:
                 active = self.owner_task_state.get_active() or {}
             except Exception:
                 active = {}
-            routed = route_owner_dialogue(text, active)
+            routed = await compile_owner_message(text, active, self.llm_router)
             if routed is not None:
+                if routed.get("actions") and not routed.get("needs_confirmation"):
+                    try:
+                        action_out = await self._execute_actions(routed.get("actions") or [])
+                        if action_out:
+                            base = str(routed.get("response") or "").strip()
+                            routed["response"] = f"{base}\n{action_out}".strip()
+                    except Exception:
+                        pass
                 selected = routed.get("selected")
                 selected_idx = int(routed.get("selected_idx") or 0)
                 if selected_idx and isinstance(selected, dict):
@@ -642,36 +650,23 @@ class ConversationEngine:
         return None
 
     async def _detect_intent_llm(self, text: str) -> Intent:
-        """LLM-based intent detection через Haiku (~50 токенов)."""
+        """LLM-based intent detection через structured Gemini parser."""
         if "?" in text:
             return Intent.QUESTION
-        prompt = (
-            f"Определи intent сообщения пользователя. Ответь ОДНИМ словом:\n"
-            f"QUESTION — вопрос о системе, данных, статусе, расходах, трендах\n"
-            f"GOAL_REQUEST — просьба создать цель или задачу\n"
-            f"SYSTEM_ACTION — команда: запустить агента, сканировать, изменить настройки\n"
-            f"FEEDBACK — отзыв, благодарность, критика\n"
-            f"CONVERSATION — свободный разговор, приветствие\n\n"
-            f'Сообщение: "{text}"\n\n'
-            f"Intent:"
-        )
-
         try:
-            response = await self.llm_router.call_llm(
-                task_type=TaskType.ROUTINE,
-                prompt=prompt,
-                estimated_tokens=50,
-            )
-            if response:
-                intent_str = response.strip().upper().replace(" ", "_")
-                intent_map = {
-                    "QUESTION": Intent.QUESTION,
-                    "GOAL_REQUEST": Intent.GOAL_REQUEST,
-                    "SYSTEM_ACTION": Intent.SYSTEM_ACTION,
-                    "FEEDBACK": Intent.FEEDBACK,
-                    "CONVERSATION": Intent.CONVERSATION,
-                }
-                detected = intent_map.get(intent_str, Intent.CONVERSATION)
+            active = self.owner_task_state.get_active() if self.owner_task_state else {}
+        except Exception:
+            active = {}
+        try:
+            parsed = await parse_owner_message_structured(text, active, self.llm_router)
+            if parsed:
+                detected = {
+                    "question": Intent.QUESTION,
+                    "goal_request": Intent.GOAL_REQUEST,
+                    "system_action": Intent.SYSTEM_ACTION,
+                    "feedback": Intent.FEEDBACK,
+                    "conversation": Intent.CONVERSATION,
+                }.get(str(parsed.get("intent") or "").strip().lower(), Intent.CONVERSATION)
                 if detected == Intent.GOAL_REQUEST and ("?" in text):
                     return Intent.QUESTION
                 return detected
