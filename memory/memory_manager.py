@@ -14,6 +14,7 @@ import math
 import sqlite3
 import time
 import threading
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -25,6 +26,7 @@ from config.settings import settings
 from modules.agent_contracts import get_agent_contract
 from modules.execution_facts import ExecutionFacts
 from modules.failure_memory import FailureMemory
+from modules.failure_substrate import build_failure_substrate
 from modules.memory_blocks import MemoryBlocks
 from modules.memory_policy import decide_save, retention_classes
 from modules.platform_knowledge import search_entries as search_platform_knowledge
@@ -33,6 +35,8 @@ from modules.platform_runbook_packs import build_runbook_packs_for_services
 from modules.prompt_guard import has_prompt_injection_signals, sanitize_untrusted_text
 
 logger = get_logger("memory_manager", agent="memory_manager")
+
+_PROTECTED_TARGETS_PATH = Path("/home/vito/vito-agent/runtime/protected_platform_targets.json")
 
 
 class MemoryManager:
@@ -1033,6 +1037,17 @@ class MemoryManager:
         except Exception:
             failures = []
 
+        failure_substrate = {}
+        try:
+            failure_substrate = build_failure_substrate(
+                agent=agent,
+                task_type=task,
+                limit=max(limit * 2, 8),
+                sqlite_path=self._sqlite_path_value(),
+            )
+        except Exception:
+            failure_substrate = {"agent": agent, "task_type": task, "entries": [], "avoid_actions": [], "blocked_patterns": [], "signals": {"entry_count": 0, "has_high_risk": False}}
+
         facts = []
         try:
             for fact in ExecutionFacts().recent_facts(limit=max(limit * 6, 20)):
@@ -1054,6 +1069,21 @@ class MemoryManager:
                     break
         except Exception:
             facts = []
+        facts = self._rerank_runtime_rows(
+            facts,
+            query=query,
+            text_builder=lambda row: " ".join(
+                [
+                    str(row.get("action") or ""),
+                    str(row.get("status") or ""),
+                    str(row.get("detail") or ""),
+                    str(row.get("evidence") or ""),
+                ]
+            ),
+            time_builder=lambda row: str(row.get("created_at") or ""),
+            importance_builder=lambda row: 0.72 if str(row.get("evidence") or "").strip() else 0.55,
+            limit=limit,
+        )
 
         blocks = []
         try:
@@ -1064,6 +1094,20 @@ class MemoryManager:
             )
         except Exception:
             blocks = []
+        blocks = self._rerank_runtime_rows(
+            blocks,
+            query=query,
+            text_builder=lambda row: " ".join(
+                [
+                    str(row.get("summary") or ""),
+                    str(row.get("block_type") or ""),
+                    str(row.get("metadata_json") or ""),
+                ]
+            ),
+            time_builder=lambda row: str(row.get("updated_at") or ""),
+            importance_builder=lambda row: float(row.get("importance") or 0.5),
+            limit=limit,
+        )
 
         playbooks = []
         try:
@@ -1075,6 +1119,20 @@ class MemoryManager:
                 row["success_rate"] = round((succ / total), 3) if total > 0 else 0.0
         except Exception:
             playbooks = []
+        playbooks = self._rerank_runtime_rows(
+            playbooks,
+            query=query,
+            text_builder=lambda row: " ".join(
+                [
+                    str(row.get("action") or ""),
+                    str(row.get("task_type") or ""),
+                    str(row.get("strategy_json") or ""),
+                ]
+            ),
+            time_builder=lambda row: str(row.get("updated_at") or ""),
+            importance_builder=lambda row: float(row.get("success_rate") or 0.0),
+            limit=limit,
+        )
 
         platform_memory = []
         try:
@@ -1084,6 +1142,19 @@ class MemoryManager:
             platform_memory = search_platform_knowledge(query_text, limit=limit)
         except Exception:
             platform_memory = []
+        platform_memory = self._rerank_runtime_rows(
+            platform_memory,
+            query=query,
+            text_builder=lambda row: " ".join(
+                [
+                    str(row.get("service") or ""),
+                    str(row.get("content") or ""),
+                ]
+            ),
+            time_builder=lambda row: "",
+            importance_builder=lambda row: 0.7,
+            limit=limit,
+        )
 
         runbook_packs = []
         try:
@@ -1110,6 +1181,33 @@ class MemoryManager:
             runbook_packs = build_runbook_packs_for_services(services)
         except Exception:
             runbook_packs = []
+        runbook_packs = self._rerank_runtime_rows(
+            runbook_packs,
+            query=query,
+            text_builder=lambda row: " ".join(
+                [
+                    str(row.get("service") or ""),
+                    json.dumps(row, ensure_ascii=False)[:2500],
+                ]
+            ),
+            time_builder=lambda row: "",
+            importance_builder=lambda row: 0.82,
+            limit=limit,
+        )
+
+        memory_layers = self._build_memory_layers_map(
+            agent=agent,
+            task=task,
+            contract=contract,
+            skills=skills[:limit],
+            playbooks=playbooks[:limit],
+            failures=failures[:limit],
+            facts=facts[:limit],
+            blocks=blocks[:limit],
+            platform_memory=platform_memory[:limit],
+            runbook_packs=runbook_packs[:limit],
+            failure_substrate=failure_substrate,
+        )
 
         return {
             "agent": agent,
@@ -1119,9 +1217,131 @@ class MemoryManager:
             "playbooks": playbooks[:limit],
             "recent_failures": failures[:limit],
             "recent_facts": facts[:limit],
+            "failure_substrate": failure_substrate,
             "memory_blocks": blocks[:limit],
             "platform_memory": platform_memory[:limit],
             "runbook_packs": runbook_packs[:limit],
+            "memory_layers": memory_layers,
+        }
+
+    def _sqlite_path_value(self) -> str:
+        return str(getattr(self, "_sqlite_path", "") or settings.SQLITE_PATH)
+
+    @staticmethod
+    def _simple_semantic_overlap(query: str, text: str) -> float:
+        q = {x for x in str(query or "").lower().split() if len(x) >= 3}
+        t = {x for x in str(text or "").lower().split() if len(x) >= 3}
+        if not q or not t:
+            return 0.0
+        common = len(q.intersection(t))
+        return min(1.0, common / max(1, len(q)))
+
+    def _rerank_runtime_rows(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        query: str,
+        text_builder,
+        time_builder,
+        importance_builder,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        scored: list[dict[str, Any]] = []
+        for row in rows or []:
+            try:
+                text = str(text_builder(row) or "")
+                ts = time_builder(row)
+                importance = float(importance_builder(row) or 0.4)
+                semantic = self._simple_semantic_overlap(query, text)
+                recency_dt = self._parse_runtime_dt(ts)
+                relevance = self.calculate_relevance(semantic, recency_dt, importance=importance)
+                item = dict(row)
+                item["runtime_relevance"] = round(relevance, 6)
+                scored.append(item)
+            except Exception:
+                scored.append(dict(row))
+        scored.sort(key=lambda x: float(x.get("runtime_relevance") or 0.0), reverse=True)
+        return scored[:limit]
+
+    @staticmethod
+    def _parse_runtime_dt(value: str) -> datetime:
+        raw = str(value or "").strip()
+        if not raw:
+            return datetime.now(timezone.utc)
+        try:
+            if raw.endswith("Z"):
+                raw = raw[:-1] + "+00:00"
+            dt = datetime.fromisoformat(raw)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except Exception:
+            return datetime.now(timezone.utc)
+
+    def _load_protected_registry_summary(self) -> dict[str, Any]:
+        if not _PROTECTED_TARGETS_PATH.exists():
+            return {"total": 0, "services": {}}
+        try:
+            data = json.loads(_PROTECTED_TARGETS_PATH.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                return {"total": 0, "services": {}}
+            services: dict[str, int] = {}
+            total = 0
+            for key, rows in data.items():
+                count = len(rows or []) if isinstance(rows, list) else 0
+                services[str(key)] = count
+                total += count
+            return {"total": total, "services": services}
+        except Exception:
+            return {"total": 0, "services": {}}
+
+    def _build_memory_layers_map(
+        self,
+        *,
+        agent: str,
+        task: str,
+        contract: dict[str, Any],
+        skills: list[dict[str, Any]],
+        playbooks: list[dict[str, Any]],
+        failures: list[dict[str, Any]],
+        facts: list[dict[str, Any]],
+        blocks: list[dict[str, Any]],
+        platform_memory: list[dict[str, Any]],
+        runbook_packs: list[dict[str, Any]],
+        failure_substrate: dict[str, Any],
+    ) -> dict[str, Any]:
+        owner_blocks = [x for x in blocks if str(x.get("block_type") or "").strip().lower() == "owner_preference"]
+        task_blocks = [x for x in blocks if str(x.get("block_type") or "").strip().lower() in {"knowledge", "skill", "playbook"}]
+        return {
+            "agent": agent,
+            "task_type": task,
+            "owner_memory": {
+                "count": len(owner_blocks),
+                "active": bool(owner_blocks),
+            },
+            "task_memory": {
+                "facts": len(facts),
+                "blocks": len(task_blocks),
+                "active": bool(facts or task_blocks),
+            },
+            "platform_runbooks": {
+                "knowledge_entries": len(platform_memory),
+                "runbook_packs": len(runbook_packs),
+                "active": bool(platform_memory or runbook_packs),
+            },
+            "anti_pattern_memory": {
+                "recent_failures": len(failures),
+                "failure_substrate_entries": len(list((failure_substrate or {}).get("entries") or [])),
+                "avoid_actions": len(list((failure_substrate or {}).get("avoid_actions") or [])),
+                "active": bool(failures or (failure_substrate or {}).get("entries")),
+            },
+            "self_learning_memory": {
+                "skills": len(skills),
+                "playbooks": len(playbooks),
+                "active": bool(skills or playbooks),
+            },
+            "protected_object_registry": self._load_protected_registry_summary(),
+            "contract_outcomes": list((contract or {}).get("owned_outcomes") or []),
         }
 
     def search_skills(self, query: str, limit: int = 5) -> list[dict]:

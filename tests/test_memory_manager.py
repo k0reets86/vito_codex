@@ -291,6 +291,54 @@ def test_relevance_decay():
     assert score_fresh > score_old
 
 
+def test_agent_memory_context_contains_layers_and_failure_substrate(memory, tmp_path):
+    db = str(tmp_path / "test.db")
+    with patch("memory.memory_manager.settings") as s:
+        s.CHROMA_PATH = str(tmp_path / "chroma")
+        s.SQLITE_PATH = db
+        memory._sqlite_path = db
+        memory.save_skill(
+            "ecommerce_agent:listing_quality_gate",
+            "Use verified upload proof before done",
+            agent="ecommerce_agent",
+            task_type="listing_create",
+        )
+        from modules.failure_memory import FailureMemory
+        from modules.execution_facts import ExecutionFacts
+        from modules.playbook_registry import PlaybookRegistry
+
+        FailureMemory(sqlite_path=db).record(
+            agent="ecommerce_agent",
+            task_type="listing_create",
+            detail="etsy upload disappeared after reload",
+            error="missing_file",
+        )
+        ExecutionFacts(sqlite_path=db).record(
+            action="ecommerce_agent:listing_create",
+            status="failed",
+            detail="publish quality gate failed",
+            source="ecommerce_agent",
+        )
+        PlaybookRegistry(sqlite_path=db).learn(
+            agent="ecommerce_agent",
+            task_type="listing_create",
+            action="ecommerce_agent:listing_create",
+            status="failed",
+            strategy={"detail": "bad path"},
+        )
+        ctx = memory.get_agent_memory_context("ecommerce_agent", task_type="listing_create", limit=5)
+
+    assert "memory_layers" in ctx
+    assert "failure_substrate" in ctx
+    layers = ctx["memory_layers"]
+    assert layers["task_memory"]["active"] is True
+    assert layers["anti_pattern_memory"]["active"] is True
+    assert isinstance(layers["protected_object_registry"], dict)
+    substrate = ctx["failure_substrate"]
+    assert substrate["signals"]["entry_count"] >= 1
+    assert any("listing_create" in str(x.get("avoid_action") or "") for x in substrate["entries"])
+
+
 # ── PostgreSQL (моки) ──
 
 @pytest.mark.asyncio

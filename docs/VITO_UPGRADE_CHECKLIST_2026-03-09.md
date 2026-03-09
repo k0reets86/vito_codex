@@ -11,7 +11,7 @@
   - `done`
   - `paused_blocked`
 
-Общий прогресс: `36%`
+Общий прогресс: `46%`
 
 ## Phase A — Execution Guardrails + Final Verifier
 - [x] Hard object protection для всех platform adapters
@@ -35,13 +35,13 @@
 - Weight: `14%`
 
 ## Phase C — Memory That Governs Runtime
-- [ ] Unified memory layers map
+- [x] Unified memory layers map
 - [x] Executable platform runbook packs
-- [ ] Relevance/reranking activated everywhere needed
-- [ ] Error stores consolidation
-- [ ] mem0 feasibility decision and integration plan
+- [x] Relevance/reranking activated everywhere needed
+- [x] Error stores consolidation
+- [x] mem0 feasibility decision and integration plan
 - [x] Lessons must mutate runtime behavior
-- Status: `in_progress`
+- Status: `done`
 - Weight: `14%`
 
 ## Phase D — Deep Research Engine
