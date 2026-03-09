@@ -15,7 +15,12 @@ from typing import Any, Optional
 from config.logger import get_logger
 from config.settings import settings
 from llm_router import LLMRouter, TaskType
-from modules.runtime_remediation import suggest_safe_actions_for_failure
+from modules.runtime_remediation import (
+    record_remediation_candidate,
+    record_remediation_promotion,
+    record_remediation_verification,
+    suggest_safe_actions_for_failure,
+)
 
 logger = get_logger("self_healer", agent="self_healer")
 
@@ -91,6 +96,12 @@ class SelfHealer:
             message=str(error),
             context=context or {},
         )
+        remediation_candidates = self.build_remediation_candidates(
+            agent=agent,
+            error=error,
+            context=context or {},
+            safe_actions=safe_actions,
+        )
 
         # 1. Поиск похожих решённых ошибок
         similar = self._find_similar_errors(agent, type(error).__name__, str(error))
@@ -111,6 +122,7 @@ class SelfHealer:
                 "method": "database",
                 "description": similar["resolution"],
                 "safe_action_suggestions": safe_actions,
+                "remediation_candidates": remediation_candidates,
             }
 
         # 2. LLM-анализ + реальное применение fix (если не превышен лимит попыток)
@@ -135,6 +147,7 @@ class SelfHealer:
                     "description": fix_desc,
                     "shell_output": fix_result["output"],
                     "safe_action_suggestions": safe_actions,
+                    "remediation_candidates": remediation_candidates,
                 }
 
         # 3. Эскалация владельцу
@@ -157,6 +170,7 @@ class SelfHealer:
                 "method": "escalated",
                 "description": f"Эскалировано владельцу после {attempt} попыток; quarantine={cooldown}s",
                 "safe_action_suggestions": safe_actions,
+                "remediation_candidates": remediation_candidates,
             }
 
         # Ещё есть попытки — просто логируем
@@ -170,7 +184,38 @@ class SelfHealer:
             "method": "pending",
             "description": f"Попытка {attempt}/{MAX_AUTO_FIX_ATTEMPTS}, будет повтор",
             "safe_action_suggestions": safe_actions,
+            "remediation_candidates": remediation_candidates,
         }
+
+    def build_remediation_candidates(
+        self,
+        *,
+        agent: str,
+        error: Exception,
+        context: dict[str, Any],
+        safe_actions: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        candidates: list[dict[str, Any]] = []
+        for item in list(safe_actions or []):
+            action = str(item.get("action") or "").strip().lower()
+            if not action:
+                continue
+            record_remediation_candidate(
+                action=action,
+                reason=str(item.get("reason") or str(error))[:220],
+                source_agent=agent,
+                task_family=str(context.get("task_family", "") or ""),
+                source="self_healer",
+            )
+            candidates.append(
+                {
+                    "kind": "safe_action",
+                    "action": action,
+                    "priority": int(item.get("priority", 5) or 5),
+                    "reason": str(item.get("reason") or "")[:220],
+                }
+            )
+        return candidates
 
     @staticmethod
     def _build_failure_snapshot(
@@ -292,16 +337,29 @@ class SelfHealer:
         Returns:
             {"applied": bool, "output": str}
         """
-        shell_cmd = analysis.get("shell_command")
-        if not shell_cmd or not self.devops:
-            return {"applied": False, "output": "no command or no devops agent"}
-        allowed, reason = self._judge_fix_proposal(shell_cmd)
-        if not allowed:
+        verify = self.verify_fix_proposal(analysis)
+        shell_cmd = str(analysis.get("shell_command") or "").strip()
+        if not verify["verified"]:
+            if shell_cmd:
+                record_remediation_verification(
+                    action=shell_cmd,
+                    verified=False,
+                    reason=str(verify.get("reason") or "verification_failed")[:220],
+                    source_agent="self_healer",
+                    task_family=str(analysis.get("task_family", "") or ""),
+                )
             logger.warning(
                 "SelfHealer Judge blocked fix proposal",
-                extra={"event": "fix_blocked_by_judge", "context": {"reason": reason, "command": str(shell_cmd)[:200]}},
+                extra={"event": "fix_blocked_by_judge", "context": {"reason": verify.get("reason"), "command": str(shell_cmd)[:200]}},
             )
-            return {"applied": False, "output": f"rejected_by_judge: {reason}"}
+            return {"applied": False, "output": f"rejected_by_judge: {verify.get('reason')}"}
+        record_remediation_verification(
+            action=shell_cmd,
+            verified=True,
+            reason="verified_before_apply",
+            source_agent="self_healer",
+            task_family=str(analysis.get("task_family", "") or ""),
+        )
 
         backup_path = None
         if self.self_updater:
@@ -341,6 +399,13 @@ class SelfHealer:
                     "SelfHealer: fix applied but tests failed -> rollback",
                     extra={"event": "fix_rollback_after_tests"},
                 )
+                record_remediation_promotion(
+                    action=shell_cmd,
+                    promoted=False,
+                    reason=f"tests_failed:{tests_out[:180]}",
+                    source_agent="self_healer",
+                    task_family=str(analysis.get("task_family", "") or ""),
+                )
                 return {"applied": False, "output": f"fix rolled back: tests failed. {tests_out}"}
             budget_ok, budget_detail = self._check_git_change_budget(before=before_stats)
             if not budget_ok:
@@ -352,6 +417,13 @@ class SelfHealer:
                 logger.warning(
                     "SelfHealer: fix exceeds change budget -> rollback",
                     extra={"event": "fix_rollback_change_budget", "context": {"detail": budget_detail}},
+                )
+                record_remediation_promotion(
+                    action=shell_cmd,
+                    promoted=False,
+                    reason=budget_detail,
+                    source_agent="self_healer",
+                    task_family=str(analysis.get("task_family", "") or ""),
                 )
                 return {"applied": False, "output": f"rejected_by_budget: {budget_detail}"}
             if bool(getattr(settings, "SELF_HEALER_CANARY_ENABLED", False)):
@@ -368,6 +440,13 @@ class SelfHealer:
                             "SelfHealer: canary command rejected -> rollback",
                             extra={"event": "fix_rollback_canary_rejected", "context": {"command": canary_cmd, "reason": canary_reason}},
                         )
+                        record_remediation_promotion(
+                            action=shell_cmd,
+                            promoted=False,
+                            reason=f"canary_rejected:{canary_reason}",
+                            source_agent="self_healer",
+                            task_family=str(analysis.get("task_family", "") or ""),
+                        )
                         return {"applied": False, "output": f"canary_rejected_by_judge: {canary_reason}"}
                     canary_result = await self.devops.execute_shell(canary_cmd)
                     if not canary_result.success:
@@ -380,11 +459,25 @@ class SelfHealer:
                             "SelfHealer: canary check failed -> rollback",
                             extra={"event": "fix_rollback_after_canary", "context": {"command": canary_cmd, "error": canary_result.error}},
                         )
+                        record_remediation_promotion(
+                            action=shell_cmd,
+                            promoted=False,
+                            reason=f"canary_failed:{str(canary_result.error or canary_result.output)[:180]}",
+                            source_agent="self_healer",
+                            task_family=str(analysis.get("task_family", "") or ""),
+                        )
                         return {"applied": False, "output": f"canary_failed: {str(canary_result.error or canary_result.output)[:300]}"}
 
             logger.info(
                 f"SelfHealer: fix применён успешно",
                 extra={"event": "fix_applied", "context": {"command": shell_cmd}},
+            )
+            record_remediation_promotion(
+                action=shell_cmd,
+                promoted=True,
+                reason="proof_verified",
+                source_agent="self_healer",
+                task_family=str(analysis.get("task_family", "") or ""),
             )
             return {"applied": True, "output": f"{str(result.output)[:500]} | tests=ok"}
         else:
@@ -397,7 +490,29 @@ class SelfHealer:
                 f"SelfHealer: fix не удался: {result.error}",
                 extra={"event": "fix_failed", "context": {"command": shell_cmd, "error": result.error}},
             )
+            record_remediation_promotion(
+                action=shell_cmd,
+                promoted=False,
+                reason=str(result.error or "apply_failed")[:220],
+                source_agent="self_healer",
+                task_family=str(analysis.get("task_family", "") or ""),
+            )
             return {"applied": False, "output": result.error or ""}
+
+    def verify_fix_proposal(self, analysis: dict) -> dict[str, Any]:
+        shell_cmd = str((analysis or {}).get("shell_command") or "").strip()
+        if not shell_cmd:
+            return {"verified": False, "reason": "no_command"}
+        if self.devops is None:
+            return {"verified": False, "reason": "no_devops_agent"}
+        allowed, reason = self._judge_fix_proposal(shell_cmd)
+        if not allowed:
+            return {"verified": False, "reason": reason}
+        if not hasattr(self.devops, "execute_shell"):
+            return {"verified": False, "reason": "devops_missing_execute_shell"}
+        if self.self_updater and not hasattr(self.self_updater, "run_tests"):
+            return {"verified": False, "reason": "self_updater_missing_test_runner"}
+        return {"verified": True, "reason": "ok", "command": shell_cmd}
 
     @staticmethod
     def _judge_fix_proposal(shell_cmd: str) -> tuple[bool, str]:

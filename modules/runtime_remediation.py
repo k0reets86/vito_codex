@@ -25,6 +25,16 @@ SAFE_ACTIONS = {
     "set_notify_minimal",
 }
 
+REMEDIATION_OUTCOMES = {
+    "candidate",
+    "verified",
+    "promoted",
+    "applied",
+    "failed",
+    "noop",
+    "held",
+}
+
 
 def _conn(sqlite_path: str | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(sqlite_path or settings.SQLITE_PATH)
@@ -145,6 +155,8 @@ def record_safe_action_outcome(
     out = str(outcome or "").strip().lower()
     if not act or not out:
         return 0
+    if out not in REMEDIATION_OUTCOMES:
+        out = "failed"
     _init_runtime_remediation_db(sqlite_path)
     conn = _conn(sqlite_path)
     try:
@@ -178,6 +190,68 @@ def record_safe_action_outcome(
         return int(cur.lastrowid or 0)
     finally:
         conn.close()
+
+
+def record_remediation_candidate(
+    action: str,
+    *,
+    reason: str = "",
+    source_agent: str = "",
+    task_family: str = "",
+    source: str = "self_healer",
+    sqlite_path: str | None = None,
+) -> int:
+    return record_safe_action_outcome(
+        action=action,
+        outcome="candidate",
+        reason=reason,
+        source_agent=source_agent,
+        task_family=task_family,
+        source=source,
+        sqlite_path=sqlite_path,
+    )
+
+
+def record_remediation_verification(
+    action: str,
+    *,
+    verified: bool,
+    reason: str = "",
+    source_agent: str = "",
+    task_family: str = "",
+    source: str = "self_healer_verify",
+    sqlite_path: str | None = None,
+) -> int:
+    return record_safe_action_outcome(
+        action=action,
+        outcome="verified" if verified else "held",
+        reason=reason,
+        source_agent=source_agent,
+        task_family=task_family,
+        source=source,
+        sqlite_path=sqlite_path,
+    )
+
+
+def record_remediation_promotion(
+    action: str,
+    *,
+    promoted: bool,
+    reason: str = "",
+    source_agent: str = "",
+    task_family: str = "",
+    source: str = "self_healer_apply",
+    sqlite_path: str | None = None,
+) -> int:
+    return record_safe_action_outcome(
+        action=action,
+        outcome="promoted" if promoted else "failed",
+        reason=reason,
+        source_agent=source_agent,
+        task_family=task_family,
+        source=source,
+        sqlite_path=sqlite_path,
+    )
 
 
 def suggest_safe_actions_for_failure(

@@ -11,7 +11,7 @@
   - `done`
   - `paused_blocked`
 
-Общий прогресс: `82%`
+Общий прогресс: `90%`
 
 ## Phase A — Execution Guardrails + Final Verifier
 - [x] Hard object protection для всех platform adapters
@@ -73,12 +73,12 @@
 - Weight: `12%`
 
 ## Phase G — Self-Healing and Safe Upgrades
-- [ ] Failure signatures to remediation candidates
-- [ ] Verify mode for remediations
-- [ ] Promotion only after proof
-- [ ] SelfHealer <-> DevOpsAgent hard wiring audited
-- [ ] Safe tool allowlist expansion where justified
-- Status: `not_started`
+- [x] Failure signatures to remediation candidates
+- [x] Verify mode for remediations
+- [x] Promotion only after proof
+- [x] SelfHealer <-> DevOpsAgent hard wiring audited
+- [x] Safe tool allowlist expansion where justified
+- Status: `done`
 - Weight: `8%`
 
 ## Phase H — Full Combat Validation

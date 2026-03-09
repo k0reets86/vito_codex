@@ -5,6 +5,9 @@ from modules.runtime_remediation import (
     get_safe_action_trust,
     plan_safe_action_updates,
     rank_safe_action_suggestions,
+    record_remediation_candidate,
+    record_remediation_promotion,
+    record_remediation_verification,
     record_safe_action_outcome,
     suggest_safe_actions_for_failure,
 )
@@ -99,6 +102,34 @@ def test_record_safe_action_outcome_persists_context(tmp_path):
     ).fetchone()
     conn.close()
     assert row == ("vito_core", "research", "self_healer")
+
+
+def test_record_remediation_candidate_verification_and_promotion(tmp_path):
+    sqlite_path = str(tmp_path / "remediation_flow.db")
+    cid = record_remediation_candidate(
+        "apply_profile_economy",
+        reason="provider degraded",
+        source_agent="vito_core",
+        task_family="research",
+        sqlite_path=sqlite_path,
+    )
+    vid = record_remediation_verification(
+        "apply_profile_economy",
+        verified=True,
+        reason="verified_before_apply",
+        source_agent="self_healer",
+        task_family="research",
+        sqlite_path=sqlite_path,
+    )
+    pid = record_remediation_promotion(
+        "apply_profile_economy",
+        promoted=True,
+        reason="proof_verified",
+        source_agent="self_healer",
+        task_family="research",
+        sqlite_path=sqlite_path,
+    )
+    assert cid > 0 and vid > 0 and pid > 0
 
 
 def test_suggest_safe_actions_for_failure_returns_relevant_actions():

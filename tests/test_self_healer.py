@@ -115,6 +115,7 @@ class TestHandleError:
         actions = [x["action"] for x in result.get("safe_action_suggestions", [])]
         assert "pause_self_learning_autopromote" in actions
         assert "apply_profile_economy" in actions
+        assert result.get("remediation_candidates")
 
     @pytest.mark.asyncio
     async def test_handle_error_found_in_db(self, mock_llm_router, mock_comms, mock_memory_with_sqlite, mock_devops):
@@ -249,6 +250,17 @@ class TestHandleError:
 
 
 class TestApplyFix:
+    def test_verify_fix_proposal_requires_devops(self, mock_llm_router, mock_memory, mock_comms):
+        healer = SelfHealer(mock_llm_router, mock_memory, mock_comms, devops_agent=None)
+        out = healer.verify_fix_proposal({"shell_command": "free -m"})
+        assert out["verified"] is False
+        assert out["reason"] == "no_devops_agent"
+
+    def test_verify_fix_proposal_accepts_safe_whitelisted_command(self, healer):
+        out = healer.verify_fix_proposal({"shell_command": "free -m"})
+        assert out["verified"] is True
+        assert out["reason"] == "ok"
+
     @pytest.mark.asyncio
     async def test_apply_fix_success(self, healer, mock_devops):
         mock_devops.execute_shell = AsyncMock(return_value=TaskResult(success=True, output="done"))
