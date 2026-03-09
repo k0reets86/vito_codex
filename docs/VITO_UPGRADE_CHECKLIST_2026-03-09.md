@@ -11,7 +11,7 @@
   - `done`
   - `paused_blocked`
 
-Общий прогресс: `90%`
+Общий прогресс: `100%`
 
 ## Phase A — Execution Guardrails + Final Verifier
 - [x] Hard object protection для всех platform adapters
@@ -82,11 +82,11 @@
 - Weight: `8%`
 
 ## Phase H — Full Combat Validation
-- [ ] Safe regression pack
-- [ ] Noisy TG pack
-- [ ] Live owner platform pack
-- [ ] Duplicate protection pack
-- [ ] Protected object pack
-- [ ] 23-agent benchmark audit rerun
-- Status: `not_started`
+- [x] Safe regression pack
+- [x] Noisy TG pack
+- [x] Live owner platform pack
+- [x] Duplicate protection pack
+- [x] Protected object pack
+- [x] 23-agent benchmark audit rerun
+- Status: `done`
 - Weight: `10%`

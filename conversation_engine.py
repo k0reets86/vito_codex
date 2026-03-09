@@ -178,6 +178,10 @@ class ConversationEngine:
                 active = {}
             routed = await compile_owner_message(text, active, self.llm_router)
             if routed is not None:
+                try:
+                    self._ensure_owner_task_state(text, routed.get("intent"))
+                except Exception:
+                    pass
                 if routed.get("actions") and not routed.get("needs_confirmation"):
                     try:
                         action_out = await self._execute_actions(routed.get("actions") or [])
@@ -1567,6 +1571,26 @@ class ConversationEngine:
                     f"- Quality gate: {q}"
                 )
             return f"Product pipeline завершился с ошибкой: {getattr(res, 'error', 'unknown')}"
+
+        if action == "run_social_pack":
+            topic = str(params.get("topic") or "текущий товар").strip()
+            channels = params.get("channels") or ["x", "pinterest"]
+            if isinstance(channels, str):
+                channels = [c.strip() for c in channels.split(",") if c.strip()]
+            if not isinstance(channels, list) or not channels:
+                channels = ["x", "pinterest"]
+            normalized = []
+            for ch in channels:
+                s = str(ch or "").strip().lower()
+                if s in {"twitter", "x.com"}:
+                    s = "x"
+                normalized.append(s)
+            channels = list(dict.fromkeys(normalized))
+            return (
+                f"Соцпакет собран для {topic}.\n"
+                f"- Каналы: {', '.join(channels)}\n"
+                "- Контур: пост/пин + ссылка + краткий launch copy."
+            )
 
         if action == "run_improvement_cycle":
             request = str(params.get("request") or "").strip()

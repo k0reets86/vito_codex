@@ -279,9 +279,6 @@ async def compile_owner_message(
 ) -> dict[str, Any] | None:
     ruled = route_owner_dialogue(text, active_task)
     if ruled is not None:
-        actions = ruled.get("actions") or []
-        if any(isinstance(a, dict) and a.get("action") == "run_deep_research" for a in actions):
-            return None
         ruled["compiler_source"] = "rule_first"
         return ruled
 

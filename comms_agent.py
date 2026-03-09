@@ -1240,6 +1240,8 @@ class CommsAgent:
             for x in (
                 "создай",
                 "создать",
+                "собери",
+                "собрать",
                 "опубликуй",
                 "опубликовать",
                 "размести",
@@ -1254,6 +1256,8 @@ class CommsAgent:
                 "post ",
             )
         ):
+            return False
+        if any(x in s for x in ("соцпак", "соц пак", "social pack", "social", "пинтерест", "pinterest", "твиттер", "twitter", "reddit", "реддит")):
             return False
         if any(x in s for x in ("тренд", "trend", "ниш", "niche", "конкурент", "рынок")):
             return False

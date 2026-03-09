@@ -13,10 +13,15 @@ import asyncio
 import importlib
 import inspect
 import json
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from agents.account_manager import AccountManager
 from agents.agent_registry import AgentRegistry
@@ -43,9 +48,6 @@ from agents.smm_agent import SMMAgent
 from agents.translation_agent import TranslationAgent
 from agents.trend_scout import TrendScout
 from agents.vito_core import VITOCore
-
-
-ROOT = Path(__file__).resolve().parents[1]
 
 
 class DummyLLMRouter:
