@@ -125,6 +125,67 @@ class HumanBrowser:
         return kwargs
 
     @staticmethod
+    def has_persistent_profile_data(profile: dict[str, Any]) -> bool:
+        spec = HumanBrowser().build_context_spec(profile)
+        path = Path(spec.persistent_profile_dir)
+        if not path.exists() or not path.is_dir():
+            return False
+        try:
+            return any(path.iterdir())
+        except Exception:
+            return False
+
+    async def launch_managed_context(
+        self,
+        browser_type,
+        *,
+        profile: dict[str, Any],
+        headless: bool,
+        launch_args: list[str] | None = None,
+        user_agent: str,
+        locale: str,
+        timezone_id: str,
+        viewport: dict[str, int] | None = None,
+    ):
+        """Launch browser+context using storage_state first, then persistent profile fallback."""
+        spec = self.build_context_spec(profile)
+        args = list(launch_args or [])
+        viewport = viewport or {"width": 1280, "height": 720}
+        Path(spec.persistent_profile_dir).mkdir(parents=True, exist_ok=True)
+
+        if spec.storage_state_path and os.path.exists(spec.storage_state_path):
+            browser = await browser_type.launch(headless=headless, args=args)
+            context = await browser.new_context(
+                storage_state=spec.storage_state_path,
+                viewport=viewport,
+                user_agent=user_agent,
+                locale=locale,
+                timezone_id=timezone_id,
+            )
+            return browser, context, "storage_state"
+
+        if self.has_persistent_profile_data(profile):
+            context = await browser_type.launch_persistent_context(
+                user_data_dir=spec.persistent_profile_dir,
+                headless=headless,
+                args=args,
+                viewport=viewport,
+                user_agent=user_agent,
+                locale=locale,
+                timezone_id=timezone_id,
+            )
+            return None, context, "persistent_profile"
+
+        browser = await browser_type.launch(headless=headless, args=args)
+        context = await browser.new_context(
+            viewport=viewport,
+            user_agent=user_agent,
+            locale=locale,
+            timezone_id=timezone_id,
+        )
+        return browser, context, "fresh"
+
+    @staticmethod
     def default_screenshot_path(service: str, task_type: str) -> str:
         svc = str(service or "generic").strip().lower() or "generic"
         task = str(task_type or "step").strip().lower() or "step"

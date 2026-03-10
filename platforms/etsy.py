@@ -242,13 +242,35 @@ class EtsyPlatform(BasePlatform):
                     if not str(os.getenv("DISPLAY", "")).strip():
                         ensure_display()
                 try:
-                    browser = await p.chromium.launch(
+                    browser, context, _launch_mode = await self._human_browser.launch_managed_context(
+                        p.chromium,
+                        profile={
+                            "service": "etsy",
+                            "storage_state_path": str(self._storage_state_path),
+                            "persistent_profile_dir": str(PROJECT_ROOT / "runtime" / "browser_profiles" / "etsy"),
+                        },
                         headless=force_headless or os.getenv("VITO_BROWSER_HEADLESS", "1").lower() not in {"0", "false", "no"},
-                        args=launch_args,
+                        launch_args=launch_args,
+                        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
+                        locale=str(getattr(settings, "BROWSER_LOCALE", "en-US") or "en-US"),
+                        timezone_id=str(getattr(settings, "BROWSER_TIMEZONE_ID", "America/New_York") or "America/New_York"),
+                        viewport={"width": 1366, "height": 900},
                     )
                 except Exception:
-                    browser = await p.chromium.launch(headless=True, args=launch_args)
-                context = await browser.new_context(**self._browser_context_kwargs())
+                    browser, context, _launch_mode = await self._human_browser.launch_managed_context(
+                        p.chromium,
+                        profile={
+                            "service": "etsy",
+                            "storage_state_path": str(self._storage_state_path),
+                            "persistent_profile_dir": str(PROJECT_ROOT / "runtime" / "browser_profiles" / "etsy"),
+                        },
+                        headless=True,
+                        launch_args=launch_args,
+                        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
+                        locale=str(getattr(settings, "BROWSER_LOCALE", "en-US") or "en-US"),
+                        timezone_id=str(getattr(settings, "BROWSER_TIMEZONE_ID", "America/New_York") or "America/New_York"),
+                        viewport={"width": 1366, "height": 900},
+                    )
                 page = await context.new_page()
                 async def _editor_debug() -> dict[str, Any]:
                     try:

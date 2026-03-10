@@ -286,14 +286,19 @@ class TwitterPlatform(BasePlatform):
         page = None
         try:
             async with async_playwright() as p:
-                browser = await p.chromium.launch(
+                browser, context, _launch_mode = await (HumanBrowser(logger=logger)).launch_managed_context(
+                    p.chromium,
+                    profile={
+                        "service": "twitter",
+                        "storage_state_path": str(self._storage_state_path),
+                        "persistent_profile_dir": str(PROJECT_ROOT / "runtime" / "browser_profiles" / "twitter"),
+                    },
                     headless=os.getenv("VITO_BROWSER_HEADLESS", "1").lower() not in {"0", "false", "no"},
-                    args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
-                )
-                context = await browser.new_context(
-                    storage_state=str(self._storage_state_path),
-                    viewport={"width": 1366, "height": 900},
+                    launch_args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
+                    locale="en-US",
+                    timezone_id="America/New_York",
+                    viewport={"width": 1366, "height": 900},
                 )
                 page = await context.new_page()
                 await page.goto("https://x.com/compose/post", wait_until="domcontentloaded", timeout=90000)
