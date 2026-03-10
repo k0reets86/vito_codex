@@ -50,7 +50,7 @@ class CurriculumAgent(BaseAgent):
         super().__init__(name="curriculum_agent", description="Автономный генератор следующих целей", **kwargs)
         self.goal_engine = goal_engine
         self.skill_lib = VITOSkillLibrary()
-        self.reflector = VITOReflector()
+        self.reflector = VITOReflector(memory_manager=self.memory)
         self.owner_model = OwnerModel()
 
     @property

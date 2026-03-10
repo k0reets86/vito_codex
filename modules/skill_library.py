@@ -147,8 +147,21 @@ class VITOSkillLibrary:
             mm = self.memory or MemoryManager()
             mm.store_knowledge(
                 doc_id=f"skill_lib_{skill['name']}",
-                text=f"Skill {skill['name']}: {skill['description']}\nTags: {', '.join(skill['tags'])}\nTrigger: {skill['trigger_hint']}",
-                metadata={"type": "skill_library", "skill_name": skill["name"], "category": skill["category"]},
+                text=(
+                    f"Skill {skill['name']}: {skill['description']}\n"
+                    f"Tags: {', '.join(skill['tags'])}\n"
+                    f"Trigger: {skill['trigger_hint']}\n"
+                    f"Source agent: {skill['source_agent']}"
+                ),
+                metadata={
+                    "type": "skill_library",
+                    "block_type": "skill",
+                    "skill_name": skill["name"],
+                    "name": skill["name"],
+                    "category": skill["category"],
+                    "agent": skill["source_agent"] or "",
+                    "importance_score": 0.8,
+                },
             )
         except Exception:
             pass
@@ -178,6 +191,18 @@ class VITOSkillLibrary:
 
     def retrieve(self, query: str, n: int = 5, category: str | None = None) -> list[dict[str, Any]]:
         query_tokens = {tok for tok in _norm_text(query).split() if tok}
+        semantic_names: list[str] = []
+        try:
+            mm = self.memory or MemoryManager()
+            if getattr(mm, "_chroma_doc_count", 0) > 0:
+                hits = mm.search_knowledge(f"skill {query}", n_results=max(4, int(n or 5) * 2))
+                for hit in hits:
+                    meta = hit.get("metadata") or {}
+                    name = str(meta.get("name") or meta.get("skill_name") or "").strip()
+                    if name and name not in semantic_names:
+                        semantic_names.append(name)
+        except Exception:
+            semantic_names = []
         conn = self._conn()
         try:
             rows = conn.execute("SELECT * FROM skill_library WHERE status = 'active'").fetchall()
@@ -206,6 +231,9 @@ class VITOSkillLibrary:
             if usage > 0:
                 success_rate = float(item.get("success_count") or 0) / usage
             score = float(overlap) + usage_bonus + success_rate
+            name = str(item.get("name") or "").strip()
+            if name in semantic_names:
+                score += max(2.0, float(len(semantic_names) - semantic_names.index(name)))
             if score > 0:
                 scored.append((score, item))
         scored.sort(key=lambda x: (-x[0], str(x[1].get("name") or "")))

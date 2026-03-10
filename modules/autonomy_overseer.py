@@ -47,3 +47,33 @@ class AutonomyOverseer:
             'finding_count': len(findings),
             'findings': findings,
         }
+
+    async def execute_actions(self, findings, goal_engine, comms, proposal_store=None) -> dict[str, Any]:
+        actions: list[dict[str, Any]] = []
+        for f in list(findings or []):
+            ftype = str(f.get("type") or "").strip()
+            if ftype == "workflow_stuck":
+                goal_id = str(f.get("goal_id") or "").strip()
+                try:
+                    if goal_id and hasattr(goal_engine, "reset_goal"):
+                        goal_engine.reset_goal(goal_id)
+                        actions.append({"type": "goal_reset", "goal_id": goal_id})
+                    elif goal_id and hasattr(goal_engine, "fail_goal"):
+                        goal_engine.fail_goal(goal_id, "overseer_timeout")
+                        actions.append({"type": "goal_failed", "goal_id": goal_id})
+                    elif comms:
+                        await comms.send_message(f"OVERSEER: stuck goal {goal_id} needs manual attention", level="warning")
+                except Exception as e:
+                    if comms:
+                        await comms.send_message(f"OVERSEER: stuck goal {goal_id} reset failed: {e}", level="warning")
+            elif ftype == "stale_proposal":
+                proposal_id = str(f.get("proposal_id") or "").strip()
+                if not proposal_id or proposal_store is None:
+                    continue
+                try:
+                    if hasattr(proposal_store, "update_status"):
+                        proposal_store.update_status(proposal_id, "archived")
+                        actions.append({"type": "proposal_archived", "proposal_id": proposal_id})
+                except Exception:
+                    continue
+        return {"actions_taken": actions, "count": len(actions)}

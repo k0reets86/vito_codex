@@ -48,6 +48,7 @@ class AgentRegistry:
         self._last_used: dict[str, float] = {}  # agent_name → timestamp
         self._started: set[str] = set()  # agents that have been start()'d
         self._event_bus = AgentEventBus()
+        self._sl_engine = None
         logger.info("AgentRegistry инициализирован", extra={"event": "init"})
 
     def register(self, agent: BaseAgent) -> None:
@@ -61,6 +62,11 @@ class AgentRegistry:
             agent.set_event_bus(self._event_bus)
         except Exception:
             pass
+        try:
+            if self._sl_engine is not None:
+                agent.set_self_learning(self._sl_engine)
+        except Exception:
+            pass
         logger.info(
             f"Агент зарегистрирован: {agent.name} ({', '.join(agent.capabilities)})",
             extra={"event": "agent_registered", "context": {"agent_name": agent.name}},
@@ -68,6 +74,14 @@ class AgentRegistry:
 
     def get_event_bus(self) -> AgentEventBus:
         return self._event_bus
+
+    def set_self_learning_engine(self, engine) -> None:
+        self._sl_engine = engine
+        for agent in self._agents.values():
+            try:
+                agent.set_self_learning(engine)
+            except Exception:
+                continue
 
     def get_recent_agent_events(self, limit: int = 50) -> list[dict]:
         return self._event_bus.recent(limit=limit)
@@ -471,6 +485,10 @@ class AgentRegistry:
                         md["verification"] = ver_row
                         result.metadata = md
                 agent._track_result(result)
+                try:
+                    agent._record_lesson(task_type, result)
+                except Exception:
+                    pass
                 # Record execution facts for verified actions
                 try:
                     if result and result.success:

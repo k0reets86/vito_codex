@@ -20,8 +20,9 @@ ATTRIBUTION_FILE = LEARNINGS_DIR / "attribution_map.json"
 class VITOReflector:
     """Verbal reflection + attribution layer."""
 
-    def __init__(self, sqlite_path: Optional[str] = None):
+    def __init__(self, sqlite_path: Optional[str] = None, memory_manager: Any | None = None):
         self.sqlite_path = sqlite_path or settings.SQLITE_PATH
+        self.memory_manager = memory_manager
         self._init_db()
         LEARNINGS_DIR.mkdir(parents=True, exist_ok=True)
         if not LEARNINGS_FILE.exists():
@@ -101,6 +102,14 @@ class VITOReflector:
             conn.close()
         self._append_learning_markdown(category, action_type, reflection, success)
         self._merge_attribution(attribution)
+        self._store_semantic_reflection(
+            category=category,
+            action_type=action_type,
+            reflection=reflection,
+            success=success,
+            task_root_id=task_root_id,
+            context=context or {},
+        )
         return {"reflection": reflection, "attribution": attribution}
 
     def get_recent(self, n: int = 10, category: str | None = None) -> list[str]:
@@ -122,6 +131,7 @@ class VITOReflector:
 
     def top_relevant(self, query: str, n: int = 5) -> list[dict[str, Any]]:
         tokens = set(_norm(query).split())
+        semantic_hints = self._semantic_reflection_hints(query, n=max(3, int(n or 5) * 3))
         conn = self._conn()
         try:
             rows = conn.execute(
@@ -134,10 +144,11 @@ class VITOReflector:
             item = dict(row)
             text = f"{item.get('category','')} {item.get('action_type','')} {item.get('reflection_text','')}"
             overlap = len(tokens & set(_norm(text).split()))
-            if overlap <= 0:
+            semantic_bonus = self._semantic_bonus(item, semantic_hints)
+            if overlap <= 0 and semantic_bonus <= 0:
                 continue
             item["attribution"] = _loads(item.get("attribution_json"), {})
-            scored.append((overlap + (1 if item.get("success") else 0), item))
+            scored.append((overlap + semantic_bonus + (1 if item.get("success") else 0), item))
         scored.sort(key=lambda x: -x[0])
         return [it for _, it in scored[: max(1, int(n or 5))]]
 
@@ -198,6 +209,64 @@ class VITOReflector:
         if platform and platform not in bucket["platforms"]:
             bucket["platforms"].append(platform)
         ATTRIBUTION_FILE.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _store_semantic_reflection(
+        self,
+        *,
+        category: str,
+        action_type: str,
+        reflection: str,
+        success: bool,
+        task_root_id: str,
+        context: dict[str, Any],
+    ) -> None:
+        if not self.memory_manager:
+            return
+        try:
+            platform = str(context.get("platform") or "").strip()
+            source = str(context.get("source") or "reflector").strip()
+            doc_id = f"reflection:{category}:{action_type}:{task_root_id or datetime.now(timezone.utc).timestamp()}"
+            self.memory_manager.store_knowledge(
+                doc_id=doc_id,
+                text=f"{category} {action_type} {reflection}",
+                metadata={
+                    "type": "reflection",
+                    "block_type": "reflection",
+                    "category": category,
+                    "action_type": action_type,
+                    "platform": platform,
+                    "source": source,
+                    "success": bool(success),
+                    "task_root_id": str(task_root_id or ""),
+                    "name": f"{category}:{action_type}",
+                },
+            )
+        except Exception:
+            logger.debug("reflector_semantic_store_failed", exc_info=True)
+
+    def _semantic_reflection_hints(self, query: str, n: int = 10) -> list[dict[str, Any]]:
+        if not self.memory_manager:
+            return []
+        try:
+            results = self.memory_manager.search_knowledge(f"reflection {query}", n_results=n)
+            return [r for r in results if (r.get("metadata") or {}).get("block_type") == "reflection"]
+        except Exception:
+            logger.debug("reflector_semantic_search_failed", exc_info=True)
+            return []
+
+    def _semantic_bonus(self, item: dict[str, Any], semantic_hints: list[dict[str, Any]]) -> int:
+        if not semantic_hints:
+            return 0
+        category = str(item.get("category") or "").strip().lower()
+        action_type = str(item.get("action_type") or "").strip().lower()
+        bonus = 0
+        for hint in semantic_hints:
+            meta = hint.get("metadata") or {}
+            if str(meta.get("category") or "").strip().lower() == category:
+                bonus += 1
+            if str(meta.get("action_type") or "").strip().lower() == action_type:
+                bonus += 2
+        return bonus
 
 
 def _loads(value: Any, default):

@@ -2,6 +2,7 @@ import pytest
 
 from agents.agent_registry import AgentRegistry
 from agents.base_agent import BaseAgent, TaskResult
+from modules.agent_event_bus import AgentEventBus
 
 
 class HelperAgent(BaseAgent):
@@ -83,3 +84,18 @@ async def test_agent_event_bus_records_handoff():
     ask = next(e for e in events if e.get("event") == "agent_ask")
     assert ask["source_agent"] == "owner_agent"
     assert ask["data"]["capability"] == "helper_cap"
+
+
+@pytest.mark.asyncio
+async def test_agent_event_bus_persists_events_in_sqlite(tmp_path):
+    bus = AgentEventBus(sqlite_path=str(tmp_path / "agent_events.db"))
+    await bus.emit("agent_ask", {"capability": "helper_cap"}, source_agent="owner_agent")
+    await bus.emit("dispatch_complete", {"capability": "helper_cap"}, source_agent="helper_agent")
+
+    recent = bus.recent(limit=10)
+    assert len(recent) == 2
+    assert recent[0]["event"] == "agent_ask"
+    assert recent[1]["event"] == "dispatch_complete"
+
+    bus.clear()
+    assert bus.recent(limit=10) == []

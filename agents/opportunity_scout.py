@@ -21,7 +21,7 @@ class OpportunityScout(BaseAgent):
     def __init__(self, **kwargs):
         super().__init__(name="opportunity_scout", description="Проактивный сканер рыночных возможностей", **kwargs)
         self.owner_model = OwnerModel()
-        self.reflector = VITOReflector()
+        self.reflector = VITOReflector(memory_manager=self.memory)
         self.skill_lib = VITOSkillLibrary()
 
     @property

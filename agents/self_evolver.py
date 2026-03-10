@@ -20,7 +20,7 @@ class SelfEvolver(BaseAgent):
 
     def __init__(self, **kwargs):
         super().__init__(name="self_evolver", description="Автономное улучшение VITO через безопасные предложения", **kwargs)
-        self.reflector = VITOReflector()
+        self.reflector = VITOReflector(memory_manager=self.memory)
         self.skill_lib = VITOSkillLibrary()
         self.owner_model = OwnerModel()
 

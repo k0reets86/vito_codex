@@ -16,6 +16,7 @@ import asyncio
 import json
 import random
 import time
+import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -49,6 +50,7 @@ from modules.runtime_remediation import (
     rank_safe_action_suggestions,
     record_safe_action_outcome,
 )
+from modules.patch_generator import PatchGenerator
 from modules.reflector import VITOReflector
 from modules.autonomy_proposals import AutonomyProposalStore
 from modules.autonomy_schedule import AutonomyScheduleState
@@ -125,12 +127,33 @@ class DecisionLoop:
         """Устанавливает SelfHealer для самолечения."""
         self.self_healer = self_healer
 
+    def _ensure_self_learning_engine(self) -> SelfLearningEngine:
+        if self.self_learning is None:
+            self.self_learning = SelfLearningEngine(sqlite_path=settings.SQLITE_PATH)
+            try:
+                self.agent_registry.set_self_learning_engine(self.self_learning)
+            except Exception:
+                pass
+        return self.self_learning
+
     async def _handle_runtime_error(self, agent: str, error: Exception, context: dict[str, Any] | None = None) -> None:
         healer = getattr(self, "_self_healer_v2", None) or self.self_healer
         if not healer:
             return
         try:
-            await healer.handle_error(agent, error, context or {})
+            ctx = dict(context or {})
+            if not ctx.get("patch_files") and self.llm_router is not None:
+                try:
+                    patch_files = await PatchGenerator(self.llm_router, PROJECT_ROOT).generate(
+                        error,
+                        traceback.format_exc(),
+                        ctx,
+                    )
+                    if patch_files:
+                        ctx["patch_files"] = patch_files
+                except Exception:
+                    pass
+            await healer.handle_error(agent, error, ctx)
         except Exception:
             pass
 
@@ -550,9 +573,7 @@ class DecisionLoop:
             interval = max(12, int(getattr(settings, "SELF_LEARNING_OPTIMIZE_INTERVAL_TICKS", 72) or 72))
             if self._tick_count - int(self._last_self_learning_opt_tick or 0) < interval:
                 return
-            if self.self_learning is None:
-                self.self_learning = SelfLearningEngine(sqlite_path=settings.SQLITE_PATH)
-            result = self.self_learning.optimize_candidates(
+            result = self._ensure_self_learning_engine().optimize_candidates(
                 days=30,
                 min_lessons=int(getattr(settings, "SELF_LEARNING_MIN_LESSONS", 3) or 3),
                 promote_confidence_min=float(settings.SELF_LEARNING_SKILL_SCORE_MIN or 0.78),
@@ -593,9 +614,7 @@ class DecisionLoop:
             interval = max(24, int(getattr(settings, "SELF_LEARNING_MAINTENANCE_INTERVAL_TICKS", 168) or 168))
             if self._tick_count - int(self._last_self_learning_maintenance_tick or 0) < interval:
                 return
-            if self.self_learning is None:
-                self.self_learning = SelfLearningEngine(sqlite_path=settings.SQLITE_PATH)
-            recalib = self.self_learning.recalibrate_thresholds(
+            recalib = self._ensure_self_learning_engine().recalibrate_thresholds(
                 days=int(getattr(settings, "SELF_LEARNING_MAINTENANCE_DAYS", 45) or 45),
                 min_lessons=int(getattr(settings, "SELF_LEARNING_MAINTENANCE_MIN_LESSONS", 4) or 4),
             )
@@ -1100,7 +1119,7 @@ class DecisionLoop:
             governance = GovernanceReporter(memory_manager=self.memory, sqlite_path=settings.SQLITE_PATH).weekly_report(days=7)
             sl_summary = {}
             if self.self_learning is None and getattr(settings, "SELF_LEARNING_ENABLED", False):
-                self.self_learning = SelfLearningEngine(sqlite_path=settings.SQLITE_PATH)
+                self._ensure_self_learning_engine()
             if self.self_learning is not None:
                 try:
                     sl_summary = self.self_learning.summary(days=30)
@@ -1498,9 +1517,7 @@ class DecisionLoop:
                 return
             if step_result.get("status") not in {"completed", "failed"}:
                 return
-            if self.self_learning is None:
-                self.self_learning = SelfLearningEngine(sqlite_path=settings.SQLITE_PATH)
-            reflection = await self.self_learning.reflect_step(
+            reflection = await self._ensure_self_learning_engine().reflect_step(
                 llm_router=self.llm_router,
                 task_type=self._classify_step(step),
                 goal_id=goal.goal_id,
@@ -2602,7 +2619,7 @@ class DecisionLoop:
         skill_name = f"goal_{goal.title[:50]}"
         runtime_sqlite = _runtime_sqlite_path(self.goal_engine)
         skill_lib = VITOSkillLibrary(sqlite_path=runtime_sqlite, memory=self.memory)
-        reflector = VITOReflector(sqlite_path=runtime_sqlite)
+        reflector = VITOReflector(sqlite_path=runtime_sqlite, memory_manager=self.memory)
         category = self._reflection_category_for_goal(goal)
         first_agent = ""
 
@@ -3003,6 +3020,25 @@ class DecisionLoop:
                     severity="info" if report.get("ok") else "warning",
                     payload={"report": report, "tick": self._tick_count},
                 )
+            if not report.get("ok"):
+                try:
+                    actions = await overseer.execute_actions(
+                        report.get("findings") or [],
+                        self.goal_engine,
+                        getattr(self, "_comms", None),
+                        proposal_store=self.autonomy_proposals,
+                    )
+                    if events is not None:
+                        events.record_event(
+                            event_type="autonomy_overseer_actions",
+                            source="decision_loop",
+                            title="autonomy_overseer_actions",
+                            status="ok",
+                            severity="info",
+                            payload={"actions": actions, "tick": self._tick_count},
+                        )
+                except Exception:
+                    pass
             if not report.get("ok") and hasattr(self, "_comms") and self._comms:
                 findings = list(report.get("findings") or [])
                 summary = "; ".join(str(x.get("type") or "issue") for x in findings[:4]) or "issues_detected"

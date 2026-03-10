@@ -250,7 +250,7 @@ class VITO:
                 self.self_healer_v2 = SelfHealerV2(
                     sandbox_manager=self.sandbox_manager,
                     apply_engine=self.apply_engine,
-                    reflector=VITOReflector(),
+                    reflector=VITOReflector(memory_manager=self.memory),
                     archive=self.evolution_archive,
                     legacy_healer=self.self_healer,
                     event_store=self.evolution_events,
@@ -261,7 +261,7 @@ class VITO:
                     apply_engine=self.apply_engine,
                     benchmarks=self.vito_benchmarks,
                     discovery=self.module_discovery,
-                    reflector=VITOReflector(),
+                    reflector=VITOReflector(memory_manager=self.memory),
                     archive=self.evolution_archive,
                     event_store=self.evolution_events,
                     **dict(llm_router=self.llm_router, memory=self.memory, finance=self.finance, comms=self.comms),

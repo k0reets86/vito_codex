@@ -81,6 +81,7 @@ class BaseAgent(ABC):
         self._registry = None
         self.registry = None
         self._event_bus = None
+        self._self_learning = None
 
     @property
     @abstractmethod
@@ -139,6 +140,9 @@ class BaseAgent(ABC):
 
     def set_event_bus(self, event_bus) -> None:
         self._event_bus = event_bus
+
+    def set_self_learning(self, engine) -> None:
+        self._self_learning = engine
 
     def get_declared_needs(self, task_type: str = "") -> list[str]:
         mapping = getattr(self, "NEEDS", {}) or {}
@@ -320,6 +324,39 @@ class BaseAgent(ABC):
                 status="success" if result.success else "failed",
                 output=result.output,
                 error=result.error or "",
+            )
+        except Exception:
+            pass
+
+    def _record_lesson(self, task_type: str, result: TaskResult) -> None:
+        engine = getattr(self, "_self_learning", None)
+        if engine is None or result is None:
+            return
+        try:
+            output_preview = ""
+            if isinstance(result.output, dict):
+                try:
+                    import json as _json
+                    output_preview = _json.dumps(result.output, ensure_ascii=False)[:400]
+                except Exception:
+                    output_preview = str(result.output)[:400]
+            else:
+                output_preview = str(result.output or result.error or "")[:400]
+            engine.record_lesson(
+                goal_id=str((result.metadata or {}).get("task_root_id") or ""),
+                step_text=f"{self.name}:{task_type}",
+                status="completed" if result.success else "failed",
+                score=1.0 if result.success else 0.0,
+                lesson=output_preview or f"{self.name}:{task_type}",
+                candidate_skill=str((result.metadata or {}).get("candidate_skill") or ""),
+                task_family=str(task_type or ""),
+                source_agent=self.name,
+                evidence={
+                    "agent": self.name,
+                    "task_type": str(task_type or ""),
+                    "success": bool(result.success),
+                    "error": str(result.error or "")[:200],
+                },
             )
         except Exception:
             pass

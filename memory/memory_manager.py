@@ -36,7 +36,9 @@ from modules.prompt_guard import has_prompt_injection_signals, sanitize_untruste
 
 logger = get_logger("memory_manager", agent="memory_manager")
 
-_PROTECTED_TARGETS_PATH = Path("/home/vito/vito-agent/runtime/protected_platform_targets.json")
+from config.paths import PROJECT_ROOT
+
+_PROTECTED_TARGETS_PATH = PROJECT_ROOT / "runtime" / "protected_platform_targets.json"
 
 
 class MemoryManager:
@@ -1588,6 +1590,9 @@ class MemoryManager:
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_episodic_created ON episodic_memory (created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_episodic_embedding_ivfflat
+                ON episodic_memory USING ivfflat (embedding vector_cosine_ops)
+                WITH (lists = 50);
                 CREATE INDEX IF NOT EXISTS idx_datalake_agent ON data_lake (agent, created_at DESC);
             """)
 
@@ -1602,6 +1607,16 @@ class MemoryManager:
                    VALUES ($1, $2, $3, $4) RETURNING id""",
                 event_type, summary, json.dumps(details or {}), importance,
             )
+            try:
+                embed = self._embed_texts([summary])
+                if embed and row and row["id"]:
+                    await conn.execute(
+                        "UPDATE episodic_memory SET embedding=$1::vector WHERE id=$2",
+                        embed[0],
+                        row["id"],
+                    )
+            except Exception:
+                pass
             logger.info(
                 f"Эпизод сохранён: {event_type}",
                 extra={"event": "episode_stored", "context": {"episode_id": row["id"]}},
@@ -1634,14 +1649,29 @@ class MemoryManager:
         """Поиск в эпизодической памяти по тексту с relevance reranking."""
         pool = await self._get_pg()
         async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                """SELECT id, event_type, summary, details, importance, created_at
-                   FROM episodic_memory
-                   WHERE summary ILIKE $1
-                   ORDER BY created_at DESC
-                   LIMIT $2""",
-                f"%{query}%", max(limit * 5, 20),
-            )
+            rows = []
+            try:
+                embed = self._embed_texts([query])
+                if embed:
+                    rows = await conn.fetch(
+                        """SELECT id, event_type, summary, details, importance, created_at
+                           FROM episodic_memory
+                           WHERE embedding IS NOT NULL
+                           ORDER BY embedding <=> $1::vector
+                           LIMIT $2""",
+                        embed[0], max(limit * 5, 20),
+                    )
+            except Exception:
+                rows = []
+            if not rows:
+                rows = await conn.fetch(
+                    """SELECT id, event_type, summary, details, importance, created_at
+                       FROM episodic_memory
+                       WHERE summary ILIKE $1
+                       ORDER BY created_at DESC
+                       LIMIT $2""",
+                    f"%{query}%", max(limit * 5, 20),
+                )
             query_terms = {t for t in str(query or "").lower().split() if t}
             ranked: list[dict] = []
             for row in rows:
