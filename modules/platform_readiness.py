@@ -9,6 +9,7 @@ from typing import Any
 
 from config.paths import PROJECT_ROOT
 from modules.service_session_registry import load_service_sessions
+from modules.platform_validation_registry import load_platform_validation_registry
 
 RUNTIME = PROJECT_ROOT / "runtime"
 REPORTS = PROJECT_ROOT / "reports"
@@ -77,6 +78,7 @@ def _probe_exists(service: str) -> bool:
 def assess_platform_readiness(services: list[str] | None = None) -> list[dict[str, Any]]:
     sessions = load_service_sessions()
     state_map = _wave_state_map()
+    registry = load_platform_validation_registry()
     svc_list = services or [
         "etsy",
         "printful",
@@ -93,7 +95,8 @@ def assess_platform_readiness(services: list[str] | None = None) -> list[dict[st
         session_present = bool(row.get("storage_exists") or row.get("profile_dir"))
         session_verified = bool(row.get("verified_at"))
         probe_present = _probe_exists(service)
-        owner_grade_state = state_map.get(service) or "unknown"
+        registry_row = dict(registry.get(service) or {})
+        owner_grade_state = state_map.get(service) or str(registry_row.get("state") or "unknown")
         blocker = ""
         if not session_present and service in {"etsy", "printful", "twitter", "amazon_kdp"}:
             blocker = "missing_session"

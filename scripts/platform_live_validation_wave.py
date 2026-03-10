@@ -10,8 +10,12 @@ from pathlib import Path
 from typing import Any
 
 import requests
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from modules.platform_validation_registry import record_platform_validation_result
 RUNTIME = ROOT / "runtime"
 REPORTS = ROOT / "reports"
 
@@ -186,6 +190,8 @@ def main() -> int:
         _check_kdp(),
         _check_printful(),
     ]
+    for item in checks:
+        record_platform_validation_result(item)
     summary = {
         "total": len(checks),
         "owner_grade": sum(1 for c in checks if c["state"] == "owner_grade"),
