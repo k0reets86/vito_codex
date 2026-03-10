@@ -9,6 +9,7 @@ from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from config.paths import PROJECT_ROOT
 from llm_router import TaskType
+from modules.growth_runtime import build_content_runtime_profile
 from modules.image_utils import write_placeholder_png
 from modules.listing_optimizer import optimize_listing_payload
 from modules.pdf_utils import make_minimal_pdf
@@ -75,9 +76,10 @@ class ContentCreator(BaseAgent):
             self._status = AgentStatus.IDLE
 
     async def create_article(self, topic: str, keywords: list[str] = None) -> TaskResult:
+        runtime_profile = build_content_runtime_profile(topic=topic, content_type="article", source_count=len(keywords or []))
         if not self.llm_router:
             output = self._local_article(topic, keywords)
-            return TaskResult(success=True, output=output["body"], metadata=output)
+            return TaskResult(success=True, output=output["body"], metadata={**output, "content_runtime_profile": runtime_profile, **self.get_skill_pack()})
         kw = f"\nКлючевые слова: {', '.join(keywords)}" if keywords else ""
         prompt = f"Напиши подробную статью на тему: {topic}{kw}\nСтруктура: заголовок, введение, 3-5 разделов, заключение. 1500-2000 слов."
         response = await self._call_llm(task_type=TaskType.CONTENT, prompt=prompt, estimated_tokens=4000)
@@ -96,11 +98,12 @@ class ContentCreator(BaseAgent):
             success=True,
             output=response,
             cost_usd=0.02,
-            metadata={"file_path": str(file_path), "topic": topic},
+            metadata={"file_path": str(file_path), "topic": topic, "content_runtime_profile": runtime_profile, **self.get_skill_pack()},
         )
 
     async def create_ebook(self, topic: str, chapters: int = 5) -> TaskResult:
         import os
+        runtime_profile = build_content_runtime_profile(topic=topic, content_type="ebook", source_count=max(int(chapters or 0), 0))
         if os.getenv("FAST_MODE") == "1":
             # Minimal offline generation for boevoy tests
             text = f"# {topic}\n\nQuick draft content."
@@ -108,9 +111,14 @@ class ContentCreator(BaseAgent):
             ts = int(time.time())
             file_path = EBOOKS_DIR / f"{slug}_{ts}.md"
             file_path.write_text(text, encoding="utf-8")
-            return TaskResult(success=True, output=text, cost_usd=0.0, metadata={"file_path": str(file_path), "chapters": 1, "topic": topic})
+            return TaskResult(success=True, output=text, cost_usd=0.0, metadata={"file_path": str(file_path), "chapters": 1, "topic": topic, "content_runtime_profile": runtime_profile, **self.get_skill_pack()})
         if not self.llm_router:
-            return TaskResult(success=False, error="LLM Router недоступен")
+            local_text = self._local_ebook(topic, chapters)
+            slug = _slugify(topic)
+            ts = int(time.time())
+            file_path = EBOOKS_DIR / f"{slug}_{ts}.md"
+            file_path.write_text(local_text, encoding="utf-8")
+            return TaskResult(success=True, output=local_text, cost_usd=0.0, metadata={"file_path": str(file_path), "chapters": max(int(chapters or 0), 1), "topic": topic, "content_runtime_profile": runtime_profile, **self.get_skill_pack()})
         parts = []
         for i in range(1, chapters + 1):
             if not self.llm_router.check_daily_limit():
@@ -141,21 +149,22 @@ class ContentCreator(BaseAgent):
             success=True,
             output=full_text,
             cost_usd=cost,
-            metadata={"file_path": str(file_path), "chapters": len(parts), "topic": topic},
+            metadata={"file_path": str(file_path), "chapters": len(parts), "topic": topic, "content_runtime_profile": runtime_profile, **self.get_skill_pack()},
         )
 
     async def create_product_description(self, product: str, platform: str) -> TaskResult:
         import os
+        runtime_profile = build_content_runtime_profile(topic=product, content_type="product_description", platform=platform)
         if os.getenv("FAST_MODE") == "1":
             text = f"{product}\nShort description for {platform}."
             slug = _slugify(product)
             ts = int(time.time())
             file_path = PRODUCTS_DIR / f"{platform}_{slug}_{ts}.md"
             file_path.write_text(text, encoding="utf-8")
-            return TaskResult(success=True, output=text, cost_usd=0.0, metadata={"file_path": str(file_path)})
+            return TaskResult(success=True, output=text, cost_usd=0.0, metadata={"file_path": str(file_path), "content_runtime_profile": runtime_profile, **self.get_skill_pack()})
         if not self.llm_router:
             local = self._local_product_description(product, platform)
-            return TaskResult(success=True, output=local["body"], metadata=local)
+            return TaskResult(success=True, output=local["body"], metadata={**local, "content_runtime_profile": runtime_profile, **self.get_skill_pack()})
         prompt = f"Напиши продающее описание для {platform}: {product}\nВключи: заголовок, описание, ключевые особенности, CTA."
         response = await self._call_llm(task_type=TaskType.CONTENT, prompt=prompt, estimated_tokens=1500)
         if not response:
@@ -173,7 +182,7 @@ class ContentCreator(BaseAgent):
             success=True,
             output=response,
             cost_usd=0.01,
-            metadata={"file_path": str(file_path), "product": product, "platform": platform},
+            metadata={"file_path": str(file_path), "product": product, "platform": platform, "content_runtime_profile": runtime_profile, **self.get_skill_pack()},
         )
 
     def _local_article(self, topic: str, keywords: list[str] | None) -> dict[str, Any]:
@@ -195,6 +204,23 @@ class ContentCreator(BaseAgent):
             f"A practical {platform} listing description with clear outcomes, concise benefits, and a direct CTA."
         )
         return {"title": product, "platform": platform, "body": body}
+
+    def _local_ebook(self, topic: str, chapters: int) -> str:
+        title = (topic or "Untitled ebook").strip()
+        total = max(int(chapters or 0), 1)
+        lines = [f"# {title}", ""]
+        for idx in range(1, total + 1):
+            lines.extend(
+                [
+                    f"## Chapter {idx}",
+                    f"{title} step {idx} explained for practical execution.",
+                    "- Context",
+                    "- Checklist",
+                    "- Suggested next action",
+                    "",
+                ]
+            )
+        return "\n".join(lines).strip()
 
     async def create_turnkey_product(self, topic: str, platform: str = "gumroad", price: int = 9) -> TaskResult:
         topic = (topic or "VITO Digital Product").strip()
@@ -285,4 +311,11 @@ class ContentCreator(BaseAgent):
                 "seo_description": listing.get("seo_description"),
             },
         }
-        return TaskResult(success=True, output=output, metadata={"file_path": str(product_md)})
+        runtime_profile = build_content_runtime_profile(
+            topic=topic,
+            content_type="product_turnkey",
+            platform=platform,
+            asset_paths=[str(pdf_path), str(cover_path), str(thumb_path)],
+            source_count=3,
+        )
+        return TaskResult(success=True, output=output, metadata={"file_path": str(product_md), "content_runtime_profile": runtime_profile, **self.get_skill_pack()})

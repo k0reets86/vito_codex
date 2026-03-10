@@ -5,6 +5,30 @@ from __future__ import annotations
 from typing import Any
 
 
+def build_content_runtime_profile(
+    *,
+    topic: str,
+    content_type: str,
+    platform: str = "",
+    asset_paths: list[str] | None = None,
+    source_count: int = 0,
+) -> dict[str, Any]:
+    assets = [str(x).strip() for x in (asset_paths or []) if str(x).strip()]
+    return {
+        "topic": str(topic or "").strip(),
+        "content_type": str(content_type or "").strip() or "generic",
+        "platform": str(platform or "").strip(),
+        "asset_count": len(assets),
+        "asset_paths": assets[:8],
+        "source_count": max(int(source_count or 0), 0),
+        "next_actions": (
+            ["attach_assets_to_listing", "run_quality_review", "handoff_to_ecommerce_agent"]
+            if assets
+            else ["generate_assets", "run_quality_review", "handoff_to_marketing_agent"]
+        ),
+    }
+
+
 def build_marketing_runtime_profile(product: str, audience: str, budget_usd: float) -> dict[str, Any]:
     budget = max(float(budget_usd or 0), 0.0)
     if budget < 100:

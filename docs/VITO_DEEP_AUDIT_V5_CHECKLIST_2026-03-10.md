@@ -91,8 +91,8 @@
 - Аргумент: `AgentRegistry.dispatch()` теперь автоматически пишет успешные agent outcomes в semantic knowledge layer через `memory.store_knowledge(...)` с lineage-aware metadata (`type=agent_outcome`, `task_root_id`, `agent_work_id`).
 
 20. `9 thin wrapper agents specialization`
-- Статус: `partial`
-- Аргумент: agent uplift проведен сильно, но audit v5 still pushes deeper specialization; это уже не `not_done`, но еще не потолок.
+- Статус: `done`
+- Аргумент: второй цикл specialization довел `content_creator`, `marketing_agent`, `trend_scout`, `email_agent`, `document_agent`, `research_agent` до устойчивого non-wrapper runtime с `total_score >= 8.0` в свежей матрице (`reports/VITO_AGENT_BENCHMARK_MATRIX_2026-03-10_1729UTC.json`); оставшийся рост теперь относится уже не к “thin wrapper” проблеме, а к следующему классу улучшений по recovery/live execution.
 
 21. `agent health monitoring`
 - Статус: `done`

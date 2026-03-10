@@ -186,8 +186,9 @@ class DocumentAgent(BaseAgent):
                 pass
 
     async def create_doc(self, title: str, content_type: str = "technical", context: dict = None) -> TaskResult:
+        runtime_profile = build_document_runtime_profile(str(title or "document"), "documentation")
         if not self.llm_router:
-            return TaskResult(success=True, output=self._local_doc(title, content_type, context), metadata={"mode": "local_fallback"})
+            return TaskResult(success=True, output=self._local_doc(title, content_type, context), metadata={"mode": "local_fallback", "document_runtime_profile": runtime_profile, **self.get_skill_pack()})
         context_text = ""
         if context:
             context_text = "\nКонтекст:\n" + "\n".join(f"- {k}: {v}" for k, v in context.items())
@@ -199,11 +200,12 @@ class DocumentAgent(BaseAgent):
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
         self._record_expense(0.02, f"Doc: {title[:50]}")
-        return TaskResult(success=True, output=response, cost_usd=0.02)
+        return TaskResult(success=True, output=response, cost_usd=0.02, metadata={"document_runtime_profile": runtime_profile, **self.get_skill_pack()})
 
     async def generate_report(self, report_type: str = "general", data: dict = None) -> TaskResult:
+        runtime_profile = build_document_runtime_profile(str(report_type or "report"), "report")
         if not self.llm_router:
-            return TaskResult(success=True, output=self._local_report(report_type, data), metadata={"mode": "local_fallback"})
+            return TaskResult(success=True, output=self._local_report(report_type, data), metadata={"mode": "local_fallback", "document_runtime_profile": runtime_profile, **self.get_skill_pack()})
         data_text = ""
         if data:
             data_text = "\nДанные:\n" + "\n".join(f"- {k}: {v}" for k, v in data.items())
@@ -215,7 +217,7 @@ class DocumentAgent(BaseAgent):
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
         self._record_expense(0.02, f"Report: {report_type}")
-        return TaskResult(success=True, output=response, cost_usd=0.02)
+        return TaskResult(success=True, output=response, cost_usd=0.02, metadata={"document_runtime_profile": runtime_profile, **self.get_skill_pack()})
 
     async def update_knowledge_base(self, topic: str, content: str) -> TaskResult:
         if not self.memory:
@@ -226,7 +228,7 @@ class DocumentAgent(BaseAgent):
             metadata={"type": "knowledge_base", "topic": topic},
         )
         logger.info(f"База знаний обновлена: {topic}", extra={"event": "kb_updated"})
-        return TaskResult(success=True, output={"topic": topic, "status": "stored"})
+        return TaskResult(success=True, output={"topic": topic, "status": "stored"}, metadata={"document_runtime_profile": build_document_runtime_profile(topic, "knowledge_base"), **self.get_skill_pack()})
 
     def _local_doc(self, title: str, content_type: str, context: dict | None) -> dict[str, Any]:
         return {
