@@ -16,6 +16,7 @@ def test_assess_platform_readiness_marks_missing_session(tmp_path, monkeypatch):
     results = assess_platform_readiness(["etsy"])
     assert results[0]["service"] == "etsy"
     assert results[0]["blocker"] == "missing_session"
+    assert results[0]["recommended_action"] == "reauth:etsy"
 
 
 def test_assess_platform_readiness_can_validate_when_session_and_probe_exist(tmp_path):
@@ -36,13 +37,14 @@ def test_assess_platform_readiness_can_validate_when_session_and_probe_exist(tmp
     assert results[0]["session_present"] is True
     assert results[0]["probe_present"] is True
     assert results[0]["can_validate_now"] is True
+    assert results[0]["recommended_action"] == "owner_grade_validate:etsy"
 
 
 def test_render_platform_readiness_summary_includes_counts():
     text = render_platform_readiness_summary([
-        {"service": "etsy", "owner_grade_state": "owner_grade", "can_validate_now": True, "blocker": ""},
-        {"service": "printful", "owner_grade_state": "partial", "can_validate_now": False, "blocker": "missing_session"},
+        {"service": "etsy", "owner_grade_state": "owner_grade", "can_validate_now": True, "blocker": "", "recommended_action": ""},
+        {"service": "printful", "owner_grade_state": "partial", "can_validate_now": False, "blocker": "missing_session", "recommended_action": "reauth:printful"},
     ])
     assert "owner-grade=1" in text
     assert "можно валидировать сейчас=1" in text
-    assert "printful: partial | blocker=missing_session" in text
+    assert "printful: partial | blocker=missing_session | next=reauth:printful" in text

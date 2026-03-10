@@ -178,7 +178,10 @@ def render_platform_readiness_summary(items: list[dict[str, Any]]) -> str:
         svc = str(item.get("service") or "?")
         state = str(item.get("owner_grade_state") or "unknown")
         blocker = str(item.get("blocker") or "")
+        action = str(item.get("recommended_action") or "")
         suffix = f" | blocker={blocker}" if blocker else ""
+        if action:
+            suffix += f" | next={action}"
         lines.append(f"  - {svc}: {state}{suffix}")
     return "\n".join(lines)
 

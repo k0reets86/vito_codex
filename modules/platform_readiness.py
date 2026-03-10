@@ -24,6 +24,7 @@ class PlatformReadiness:
     owner_grade_state: str
     can_validate_now: bool
     blocker: str
+    recommended_action: str
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -100,11 +101,20 @@ def assess_platform_readiness(services: list[str] | None = None) -> list[dict[st
         blocker = ""
         if not session_present and service in {"etsy", "printful", "twitter", "amazon_kdp"}:
             blocker = "missing_session"
-        elif owner_grade_state == "blocked":
-            blocker = "validation_blocked"
         elif not probe_present:
             blocker = "missing_probe"
-        can_validate_now = not blocker and session_present and probe_present
+        can_validate_now = session_present and probe_present
+        if not blocker and owner_grade_state == "blocked":
+            blocker = "last_validation_blocked"
+        recommended_action = ""
+        if blocker == "missing_session":
+            recommended_action = f"reauth:{service}"
+        elif blocker == "missing_probe":
+            recommended_action = f"run_probe:{service}"
+        elif blocker == "last_validation_blocked":
+            recommended_action = f"owner_grade_validate:{service}"
+        elif owner_grade_state != "owner_grade":
+            recommended_action = f"owner_grade_validate:{service}"
         results.append(
             PlatformReadiness(
                 service=service,
@@ -114,6 +124,7 @@ def assess_platform_readiness(services: list[str] | None = None) -> list[dict[st
                 owner_grade_state=owner_grade_state,
                 can_validate_now=can_validate_now,
                 blocker=blocker,
+                recommended_action=recommended_action,
             ).to_dict()
         )
     return results
