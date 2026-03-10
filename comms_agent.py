@@ -1990,6 +1990,26 @@ class CommsAgent:
     async def _maybe_handle_owner_shortcuts(self, text: str) -> bool:
         lower = str(text or "").lower()
         strict_cmds = bool(getattr(settings, "TELEGRAM_STRICT_COMMANDS", True)) and not self._autonomy_max_enabled()
+        if self._is_resume_prompt(text):
+            if self._cancel_state:
+                try:
+                    self._cancel_state.clear()
+                except Exception:
+                    pass
+            if self._decision_loop and not self._decision_loop.running:
+                try:
+                    self._decision_loop.start()
+                except Exception:
+                    pass
+            await self.send_message("Продолжаю работу. Если нужна новая цель, напиши ее одной фразой.", level="result")
+            return True
+        if self._is_pause_prompt(text):
+            cancelled = self._cancel_all_owner_work(reason="owner_text_pause")
+            await self.send_message(
+                f"Остановил текущую работу. Снято задач из очереди: {cancelled}. Для продолжения напиши: «продолжай».",
+                level="result",
+            )
+            return True
         if self._is_cancel_all_tasks_prompt(text):
             cancelled = self._cancel_all_owner_work(reason="owner_text_cancel_all")
             await self.send_message(
@@ -2036,9 +2056,22 @@ class CommsAgent:
                 "че по задач",
                 "что по задач",
                 "что с задач",
+                "что сейчас делаешь",
+                "что щас делаеш",
+                "что сейчас делаеш",
                 "как успехи",
             )
         )
+
+    @staticmethod
+    def _is_pause_prompt(text: str) -> bool:
+        s = str(text or "").strip().lower().replace("ё", "е")
+        return s in {"стоп", "пауза", "остановись", "останови все", "прекрати", "pause"}
+
+    @staticmethod
+    def _is_resume_prompt(text: str) -> bool:
+        s = str(text or "").strip().lower().replace("ё", "е")
+        return s in {"продолжай", "продолжим", "поехали", "resume", "возобнови", "возобновляй"}
 
     @staticmethod
     def _is_cancel_all_tasks_prompt(text: str) -> bool:
@@ -3915,6 +3948,18 @@ class CommsAgent:
         if (not strict_cmds) and any(kw in lower for kw in ["баланс", "balance", "balances", "остатки", "сколько на счетах", "сколько осталось"]):
             await self._cmd_balances(update, context)
             return
+
+        for candidate in (
+            self._maybe_handle_owner_shortcuts,
+            self._maybe_handle_owner_service_commands,
+            self._maybe_handle_owner_menu_commands,
+            self._maybe_handle_owner_task_commands,
+            self._maybe_handle_owner_publish_commands,
+            self._maybe_handle_owner_webop_commands,
+        ):
+            handled = await candidate(text)
+            if handled:
+                return
 
         # 2. Pending approvals — да/нет/✅/❌
         if self._pending_approvals:

@@ -247,6 +247,19 @@ def _builtin(name: str) -> list[Step]:
             Step("LSN08", "котор щас врем в берлине", ["берлин", "время"], ["traceback", "exception"]),
             Step("LSN09", "рецепт паст, быст", ["паста", "ингреди"], ["traceback", "exception"]),
         ]
+    if key == "phase_owner_basic_dialogue":
+        return [
+            Step("BD01", "как дела", ["сейчас", "decision loop"], ["traceback", "exception"]),
+            Step("BD02", "что щас делаеш", ["сейчас", "работе", "decision loop"], ["traceback", "exception"]),
+            Step("BD03", "стоп", ["остановил", "продолжения"], ["traceback", "exception"]),
+            Step("BD04", "продолжай", ["продолжаю работу"], ["traceback", "exception"]),
+            Step("BD05", "что по задачам", ["сейчас", "decision loop"], ["traceback", "exception"]),
+            Step("BD06", "отмени все задачи", ["все текущие задачи снял"], ["traceback", "exception"]),
+            Step("BD07", "как дел", ["сейчас", "decision loop"], ["traceback", "exception"]),
+            Step("BD08", "что сейчас делаешь", ["сейчас", "decision loop"], ["traceback", "exception"]),
+            Step("BD09", "поехали", ["продолжаю работу"], ["traceback", "exception"]),
+            Step("BD10", "че по задач", ["сейчас", "decision loop"], ["traceback", "exception"]),
+        ]
     if key == "phase_platform_live_verify_safe":
         return [
             Step("PLV01", "зайди на амазон", ["amazon", "вход", "логин", "kdp"], ["traceback", "exception"]),

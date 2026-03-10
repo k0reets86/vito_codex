@@ -840,6 +840,40 @@ async def test_owner_shortcut_cancel_all_tasks_cancels_immediately(comms, tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_owner_shortcut_pause_stops_work_immediately(comms):
+    comms.send_message = AsyncMock()
+    comms._cancel_goal_queue = MagicMock(return_value=2)
+    comms._decision_loop = MagicMock()
+
+    handled = await comms._maybe_handle_owner_shortcuts("стоп")
+
+    assert handled is True
+    comms._cancel_goal_queue.assert_called_once_with(reason="owner_text_pause")
+    comms._decision_loop.stop.assert_called_once()
+    text = comms.send_message.await_args.kwargs.get("text") or comms.send_message.await_args.args[0]
+    assert "Остановил текущую работу" in text
+    assert "2" in text
+
+
+@pytest.mark.asyncio
+async def test_owner_shortcut_resume_resumes_loop(comms):
+    comms.send_message = AsyncMock()
+    cancel_state = MagicMock()
+    decision_loop = MagicMock()
+    decision_loop.running = False
+    comms._cancel_state = cancel_state
+    comms._decision_loop = decision_loop
+
+    handled = await comms._maybe_handle_owner_shortcuts("продолжай")
+
+    assert handled is True
+    cancel_state.clear.assert_called_once()
+    decision_loop.start.assert_called_once()
+    text = comms.send_message.await_args.kwargs.get("text") or comms.send_message.await_args.args[0]
+    assert "Продолжаю работу" in text
+
+
+@pytest.mark.asyncio
 async def test_cmd_task_current_and_done(comms, mock_update, tmp_path):
     owner_task_state = OwnerTaskState(path=tmp_path / "owner_task_state.json")
     owner_task_state.set_active("подготовить публикацию", intent="goal_request")
