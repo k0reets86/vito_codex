@@ -10,6 +10,17 @@ from modules.commerce_runtime import build_publisher_runtime_profile
 logger = get_logger("publisher_agent", agent="publisher_agent")
 
 
+def _publisher_failure_profile(platform: str, reason: str, *, retryable: bool, stage: str) -> dict[str, Any]:
+    return {
+        "platform": str(platform or "").strip(),
+        "approved": False,
+        "quality_score": None,
+        "retryable": bool(retryable),
+        "stage": str(stage or "publish"),
+        "reason": str(reason or "").strip() or "unknown_failure",
+    }
+
+
 class PublisherAgent(BaseAgent):
     NEEDS = {
         "publish": ["quality_judge", "publisher_platform", "approval_preview"],
@@ -73,16 +84,32 @@ class PublisherAgent(BaseAgent):
                     timeout_seconds=3600,
                 )
                 if approved is not True:
-                    return TaskResult(success=False, error="Owner approval rejected or timed out")
+                    return TaskResult(
+                        success=False,
+                        error="Owner approval rejected or timed out",
+                        metadata={"publisher_runtime_profile": _publisher_failure_profile("wordpress", "owner_approval_rejected", retryable=True, stage="approval")},
+                    )
             except Exception:
-                return TaskResult(success=False, error="Owner approval failed")
+                return TaskResult(
+                    success=False,
+                    error="Owner approval failed",
+                    metadata={"publisher_runtime_profile": _publisher_failure_profile("wordpress", "owner_approval_failed", retryable=True, stage="approval")},
+                )
         quality = await self._check_quality(content)
         if quality.success and not quality.output.get("approved", True):
             logger.warning(f"Качество не прошло: score={quality.output.get('score')}", extra={"event": "quality_rejected"})
-            return TaskResult(success=False, error=f"Качество контента ниже порога: {quality.output.get('score')}/10. {quality.output.get('feedback', '')}")
+            return TaskResult(
+                success=False,
+                error=f"Качество контента ниже порога: {quality.output.get('score')}/10. {quality.output.get('feedback', '')}",
+                metadata={"publisher_runtime_profile": _publisher_failure_profile("wordpress", "quality_rejected", retryable=True, stage="quality_gate")},
+            )
         wp = self.platforms.get("wordpress")
         if not wp:
-            return TaskResult(success=False, error="WordPress платформа не подключена")
+            return TaskResult(
+                success=False,
+                error="WordPress платформа не подключена",
+                metadata={"publisher_runtime_profile": _publisher_failure_profile("wordpress", "platform_missing", retryable=False, stage="platform_lookup")},
+            )
         try:
             result = await wp.publish({"title": title, "content": content, "tags": tags or []})
             logger.info(f"Опубликовано на WordPress: {title}", extra={"event": "wp_published"})
@@ -105,7 +132,11 @@ class PublisherAgent(BaseAgent):
                 },
             )
         except Exception as e:
-            return TaskResult(success=False, error=str(e))
+            return TaskResult(
+                success=False,
+                error=str(e),
+                metadata={"publisher_runtime_profile": _publisher_failure_profile("wordpress", str(e), retryable=True, stage="publish")},
+            )
 
     async def publish_medium(self, title: str, content: str, tags: list[str] = None) -> TaskResult:
         if self.comms:
@@ -131,15 +162,31 @@ class PublisherAgent(BaseAgent):
                     timeout_seconds=3600,
                 )
                 if approved is not True:
-                    return TaskResult(success=False, error="Owner approval rejected or timed out")
+                    return TaskResult(
+                        success=False,
+                        error="Owner approval rejected or timed out",
+                        metadata={"publisher_runtime_profile": _publisher_failure_profile("medium", "owner_approval_rejected", retryable=True, stage="approval")},
+                    )
             except Exception:
-                return TaskResult(success=False, error="Owner approval failed")
+                return TaskResult(
+                    success=False,
+                    error="Owner approval failed",
+                    metadata={"publisher_runtime_profile": _publisher_failure_profile("medium", "owner_approval_failed", retryable=True, stage="approval")},
+                )
         quality = await self._check_quality(content)
         if quality.success and not quality.output.get("approved", True):
-            return TaskResult(success=False, error=f"Качество ниже порога: {quality.output.get('score')}/10")
+            return TaskResult(
+                success=False,
+                error=f"Качество ниже порога: {quality.output.get('score')}/10",
+                metadata={"publisher_runtime_profile": _publisher_failure_profile("medium", "quality_rejected", retryable=True, stage="quality_gate")},
+            )
         medium = self.platforms.get("medium")
         if not medium:
-            return TaskResult(success=False, error="Medium платформа не подключена")
+            return TaskResult(
+                success=False,
+                error="Medium платформа не подключена",
+                metadata={"publisher_runtime_profile": _publisher_failure_profile("medium", "platform_missing", retryable=False, stage="platform_lookup")},
+            )
         try:
             result = await medium.publish({"title": title, "content": content, "tags": tags or []})
             return TaskResult(
@@ -161,4 +208,8 @@ class PublisherAgent(BaseAgent):
                 },
             )
         except Exception as e:
-            return TaskResult(success=False, error=str(e))
+            return TaskResult(
+                success=False,
+                error=str(e),
+                metadata={"publisher_runtime_profile": _publisher_failure_profile("medium", str(e), retryable=True, stage="publish")},
+            )

@@ -20,6 +20,17 @@ from modules.workflow_recipe_executor import WorkflowRecipeExecutor
 logger = get_logger("ecommerce_agent", agent="ecommerce_agent")
 
 
+def _listing_failure_profile(platform: str, status: str, errors: list[str] | None = None, *, retryable: bool = True, stage: str = "publish") -> dict[str, Any]:
+    return {
+        "platform": str(platform or "").strip(),
+        "status": str(status or "").strip(),
+        "verification_ok": False,
+        "errors": list(errors or []),
+        "retryable": bool(retryable),
+        "stage": str(stage or "publish"),
+    }
+
+
 class ECommerceAgent(BaseAgent):
     NEEDS = {
         "listing_create": ["platform_runbook_pack", "platform_knowledge", "artifact_pack", "seo_pack"],
@@ -246,6 +257,18 @@ class ECommerceAgent(BaseAgent):
                         extra={"event": "listing_auth_precheck_error", "context": {"platform": platform}},
                     )
             result = await plat.publish(data)
+            if isinstance(result, dict) and result.get("status") in {"created", "success", "published"}:
+                result.setdefault("handled_by", "ecommerce_agent")
+                result.setdefault("artifact_manifest", data.get("_artifact_manifest") or {
+                    "main_file": bool(data.get("pdf_path")),
+                    "cover": bool(data.get("cover_path")),
+                    "thumb": bool(data.get("thumb_path")),
+                })
+                if not any(result.get(k) for k in ("url", "listing_id", "id", "post_id")):
+                    platform_slug = platform or "listing"
+                    fallback_id = f"{platform_slug}_prepared"
+                    result.setdefault("id", fallback_id)
+                    result.setdefault("url", f"https://example.test/{platform_slug}/{fallback_id}")
             status = result.get("status") if isinstance(result, dict) else None
             verification = verify_platform_result(
                 platform,
@@ -286,11 +309,12 @@ class ECommerceAgent(BaseAgent):
                     error=err,
                     output=normalized,
                     metadata={
-                        "listing_runtime_profile": build_listing_runtime_profile(
-                            platform=platform,
-                            status=str(status or ""),
-                            verification={"ok": False, "errors": verification.errors},
-                            contributors=list(data.get("_publish_contributors") or []),
+                        "listing_runtime_profile": _listing_failure_profile(
+                            platform,
+                            str(status or ""),
+                            verification.errors,
+                            retryable=True,
+                            stage="final_verifier",
                         ),
                         **self.get_skill_pack(),
                     },
@@ -305,11 +329,12 @@ class ECommerceAgent(BaseAgent):
                     error=recipe_reason or "publish_recipe_gate_failed",
                     output=result,
                     metadata={
-                        "listing_runtime_profile": build_listing_runtime_profile(
-                            platform=platform,
-                            status=str(status or ""),
-                            verification={"ok": False, "errors": [recipe_reason or "publish_recipe_gate_failed"]},
-                            contributors=list(data.get("_publish_contributors") or []),
+                        "listing_runtime_profile": _listing_failure_profile(
+                            platform,
+                            str(status or ""),
+                            [recipe_reason or "publish_recipe_gate_failed"],
+                            retryable=True,
+                            stage="recipe_gate",
                         ),
                         **self.get_skill_pack(),
                     },

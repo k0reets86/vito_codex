@@ -111,7 +111,58 @@ class DummyPlatform:
         return True
 
     async def publish(self, content: dict) -> dict:
-        return {"platform": self.name, "status": "created", "content_preview": str(content)[:120]}
+        platform = str(self.name or "").strip().lower()
+        payload = dict(content or {})
+        title = str(payload.get("name") or payload.get("title") or "Mega test product").strip() or "Mega test product"
+        slug = title.lower().replace(" ", "-")[:32] or f"{platform}-item"
+        base = {
+            "platform": platform,
+            "content_preview": str(content)[:120],
+            "handled_by": f"dummy_{platform}",
+        }
+        if platform == "gumroad":
+            base.update(
+                {
+                    "status": "published",
+                    "id": f"{platform}_{slug}",
+                    "url": f"https://example.test/{platform}/{slug}",
+                    "slug": slug,
+                    "main_file_attached": True,
+                    "cover_confirmed": True,
+                    "preview_confirmed": True,
+                    "thumbnail_confirmed": True,
+                    "tags_confirmed": True,
+                    "image_count": 2,
+                }
+            )
+            return base
+        if platform == "etsy":
+            base.update(
+                {
+                    "status": "draft",
+                    "id": f"{platform}_{slug}",
+                    "listing_id": f"{platform}_{slug}",
+                    "url": f"https://example.test/{platform}/{slug}",
+                    "file_attached": True,
+                    "image_count": 2,
+                    "tags_confirmed": True,
+                    "materials_confirmed": True,
+                    "category_confirmed": True,
+                    "editor_audit": {"ok": True},
+                }
+            )
+            return base
+        if platform in {"kofi", "wordpress", "medium", "twitter", "printful"}:
+            base.update(
+                {
+                    "status": "published",
+                    "id": f"{platform}_{slug}",
+                    "url": f"https://example.test/{platform}/{slug}",
+                }
+            )
+            return base
+        base.update({"status": "created", "id": f"{platform}_{slug}", "url": f"https://example.test/{platform}/{slug}"})
+        return base
 
     async def get_analytics(self) -> dict:
         return {"platform": self.name, "sales": 0, "revenue": 0.0}

@@ -35,14 +35,16 @@ _BASE_CONTRACT: dict[str, Any] = {
 
 _CONTRACTS: dict[str, dict[str, Any]] = {
     "vito_core": {
-        "role": "owner_orchestrator",
+        "role": "owner_orchestrator_manager",
         "primary_kind": "persona",
         "owned_outcomes": ["task_routing", "workflow_state", "agent_handoff", "owner_response"],
         "required_evidence": ["workflow_status", "responsible_agent", "verification_state"],
+        "runtime_enforced": True,
         "tool_scopes": ["registry", "memory", "workflow_state_machine", "llm_router"],
-        "collaborates_with": ["quality_judge", "hr_agent", "devops_agent"],
+        "collaborates_with": ["quality_judge", "hr_agent", "devops_agent", "ecommerce_agent", "publisher_agent", "browser_agent", "account_manager"],
         "memory_inputs": ["owner_memory", "workflow_memory", "skill_memory", "anti_pattern_memory"],
-        "memory_outputs": ["workflow_facts", "owner_context_updates", "routing_lessons"],
+        "memory_outputs": ["workflow_facts", "owner_context_updates", "routing_lessons", "orchestration_recovery_notes", "final_decision_records"],
+        "escalation_rules": ["escalate_on_policy_conflict", "escalate_on_missing_evidence", "escalate_on_workflow_degradation"],
         "workflow_roles": {
             "lead": ["research_pipeline", "publish_pipeline", "self_improvement_pipeline"],
             "support": ["all"],
@@ -88,13 +90,14 @@ _CONTRACTS: dict[str, dict[str, Any]] = {
         "workflow_roles": {"lead": ["marketing_pipeline"], "support": ["publish_pipeline"], "verify": []},
     },
     "ecommerce_agent": {
-        "role": "listing_owner",
+        "role": "listing_owner_operator",
         "owned_outcomes": ["listing_package", "listing_publish", "platform_rules_sync"],
         "required_evidence": ["platform_status", "listing_id_or_url", "artifact_manifest"],
         "runtime_enforced": True,
-        "tool_scopes": ["commerce_platforms", "artifact_pack", "browser_publish"],
-        "collaborates_with": ["content_creator", "seo_agent", "marketing_agent", "smm_agent", "quality_judge"],
-        "memory_outputs": ["platform_runbooks", "listing_recipes", "platform_constraints"],
+        "tool_scopes": ["commerce_platforms", "artifact_pack", "browser_publish", "platform_runbook_pack", "final_verifier"],
+        "collaborates_with": ["content_creator", "seo_agent", "marketing_agent", "smm_agent", "quality_judge", "publisher_agent", "vito_core"],
+        "memory_outputs": ["platform_runbooks", "listing_recipes", "platform_constraints", "listing_runtime_profiles", "publish_recovery_notes"],
+        "escalation_rules": ["escalate_on_policy_conflict", "escalate_on_missing_evidence", "escalate_on_verifier_reject"],
         "workflow_roles": {"lead": ["publish_pipeline", "listing_update_pipeline"], "support": ["launch_pipeline"], "verify": ["quality_judge"]},
     },
     "seo_agent": {
@@ -254,12 +257,14 @@ _CONTRACTS: dict[str, dict[str, Any]] = {
         "workflow_roles": {"lead": ["browser_execution_pipeline"], "support": ["auth_pipeline", "publish_pipeline"], "verify": []},
     },
     "publisher_agent": {
-        "role": "editorial_publisher",
+        "role": "editorial_publisher_operator",
         "owned_outcomes": ["article_publish", "cms_publish", "content_distribution"],
         "required_evidence": ["platform_status", "published_url_or_status"],
-        "tool_scopes": ["cms_platforms", "preview_generation", "approval_flow"],
-        "collaborates_with": ["content_creator", "seo_agent", "quality_judge", "translation_agent"],
-        "memory_outputs": ["publishing_runbooks", "editorial_patterns"],
+        "runtime_enforced": True,
+        "tool_scopes": ["cms_platforms", "preview_generation", "approval_flow", "publisher_runtime_profile", "publish_retry_rules"],
+        "collaborates_with": ["content_creator", "seo_agent", "quality_judge", "translation_agent", "vito_core", "devops_agent"],
+        "memory_outputs": ["publishing_runbooks", "editorial_patterns", "publish_recovery_notes", "evidence_patterns", "distribution_lessons"],
+        "escalation_rules": ["escalate_on_policy_conflict", "escalate_on_missing_evidence", "escalate_on_publish_platform_unavailable"],
         "workflow_roles": {"lead": ["editorial_publish_pipeline"], "support": ["launch_pipeline"], "verify": ["quality_judge"]},
     },
     "quality_judge": {

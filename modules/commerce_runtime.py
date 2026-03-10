@@ -30,10 +30,11 @@ def build_publisher_runtime_profile(platform: str, quality_score: Any, approved:
         "platform": str(platform or "").strip(),
         "quality_score": score,
         "approved": ok,
+        "verification_ok": ok,
+        "recovery_stage": "quality_gate" if not ok else "distribution_ready",
         "next_actions": (
             ["revise_content", "rerun_quality_gate", "block_publish"]
             if not ok
             else ["capture_publish_url", "record_editorial_runbook", "handoff_to_distribution"]
         ),
     }
-

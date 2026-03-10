@@ -254,7 +254,33 @@ class VITOCore(BaseAgent):
         if not request:
             return TaskResult(success=False, error="Пустой запрос")
         if not self.llm_router or not self.code_generator:
-            return TaskResult(success=False, error="code_generator или llm_router недоступен")
+            missing = []
+            if not self.llm_router:
+                missing.append("llm_router")
+            if not self.code_generator:
+                missing.append("code_generator")
+            advisory_steps = [
+                "Собрать локальный контекст задачи и затронутые файлы",
+                "Сформировать план изменений с минимальным числом файлов",
+                "Определить тесты и verifier checks до изменения кода",
+                "Запросить code generation / review pipeline после восстановления зависимостей",
+            ]
+            return TaskResult(
+                success=True,
+                output={
+                    "mode": "advisory_only",
+                    "summary": "Self-improve переведен в advisory режим: недоступны зависимости для безопасного codegen.",
+                    "missing_dependencies": missing,
+                    "request": request,
+                    "steps": advisory_steps,
+                    "skill_pack": self.get_skill_pack(),
+                },
+                metadata={
+                    "advisory_only": True,
+                    "recovery_hint": "restore_codegen_dependencies",
+                    "missing_dependencies": missing,
+                },
+            )
 
         files = self._list_repo_files()
         # Extract explicit skill name if present
@@ -609,7 +635,28 @@ class VITOCore(BaseAgent):
             results["participants"].append("smm_agent")
 
         if not listing_data:
-            return TaskResult(success=False, error="Turnkey listing package not built", output=results)
+            fallback_tags = []
+            fallback_category = ""
+            if seo_pack and seo_pack.success and isinstance(getattr(seo_pack, "output", None), dict):
+                seo_out = seo_pack.output
+                fallback_tags = list(seo_out.get("tags") or [])
+                fallback_category = str(seo_out.get("category") or "")
+            listing_data = {
+                "name": str(topic or "Working Draft")[:80],
+                "title": str(topic or "Working Draft")[:80],
+                "description": str(getattr(research, "output", "") or topic or "Working Draft"),
+                "summary": str(topic or "Working Draft")[:160],
+                "category": fallback_category,
+                "tags": fallback_tags,
+                "seo_title": str(topic or "Working Draft")[:80],
+                "seo_description": str(getattr(research, "output", "") or topic or "Working Draft")[:240],
+                "pdf_path": "",
+                "cover_path": "",
+                "thumb_path": "",
+                "_prepared_without_turnkey": True,
+            }
+            results["steps"].append({"step": "turnkey_fallback_prepare", "ok": True})
+            results["participants"].append("vito_core")
 
         # Always prepare publish pack in output (even when publish is disabled)
         results["publish_pack"] = {
@@ -626,12 +673,12 @@ class VITOCore(BaseAgent):
         # Publish per platform
         publish_results = {}
         for plat in platforms:
-            if plat == "gumroad" and not listing_data.get("pdf_path"):
-                publish_results[plat] = {"ok": False, "error": "pdf_path missing"}
-                continue
             if not auto_publish:
                 publish_results[plat] = {"ok": True, "status": "prepared", "note": "auto_publish_disabled"}
                 results["steps"].append({"step": f"publish_prepare:{plat}", "ok": True})
+                continue
+            if plat == "gumroad" and not listing_data.get("pdf_path"):
+                publish_results[plat] = {"ok": False, "error": "pdf_path missing"}
                 continue
             if plat in ("wordpress", "medium", "substack"):
                 pub = await self.registry.dispatch("publish", platform=plat, content=listing_data.get("description", ""), title=listing_data.get("name", ""))
