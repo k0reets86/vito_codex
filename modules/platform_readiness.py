@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from config.paths import PROJECT_ROOT
+from config.settings import settings
 from modules.service_session_registry import load_service_sessions
 from modules.browser_runtime_policy import get_browser_runtime_profile
 from modules.platform_validation_registry import load_platform_validation_registry
@@ -84,6 +85,22 @@ def _reauth_command_for_service(service: str) -> str:
         return "python3 scripts/pinterest_auth_helper.py browser-capture"
     return ""
 
+
+def _service_runtime_available(service: str, session_present: bool) -> bool:
+    svc = str(service or "").strip().lower()
+    if session_present:
+        return True
+    if svc == "twitter":
+        mode = str(getattr(settings, "TWITTER_MODE", "api") or "api").strip().lower()
+        if mode == "api":
+            return bool(
+                getattr(settings, "TWITTER_CONSUMER_KEY", "")
+                and getattr(settings, "TWITTER_CONSUMER_SECRET", "")
+                and getattr(settings, "TWITTER_ACCESS_TOKEN", "")
+                and getattr(settings, "TWITTER_ACCESS_SECRET", "")
+            )
+    return False
+
 def _probe_exists(service: str) -> bool:
     mapping = {
         "etsy": RUNTIME / "etsy_owner_grade_probe.json",
@@ -118,17 +135,18 @@ def assess_platform_readiness(services: list[str] | None = None) -> list[dict[st
         session_present = bool(row.get("storage_exists") or row.get("profile_dir"))
         session_verified = bool(row.get("verified_at"))
         probe_present = _probe_exists(service)
+        runtime_available = _service_runtime_available(service, session_present)
         registry_row = dict(registry.get(service) or {})
         owner_grade_state = state_map.get(service) or str(registry_row.get("state") or "unknown")
         blocker = ""
         registry_blocker = str(registry_row.get("blocker") or "").strip().lower()
-        if registry_blocker == "missing_session":
+        if registry_blocker == "missing_session" and not runtime_available:
             blocker = "missing_session"
-        elif not session_present and service in {"etsy", "printful", "twitter", "amazon_kdp"}:
+        elif not runtime_available and service in {"etsy", "printful", "twitter", "amazon_kdp"}:
             blocker = "missing_session"
         elif not probe_present:
             blocker = "missing_probe"
-        can_validate_now = session_present and probe_present
+        can_validate_now = runtime_available and probe_present
         if not blocker and owner_grade_state == "blocked":
             blocker = "last_validation_blocked"
         recommended_action = ""

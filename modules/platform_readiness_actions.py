@@ -13,6 +13,7 @@ from modules.account_auth_remediation import build_auth_remediation
 from modules.browser_runtime_policy import get_browser_runtime_profile
 from modules.platform_auth_interrupts import PlatformAuthInterrupts
 from modules.platform_validation_registry import load_platform_validation_registry
+from modules.service_session_registry import capture_session_snapshot
 
 
 def build_platform_readiness_step(action: str) -> str:
@@ -89,6 +90,49 @@ def _reauth_command_for_service(service: str) -> str:
 
 
 
+def _attempt_auto_reauth(service: str) -> tuple[bool, str, dict[str, Any]]:
+    svc = str(service or '').strip().lower()
+    if svc == 'etsy':
+        ok, detail = _run_python('scripts/etsy_auth_helper.py auto-login --timeout-sec 120 --storage-path runtime/etsy_storage_state.json')
+        payload: dict[str, Any] = {'auto_attempted': True, 'auto_path': 'etsy_auth_helper:auto-login'}
+        if ok:
+            profile = get_browser_runtime_profile(svc)
+            capture_session_snapshot(
+                svc,
+                storage_state_path=str(profile.get('storage_state_path') or ''),
+                profile_dir=str(profile.get('persistent_profile_dir') or ''),
+                verified=True,
+            )
+            payload['auto_reauth_ok'] = True
+            return True, detail, payload
+        low = str(detail or '').lower()
+        payload['auto_reauth_ok'] = False
+        if 'otp_required' in low or 'challenge' in low or 'captcha' in low or 'datadome' in low:
+            payload['auto_reauth_blocker'] = 'challenge'
+            return False, detail, payload
+        payload['auto_reauth_blocker'] = 'failed'
+        return False, detail, payload
+    if svc == 'printful':
+        ok, detail = _run_python(
+            'scripts/printful_auth_helper.py browser-capture --timeout-sec 120 --storage-path runtime/printful_storage_state.json --headless --auto-submit'
+        )
+        payload = {'auto_attempted': True, 'auto_path': 'printful_auth_helper:browser-capture'}
+        if ok:
+            profile = get_browser_runtime_profile(svc)
+            capture_session_snapshot(
+                svc,
+                storage_state_path=str(profile.get('storage_state_path') or ''),
+                profile_dir=str(profile.get('persistent_profile_dir') or ''),
+                verified=True,
+            )
+            payload['auto_reauth_ok'] = True
+            return True, detail, payload
+        payload['auto_reauth_ok'] = False
+        payload['auto_reauth_blocker'] = 'failed'
+        return False, detail, payload
+    return False, '', {'auto_attempted': False}
+
+
 def execute_platform_readiness_action(
     *,
     service: str,
@@ -102,10 +146,27 @@ def execute_platform_readiness_action(
         return {'status': 'failed', 'error': 'invalid_platform_readiness_action', 'agent': 'platform_readiness'}
 
     if act.startswith('reauth:'):
-        interrupt_id = PlatformAuthInterrupts().raise_interrupt(svc, block or 'missing_session', detail=act)
-        remediation = build_auth_remediation(svc, error=block or 'missing_session', configured=True)
         profile = get_browser_runtime_profile(svc)
         cmd = _reauth_command_for_service(svc)
+        auto_ok, auto_detail, auto_payload = _attempt_auto_reauth(svc)
+        if auto_ok:
+            PlatformAuthInterrupts().resolve_interrupt(svc)
+            return {
+                'status': 'completed',
+                'output': {
+                    'service': svc,
+                    'action': act,
+                    'state': 'session_restored',
+                    'reauth_command': cmd,
+                    'login_url': str(profile.get('profile_completion_route') or ''),
+                    'storage_state_path': str(profile.get('storage_state_path') or ''),
+                    'persistent_profile_dir': str(profile.get('persistent_profile_dir') or ''),
+                    **auto_payload,
+                },
+                'agent': 'platform_readiness',
+            }
+        interrupt_id = PlatformAuthInterrupts().raise_interrupt(svc, block or 'missing_session', detail=auto_detail or act)
+        remediation = build_auth_remediation(svc, error=block or 'missing_session', configured=True)
         return {
             'status': 'waiting_approval',
             'error': f'Нужна повторная авторизация для {svc}',
@@ -116,6 +177,8 @@ def execute_platform_readiness_action(
                 'login_url': str(profile.get('profile_completion_route') or ''),
                 'storage_state_path': str(profile.get('storage_state_path') or ''),
                 'persistent_profile_dir': str(profile.get('persistent_profile_dir') or ''),
+                **auto_payload,
+                'auto_reauth_detail': auto_detail,
             },
             'agent': 'platform_readiness',
         }
@@ -125,6 +188,9 @@ def execute_platform_readiness_action(
         report = _read_json(_latest_wave_report()) if _latest_wave_report() else {}
         check = _find_service_check(report, svc)
         state = str(check.get('state') or '').strip().lower()
+        check_blocker = str(check.get('blocker') or '').strip().lower()
+        if check_blocker == 'missing_session':
+            PlatformAuthInterrupts().raise_interrupt(svc, 'missing_session', detail=detail or act)
         if ok and state in {'partial', 'owner_grade'}:
             PlatformAuthInterrupts().resolve_interrupt(svc)
         if ok and check:
@@ -146,6 +212,9 @@ def execute_platform_readiness_action(
         registry_after = dict(load_platform_validation_registry().get(svc) or {})
         state = str(registry_after.get('state') or registry_before.get('state') or '').strip().lower()
         owner_grade_ok = bool(registry_after.get('owner_grade_ok'))
+        blocker_now = str(registry_after.get('blocker') or registry_before.get('blocker') or '').strip().lower()
+        if blocker_now == 'missing_session':
+            PlatformAuthInterrupts().raise_interrupt(svc, 'missing_session', detail=detail or act)
         if ok and owner_grade_ok:
             PlatformAuthInterrupts().resolve_interrupt(svc)
         if ok and state in {'owner_grade', 'partial', 'blocked'}:
