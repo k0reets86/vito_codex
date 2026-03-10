@@ -96,6 +96,7 @@ from modules.owner_preference_model import OwnerPreferenceModel
 from modules.owner_pref_metrics import OwnerPreferenceMetrics
 from modules.auth_broker import AuthBroker
 from modules.browser_runtime_policy import get_browser_runtime_profile, get_profile_completion_runbook, storage_state_path_for_service
+from modules.service_session_registry import capture_session_snapshot, clear_service_session
 from modules.data_lake import DataLake
 from modules.status_snapshot import build_status_snapshot, render_status_snapshot
 from modules.telegram_nlu_router import route_owner_dialogue
@@ -1030,6 +1031,16 @@ class CommsAgent:
             self._auth_broker.mark_authenticated(svc, method="manual_confirmed", detail="owner_confirmed", ttl_sec=ttl_sec)
         except Exception:
             pass
+        try:
+            profile = get_browser_runtime_profile(svc)
+            capture_session_snapshot(
+                svc,
+                storage_state_path=profile.storage_state_path,
+                profile_dir=profile.persistent_profile_dir,
+                verified=True,
+            )
+        except Exception:
+            pass
         self._save_auth_state()
 
     def _clear_service_auth_confirmed(self, service: str) -> None:
@@ -1040,6 +1051,10 @@ class CommsAgent:
             self._service_auth_confirmed.pop(svc, None)
             try:
                 self._auth_broker.clear(svc)
+            except Exception:
+                pass
+            try:
+                clear_service_session(svc)
             except Exception:
                 pass
             self._save_auth_state()

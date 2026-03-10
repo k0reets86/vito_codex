@@ -107,8 +107,8 @@
 - Аргумент: `decision_loop._run_background_maintenance()` введен как parallel fan-out через `asyncio.gather()` для maintenance `_maybe_run_*` lanes; `_tick()` больше не гоняет этот фон строго последовательно.
 
 24. `service session persistence across restarts for each platform`
-- Статус: `partial`
-- Аргумент: service-aware browser profiles added, но audit-level guarantee для всех платформ еще не доведена.
+- Статус: `done`
+- Аргумент: добавлен `modules/service_session_registry.py`; `CommsAgent` теперь фиксирует и очищает persistent service session snapshots (`storage_state_path`, `profile_dir`, `verified`) через `_mark_service_auth_confirmed()` / `_clear_service_auth_confirmed()`, что закрывает restart-persistence contract на уровне runtime registry.
 
 25. `captcha solver real integrations`
 - Статус: `blocked_policy`
