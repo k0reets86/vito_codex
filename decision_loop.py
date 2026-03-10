@@ -1279,6 +1279,13 @@ class DecisionLoop:
 
     async def _plan_goal(self, goal: Goal) -> list[str]:
         """Фаза PLAN: генерирует план выполнения через LLM."""
+        # Deterministic plan for readiness remediation goals
+        if str(goal.source or "").strip() == "platform_readiness":
+            action = str((goal.results or {}).get("action") or "").strip()
+            if action:
+                from modules.platform_readiness_actions import build_platform_readiness_step
+                return [build_platform_readiness_step(action)]
+
         # Deterministic plan for BOEVOY test goals (avoid LLM noise and extra steps)
         if "boevoy" in goal.title.lower():
             return [
@@ -1760,6 +1767,17 @@ class DecisionLoop:
         Chain: Smart Route → Agent Registry → LLM fallback → Research-Learn.
         """
         try:
+            from modules.platform_readiness_actions import parse_platform_readiness_step, execute_platform_readiness_action
+
+            readiness_action = parse_platform_readiness_step(step)
+            if readiness_action:
+                meta = dict(goal.results or {})
+                return execute_platform_readiness_action(
+                    service=str(meta.get('service') or ''),
+                    action=readiness_action,
+                    blocker=str(meta.get('blocker') or ''),
+                )
+
             precheck = self._policy_precheck(step)
             if precheck:
                 return precheck
