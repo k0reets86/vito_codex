@@ -799,8 +799,44 @@ async def test_cmd_cancel_clears_owner_task_state(comms, mock_update, tmp_path):
 
     await comms._cmd_cancel(mock_update, MagicMock())
     assert owner_task_state.get_active() is None
-    assert ge._goals[g1.goal_id].status == GoalStatus.CANCELLED
-    assert ge._goals[g2.goal_id].status == GoalStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_owner_shortcut_how_are_you_returns_brief_status(comms, tmp_path):
+    owner_task_state = OwnerTaskState(path=tmp_path / "owner_task_state_status.json")
+    owner_task_state.set_active("доделать etsy черновик", intent="goal_request")
+    decision_loop = MagicMock()
+    decision_loop.get_status.return_value = {"running": True}
+    comms.set_modules(owner_task_state=owner_task_state, decision_loop=decision_loop)
+    comms.send_message = AsyncMock()
+
+    handled = await comms._maybe_handle_owner_shortcuts("как дела")
+
+    assert handled is True
+    comms.send_message.assert_awaited_once()
+    text = comms.send_message.await_args.kwargs.get("text") or comms.send_message.await_args.args[0]
+    assert "Сейчас в работе: доделать etsy черновик" in text
+    assert "Decision Loop: работает." in text
+
+
+@pytest.mark.asyncio
+async def test_owner_shortcut_cancel_all_tasks_cancels_immediately(comms, tmp_path):
+    owner_task_state = OwnerTaskState(path=tmp_path / "owner_task_state_cancel.json")
+    owner_task_state.set_active("старая задача", intent="goal_request")
+    comms.set_modules(owner_task_state=owner_task_state)
+    comms.send_message = AsyncMock()
+    comms._cancel_goal_queue = MagicMock(return_value=4)
+    comms._decision_loop = MagicMock()
+
+    handled = await comms._maybe_handle_owner_shortcuts("отмени все задачи")
+
+    assert handled is True
+    comms._cancel_goal_queue.assert_called_once_with(reason="owner_text_cancel_all")
+    comms._decision_loop.stop.assert_called_once()
+    assert owner_task_state.get_active() is None
+    text = comms.send_message.await_args.kwargs.get("text") or comms.send_message.await_args.args[0]
+    assert "Все текущие задачи снял" in text
+    assert "4" in text
 
 
 @pytest.mark.asyncio

@@ -1990,6 +1990,16 @@ class CommsAgent:
     async def _maybe_handle_owner_shortcuts(self, text: str) -> bool:
         lower = str(text or "").lower()
         strict_cmds = bool(getattr(settings, "TELEGRAM_STRICT_COMMANDS", True)) and not self._autonomy_max_enabled()
+        if self._is_cancel_all_tasks_prompt(text):
+            cancelled = self._cancel_all_owner_work(reason="owner_text_cancel_all")
+            await self.send_message(
+                f"Все текущие задачи снял. Отменено из очереди: {cancelled}.",
+                level="result",
+            )
+            return True
+        if self._is_how_are_you_prompt(text):
+            await self.send_message(self._render_owner_brief_status(), level="result")
+            return True
         if text.isdigit() and self._prime_research_pending_actions_from_owner_state(text):
             idx = int(text)
             picked = self._select_pending_research_option(idx)
@@ -2011,6 +2021,100 @@ class CommsAgent:
             await self.send_message(msg if ok else "Используй: /llm_mode free|prod|status", level="result")
             return True
         return False
+
+    @staticmethod
+    def _is_how_are_you_prompt(text: str) -> bool:
+        s = str(text or "").strip().lower().replace("ё", "е")
+        if not s:
+            return False
+        return any(
+            token in s
+            for token in (
+                "как дела",
+                "как дел",
+                "как ты",
+                "че по задач",
+                "что по задач",
+                "что с задач",
+                "как успехи",
+            )
+        )
+
+    @staticmethod
+    def _is_cancel_all_tasks_prompt(text: str) -> bool:
+        s = str(text or "").strip().lower().replace("ё", "е")
+        if not s:
+            return False
+        task_tokens = ("задач", "цели", "дела", "очеред")
+        cancel_tokens = ("отмени", "отмена", "сними", "убери", "очисти", "stop all", "cancel all")
+        all_tokens = ("все", "всё", "all")
+        return any(tok in s for tok in cancel_tokens) and any(tok in s for tok in all_tokens) and any(tok in s for tok in task_tokens)
+
+    def _render_owner_brief_status(self) -> str:
+        running = False
+        if self._decision_loop:
+            try:
+                st = self._decision_loop.get_status() or {}
+                running = bool(st.get("running", False))
+            except Exception:
+                pass
+        active_text = ""
+        if self._owner_task_state:
+            try:
+                active = self._owner_task_state.get_active() or {}
+                active_text = str(active.get("text") or "").strip()
+            except Exception:
+                pass
+        pending_approvals = len(getattr(self, "_pending_approvals", {}) or {})
+        queued = 0
+        if self._goal_engine:
+            try:
+                goals = self._goal_engine.get_all_goals(status=None) or []
+                queued = sum(
+                    1
+                    for g in goals
+                    if str(getattr(getattr(g, "status", None), "value", "") or "")
+                    not in {"completed", "failed", "cancelled"}
+                )
+            except Exception:
+                pass
+        lines = []
+        if active_text:
+            lines.append(f"Сейчас в работе: {active_text[:200]}")
+        else:
+            lines.append("Сейчас активной задачи от тебя не зафиксировано.")
+        lines.append(f"Decision Loop: {'работает' if running else 'на паузе'}.")
+        if pending_approvals:
+            lines.append(f"Ожидают подтверждения: {pending_approvals}.")
+        if queued:
+            lines.append(
+                f"В системной очереди еще {queued}. Если это старые хвосты, напиши: «отмени все задачи»."
+            )
+        return "\n".join(lines)
+
+    def _cancel_all_owner_work(self, reason: str = "owner_cancelled") -> int:
+        if self._cancel_state:
+            try:
+                self._cancel_state.cancel(reason=reason)
+            except Exception:
+                pass
+        cancelled_goals = self._cancel_goal_queue(reason=reason)
+        if self._owner_task_state:
+            try:
+                self._owner_task_state.cancel(note=reason)
+            except Exception:
+                pass
+        self._pending_approvals.clear()
+        self._pending_schedule_update = None
+        self._pending_owner_confirmation = None
+        self._pending_choice_context = None
+        self._pending_system_action = None
+        if self._decision_loop:
+            try:
+                self._decision_loop.stop()
+            except Exception:
+                pass
+        return int(cancelled_goals or 0)
 
     async def _maybe_handle_owner_service_commands(self, text: str) -> bool:
         service_status = self._detect_contextual_service_status_request(text)
@@ -4022,20 +4126,7 @@ class CommsAgent:
         """Пауза всех текущих задач и очистка очередей."""
         if await self._reject_stranger(update):
             return
-        if self._cancel_state:
-            self._cancel_state.cancel(reason="owner_cancelled")
-        cancelled_goals = self._cancel_goal_queue(reason="owner_cancelled")
-        if self._owner_task_state:
-            try:
-                self._owner_task_state.cancel(note="owner_cancelled")
-            except Exception:
-                pass
-        self._pending_approvals.clear()
-        self._pending_schedule_update = None
-        self._pending_owner_confirmation = None
-        self._pending_choice_context = None
-        if self._decision_loop:
-            self._decision_loop.stop()
+        cancelled_goals = self._cancel_all_owner_work(reason="owner_cancelled")
         await update.message.reply_text(
             f"Всё приостановлено. Отправь /resume, когда будешь готов продолжить.\n"
             f"Отменено задач из очереди: {cancelled_goals}.",
