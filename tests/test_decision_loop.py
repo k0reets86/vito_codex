@@ -227,6 +227,30 @@ async def test_platform_readiness_monitor_sends_alert_on_new_blockers(dl, monkey
     assert status["platform_readiness"]["blocked"] == 1
     assert dl._comms.messages
     assert "reauth:etsy" in dl._comms.messages[0][0]
+    goals = dl.goal_engine.get_all_goals()
+    assert any(g.source == "platform_readiness" for g in goals)
+
+
+@pytest.mark.asyncio
+async def test_platform_readiness_monitor_deduplicates_goals(dl, monkeypatch):
+    monkeypatch.setattr(
+        "decision_loop.assess_platform_readiness",
+        lambda: [
+            {
+                "service": "etsy",
+                "owner_grade_state": "blocked",
+                "blocker": "missing_session",
+                "recommended_action": "reauth:etsy",
+                "can_validate_now": False,
+            }
+        ],
+    )
+    dl._tick_count = 10
+    await dl._maybe_run_platform_readiness_monitor()
+    dl._tick_count = 20
+    await dl._maybe_run_platform_readiness_monitor()
+    goals = [g for g in dl.goal_engine.get_all_goals() if g.source == "platform_readiness"]
+    assert len(goals) == 1
 
 
 # ── Idle action ──

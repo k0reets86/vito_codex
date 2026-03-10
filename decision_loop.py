@@ -1084,6 +1084,8 @@ class DecisionLoop:
                 if action:
                     actionable.append(action)
             signature = "|".join(sorted(blockers + actionable))
+            for item in self._platform_readiness_cache:
+                self._ensure_platform_readiness_goal(item)
             if not signature or signature == self._last_platform_readiness_signature:
                 return
             self._last_platform_readiness_signature = signature
@@ -1094,6 +1096,49 @@ class DecisionLoop:
                     f"- next: {', '.join(actionable[:5]) or 'n/a'}"
                 )
                 await self._comms.send_message(msg, level="warning")
+        except Exception:
+            pass
+
+    def _ensure_platform_readiness_goal(self, item: dict[str, Any]) -> None:
+        try:
+            service = str(item.get("service") or "").strip().lower()
+            action = str(item.get("recommended_action") or "").strip()
+            blocker = str(item.get("blocker") or "").strip()
+            if not service or not action:
+                return
+            title = f"Platform readiness: {action}"
+            existing = self.goal_engine.get_all_goals() or []
+            for goal in existing:
+                if goal.status in (GoalStatus.COMPLETED, GoalStatus.FAILED, GoalStatus.CANCELLED):
+                    continue
+                if str(getattr(goal, "source", "") or "") != "platform_readiness":
+                    continue
+                results = getattr(goal, "results", {}) or {}
+                if str(results.get("service") or "").strip().lower() == service and str(results.get("action") or "").strip() == action:
+                    return
+                if str(getattr(goal, "title", "") or "").strip() == title:
+                    return
+            goal = self.goal_engine.create_goal(
+                title=title,
+                description=(
+                    f"Восстановить готовность платформы {service}: {action}. "
+                    f"Текущий blocker={blocker or 'n/a'}."
+                ),
+                priority=GoalPriority.HIGH if blocker == "missing_session" else GoalPriority.MEDIUM,
+                source="platform_readiness",
+                estimated_cost_usd=0.0,
+                estimated_roi=0.0,
+            )
+            try:
+                goal.results = {
+                    "service": service,
+                    "action": action,
+                    "blocker": blocker,
+                    "mode": "runtime_readiness_monitor",
+                }
+                self.goal_engine._persist_goal(goal)
+            except Exception:
+                pass
         except Exception:
             pass
 
