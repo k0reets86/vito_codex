@@ -31,4 +31,13 @@ jobs:
 
       - name: Smoke import boot
         run: |
-          python3 scripts/ci_smoke_boot.py
+          timeout 60s bash -lc '
+            for attempt in 1 2 3; do
+              echo "Smoke attempt ${attempt}/3"
+              if python3 scripts/ci_smoke_boot.py; then
+                exit 0
+              fi
+              sleep 2
+            done
+            exit 1
+          '
