@@ -12,6 +12,7 @@ from typing import Any, Optional
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from llm_router import TaskType
+from modules.growth_research_operational import build_document_operational_pack
 from modules.research_family_runtime import build_document_runtime_profile
 
 logger = get_logger("document_agent", agent="document_agent")
@@ -62,23 +63,27 @@ class DocumentAgent(BaseAgent):
         file_path = Path(path).expanduser()
         if not file_path.exists():
             runtime_profile = build_document_runtime_profile(str(file_path), "document_parse")
+            op_pack = build_document_operational_pack(path=str(file_path), capability="document_parse", source_exists=False, extracted_kind="missing_source")
             return TaskResult(
                 success=True,
                 output={"status": "source_missing", "path": str(file_path), "next_actions": runtime_profile["next_actions"]},
-                metadata={"document_runtime_profile": runtime_profile, **self.get_skill_pack()},
+                metadata={"document_runtime_profile": runtime_profile, "operational_pack": op_pack, **self.get_skill_pack()},
             )
         suffix = file_path.suffix.lower()
         try:
             if suffix in {".txt", ".md", ".log"}:
-                return TaskResult(success=True, output={"text": file_path.read_text(errors="ignore")}, metadata={"document_runtime_profile": build_document_runtime_profile(str(file_path), "document_parse"), **self.get_skill_pack()})
+                op_pack = build_document_operational_pack(path=str(file_path), capability="document_parse", source_exists=True, extracted_kind="text")
+                return TaskResult(success=True, output={"text": file_path.read_text(errors="ignore"), "used_skills": op_pack["used_skills"], "evidence": op_pack["evidence"], "next_actions": op_pack["next_actions"], "recovery_hints": op_pack["recovery_hints"]}, metadata={"document_runtime_profile": build_document_runtime_profile(str(file_path), "document_parse"), "operational_pack": op_pack, **self.get_skill_pack()})
             if suffix == ".json":
                 data = json.loads(file_path.read_text(errors="ignore"))
-                return TaskResult(success=True, output={"json": data}, metadata={"document_runtime_profile": build_document_runtime_profile(str(file_path), "document_parse"), **self.get_skill_pack()})
+                op_pack = build_document_operational_pack(path=str(file_path), capability="document_parse", source_exists=True, extracted_kind="json")
+                return TaskResult(success=True, output={"json": data, "used_skills": op_pack["used_skills"], "evidence": op_pack["evidence"], "next_actions": op_pack["next_actions"], "recovery_hints": op_pack["recovery_hints"]}, metadata={"document_runtime_profile": build_document_runtime_profile(str(file_path), "document_parse"), "operational_pack": op_pack, **self.get_skill_pack()})
             if suffix == ".csv":
                 with file_path.open(newline="", encoding="utf-8", errors="ignore") as f:
                     reader = csv.reader(f)
                     rows = [row for row in reader][:1000]
-                return TaskResult(success=True, output={"rows": rows}, metadata={"document_runtime_profile": build_document_runtime_profile(str(file_path), "document_parse"), **self.get_skill_pack()})
+                op_pack = build_document_operational_pack(path=str(file_path), capability="document_parse", source_exists=True, extracted_kind="csv_rows")
+                return TaskResult(success=True, output={"rows": rows, "used_skills": op_pack["used_skills"], "evidence": op_pack["evidence"], "next_actions": op_pack["next_actions"], "recovery_hints": op_pack["recovery_hints"]}, metadata={"document_runtime_profile": build_document_runtime_profile(str(file_path), "document_parse"), "operational_pack": op_pack, **self.get_skill_pack()})
             if suffix == ".docx":
                 try:
                     import docx  # python-docx
@@ -86,7 +91,8 @@ class DocumentAgent(BaseAgent):
                     return TaskResult(success=False, error="python-docx не установлен")
                 doc = docx.Document(str(file_path))
                 text = "\n".join(p.text for p in doc.paragraphs)
-                return TaskResult(success=True, output={"text": text}, metadata={"document_runtime_profile": build_document_runtime_profile(str(file_path), "document_parse"), **self.get_skill_pack()})
+                op_pack = build_document_operational_pack(path=str(file_path), capability="document_parse", source_exists=True, extracted_kind="docx_text")
+                return TaskResult(success=True, output={"text": text, "used_skills": op_pack["used_skills"], "evidence": op_pack["evidence"], "next_actions": op_pack["next_actions"], "recovery_hints": op_pack["recovery_hints"]}, metadata={"document_runtime_profile": build_document_runtime_profile(str(file_path), "document_parse"), "operational_pack": op_pack, **self.get_skill_pack()})
             if suffix == ".pdf":
                 try:
                     from pypdf import PdfReader
@@ -96,7 +102,8 @@ class DocumentAgent(BaseAgent):
                 pages = []
                 for page in reader.pages[:50]:
                     pages.append(page.extract_text() or "")
-                return TaskResult(success=True, output={"text": "\n".join(pages)}, metadata={"document_runtime_profile": build_document_runtime_profile(str(file_path), "document_parse"), **self.get_skill_pack()})
+                op_pack = build_document_operational_pack(path=str(file_path), capability="document_parse", source_exists=True, extracted_kind="pdf_text")
+                return TaskResult(success=True, output={"text": "\n".join(pages), "used_skills": op_pack["used_skills"], "evidence": op_pack["evidence"], "next_actions": op_pack["next_actions"], "recovery_hints": op_pack["recovery_hints"]}, metadata={"document_runtime_profile": build_document_runtime_profile(str(file_path), "document_parse"), "operational_pack": op_pack, **self.get_skill_pack()})
             if suffix in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff"}:
                 return await self.ocr_image(str(file_path))
             if suffix in {".mp4", ".mov", ".avi", ".mkv", ".webm"}:
@@ -109,10 +116,11 @@ class DocumentAgent(BaseAgent):
         file_path = Path(path).expanduser()
         if not file_path.exists():
             runtime_profile = build_document_runtime_profile(str(file_path), "image_ocr")
+            op_pack = build_document_operational_pack(path=str(file_path), capability="image_ocr", source_exists=False, extracted_kind="missing_source")
             return TaskResult(
                 success=True,
                 output={"status": "source_missing", "path": str(file_path), "next_actions": runtime_profile["next_actions"]},
-                metadata={"document_runtime_profile": runtime_profile, **self.get_skill_pack()},
+                metadata={"document_runtime_profile": runtime_profile, "operational_pack": op_pack, **self.get_skill_pack()},
             )
         try:
             from PIL import Image
@@ -125,7 +133,8 @@ class DocumentAgent(BaseAgent):
                 import pytesseract
 
                 text = pytesseract.image_to_string(img)
-                return TaskResult(success=True, output={"text": text}, metadata={"document_runtime_profile": build_document_runtime_profile(str(file_path), "image_ocr"), **self.get_skill_pack()})
+                op_pack = build_document_operational_pack(path=str(file_path), capability="image_ocr", source_exists=True, extracted_kind="ocr_text")
+                return TaskResult(success=True, output={"text": text, "used_skills": op_pack["used_skills"], "evidence": op_pack["evidence"], "next_actions": op_pack["next_actions"], "recovery_hints": op_pack["recovery_hints"]}, metadata={"document_runtime_profile": build_document_runtime_profile(str(file_path), "image_ocr"), "operational_pack": op_pack, **self.get_skill_pack()})
             except Exception:
                 try:
                     from tesserocr import PyTessBaseAPI
@@ -133,7 +142,8 @@ class DocumentAgent(BaseAgent):
                     with PyTessBaseAPI() as api:
                         api.SetImage(img)
                         text = api.GetUTF8Text()
-                    return TaskResult(success=True, output={"text": text}, metadata={"document_runtime_profile": build_document_runtime_profile(str(file_path), "image_ocr"), **self.get_skill_pack()})
+                    op_pack = build_document_operational_pack(path=str(file_path), capability="image_ocr", source_exists=True, extracted_kind="ocr_text")
+                    return TaskResult(success=True, output={"text": text, "used_skills": op_pack["used_skills"], "evidence": op_pack["evidence"], "next_actions": op_pack["next_actions"], "recovery_hints": op_pack["recovery_hints"]}, metadata={"document_runtime_profile": build_document_runtime_profile(str(file_path), "image_ocr"), "operational_pack": op_pack, **self.get_skill_pack()})
                 except Exception:
                     return TaskResult(success=False, error="OCR недоступен (нет pytesseract или tesserocr)")
         except Exception as e:
@@ -143,10 +153,11 @@ class DocumentAgent(BaseAgent):
         file_path = Path(path).expanduser()
         if not file_path.exists():
             runtime_profile = build_document_runtime_profile(str(file_path), "video_extract")
+            op_pack = build_document_operational_pack(path=str(file_path), capability="video_extract", source_exists=False, extracted_kind="missing_source")
             return TaskResult(
                 success=True,
                 output={"status": "source_missing", "path": str(file_path), "next_actions": runtime_profile["next_actions"]},
-                metadata={"document_runtime_profile": runtime_profile, **self.get_skill_pack()},
+                metadata={"document_runtime_profile": runtime_profile, "operational_pack": op_pack, **self.get_skill_pack()},
             )
         if not shutil.which("ffmpeg"):
             return TaskResult(success=False, error="ffmpeg не установлен")
@@ -175,7 +186,8 @@ class DocumentAgent(BaseAgent):
                     txt = res.output.get("text", "")
                     if txt.strip():
                         texts.append(txt.strip())
-            return TaskResult(success=True, output={"text": "\n".join(texts)}, metadata={"document_runtime_profile": build_document_runtime_profile(str(file_path), "video_extract"), **self.get_skill_pack()})
+            op_pack = build_document_operational_pack(path=str(file_path), capability="video_extract", source_exists=True, extracted_kind="video_ocr_text")
+            return TaskResult(success=True, output={"text": "\n".join(texts), "used_skills": op_pack["used_skills"], "evidence": op_pack["evidence"], "next_actions": op_pack["next_actions"], "recovery_hints": op_pack["recovery_hints"]}, metadata={"document_runtime_profile": build_document_runtime_profile(str(file_path), "video_extract"), "operational_pack": op_pack, **self.get_skill_pack()})
         except Exception as e:
             return TaskResult(success=False, error=str(e))
         finally:
@@ -187,8 +199,14 @@ class DocumentAgent(BaseAgent):
 
     async def create_doc(self, title: str, content_type: str = "technical", context: dict = None) -> TaskResult:
         runtime_profile = build_document_runtime_profile(str(title or "document"), "documentation")
+        op_pack = build_document_operational_pack(path=str(title or "document"), capability="documentation", source_exists=True, extracted_kind="generated_document")
         if not self.llm_router:
-            return TaskResult(success=True, output=self._local_doc(title, content_type, context), metadata={"mode": "local_fallback", "document_runtime_profile": runtime_profile, **self.get_skill_pack()})
+            local = self._local_doc(title, content_type, context)
+            local["used_skills"] = op_pack["used_skills"]
+            local["evidence"] = op_pack["evidence"]
+            local["next_actions"] = op_pack["next_actions"]
+            local["recovery_hints"] = op_pack["recovery_hints"]
+            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", "document_runtime_profile": runtime_profile, "operational_pack": op_pack, **self.get_skill_pack()})
         context_text = ""
         if context:
             context_text = "\nКонтекст:\n" + "\n".join(f"- {k}: {v}" for k, v in context.items())
@@ -200,12 +218,18 @@ class DocumentAgent(BaseAgent):
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
         self._record_expense(0.02, f"Doc: {title[:50]}")
-        return TaskResult(success=True, output=response, cost_usd=0.02, metadata={"document_runtime_profile": runtime_profile, **self.get_skill_pack()})
+        return TaskResult(success=True, output=response, cost_usd=0.02, metadata={"document_runtime_profile": runtime_profile, "operational_pack": op_pack, **self.get_skill_pack()})
 
     async def generate_report(self, report_type: str = "general", data: dict = None) -> TaskResult:
         runtime_profile = build_document_runtime_profile(str(report_type or "report"), "report")
+        op_pack = build_document_operational_pack(path=str(report_type or "report"), capability="report", source_exists=True, extracted_kind="generated_report")
         if not self.llm_router:
-            return TaskResult(success=True, output=self._local_report(report_type, data), metadata={"mode": "local_fallback", "document_runtime_profile": runtime_profile, **self.get_skill_pack()})
+            local = self._local_report(report_type, data)
+            local["used_skills"] = op_pack["used_skills"]
+            local["evidence"] = op_pack["evidence"]
+            local["next_actions"] = op_pack["next_actions"]
+            local["recovery_hints"] = op_pack["recovery_hints"]
+            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", "document_runtime_profile": runtime_profile, "operational_pack": op_pack, **self.get_skill_pack()})
         data_text = ""
         if data:
             data_text = "\nДанные:\n" + "\n".join(f"- {k}: {v}" for k, v in data.items())
@@ -217,7 +241,7 @@ class DocumentAgent(BaseAgent):
         if not response:
             return TaskResult(success=False, error="LLM не вернул ответ")
         self._record_expense(0.02, f"Report: {report_type}")
-        return TaskResult(success=True, output=response, cost_usd=0.02, metadata={"document_runtime_profile": runtime_profile, **self.get_skill_pack()})
+        return TaskResult(success=True, output=response, cost_usd=0.02, metadata={"document_runtime_profile": runtime_profile, "operational_pack": op_pack, **self.get_skill_pack()})
 
     async def update_knowledge_base(self, topic: str, content: str) -> TaskResult:
         if not self.memory:
@@ -228,7 +252,8 @@ class DocumentAgent(BaseAgent):
             metadata={"type": "knowledge_base", "topic": topic},
         )
         logger.info(f"База знаний обновлена: {topic}", extra={"event": "kb_updated"})
-        return TaskResult(success=True, output={"topic": topic, "status": "stored"}, metadata={"document_runtime_profile": build_document_runtime_profile(topic, "knowledge_base"), **self.get_skill_pack()})
+        op_pack = build_document_operational_pack(path=topic, capability="knowledge_base", source_exists=True, extracted_kind="knowledge_entry")
+        return TaskResult(success=True, output={"topic": topic, "status": "stored", "used_skills": op_pack["used_skills"], "evidence": op_pack["evidence"], "next_actions": op_pack["next_actions"], "recovery_hints": op_pack["recovery_hints"]}, metadata={"document_runtime_profile": build_document_runtime_profile(topic, "knowledge_base"), "operational_pack": op_pack, **self.get_skill_pack()})
 
     def _local_doc(self, title: str, content_type: str, context: dict | None) -> dict[str, Any]:
         return {

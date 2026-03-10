@@ -9,6 +9,7 @@ from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from config.paths import PROJECT_ROOT
 from llm_router import TaskType
+from modules.growth_research_operational import build_content_operational_pack
 from modules.growth_runtime import build_content_runtime_profile
 from modules.image_utils import write_placeholder_png
 from modules.listing_optimizer import optimize_listing_payload
@@ -79,7 +80,20 @@ class ContentCreator(BaseAgent):
         runtime_profile = build_content_runtime_profile(topic=topic, content_type="article", source_count=len(keywords or []))
         if not self.llm_router:
             output = self._local_article(topic, keywords)
-            return TaskResult(success=True, output=output["body"], metadata={**output, "content_runtime_profile": runtime_profile, **self.get_skill_pack()})
+            op_pack = build_content_operational_pack(
+                topic=topic,
+                platform="article",
+                asset_paths=[],
+                seo_score=0,
+                publish_ready=False,
+                tags=keywords or [],
+                category="article",
+            )
+            return TaskResult(
+                success=True,
+                output=output["body"],
+                metadata={**output, "content_runtime_profile": runtime_profile, "operational_pack": op_pack, **self.get_skill_pack()},
+            )
         kw = f"\nКлючевые слова: {', '.join(keywords)}" if keywords else ""
         prompt = f"Напиши подробную статью на тему: {topic}{kw}\nСтруктура: заголовок, введение, 3-5 разделов, заключение. 1500-2000 слов."
         response = await self._call_llm(task_type=TaskType.CONTENT, prompt=prompt, estimated_tokens=4000)
@@ -111,14 +125,16 @@ class ContentCreator(BaseAgent):
             ts = int(time.time())
             file_path = EBOOKS_DIR / f"{slug}_{ts}.md"
             file_path.write_text(text, encoding="utf-8")
-            return TaskResult(success=True, output=text, cost_usd=0.0, metadata={"file_path": str(file_path), "chapters": 1, "topic": topic, "content_runtime_profile": runtime_profile, **self.get_skill_pack()})
+            op_pack = build_content_operational_pack(topic=topic, platform="ebook", asset_paths=[str(file_path)], seo_score=0, publish_ready=False, category="ebook")
+            return TaskResult(success=True, output=text, cost_usd=0.0, metadata={"file_path": str(file_path), "chapters": 1, "topic": topic, "content_runtime_profile": runtime_profile, "operational_pack": op_pack, **self.get_skill_pack()})
         if not self.llm_router:
             local_text = self._local_ebook(topic, chapters)
             slug = _slugify(topic)
             ts = int(time.time())
             file_path = EBOOKS_DIR / f"{slug}_{ts}.md"
             file_path.write_text(local_text, encoding="utf-8")
-            return TaskResult(success=True, output=local_text, cost_usd=0.0, metadata={"file_path": str(file_path), "chapters": max(int(chapters or 0), 1), "topic": topic, "content_runtime_profile": runtime_profile, **self.get_skill_pack()})
+            op_pack = build_content_operational_pack(topic=topic, platform="ebook", asset_paths=[str(file_path)], seo_score=0, publish_ready=False, category="ebook")
+            return TaskResult(success=True, output=local_text, cost_usd=0.0, metadata={"file_path": str(file_path), "chapters": max(int(chapters or 0), 1), "topic": topic, "content_runtime_profile": runtime_profile, "operational_pack": op_pack, **self.get_skill_pack()})
         parts = []
         for i in range(1, chapters + 1):
             if not self.llm_router.check_daily_limit():
@@ -161,10 +177,12 @@ class ContentCreator(BaseAgent):
             ts = int(time.time())
             file_path = PRODUCTS_DIR / f"{platform}_{slug}_{ts}.md"
             file_path.write_text(text, encoding="utf-8")
-            return TaskResult(success=True, output=text, cost_usd=0.0, metadata={"file_path": str(file_path), "content_runtime_profile": runtime_profile, **self.get_skill_pack()})
+            op_pack = build_content_operational_pack(topic=product, platform=platform, asset_paths=[str(file_path)], seo_score=0, publish_ready=False, category=platform)
+            return TaskResult(success=True, output=text, cost_usd=0.0, metadata={"file_path": str(file_path), "content_runtime_profile": runtime_profile, "operational_pack": op_pack, **self.get_skill_pack()})
         if not self.llm_router:
             local = self._local_product_description(product, platform)
-            return TaskResult(success=True, output=local["body"], metadata={**local, "content_runtime_profile": runtime_profile, **self.get_skill_pack()})
+            op_pack = build_content_operational_pack(topic=product, platform=platform, asset_paths=[], seo_score=0, publish_ready=False, category=platform)
+            return TaskResult(success=True, output=local["body"], metadata={**local, "content_runtime_profile": runtime_profile, "operational_pack": op_pack, **self.get_skill_pack()})
         prompt = f"Напиши продающее описание для {platform}: {product}\nВключи: заголовок, описание, ключевые особенности, CTA."
         response = await self._call_llm(task_type=TaskType.CONTENT, prompt=prompt, estimated_tokens=1500)
         if not response:
@@ -318,4 +336,18 @@ class ContentCreator(BaseAgent):
             asset_paths=[str(pdf_path), str(cover_path), str(thumb_path)],
             source_count=3,
         )
-        return TaskResult(success=True, output=output, metadata={"file_path": str(product_md), "content_runtime_profile": runtime_profile, **self.get_skill_pack()})
+        op_pack = build_content_operational_pack(
+            topic=topic,
+            platform=platform,
+            asset_paths=[str(pdf_path), str(cover_path), str(thumb_path), str(product_md), str(seo_json)],
+            seo_score=listing.get("seo_score"),
+            publish_ready=listing.get("publish_ready"),
+            tags=listing.get("tags") or [],
+            category=str(listing.get("category") or ""),
+        )
+        output["used_skills"] = op_pack["used_skills"]
+        output["evidence"] = op_pack["evidence"]
+        output["next_actions"] = op_pack["next_actions"]
+        output["recovery_hints"] = op_pack["recovery_hints"]
+        output["quality_checks"] = op_pack["quality_checks"]
+        return TaskResult(success=True, output=output, metadata={"file_path": str(product_md), "content_runtime_profile": runtime_profile, "operational_pack": op_pack, **self.get_skill_pack()})

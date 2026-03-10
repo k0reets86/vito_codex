@@ -16,6 +16,7 @@ from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from config.settings import settings
 from llm_router import TaskType
+from modules.growth_research_operational import build_research_operational_pack
 from modules.research_family_runtime import build_research_runtime_profile
 from modules.research_report_store import save_full_report
 
@@ -340,6 +341,13 @@ class ResearchAgent(BaseAgent):
             source_failures=source_failures,
             fallback_reason="no_reliable_external_data" if not real_data else "",
         )
+        op_pack = build_research_operational_pack(
+            topic=topic,
+            sources=list(real_data.keys()),
+            overall_score=structured.get("overall_score", 0),
+            recommended_product=structured.get("recommended_product") or {},
+            report_path=report_path,
+        )
 
         return TaskResult(
             success=True,
@@ -360,6 +368,8 @@ class ResearchAgent(BaseAgent):
                 "judge_payload": judge_payload,
                 "research_runtime_profile": runtime_profile,
                 "next_actions": runtime_profile.get("next_actions") or [],
+                "operational_pack": op_pack,
+                "used_skills": op_pack["used_skills"],
                 **self.get_skill_pack(),
             },
         )
@@ -572,7 +582,12 @@ class ResearchAgent(BaseAgent):
                 "market_gaps": ["Need live synthesis for deeper competitor map"],
                 "sources": list(real_data.keys()),
             }
-            return TaskResult(success=True, output=local, metadata={"executive_summary": f"Fallback competitor scan for {niche}", "data_sources": list(real_data.keys()), "research_runtime_profile": runtime_profile, **self.get_skill_pack()})
+            op_pack = build_research_operational_pack(topic=niche, sources=list(real_data.keys()), overall_score=55 if real_data else 35, recommended_product={"title": niche, "platform": "analysis"}, report_path="")
+            local["used_skills"] = op_pack["used_skills"]
+            local["evidence"] = op_pack["evidence"]
+            local["next_actions"] = op_pack["next_actions"]
+            local["recovery_hints"] = op_pack["recovery_hints"]
+            return TaskResult(success=True, output=local, metadata={"executive_summary": f"Fallback competitor scan for {niche}", "data_sources": list(real_data.keys()), "research_runtime_profile": runtime_profile, "operational_pack": op_pack, **self.get_skill_pack()})
 
         data_context = ""
         for key, val in real_data.items():
@@ -624,11 +639,12 @@ class ResearchAgent(BaseAgent):
                         "sources": list(real_data.keys())},
             )
 
+        op_pack = build_research_operational_pack(topic=niche, sources=list(real_data.keys()), overall_score=60 if real_data else 40, recommended_product={"title": niche, "platform": "analysis"}, report_path="")
         return TaskResult(
             success=True,
             output=response,
             cost_usd=0.02,
-            metadata={"executive_summary": executive_summary, "data_sources": list(real_data.keys()), "research_runtime_profile": runtime_profile, **self.get_skill_pack()},
+            metadata={"executive_summary": executive_summary, "data_sources": list(real_data.keys()), "research_runtime_profile": runtime_profile, "operational_pack": op_pack, **self.get_skill_pack()},
         )
 
     async def market_analysis(self, product_type: str) -> TaskResult:
@@ -652,7 +668,12 @@ class ResearchAgent(BaseAgent):
                 "sources": list(real_data.keys()),
                 "opportunities": ["Collect live synthesis for stronger market sizing and positioning"],
             }
-            return TaskResult(success=True, output=local, metadata={"executive_summary": f"Fallback market scan for {product_type}", "data_sources": list(real_data.keys()), "research_runtime_profile": runtime_profile, **self.get_skill_pack()})
+            op_pack = build_research_operational_pack(topic=product_type, sources=list(real_data.keys()), overall_score=55 if real_data else 35, recommended_product={"title": product_type, "platform": "analysis"}, report_path="")
+            local["used_skills"] = op_pack["used_skills"]
+            local["evidence"] = op_pack["evidence"]
+            local["next_actions"] = op_pack["next_actions"]
+            local["recovery_hints"] = op_pack["recovery_hints"]
+            return TaskResult(success=True, output=local, metadata={"executive_summary": f"Fallback market scan for {product_type}", "data_sources": list(real_data.keys()), "research_runtime_profile": runtime_profile, "operational_pack": op_pack, **self.get_skill_pack()})
 
         data_context = ""
         for key, val in real_data.items():
@@ -704,11 +725,12 @@ class ResearchAgent(BaseAgent):
                         "sources": list(real_data.keys())},
             )
 
+        op_pack = build_research_operational_pack(topic=product_type, sources=list(real_data.keys()), overall_score=65 if real_data else 40, recommended_product={"title": product_type, "platform": "analysis"}, report_path="")
         return TaskResult(
             success=True,
             output=response,
             cost_usd=0.03,
-            metadata={"executive_summary": executive_summary, "data_sources": list(real_data.keys()), "research_runtime_profile": runtime_profile, **self.get_skill_pack()},
+            metadata={"executive_summary": executive_summary, "data_sources": list(real_data.keys()), "research_runtime_profile": runtime_profile, "operational_pack": op_pack, **self.get_skill_pack()},
         )
 
     # ── Utility ──

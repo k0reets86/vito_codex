@@ -14,6 +14,7 @@ from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from config.settings import settings
 from llm_router import TaskType
+from modules.growth_research_operational import build_trend_operational_pack
 from modules.network_utils import network_available
 from modules.research_family_runtime import build_trend_runtime_profile
 
@@ -150,6 +151,7 @@ class TrendScout(BaseAgent):
                         mode="pytrends_primary",
                         source_urls=search_terms,
                     ),
+                    "operational_pack": build_trend_operational_pack(mode="pytrends_primary", source_urls=search_terms, summary_items=trend_summary),
                     **self.get_skill_pack(),
                 },
             )
@@ -215,6 +217,7 @@ class TrendScout(BaseAgent):
                             source_urls=feeds,
                             fallback_reason=reason,
                         ),
+                        "operational_pack": build_trend_operational_pack(mode="fallback_llm", source_urls=feeds, fallback_reason=reason),
                         **self.get_skill_pack(),
                     },
                 )
@@ -238,12 +241,13 @@ class TrendScout(BaseAgent):
                 metadata={
                     "trend_runtime_profile": build_trend_runtime_profile(
                         mode="fallback_raw",
-                        source_urls=feeds,
-                        fallback_reason=reason,
-                    ),
-                    **self.get_skill_pack(),
-                },
-            )
+                            source_urls=feeds,
+                            fallback_reason=reason,
+                        ),
+                        "operational_pack": build_trend_operational_pack(mode="fallback_raw", source_urls=feeds, fallback_reason=reason),
+                        **self.get_skill_pack(),
+                    },
+                )
 
         return TaskResult(success=False, error=f"trend_fallback_failed:{reason}")
 
@@ -285,13 +289,19 @@ class TrendScout(BaseAgent):
 
     async def suggest_niches(self) -> TaskResult:
         if not self.llm_router:
-            return TaskResult(success=True, output=self._local_niches(), metadata={"mode": "local_fallback"})
+            local = self._local_niches()
+            op_pack = build_trend_operational_pack(mode="local_niches", source_urls=[], summary_items=local.get("niches"))
+            local["used_skills"] = op_pack["used_skills"]
+            local["evidence"] = op_pack["evidence"]
+            local["next_actions"] = op_pack["next_actions"]
+            local["recovery_hints"] = op_pack["recovery_hints"]
+            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", "operational_pack": op_pack})
         prompt = "Предложи 5-7 перспективных ниш для цифровых продуктов (ebooks, templates, курсы, SaaS). Для каждой укажи: название, уровень конкуренции, потенциал монетизации, рекомендуемые продукты."
         response = await self._call_llm(task_type=TaskType.STRATEGY, prompt=prompt, estimated_tokens=2500)
         if not response:
             return TaskResult(success=True, output=self._local_niches(), metadata={"mode": "local_fallback"})
         self._record_expense(0.03, "Suggest niches")
-        return TaskResult(success=True, output=response, cost_usd=0.03)
+        return TaskResult(success=True, output=response, cost_usd=0.03, metadata={"operational_pack": build_trend_operational_pack(mode="llm_niches", source_urls=[], summary_items=[]), **self.get_skill_pack()})
 
     def _local_niches(self) -> dict[str, Any]:
         return {

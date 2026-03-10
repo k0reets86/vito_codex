@@ -6,6 +6,7 @@ from typing import Any
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from llm_router import TaskType
+from modules.growth_research_operational import build_email_operational_pack
 from modules.growth_runtime import build_email_runtime_profile
 
 logger = get_logger("email_agent", agent="email_agent")
@@ -48,8 +49,21 @@ class EmailAgent(BaseAgent):
 
     async def create_newsletter(self, topic: str, audience: str, tone: str = "professional") -> TaskResult:
         local = self._local_newsletter(topic, audience, tone)
+        op_pack = build_email_operational_pack(
+            topic=topic,
+            audience=audience,
+            mode="single_send",
+            email_count=1,
+            subject=local.get("subject", ""),
+            cta=local.get("cta", ""),
+        )
+        local["used_skills"] = op_pack["used_skills"]
+        local["evidence"] = op_pack["evidence"]
+        local["next_actions"] = op_pack["next_actions"]
+        local["recovery_hints"] = op_pack["recovery_hints"]
+        local["quality_checks"] = op_pack["quality_checks"]
         if not self.llm_router:
-            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", "email_runtime_profile": build_email_runtime_profile(topic, audience), **self.get_skill_pack()})
+            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", "email_runtime_profile": build_email_runtime_profile(topic, audience), "operational_pack": op_pack, **self.get_skill_pack()})
         response = await self._call_llm(
             task_type=TaskType.CONTENT,
             prompt=f"Напиши email-рассылку.\nТема: {topic}\nАудитория: {audience}\nТон: {tone}\nВключи: subject line, preheader, тело письма, CTA.",
@@ -58,12 +72,25 @@ class EmailAgent(BaseAgent):
         if response:
             self._record_expense(0.01, f"Newsletter: {topic[:50]}")
             local["llm_notes"] = response
-        return TaskResult(success=True, output=local, cost_usd=0.01 if response else 0.0, metadata={"email_runtime_profile": build_email_runtime_profile(topic, audience), **self.get_skill_pack()})
+        return TaskResult(success=True, output=local, cost_usd=0.01 if response else 0.0, metadata={"email_runtime_profile": build_email_runtime_profile(topic, audience), "operational_pack": op_pack, **self.get_skill_pack()})
 
     async def create_sequence(self, goal: str, emails_count: int = 5) -> TaskResult:
         local = self._local_sequence(goal, emails_count)
+        op_pack = build_email_operational_pack(
+            topic=goal,
+            audience="sequence",
+            mode="sequence",
+            email_count=emails_count,
+            subject=str(((local.get("emails") or [{}])[0] or {}).get("subject") or ""),
+            cta=str(((local.get("emails") or [{}])[0] or {}).get("cta") or ""),
+        )
+        local["used_skills"] = op_pack["used_skills"]
+        local["evidence"] = op_pack["evidence"]
+        local["next_actions"] = op_pack["next_actions"]
+        local["recovery_hints"] = op_pack["recovery_hints"]
+        local["quality_checks"] = op_pack["quality_checks"]
         if not self.llm_router:
-            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", "email_runtime_profile": build_email_runtime_profile(goal, "sequence", emails_count), **self.get_skill_pack()})
+            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", "email_runtime_profile": build_email_runtime_profile(goal, "sequence", emails_count), "operational_pack": op_pack, **self.get_skill_pack()})
         response = await self._call_llm(
             task_type=TaskType.CONTENT,
             prompt=f"Создай email-автосерию из {emails_count} писем.\nЦель: {goal}\nДля каждого: subject, тело, CTA, интервал отправки.",
@@ -72,7 +99,7 @@ class EmailAgent(BaseAgent):
         if response:
             self._record_expense(0.02, f"Email sequence: {goal[:50]}")
             local["llm_notes"] = response
-        return TaskResult(success=True, output=local, cost_usd=0.02 if response else 0.0, metadata={"email_runtime_profile": build_email_runtime_profile(goal, "sequence", emails_count), **self.get_skill_pack()})
+        return TaskResult(success=True, output=local, cost_usd=0.02 if response else 0.0, metadata={"email_runtime_profile": build_email_runtime_profile(goal, "sequence", emails_count), "operational_pack": op_pack, **self.get_skill_pack()})
 
     async def manage_subscribers(self, action: str, data: dict) -> TaskResult:
         if action == "list":

@@ -12,13 +12,13 @@ _PACKS: dict[str, dict[str, Any]] = {
         "preferred_workflows": ["W01", "W02"],
     },
     "research_agent": {
-        "skills": ["iterative_market_research", "evidence_digest", "opportunity_scoring", "operator_ready_recommendation"],
-        "evidence": ["report_path", "data_sources", "overall_score", "recommended_product"],
+        "skills": ["iterative_market_research", "evidence_digest", "opportunity_scoring", "operator_ready_recommendation", "competitor_mapping", "market_gap_analysis", "judge_rework_loop"],
+        "evidence": ["report_path", "data_sources", "overall_score", "recommended_product", "operational_pack"],
         "preferred_workflows": ["W01", "W08"],
     },
     "trend_scout": {
-        "skills": ["multi_source_trend_scan", "fallback_trend_collection", "trend_signal_ranking", "niche_seed_generation"],
-        "evidence": ["trend_runtime_profile", "source_count", "fallback_reason", "next_actions"],
+        "skills": ["multi_source_trend_scan", "fallback_trend_collection", "trend_signal_ranking", "niche_seed_generation", "trend_conflict_detection", "signal_strength_review"],
+        "evidence": ["trend_runtime_profile", "source_count", "fallback_reason", "next_actions", "operational_pack"],
         "preferred_workflows": ["W01", "W08"],
     },
     "analytics_agent": {
@@ -27,8 +27,8 @@ _PACKS: dict[str, dict[str, Any]] = {
         "preferred_workflows": ["W03", "W06"],
     },
     "document_agent": {
-        "skills": ["document_ingest", "recovery_aware_parse", "ocr_extract", "knowledge_capture"],
-        "evidence": ["document_runtime_profile", "path", "next_actions", "source_status"],
+        "skills": ["document_ingest", "recovery_aware_parse", "ocr_extract", "knowledge_capture", "parser_selection", "source_integrity_check", "extract_quality_review"],
+        "evidence": ["document_runtime_profile", "path", "next_actions", "source_status", "operational_pack"],
         "preferred_workflows": ["W01", "W08"],
     },
     "browser_agent": {
@@ -57,13 +57,13 @@ _PACKS: dict[str, dict[str, Any]] = {
         "preferred_workflows": ["W05"],
     },
     "marketing_agent": {
-        "skills": ["channel_mix_strategy", "funnel_design", "ad_copy_packaging", "budget_profile_selection"],
-        "evidence": ["marketing_runtime_profile", "offer_angle", "channel_mix", "timeline"],
+        "skills": ["channel_mix_strategy", "funnel_design", "ad_copy_packaging", "budget_profile_selection", "offer_angle_selection", "campaign_test_mapping", "timeline_execution_mapping"],
+        "evidence": ["marketing_runtime_profile", "offer_angle", "channel_mix", "timeline", "operational_pack"],
         "preferred_workflows": ["W01", "W05", "W06"],
     },
     "email_agent": {
-        "skills": ["newsletter_packaging", "sequence_planning", "subscriber_management", "send_readiness_checks"],
-        "evidence": ["email_runtime_profile", "subject", "cta", "audience"],
+        "skills": ["newsletter_packaging", "sequence_planning", "subscriber_management", "send_readiness_checks", "subject_line_packaging", "audience_alignment", "cadence_planning"],
+        "evidence": ["email_runtime_profile", "subject", "cta", "audience", "operational_pack"],
         "preferred_workflows": ["W05"],
     },
     "publisher_agent": {
@@ -105,6 +105,11 @@ _PACKS: dict[str, dict[str, Any]] = {
         "skills": ["candidate_shortlisting", "partner_scoring", "referral_tracking", "collaboration_pitching"],
         "evidence": ["partnership_runtime_profile", "candidate_count", "top_candidates", "proposal"],
         "preferred_workflows": ["growth_pipeline", "W05"],
+    },
+    "content_creator": {
+        "skills": ["article_drafting", "ebook_packaging", "listing_copy_building", "asset_manifest_assembly", "platform_fit_copy_packaging", "listing_seo_alignment", "content_quality_self_check"],
+        "evidence": ["content_runtime_profile", "file_path", "asset_paths", "operational_pack"],
+        "preferred_workflows": ["W01", "W02", "W05"],
     },
 }
 
