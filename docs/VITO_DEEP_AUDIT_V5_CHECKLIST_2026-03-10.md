@@ -24,8 +24,8 @@
 
 ## P1
 4. `SkillLibrary.retrieve()` semantic merge
-- Статус: `partial`
-- Аргумент: semantic merge с Chroma knowledge уже добавлен, но это еще не полный deep semantic retrieval layer с отдельной проверкой recall/precision.
+- Статус: `done`
+- Аргумент: `SkillLibrary.retrieve()` теперь делает semantic merge с weighted reranking (`token recall + usage/success + semantic relevance + task_family hint`), а semantic dominance покрыта отдельным тестом.
 
 5. `record_lesson()` в BaseAgent / AgentRegistry
 - Статус: `done`

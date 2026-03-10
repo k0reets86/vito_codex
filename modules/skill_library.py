@@ -191,7 +191,7 @@ class VITOSkillLibrary:
 
     def retrieve(self, query: str, n: int = 5, category: str | None = None) -> list[dict[str, Any]]:
         query_tokens = {tok for tok in _norm_text(query).split() if tok}
-        semantic_names: list[str] = []
+        semantic_scores: dict[str, float] = {}
         try:
             mm = self.memory or MemoryManager()
             if getattr(mm, "_chroma_doc_count", 0) > 0:
@@ -199,10 +199,11 @@ class VITOSkillLibrary:
                 for hit in hits:
                     meta = hit.get("metadata") or {}
                     name = str(meta.get("name") or meta.get("skill_name") or "").strip()
-                    if name and name not in semantic_names:
-                        semantic_names.append(name)
+                    if name:
+                        rel = float(hit.get("relevance") or 0.0)
+                        semantic_scores[name] = max(semantic_scores.get(name, 0.0), rel)
         except Exception:
-            semantic_names = []
+            semantic_scores = {}
         conn = self._conn()
         try:
             rows = conn.execute("SELECT * FROM skill_library WHERE status = 'active'").fetchall()
@@ -225,16 +226,27 @@ class VITOSkillLibrary:
             )
             hay_tokens = {tok for tok in _norm_text(hay).split() if tok}
             overlap = len(query_tokens & hay_tokens)
+            token_recall = (
+                len(query_tokens & hay_tokens) / max(1, len(query_tokens))
+                if query_tokens else 0.0
+            )
             usage_bonus = min(5.0, float(item.get("usage_count") or 0) * 0.1)
             success_rate = 0.0
             usage = float(item.get("usage_count") or 0)
             if usage > 0:
                 success_rate = float(item.get("success_count") or 0) / usage
-            score = float(overlap) + usage_bonus + success_rate
+            score = float(overlap) + usage_bonus + success_rate + (token_recall * 1.5)
             name = str(item.get("name") or "").strip()
-            if name in semantic_names:
-                score += max(2.0, float(len(semantic_names) - semantic_names.index(name)))
+            semantic_boost = float(semantic_scores.get(name, 0.0))
+            if semantic_boost > 0:
+                score += 3.0 + (semantic_boost * 4.0)
+            metadata = item.get("metadata") or {}
+            if query_tokens and any(tok in query_tokens for tok in _norm_text(str(metadata.get("task_family") or "")).split()):
+                score += 1.0
             if score > 0:
+                item["retrieval_score"] = round(score, 6)
+                if semantic_boost > 0:
+                    item["semantic_score"] = round(semantic_boost, 6)
                 scored.append((score, item))
         scored.sort(key=lambda x: (-x[0], str(x[1].get("name") or "")))
         return [item for _, item in scored[: max(1, int(n or 5))]]
