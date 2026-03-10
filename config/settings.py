@@ -233,6 +233,7 @@ class Settings:
     REVENUE_ENGINE_LIVE_MAX_RUNNING_AGE_SEC: int = int(os.getenv("REVENUE_ENGINE_LIVE_MAX_RUNNING_AGE_SEC", "0") or 0)
     REVENUE_ENGINE_LIVE_REQUIRE_QUEUE_STATS: bool = os.getenv("REVENUE_ENGINE_LIVE_REQUIRE_QUEUE_STATS", "true").lower() in ("1", "true", "yes", "on")
     REVENUE_ENGINE_LIVE_REQUIRE_BROWSER_RUNTIME: bool = os.getenv("REVENUE_ENGINE_LIVE_REQUIRE_BROWSER_RUNTIME", "false").lower() in ("1", "true", "yes", "on")
+    BROWSER_AUTOMATION_ENGINE: str = os.getenv("BROWSER_AUTOMATION_ENGINE", "auto")
     REVENUE_ENGINE_LIVE_REQUIRE_SESSION_COOKIE: bool = os.getenv("REVENUE_ENGINE_LIVE_REQUIRE_SESSION_COOKIE", "false").lower() in ("1", "true", "yes", "on")
     GUMROAD_SESSION_COOKIE_FILE: str = os.getenv("GUMROAD_SESSION_COOKIE_FILE", "/tmp/gumroad_cookie.txt")
     REVENUE_ENGINE_PUBLISH_TIMEOUT_SEC: int = int(os.getenv("REVENUE_ENGINE_PUBLISH_TIMEOUT_SEC", "45") or 45)

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch, call
 import pytest
 
 from agents.base_agent import TaskResult
+from config.settings import settings
 
 
 class TestBrowserAgent:
@@ -138,6 +139,31 @@ class TestBrowserAgent:
             assert result.success is False
             assert result.error == "auth_interrupt"
             assert result.output["auth_interrupt"]["type"] == "otp_required"
+
+
+def test_browser_engine_preference_defaults_to_auto(monkeypatch):
+    from agents.browser_agent import _browser_engine_preference
+
+    monkeypatch.setattr(settings, "BROWSER_AUTOMATION_ENGINE", "weird")
+    assert _browser_engine_preference() == "auto"
+
+
+def test_resolve_browser_engine_falls_back_to_playwright(monkeypatch):
+    import builtins
+    from agents.browser_agent import _resolve_browser_engine
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name.startswith("patchright.async_api"):
+            raise ImportError("no patchright")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(settings, "BROWSER_AUTOMATION_ENGINE", "auto")
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    engine, factory = _resolve_browser_engine()
+    assert engine == "playwright"
+    assert callable(factory)
 
     @pytest.mark.asyncio
     async def test_fill_form_uses_default_screenshot_for_screenshot_first_service(self, agent):

@@ -118,6 +118,32 @@ def _browser_user_agent() -> str:
     return random.choice(pool)
 
 
+def _browser_engine_preference() -> str:
+    engine = str(getattr(settings, "BROWSER_AUTOMATION_ENGINE", "auto") or "auto").strip().lower()
+    return engine if engine in {"auto", "playwright", "patchright"} else "auto"
+
+
+def _resolve_browser_engine() -> tuple[str, Any]:
+    preferred = _browser_engine_preference()
+    errors: list[str] = []
+    if preferred in {"auto", "patchright"}:
+        try:
+            from patchright.async_api import async_playwright as async_patchright
+
+            return "patchright", async_patchright
+        except Exception as e:
+            errors.append(f"patchright:{e}")
+            if preferred == "patchright":
+                raise RuntimeError("patchright_unavailable")
+    try:
+        from playwright.async_api import async_playwright
+
+        return "playwright", async_playwright
+    except Exception as e:
+        errors.append(f"playwright:{e}")
+    raise RuntimeError("browser_engine_unavailable:" + " | ".join(errors))
+
+
 def _stealth_init_script() -> str:
     return """
 Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
@@ -139,6 +165,7 @@ class BrowserAgent(BaseAgent):
     _instance: Optional["BrowserAgent"] = None
     _browser = None
     _playwright_inst = None
+    _browser_engine = "playwright"
     _lock: Optional[asyncio.Lock] = None
     _page_sem: Optional[asyncio.Semaphore] = None
 
@@ -174,8 +201,6 @@ class BrowserAgent(BaseAgent):
             if BrowserAgent._browser is not None and self._context is not None:
                 return
             try:
-                from playwright.async_api import async_playwright
-
                 # Resource guard: проверяем есть ли RAM для Chromium (~300MB)
                 if not resource_guard.can_proceed(estimated_mb=300):
                     logger.warning(
@@ -192,8 +217,10 @@ class BrowserAgent(BaseAgent):
                 for attempt in range(1, 4):
                     try:
                         _set_memory_limit()
+                        engine_name, engine_factory = _resolve_browser_engine()
                         if BrowserAgent._playwright_inst is None:
-                            BrowserAgent._playwright_inst = await async_playwright().start()
+                            BrowserAgent._playwright_inst = await engine_factory().start()
+                            BrowserAgent._browser_engine = engine_name
                         BrowserAgent._browser = await BrowserAgent._playwright_inst.chromium.launch(
                             headless=True,
                             args=_chromium_launch_args(),
@@ -209,8 +236,8 @@ class BrowserAgent(BaseAgent):
                         if bool(getattr(settings, "BROWSER_STEALTH_ENABLED", True)):
                             await self._context.add_init_script(_stealth_init_script())
                         logger.info(
-                            f"Playwright Chromium запущен (attempt={attempt})",
-                            extra={"event": "browser_started", "context": {"attempt": attempt}},
+                            f"{BrowserAgent._browser_engine} Chromium запущен (attempt={attempt})",
+                            extra={"event": "browser_started", "context": {"attempt": attempt, "engine": BrowserAgent._browser_engine}},
                         )
                         return
                     except Exception as e:

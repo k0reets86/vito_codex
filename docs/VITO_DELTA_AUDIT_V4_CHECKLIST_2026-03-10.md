@@ -67,9 +67,9 @@
 - Почему не закрыто: сам `comms_agent.py` все еще слишком большой и требует дальнейшего выноса routing/deferred execution/auth lanes в отдельные модули.
 
 10. `SEC-3` — `HumanBrowser` не переведен на `patchright`
-- Статус: `not_done`
-- Что сделано: безопасный browser runtime слой добавлен, но миграции на `patchright` нет.
-- Почему не закрыто: browser resilience улучшен, но именно этот пункт из аудита остается открытым.
+- Статус: `partial`
+- Что сделано: browser stack теперь умеет `auto / playwright / patchright` backend selection через [browser_agent.py](/home/vito/vito-agent/agents/browser_agent.py) и `BROWSER_AUTOMATION_ENGINE`.
+- Почему не закрыто: это еще не полная миграция/боевое подтверждение `patchright` как основного backend-а; пока закрыт инфраструктурный слой совместимости и безопасный fallback.
 
 11. `MEM-1` — `search_episodes()` без relevance scoring
 - Статус: `done`
@@ -256,8 +256,8 @@
 - Обоснование: реализован через `oauth-auto` в helper.
 
 50. `Prompt C` — patchright migration
-- Статус: `not_done`
-- Обоснование: не реализовывалось.
+- Статус: `partial`
+- Обоснование: добавлен runtime backend selector и основа для controlled migration, но полноценный production rollout `patchright` пока не проведен.
 
 51. `Prompt D` — OpportunityScout real LLM
 - Статус: `done`
