@@ -447,7 +447,10 @@ class CommsAgent:
     def __init__(self):
         self._bot: Optional[Bot] = None
         self._app: Optional[Application] = None
-        self._owner_id: int = int(settings.TELEGRAM_OWNER_CHAT_ID)
+        try:
+            self._owner_id = int(str(getattr(settings, "TELEGRAM_OWNER_CHAT_ID", "") or "0").strip())
+        except Exception:
+            self._owner_id = 0
         self._notify_mode: str = getattr(settings, "NOTIFY_MODE", "minimal")
 
         # Очередь запросов на одобрение: request_id → asyncio.Future
@@ -2267,8 +2270,9 @@ class CommsAgent:
             "prepared": bool(prepared_guess),
         }
         await send_reply(
-            "Не смог стабильно открыть окно ввода кода Amazon. "
-            "Пришли 6-значный код из Amazon/Authenticator — попробую прямой вход."
+            "Нужен 6-значный код из Amazon/Authenticator. "
+            "Пришли 6-значный код — не смог стабильно открыть окно ввода кода Amazon, "
+            "но попробую прямой вход по коду."
             f"{summary}"
         )
         logger.warning(
