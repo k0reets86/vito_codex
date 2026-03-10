@@ -3,51 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from modules.platform_knowledge import get_service_knowledge
-from modules.platform_policy_packs import build_service_policy_pack
-
-
-RUNBOOK_REQUIREMENTS: dict[str, dict[str, Any]] = {
-    "etsy": {
-        "required_artifacts": ["title", "description", "price", "category", "tags", "main_file", "images"],
-        "verify_points": ["editor_reload", "file_attached", "image_count", "tags_confirmed", "materials_confirmed"],
-        "preferred_actions": ["create_once", "fill_details", "attach_file", "attach_images", "reload_verify"],
-    },
-    "gumroad": {
-        "required_artifacts": ["title", "summary", "description", "category", "tags", "main_file", "cover", "thumbnail", "preview_gallery"],
-        "verify_points": ["draft_confirmed", "main_file_attached", "cover_confirmed", "preview_confirmed", "thumbnail_confirmed", "public_page"],
-        "preferred_actions": ["create_once", "content_pdf", "cover_upload", "thumbnail_upload", "save_and_continue", "reload_verify"],
-    },
-    "amazon_kdp": {
-        "required_artifacts": ["details", "description", "keywords", "categories", "manuscript", "cover", "pricing"],
-        "verify_points": ["bookshelf", "content_reload", "manuscript_uploaded", "cover_uploaded", "pricing_persisted"],
-        "preferred_actions": ["resume_existing", "fill_details", "upload_content", "save_draft", "pricing_reload_verify"],
-    },
-    "printful": {
-        "required_artifacts": ["design_file", "template", "mockups", "details", "sync_target"],
-        "verify_points": ["template_saved", "publish_wizard", "etsy_edit_url"],
-        "preferred_actions": ["open_product_page", "upload_design", "apply_design", "save_template", "publish_to_etsy"],
-    },
-    "kofi": {
-        "required_artifacts": ["title", "description", "price", "file_or_link"],
-        "verify_points": ["shop_settings_reload", "public_product_url"],
-        "preferred_actions": ["authenticate", "open_shop_settings", "fill_product", "save_verify"],
-    },
-    "twitter": {
-        "required_artifacts": ["text", "media_or_link"],
-        "verify_points": ["permalink"],
-        "preferred_actions": ["compose", "post", "verify_permalink"],
-    },
-    "pinterest": {
-        "required_artifacts": ["title", "description", "image", "link"],
-        "verify_points": ["pin_page", "description", "outbound_link"],
-        "preferred_actions": ["create_pin", "fill_fields", "publish", "verify_pin_page"],
-    },
-    "reddit": {
-        "required_artifacts": ["community", "title", "body_or_link", "image_optional", "flair_if_required"],
-        "verify_points": ["submit_result", "post_url"],
-        "preferred_actions": ["read_rules", "open_submit", "fill_form", "submit", "verify_post"],
-    },
-}
+from modules.platform_requirements import RUNBOOK_REQUIREMENTS
+from modules.platform_runtime_registry import get_runtime_entry
 
 
 def _service_alias(service: str) -> str:
@@ -76,6 +33,7 @@ def _dedupe_strings(values: list[str]) -> list[str]:
 
 def build_service_runbook_pack(service: str) -> dict[str, Any]:
     svc = _service_alias(service)
+    runtime_entry = get_runtime_entry(svc)
     knowledge = get_service_knowledge(svc)
     base = RUNBOOK_REQUIREMENTS.get(svc, {})
     success_rows = list((knowledge.get("success_runbooks") or [])[-5:])
@@ -98,22 +56,29 @@ def build_service_runbook_pack(service: str) -> dict[str, Any]:
         if isinstance(evidence, dict):
             evidence_keys.extend([str(k) for k in evidence.keys()])
 
-    policy_pack = build_service_policy_pack(svc)
     return {
         "service": svc,
-        "required_artifacts": list(base.get("required_artifacts") or []),
-        "verify_points": list(base.get("verify_points") or []),
-        "preferred_actions": list(base.get("preferred_actions") or []),
-        "recommended_steps": _dedupe_strings(lessons)[:20],
-        "avoid_patterns": _dedupe_strings(anti_patterns)[:20],
-        "evidence_keys_seen": _dedupe_strings(evidence_keys)[:20],
-        "known_urls": _dedupe_strings(urls)[:10],
+        "required_artifacts": list(runtime_entry.get("required_artifacts") or base.get("required_artifacts") or []),
+        "verify_points": list(runtime_entry.get("verify_points") or base.get("verify_points") or []),
+        "preferred_actions": list(runtime_entry.get("preferred_actions") or base.get("preferred_actions") or []),
+        "recommended_steps": _dedupe_strings(list(runtime_entry.get("recommended_steps") or []) + lessons)[:20],
+        "avoid_patterns": _dedupe_strings(list(runtime_entry.get("avoid_patterns") or []) + anti_patterns)[:20],
+        "evidence_keys_seen": _dedupe_strings(list(runtime_entry.get("evidence_keys_seen") or []) + evidence_keys)[:20],
+        "known_urls": _dedupe_strings(list(runtime_entry.get("known_urls") or []) + urls)[:10],
         "recent_success_count": len(success_rows),
         "recent_failure_count": len(failure_rows),
         "updated_at": str(knowledge.get("updated_at") or ""),
-        "policy_pack": policy_pack,
-        "policy_notes": list(policy_pack.get("policy_notes") or [])[:20],
-        "rules_updates": list(policy_pack.get("rules_updates") or [])[:5],
+        "policy_pack": {
+            "service": svc,
+            "policy_section_titles": list(runtime_entry.get("policy_section_titles") or [])[:20],
+            "policy_notes": list(runtime_entry.get("policy_notes") or [])[:30],
+            "rules_updates": list(runtime_entry.get("rules_updates") or [])[:10],
+            "has_policy_knowledge": bool(runtime_entry.get("policy_section_titles") or runtime_entry.get("policy_notes")),
+            "has_rules_updates": bool(runtime_entry.get("rules_updates") or []),
+        },
+        "policy_notes": list(runtime_entry.get("policy_notes") or [])[:20],
+        "rules_updates": list(runtime_entry.get("rules_updates") or [])[:5],
+        "runtime_registry": runtime_entry,
     }
 
 

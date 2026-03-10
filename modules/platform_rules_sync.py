@@ -15,6 +15,7 @@ from config.logger import get_logger
 from config.paths import PROJECT_ROOT
 from config.settings import settings
 from modules.platform_knowledge import append_entry
+from modules.platform_runtime_registry import get_runtime_entry
 
 logger = get_logger("platform_rules_sync", agent="platform_rules_sync")
 
@@ -145,6 +146,10 @@ def sync_platform_rules(
                             f"Excerpt: {excerpt[:1000]}"
                         ),
                     )
+                except Exception:
+                    pass
+                try:
+                    get_runtime_entry(src.service, refresh=True)
                 except Exception:
                     pass
             checked.append({"service": src.service, "url": src.url, "status": "ok", "hash": digest})

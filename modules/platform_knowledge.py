@@ -126,6 +126,11 @@ def record_platform_lesson(
     if ev:
         md_lines.append(f"Evidence: {json.dumps(ev, ensure_ascii=False)[:1000]}")
     append_entry(f"{svc} lesson", "\n".join(md_lines))
+    try:
+        from modules.platform_runtime_registry import get_runtime_entry
+        get_runtime_entry(svc, refresh=True)
+    except Exception:
+        pass
 
 
 def search_entries(query: str, limit: int = 5) -> list[dict]:

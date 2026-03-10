@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from modules.platform_knowledge import search_entries as search_platform_knowledge
+from modules.platform_runtime_registry import get_runtime_entry
 
 
 class KnowledgeConsolidator:
@@ -64,15 +65,23 @@ class KnowledgeConsolidator:
         seen: set[str] = set()
         for service in services:
             try:
-                rows = search_platform_knowledge(service, limit=limit)
+                entry = get_runtime_entry(service)
             except Exception:
-                rows = []
-            for row in rows:
-                key = str(row.get("service") or "")
-                if key in seen:
-                    continue
+                entry = {}
+            key = str(entry.get("service") or service or "")
+            if key and key not in seen:
                 seen.add(key)
-                hits.append(row)
+                hits.append(
+                    {
+                        "service": key,
+                        "content": " ".join(
+                            list(entry.get("policy_notes") or [])[:8]
+                            + list(entry.get("recommended_steps") or [])[:8]
+                            + list(entry.get("avoid_patterns") or [])[:6]
+                        )[:4000],
+                        "runtime_entry": entry,
+                    }
+                )
         try:
             rows = search_platform_knowledge(query, limit=limit)
         except Exception:
@@ -82,6 +91,10 @@ class KnowledgeConsolidator:
             if key in seen:
                 continue
             seen.add(key)
+            try:
+                row["runtime_entry"] = get_runtime_entry(key)
+            except Exception:
+                row["runtime_entry"] = {}
             hits.append(row)
         return hits[:limit]
 
