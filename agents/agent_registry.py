@@ -8,10 +8,11 @@
   - Диспетчеризация задач к подходящему агенту
 """
 
+import asyncio
 import json
 import time
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from agents.base_agent import BaseAgent, TaskResult
 from config.logger import get_logger
@@ -285,17 +286,20 @@ class AgentRegistry:
                 delegations = orchestration_plan.get("delegations", []) if isinstance(orchestration_plan, dict) else []
                 delegation_results: list[dict] = []
                 if delegations and orchestration_depth < 2:
+                    prepared_delegations: list[tuple[str, dict[str, Any]]] = []
                     for item in delegations:
                         cap = ""
-                        d_kwargs: dict = {}
+                        d_kwargs: dict[str, Any] = {}
                         if isinstance(item, str):
                             cap = item.strip()
                         elif isinstance(item, dict):
                             cap = str(item.get("capability") or "").strip()
                             if isinstance(item.get("kwargs"), dict):
                                 d_kwargs = dict(item.get("kwargs") or {})
-                        if not cap:
-                            continue
+                        if cap:
+                            prepared_delegations.append((cap, d_kwargs))
+
+                    async def _run_delegation(cap: str, d_kwargs: dict[str, Any]) -> dict[str, Any]:
                         delegated = await self.dispatch(
                             cap,
                             __orchestration_depth=orchestration_depth + 1,
@@ -314,14 +318,31 @@ class AgentRegistry:
                             social_image_id=task_kwargs.get("social_image_id"),
                             **d_kwargs,
                         )
-                        delegation_results.append(
-                            {
-                                "capability": cap,
-                                "success": bool(delegated and delegated.success),
-                                "output": getattr(delegated, "output", None),
-                                "error": getattr(delegated, "error", None),
-                            }
+                        return {
+                            "capability": cap,
+                            "success": bool(delegated and delegated.success),
+                            "output": getattr(delegated, "output", None),
+                            "error": getattr(delegated, "error", None),
+                        }
+
+                    if prepared_delegations:
+                        delegated_rows = await asyncio.gather(
+                            *[_run_delegation(cap, d_kwargs) for cap, d_kwargs in prepared_delegations],
+                            return_exceptions=True,
                         )
+                        for index, row in enumerate(delegated_rows):
+                            cap = prepared_delegations[index][0]
+                            if isinstance(row, Exception):
+                                delegation_results.append(
+                                    {
+                                        "capability": cap,
+                                        "success": False,
+                                        "output": None,
+                                        "error": str(row),
+                                    }
+                                )
+                            else:
+                                delegation_results.append(row)
                     try:
                         task_kwargs = agent.consume_delegation_results(task_type, task_kwargs, delegation_results)
                     except Exception:

@@ -99,8 +99,8 @@
 - Аргумент: есть benchmarks, failure substrate и autonomy oversight, но отдельного health monitor по агентам с dynamic degradation logic еще нет.
 
 22. `registry.dispatch()` fan-out / parallel delegations`
-- Статус: `not_done`
-- Аргумент: handoff substrate есть, но dispatch по-прежнему в основном синхронный lane.
+- Статус: `done`
+- Аргумент: `AgentRegistry.dispatch()` теперь исполняет orchestration `delegations` через `asyncio.gather()` с сохранением порядка результатов, fail-safe сбором ошибок и регрессионным тестом на реальный parallel fan-out.
 
 23. `decision_loop` sequential `_maybe_run_*``
 - Статус: `done`

@@ -1,5 +1,6 @@
 """Тесты AgentRegistry — 8 тестов."""
 
+import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
@@ -85,6 +86,52 @@ class FakeOwnerOrchestratingAgent(BaseAgent):
     async def execute_task(self, task_type: str, **kwargs) -> TaskResult:
         delegated = kwargs.get("delegated", [])
         return TaskResult(success=True, output={"status": "ok", "delegations_seen": len(delegated)})
+
+
+class FakeParallelOwnerAgent(BaseAgent):
+    def __init__(self, name, caps, **kwargs):
+        super().__init__(name=name, description=f"Fake parallel owner {name}", **kwargs)
+        self._caps = caps
+
+    @property
+    def capabilities(self) -> list[str]:
+        return self._caps
+
+    def build_task_orchestration(self, task_type: str, **kwargs) -> dict:
+        return {
+            "delegations": [
+                {"capability": "helper_one"},
+                {"capability": "helper_two"},
+            ],
+        }
+
+    def consume_delegation_results(self, task_type: str, task_kwargs: dict, delegation_results: list[dict]) -> dict:
+        merged = dict(task_kwargs)
+        merged["delegated"] = delegation_results
+        return merged
+
+    async def execute_task(self, task_type: str, **kwargs) -> TaskResult:
+        delegated = kwargs.get("delegated") or []
+        return TaskResult(success=True, output={"status": "ok", "delegated": delegated})
+
+
+class SlowHelperAgent(BaseAgent):
+    def __init__(self, name, caps, delay: float = 0.05, **kwargs):
+        super().__init__(name=name, description=f"Slow helper {name}", **kwargs)
+        self._caps = caps
+        self._delay = delay
+        self.started_at = None
+        self.finished_at = None
+
+    @property
+    def capabilities(self) -> list[str]:
+        return self._caps
+
+    async def execute_task(self, task_type: str, **kwargs) -> TaskResult:
+        self.started_at = asyncio.get_event_loop().time()
+        await asyncio.sleep(self._delay)
+        self.finished_at = asyncio.get_event_loop().time()
+        return TaskResult(success=True, output={"helper": self.name, "task": task_type})
 
 
 class FakeResearchAgent(BaseAgent):
@@ -277,6 +324,31 @@ class TestRegistryDispatch:
         assert result.success is False
         assert "verification_" in (result.error or "")
         assert "quality_review" in (result.error or "")
+
+    @pytest.mark.asyncio
+    async def test_dispatch_runs_delegations_in_parallel(self):
+        registry = AgentRegistry()
+        owner = FakeParallelOwnerAgent("owner_parallel", ["parallel_cap"])
+        helper_one = SlowHelperAgent("helper_one_agent", ["helper_one"], delay=0.06)
+        helper_two = SlowHelperAgent("helper_two_agent", ["helper_two"], delay=0.06)
+        registry.register(owner)
+        registry.register(helper_one)
+        registry.register(helper_two)
+
+        await registry._ensure_started(owner)
+        await registry._ensure_started(helper_one)
+        await registry._ensure_started(helper_two)
+
+        result = await registry.dispatch("parallel_cap")
+
+        assert result is not None
+        assert result.success is True
+        delegated = list(result.output.get("delegated") or [])
+        assert len(delegated) == 2
+        assert {row.get("capability") for row in delegated} == {"helper_one", "helper_two"}
+        assert helper_one.started_at is not None and helper_one.finished_at is not None
+        assert helper_two.started_at is not None and helper_two.finished_at is not None
+        assert helper_two.started_at < helper_one.finished_at
 
     @pytest.mark.asyncio
     async def test_dispatch_research_keeps_output_on_verification_reject(self):
