@@ -74,6 +74,15 @@ class CurriculumAgent(BaseAgent):
         learnings = self.reflector.get_recent(n=10, category="strategy")
         active = self._get_active_goals()
         prefs = self.owner_model.get_preferences()
+        skill_query = " ".join([str(g.get("title") or "") for g in active[:3]]) or "autonomy digital product runtime"
+        related_skills = self.skill_lib.retrieve(skill_query, n=5, category="commerce_execution") + self.skill_lib.retrieve(
+            "goal planning strategy optimization", n=3
+        )
+        used_skills = []
+        for item in related_skills:
+            name = str(item.get("name") or "").strip()
+            if name and name not in used_skills:
+                used_skills.append(name)
         goals = []
         if self.llm_router:
             prompt = CURRICULUM_PROMPT.format(
@@ -81,13 +90,38 @@ class CurriculumAgent(BaseAgent):
                 recent_learnings="\n".join(learnings),
                 active_goals=json.dumps(active, ensure_ascii=False),
                 owner_preferences=json.dumps(prefs, ensure_ascii=False),
+            ) + (
+                "\n\nRELEVANT SKILLS:\n"
+                + json.dumps(
+                    [
+                        {"name": item.get("name"), "description": item.get("description"), "trigger": item.get("trigger_hint")}
+                        for item in related_skills[:5]
+                    ],
+                    ensure_ascii=False,
+                )
             )
             raw = await self._call_llm(task_type=TaskType.RESEARCH, prompt=prompt, estimated_tokens=800)
             goals = _extract_json_list(raw)
         if not goals:
             goals = self._fallback_goals(state)
         approved = self.owner_model.filter_goals(goals)
-        return {"generated_at": datetime.now(timezone.utc).isoformat(), "goals": approved[:3], "state": state}
+        for skill_name in used_skills[:5]:
+            try:
+                self.skill_lib.record_use(skill_name, success=True)
+            except Exception:
+                pass
+        return {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "goals": approved[:3],
+            "state": state,
+            "used_skills": used_skills[:5],
+            "runtime_profile": {
+                "active_goal_count": len(active),
+                "recent_learning_count": len(learnings),
+                "owner_risk": str(prefs.get("risk_appetite") or "medium"),
+                "skill_support": used_skills[:5],
+            },
+        }
 
     async def prioritize_goals(self, goals: list[dict[str, Any]]) -> dict[str, Any]:
         ranked = sorted(

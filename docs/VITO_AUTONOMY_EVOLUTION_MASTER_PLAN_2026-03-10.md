@@ -133,6 +133,9 @@ Definition of done:
    - proposal -> owner visibility -> approval/deferral -> execution
 4. archive of successful improvements and reflections
 5. stronger use of `skill_library` in planning/runtime
+6. persistent autonomy proposal store
+7. persistent autonomy schedule state
+8. formal autonomy benchmark matrix and reportable scoring
 
 Definition of done:
 - autonomy triad работает не как декоративный слой, а как operational subsystem.

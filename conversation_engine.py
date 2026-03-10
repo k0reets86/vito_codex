@@ -34,6 +34,7 @@ from modules.owner_preference_model import OwnerPreferenceModel
 from modules.conversation_memory import ConversationMemory
 from modules.cancel_state import CancelState
 from modules.owner_task_state import OwnerTaskState
+from modules.autonomy_proposals import AutonomyProposalStore
 from modules.status_snapshot import build_status_snapshot, render_status_snapshot
 from modules.telegram_command_compiler import compile_owner_message, parse_owner_message_structured
 from llm_router import LLMRouter, TaskType, MODEL_REGISTRY
@@ -105,6 +106,7 @@ class ConversationEngine:
         self.cancel_state = cancel_state
         self.owner_task_state = owner_task_state
         self.owner_model = OwnerModel()
+        self.autonomy_proposals = AutonomyProposalStore()
         self._session_id = "default"
         self._defer_owner_actions = False
         self._context: list[Turn] = []
@@ -181,6 +183,18 @@ class ConversationEngine:
                     return {"response": response, "intent": Intent.QUESTION.value}
             except Exception:
                 pass
+        autonomy_continuation = self._maybe_continue_from_autonomy_proposals(text)
+        if autonomy_continuation is not None:
+            try:
+                self._ensure_owner_task_state(text, autonomy_continuation.get("intent"))
+                self._add_turn("user", text, Intent.SYSTEM_ACTION if autonomy_continuation.get("intent") == Intent.SYSTEM_ACTION.value else Intent.QUESTION)
+                if autonomy_continuation.get("response"):
+                    self._add_turn("assistant", autonomy_continuation["response"])
+                    self.owner_model.update_from_interaction(text, autonomy_continuation["response"])
+            except Exception:
+                pass
+            autonomy_continuation["nlu_tones"] = self._detect_tone(text)
+            return autonomy_continuation
         if self.owner_task_state:
             try:
                 active = self.owner_task_state.get_active() or {}
@@ -417,6 +431,49 @@ class ConversationEngine:
                     "- KDP: книжная версия для Kindle/print, если продукт идет как книга или workbook."
                 ),
             }
+        autonomy_kw = ("предлож", "идеи", "автоном", "что нашел", "что нашёл", "opportunit", "opportunity")
+        if self._has_keywords(normalized, autonomy_kw, fuzzy=True):
+            items = self.autonomy_proposals.list_open(limit=5)
+            if not items:
+                return {"intent": Intent.QUESTION.value, "response": "Автономных предложений пока нет."}
+            lines = ["Текущие автономные предложения:"]
+            for idx, item in enumerate(items, start=1):
+                payload = dict(item.get("payload") or {})
+                lines.append(
+                    f"{idx}. {str(item.get('title') or '').strip()} — "
+                    f"{str(item.get('proposal_kind') or '').strip()} "
+                    f"(score={round(float(item.get('score') or 0.0), 2)})"
+                )
+                why = str(payload.get("why") or payload.get("rationale") or "").strip()
+                if why:
+                    lines.append(f"   {why[:160]}")
+            lines.append("Можно ответить номером, «одобряю 2», «отложи 1» или «запускай 3».")
+            try:
+                if self.owner_task_state:
+                    active = self.owner_task_state.get_active() or {}
+                    if not active:
+                        self.owner_task_state.set_active(
+                            text=text,
+                            source="telegram",
+                            intent=Intent.QUESTION.value,
+                            force=False,
+                            metadata={
+                                "autonomy_lane": True,
+                            },
+                        )
+                    proposal_ids = [
+                        int(item.get("proposal_id") or 0)
+                        for item in items[:5]
+                        if int(item.get("proposal_id") or 0) > 0
+                    ]
+                    self.owner_task_state.enrich_active(
+                        autonomy_proposal_ids_json=json.dumps(proposal_ids, ensure_ascii=False),
+                        autonomy_selected_json="",
+                        autonomy_selected_proposal_id="",
+                    )
+            except Exception:
+                pass
+            return {"intent": Intent.QUESTION.value, "response": "\n".join(lines)}
 
         net_kw = ("интернет", "network", "сеть", "доступ к интернет", "online")
         check_kw = ("проверь", "check", "есть ли", "доступ")
@@ -1724,6 +1781,28 @@ class ConversationEngine:
                 f"- Каналы: {', '.join(channels)}\n"
                 "- Контур: пост/пин + ссылка + краткий launch copy."
             )
+        if action == "run_autonomy_proposal":
+            from goal_engine import GoalPriority
+            proposal = dict(params.get("proposal") or {})
+            proposal_id = int(params.get("proposal_id") or 0)
+            title = str(proposal.get("title") or "Autonomy proposal").strip()[:180]
+            rationale = str(proposal.get("why") or proposal.get("rationale") or "")[:1000]
+            kind = str(params.get("proposal_kind") or proposal.get("type") or "autonomy").strip()
+            if self.goal_engine:
+                self.goal_engine.create_goal(
+                    title=title,
+                    description=rationale,
+                    priority=GoalPriority.MEDIUM,
+                    source=f"autonomy:{kind}",
+                    estimated_cost_usd=0.03,
+                    estimated_roi=float(proposal.get("expected_revenue") or 0),
+                )
+            if proposal_id > 0:
+                try:
+                    self.autonomy_proposals.mark_status(proposal_id, "executed", note="goal_created_via_conversation_engine")
+                except Exception:
+                    pass
+            return f"Автономное предложение запущено: {title}"
 
         if action == "run_improvement_cycle":
             request = str(params.get("request") or "").strip()
@@ -1999,6 +2078,7 @@ class ConversationEngine:
             allowed.add("run_printful_etsy_sync")
             allowed.add("run_improvement_cycle")
             allowed.add("autonomous_execute")
+            allowed.add("run_autonomy_proposal")
         return allowed
 
     async def _autonomous_execute(self, request: str) -> str:
@@ -2611,6 +2691,107 @@ class ConversationEngine:
             "actions": [{"action": "run_product_pipeline", "params": {"topic": topic, "platforms": platforms, "auto_publish": True}}],
             "needs_confirmation": False,
         }
+
+    def _maybe_continue_from_autonomy_proposals(self, text: str) -> dict[str, Any] | None:
+        if not self.owner_task_state:
+            return None
+        try:
+            active = self.owner_task_state.get_active() or {}
+        except Exception:
+            active = {}
+        try:
+            proposal_ids = json.loads(str(active.get("autonomy_proposal_ids_json") or "[]"))
+        except Exception:
+            proposal_ids = []
+        proposals: list[dict[str, Any]] = []
+        if isinstance(proposal_ids, list):
+            for raw_id in proposal_ids[:5]:
+                try:
+                    proposal_id = int(raw_id or 0)
+                except Exception:
+                    proposal_id = 0
+                if proposal_id <= 0:
+                    continue
+                item = self.autonomy_proposals.get(proposal_id)
+                if isinstance(item, dict):
+                    proposals.append(item)
+        if not proposals:
+            raw = str(active.get("autonomy_proposals_json") or "").strip()
+            if not raw:
+                return None
+            try:
+                proposals = json.loads(raw)
+            except Exception:
+                return None
+            if not isinstance(proposals, list) or not proposals:
+                return None
+        lower = str(text or "").strip().lower()
+        choice_match = re.search(r"(?<!\d)([1-5])(?!\d)", lower)
+        selected_idx = int(choice_match.group(1)) if choice_match else 0
+        selected = None
+        if selected_idx and 1 <= selected_idx <= len(proposals):
+            candidate = proposals[selected_idx - 1]
+            if isinstance(candidate, dict):
+                selected = candidate
+        else:
+            try:
+                selected_id = int(active.get("autonomy_selected_proposal_id") or 0)
+            except Exception:
+                selected_id = 0
+            if selected_id > 0:
+                selected = self.autonomy_proposals.get(selected_id)
+            elif str(active.get("autonomy_selected_json") or "").strip():
+                try:
+                    selected = json.loads(str(active.get("autonomy_selected_json")))
+                except Exception:
+                    selected = None
+        if selected_idx and selected:
+            try:
+                self.owner_task_state.enrich_active(
+                    autonomy_selected_index=selected_idx,
+                    autonomy_selected_proposal_id=int(selected.get("proposal_id") or 0),
+                    autonomy_selected_json="",
+                    autonomy_selected_title=str(selected.get("title") or "")[:180],
+                )
+            except Exception:
+                pass
+            if lower.isdigit() or "вариант" in lower:
+                return {
+                    "intent": Intent.QUESTION.value,
+                    "response": (
+                        f"Зафиксировал автономное предложение {selected_idx}: "
+                        f"{str(selected.get('title') or '').strip()}. "
+                        "Можно ответить «одобряю», «отложи» или «запускай»."
+                    ),
+                }
+        if not isinstance(selected, dict):
+            return None
+        proposal_id = int(selected.get("proposal_id") or 0)
+        if any(tok in lower for tok in ("отлож", "потом", "не сейчас", "defer")):
+            if proposal_id > 0:
+                self.autonomy_proposals.mark_status(proposal_id, "deferred", note="owner_deferred")
+            return {"intent": Intent.QUESTION.value, "response": "Отложил предложение. Оно останется в списке."}
+        if any(tok in lower for tok in ("нет", "отклон", "reject")):
+            if proposal_id > 0:
+                self.autonomy_proposals.mark_status(proposal_id, "rejected", note="owner_rejected")
+            return {"intent": Intent.QUESTION.value, "response": "Отклонил предложение и убрал его из активных."}
+        if any(tok in lower for tok in ("одобр", "да", "запуск", "делай", "run")):
+            if proposal_id > 0:
+                self.autonomy_proposals.mark_status(proposal_id, "approved", note="owner_approved")
+            return {
+                "intent": Intent.SYSTEM_ACTION.value,
+                "response": f"Принял. Запускаю автономное предложение: {str(selected.get('title') or '').strip()}",
+                "actions": [{
+                    "action": "run_autonomy_proposal",
+                    "params": {
+                        "proposal_id": proposal_id,
+                        "proposal_kind": str(selected.get("proposal_kind") or ""),
+                        "proposal": dict(selected.get("payload") or {}),
+                    },
+                }],
+                "needs_confirmation": False,
+            }
+        return None
 
     def _quick_spend(self) -> str:
         spend = self.llm_router.get_daily_spend() if self.llm_router else 0.0

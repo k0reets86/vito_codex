@@ -719,6 +719,29 @@ async def test_process_message_recommended_choice_honors_platform_override(mock_
 
 
 @pytest.mark.asyncio
+async def test_process_message_autonomy_proposal_lifecycle(mock_llm_router, mock_memory, tmp_path):
+    owner_state = OwnerTaskState(path=tmp_path / "owner_task_state.json")
+    engine = ConversationEngine(llm_router=mock_llm_router, memory=mock_memory, owner_task_state=owner_state)
+    stored = engine.autonomy_proposals.upsert_batch(
+        "opportunity_scout",
+        "opportunity",
+        [
+            {"title": "Meme launch pack", "rationale": "fresh trend", "expected_revenue": 100, "confidence": 0.8},
+            {"title": "Creator planner", "rationale": "broad demand", "expected_revenue": 80, "confidence": 0.7},
+        ],
+    )
+    ask = await engine.process_message("покажи автономные предложения")
+    assert "Текущие автономные предложения" in ask["response"]
+    pick = await engine.process_message("2")
+    assert "Зафиксировал автономное предложение 2" in pick["response"]
+    run = await engine.process_message("запускай")
+    assert run["actions"][0]["action"] == "run_autonomy_proposal"
+    proposal_id = int(stored[1]["proposal_id"])
+    current = engine.autonomy_proposals.get(proposal_id)
+    assert current["status"] == "approved"
+
+
+@pytest.mark.asyncio
 async def test_execute_actions_blocks_unknown_action_without_auto_self_improve(mock_llm_router, mock_memory):
     registry = MagicMock()
     registry.dispatch = AsyncMock()

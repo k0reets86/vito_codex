@@ -50,6 +50,8 @@ from modules.runtime_remediation import (
     record_safe_action_outcome,
 )
 from modules.reflector import VITOReflector
+from modules.autonomy_proposals import AutonomyProposalStore
+from modules.autonomy_schedule import AutonomyScheduleState
 from modules.skill_library import VITOSkillLibrary
 
 TICK_INTERVAL = 300  # 5 минут
@@ -108,6 +110,8 @@ class DecisionLoop:
         self._last_opportunity_scout_tick = 0
         self._last_curriculum_tick = 0
         self._last_self_evolver_tick = 0
+        self.autonomy_proposals = AutonomyProposalStore(sqlite_path=_runtime_sqlite_path(goal_engine))
+        self.autonomy_schedule = AutonomyScheduleState(sqlite_path=_runtime_sqlite_path(goal_engine))
         self._kdp_watchdog_state: dict[str, Any] = self._load_kdp_watchdog_state()
         self._current_interrupt_id: int | None = None
         self._current_goal_id: str | None = None
@@ -2922,39 +2926,70 @@ class DecisionLoop:
 
     async def _maybe_run_opportunity_scout(self) -> None:
         interval = max(12, int(getattr(settings, "AUTONOMY_SCOUT_INTERVAL_TICKS", 72) or 72))
-        if self._tick_count - int(self._last_opportunity_scout_tick or 0) < interval:
+        if not self.autonomy_schedule.is_due("opportunity_scout", self._tick_count, interval):
             return
         result = await self.agent_registry.dispatch("scan_opportunities")
         if result and result.success and self.memory:
+            payload = dict(result.output or {}) if isinstance(result.output, dict) else {}
             self.memory.store_knowledge(
                 doc_id=f"opportunity_scout_{self._tick_count}",
                 text=str(result.output)[:3000],
                 metadata={"type": "opportunity_proposals", "tick": self._tick_count},
             )
+            proposals = list(payload.get("proposals") or [])
+            stored = self.autonomy_proposals.upsert_batch("opportunity_scout", "opportunity", proposals)
+            if stored:
+                self.memory.store_knowledge(
+                    doc_id=f"opportunity_scout_store_{self._tick_count}",
+                    text=json.dumps(stored[:5], ensure_ascii=False),
+                    metadata={"type": "autonomy_proposal_store", "tick": self._tick_count, "source": "opportunity_scout"},
+                )
+        self.autonomy_schedule.mark_run("opportunity_scout", self._tick_count, interval)
         self._last_opportunity_scout_tick = self._tick_count
 
     async def _maybe_run_curriculum_review(self) -> None:
         interval = max(12, int(getattr(settings, "AUTONOMY_CURRICULUM_INTERVAL_TICKS", 72) or 72))
-        if self._tick_count - int(self._last_curriculum_tick or 0) < interval:
+        if not self.autonomy_schedule.is_due("curriculum_review", self._tick_count, interval):
             return
         result = await self.agent_registry.dispatch("generate_goals")
         if result and result.success and self.memory:
+            payload = dict(result.output or {}) if isinstance(result.output, dict) else {}
             self.memory.store_knowledge(
                 doc_id=f"curriculum_goals_{self._tick_count}",
                 text=str(result.output)[:3000],
                 metadata={"type": "curriculum_goals", "tick": self._tick_count},
             )
+            goals = list(payload.get("goals") or [])
+            stored = self.autonomy_proposals.upsert_batch("curriculum_agent", "goal", goals)
+            if stored:
+                self.memory.store_knowledge(
+                    doc_id=f"curriculum_goals_store_{self._tick_count}",
+                    text=json.dumps(stored[:5], ensure_ascii=False),
+                    metadata={"type": "autonomy_proposal_store", "tick": self._tick_count, "source": "curriculum_agent"},
+                )
+        self.autonomy_schedule.mark_run("curriculum_review", self._tick_count, interval)
         self._last_curriculum_tick = self._tick_count
 
     async def _maybe_run_self_evolver_weekly(self) -> None:
         interval = max(288, int(getattr(settings, "AUTONOMY_SELF_EVOLVER_INTERVAL_TICKS", 2016) or 2016))
-        if self._tick_count - int(self._last_self_evolver_tick or 0) < interval:
+        if not self.autonomy_schedule.is_due("self_evolver_weekly", self._tick_count, interval):
             return
         evolver_v2 = getattr(self, "_self_evolver_v2", None)
         if evolver_v2 is not None:
-            await evolver_v2.execute_task("weekly_evolve_cycle", baseline_score=0.7)
+            result = await evolver_v2.execute_task("weekly_evolve_cycle", baseline_score=0.7)
         else:
-            await self.agent_registry.dispatch("weekly_improve_cycle")
+            result = await self.agent_registry.dispatch("weekly_improve_cycle")
+        if result and result.success:
+            payload = dict(result.output or {}) if isinstance(result.output, dict) else {}
+            proposals = list(payload.get("proposals") or [])
+            stored = self.autonomy_proposals.upsert_batch("self_evolver", "improvement", proposals)
+            if stored and self.memory:
+                self.memory.store_knowledge(
+                    doc_id=f"self_evolver_store_{self._tick_count}",
+                    text=json.dumps(stored[:5], ensure_ascii=False),
+                    metadata={"type": "autonomy_proposal_store", "tick": self._tick_count, "source": "self_evolver"},
+                )
+        self.autonomy_schedule.mark_run("self_evolver_weekly", self._tick_count, interval)
         self._last_self_evolver_tick = self._tick_count
 
     async def _maybe_create_autonomy_goal(self) -> bool:

@@ -8,6 +8,7 @@ from agents.base_agent import BaseAgent, TaskResult
 from llm_router import TaskType
 from modules.owner_model import OwnerModel
 from modules.reflector import VITOReflector
+from modules.skill_library import VITOSkillLibrary
 
 
 class OpportunityScout(BaseAgent):
@@ -21,6 +22,7 @@ class OpportunityScout(BaseAgent):
         super().__init__(name="opportunity_scout", description="Проактивный сканер рыночных возможностей", **kwargs)
         self.owner_model = OwnerModel()
         self.reflector = VITOReflector()
+        self.skill_lib = VITOSkillLibrary()
 
     @property
     def capabilities(self) -> list[str]:
@@ -38,9 +40,27 @@ class OpportunityScout(BaseAgent):
         research_result = await self.ask("research", silent=True, topic="digital product trends and low competition opportunities")
         success_patterns = self.reflector.get_recent(n=5, category="ecommerce")
         prefs = self.owner_model.get_preferences()
-        proposals = await self._build_proposals(trend_result, research_result, success_patterns, prefs)
+        skill_query = f"{getattr(trend_result, 'output', '')} {getattr(research_result, 'output', '')}".strip() or "digital products opportunities"
+        related_skills = self.skill_lib.retrieve(skill_query, n=5)
+        proposals = await self._build_proposals(trend_result, research_result, success_patterns, prefs, related_skills)
         filtered = self.owner_model.filter_goals(proposals)
-        return {"generated_at": datetime.now(timezone.utc).isoformat(), "proposals": filtered[:3]}
+        used_skills = [str(item.get("name") or "").strip() for item in related_skills if str(item.get("name") or "").strip()]
+        for skill_name in used_skills[:5]:
+            try:
+                self.skill_lib.record_use(skill_name, success=True)
+            except Exception:
+                pass
+        return {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "proposals": filtered[:3],
+            "used_skills": used_skills[:5],
+            "runtime_profile": {
+                "trend_signal_present": bool(str(getattr(trend_result, "output", "") or "").strip()),
+                "research_signal_present": bool(str(getattr(research_result, "output", "") or "").strip()),
+                "skill_support": used_skills[:5],
+                "owner_risk": str(prefs.get("risk_appetite") or "medium"),
+            },
+        }
 
     @staticmethod
     def _extract_json_list(raw: str) -> list[dict[str, Any]]:
@@ -61,7 +81,7 @@ class OpportunityScout(BaseAgent):
                 return [x for x in data if isinstance(x, dict)]
         return []
 
-    async def _build_proposals(self, trend_result, research_result, success_patterns: list[str], prefs: dict[str, Any]) -> list[dict[str, Any]]:
+    async def _build_proposals(self, trend_result, research_result, success_patterns: list[str], prefs: dict[str, Any], related_skills: list[dict[str, Any]]) -> list[dict[str, Any]]:
         trend_text = str(getattr(trend_result, "output", "") or "")[:1500]
         research_text = str(getattr(research_result, "output", "") or "")[:1500]
         prompt = (
@@ -73,6 +93,7 @@ class OpportunityScout(BaseAgent):
             f"TREND DATA:\n{trend_text[:1200]}\n\n"
             f"RESEARCH DATA:\n{research_text[:1200]}\n\n"
             f"SUCCESS PATTERNS:\n{json.dumps(success_patterns[:3], ensure_ascii=False)}\n\n"
+            f"RELEVANT SKILLS:\n{json.dumps([{'name': s.get('name'), 'description': s.get('description')} for s in related_skills[:5]], ensure_ascii=False)}\n\n"
             f"OWNER PREFERENCES:\n{json.dumps(prefs, ensure_ascii=False)}\n\n"
             "Generate personalized opportunities for monetization and execution."
         )

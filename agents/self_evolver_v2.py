@@ -5,9 +5,11 @@ from typing import Any
 
 from agents.base_agent import BaseAgent, TaskResult
 from modules.apply_engine import ApplyEngine
+from modules.autonomy_runtime import build_self_evolve_runtime_profile
 from modules.evolution_archive import EvolutionArchive
 from modules.module_discovery import ModuleDiscovery
 from modules.sandbox_manager import SandboxManager
+from modules.skill_library import VITOSkillLibrary
 from modules.vito_benchmarks import VITOBenchmarks
 
 
@@ -25,6 +27,7 @@ class SelfEvolverV2(BaseAgent):
         self.discovery = discovery
         self.reflector = reflector
         self.archive = archive or EvolutionArchive()
+        self.skill_lib = VITOSkillLibrary()
 
     @property
     def capabilities(self) -> list[str]:
@@ -53,6 +56,12 @@ class SelfEvolverV2(BaseAgent):
 
     async def propose_and_benchmark(self, candidates: list[dict[str, Any]], baseline_score: float) -> dict[str, Any]:
         result = self.benchmarks.evaluate(candidates, baseline_score=baseline_score)
+        used_skills = [str(item.get("name") or "").strip() for item in self.skill_lib.retrieve("self healing benchmarks runtime", n=4)]
+        for skill_name in used_skills[:4]:
+            try:
+                self.skill_lib.record_use(skill_name, success=bool(result.get("approved")))
+            except Exception:
+                pass
         if self.reflector and hasattr(self.reflector, 'reflect'):
             try:
                 maybe = self.reflector.reflect(
@@ -73,6 +82,14 @@ class SelfEvolverV2(BaseAgent):
             payload={"baseline_score": baseline_score, "candidates": candidates, "result": result},
             success=bool(result.get("approved")),
         )
+        result = dict(result or {})
+        result["used_skills"] = used_skills[:4]
+        result["runtime_profile"] = build_self_evolve_runtime_profile(
+            proposal_count=len(candidates or []),
+            issue_buckets={},
+            owner_alignment=False,
+        )
+        result["archive_ref"] = "self_evolve_v2:benchmark_proposals"
         return result
 
     async def weekly_evolve_cycle(self, queries: list[str] | None = None, baseline_score: float = 0.0) -> dict[str, Any]:
@@ -89,7 +106,15 @@ class SelfEvolverV2(BaseAgent):
             for item in list(discovered.get("items") or []):
                 candidates.append(item)
         result = await self.propose_and_benchmark(candidates, baseline_score=baseline_score)
-        payload = {"queries": search_terms, "candidate_count": len(candidates), "result": result}
+        payload = {
+            "queries": search_terms,
+            "candidate_count": len(candidates),
+            "result": result,
+            "proposals": list((result or {}).get("candidates") or candidates)[:4] if isinstance(result, dict) else candidates[:4],
+            "used_skills": list((result or {}).get("used_skills") or []),
+            "runtime_profile": dict((result or {}).get("runtime_profile") or {}),
+            "archive_ref": "self_evolve_cycle:weekly_evolve_cycle",
+        }
         self.archive.record(
             archive_type="self_evolve_cycle",
             title="weekly_evolve_cycle",

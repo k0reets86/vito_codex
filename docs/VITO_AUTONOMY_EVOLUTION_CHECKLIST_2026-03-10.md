@@ -8,7 +8,7 @@
   - `not_done`
   - `paused_blocked`
 
-Общий прогресс: `46%`
+Общий прогресс: `68%`
 
 ## Phase AE1 — Evolution Engine Foundations
 1. `SandboxManager`
@@ -62,32 +62,32 @@
 
 ## Phase AE3 — Autonomy Runtime Completion
 13. `CurriculumAgent formal benchmark coverage`
-- Status: `partial`
-- Почему: агент есть, но нет отдельного autonomy benchmark lane.
+- Status: `done`
+- Почему: добавлен formal autonomy benchmark layer (`modules/autonomy_benchmark_matrix.py`), `CurriculumAgent` теперь отдает `runtime_profile` и `used_skills`, покрыт тестами и входит в matrix scoring.
 
 14. `OpportunityScout formal benchmark coverage`
-- Status: `partial`
-- Почему: агент есть, но нет полного benchmark/runtime score pack.
+- Status: `done`
+- Почему: `OpportunityScout` теперь использует `SkillLibrary`, отдает `runtime_profile` и `used_skills`, включен в formal autonomy benchmark matrix.
 
 15. `SelfEvolver autonomy benchmark coverage`
-- Status: `partial`
-- Почему: runtime есть, но benchmark contract неполный.
+- Status: `done`
+- Почему: `SelfEvolverV2` теперь отдает `runtime_profile`, `archive_ref`, `used_skills`, а benchmark contract формализован через autonomy matrix.
 
 16. `Daily/weekly autonomy schedule hooks`
-- Status: `partial`
-- Почему: части циклов есть, но не как законченный autonomy schedule.
+- Status: `done`
+- Почему: добавлен `modules/autonomy_schedule.py`, `DecisionLoop` переведен на persistent due-check/mark-run для scout/curriculum/self-evolver циклов.
 
 17. `Owner proposal lifecycle`
-- Status: `partial`
-- Почему: proposals есть, но approval/deferral/execution цикл не формализован полностью.
+- Status: `done`
+- Почему: добавлен `modules/autonomy_proposals.py`, `ConversationEngine` умеет показывать предложения, фиксировать выбор, approve/defer/reject и запускать их как goal-backed execution.
 
 18. `Archive of successful improvements`
-- Status: `not_done`
-- Почему: отдельный formal archive не реализован.
+- Status: `done`
+- Почему: `EvolutionArchive` уже встроен в `SelfHealerV2/SelfEvolverV2`, а autonomy proposal lifecycle теперь имеет persistent execution history в `AutonomyProposalStore`.
 
 19. `SkillLibrary deeply influences planning/runtime`
-- Status: `partial`
-- Почему: влияние есть, но не везде и не как строгий governor.
+- Status: `done`
+- Почему: `CurriculumAgent`, `OpportunityScout`, `SelfEvolverV2` теперь используют retrieval из `SkillLibrary`, возвращают `used_skills` и записывают skill-use в runtime.
 
 ## Phase AE4 — Discovery / Overseer / Governance
 20. `Weekly automated module discovery`
