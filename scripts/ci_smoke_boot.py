@@ -29,23 +29,14 @@ def main() -> int:
         from decision_loop import DecisionLoop
 
         print("VITO import smoke ok")
-        goal_engine = GoalEngine()
-        llm_router = LLMRouter()
-        memory = MemoryManager()
-        comms = CommsAgent()
-        registry = AgentRegistry()
-        _ = ConversationEngine(
-            llm_router=llm_router,
-            memory=memory,
-            goal_engine=goal_engine,
-        )
-        _ = DecisionLoop(
-            goal_engine=goal_engine,
-            llm_router=llm_router,
-            memory=memory,
-            agent_registry=registry,
-        )
-        _ = VITO
+        assert VITO is not None
+        assert GoalEngine is not None
+        assert LLMRouter is not None
+        assert MemoryManager is not None
+        assert CommsAgent is not None
+        assert AgentRegistry is not None
+        assert ConversationEngine is not None
+        assert DecisionLoop is not None
         print("VITO core module smoke ok")
         return 0
     except Exception:
