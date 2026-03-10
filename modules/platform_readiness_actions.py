@@ -61,6 +61,16 @@ def _run_python(script_rel: str) -> tuple[bool, str]:
     return proc.returncode == 0, detail
 
 
+def _run_platform_probe(service: str) -> tuple[bool, str]:
+    svc = str(service or '').strip().lower()
+    specific = {
+        'etsy': 'scripts/etsy_owner_grade_probe.py',
+    }.get(svc)
+    if specific and (PROJECT_ROOT / specific).exists():
+        return _run_python(specific)
+    return _run_python('scripts/platform_live_validation_wave.py')
+
+
 def execute_platform_readiness_action(
     *,
     service: str,
@@ -84,7 +94,7 @@ def execute_platform_readiness_action(
         }
 
     if act.startswith('run_probe:'):
-        ok, detail = _run_python('scripts/platform_live_validation_wave.py')
+        ok, detail = _run_platform_probe(svc)
         report = _read_json(_latest_wave_report()) if _latest_wave_report() else {}
         check = _find_service_check(report, svc)
         state = str(check.get('state') or '').strip().lower()

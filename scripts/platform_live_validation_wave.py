@@ -130,20 +130,24 @@ def _check_twitter() -> dict[str, Any]:
 def _check_etsy() -> dict[str, Any]:
     path = RUNTIME / "etsy_owner_grade_probe.json"
     data = _load_json(path) or {}
+    redirected_to_signin = "/signin" in str(data.get("url") or "")
     ok = bool(
         data.get("ok")
         and data.get("body_has_instant_download")
         and data.get("body_has_materials")
         and data.get("body_has_category")
+        and data.get("body_has_pdf")
+        and int(data.get("image_count") or 0) > 0
     )
-    # Keep partial until file/media proof is stronger.
     return {
         "platform": "etsy",
         "mode": "editor_probe",
+        "url": str(data.get("url") or ""),
         "source": str(path),
         "signals": data,
-        "owner_grade_ok": False,
-        "state": "partial" if ok else "blocked",
+        "owner_grade_ok": ok,
+        "blocker": "missing_session" if redirected_to_signin else "",
+        "state": "owner_grade" if ok else ("blocked" if redirected_to_signin else "partial"),
     }
 
 

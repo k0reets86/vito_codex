@@ -5,6 +5,7 @@ from modules.platform_readiness import assess_platform_readiness
 from modules.comms_views import render_platform_readiness_summary
 from modules.status_snapshot import build_status_snapshot, render_status_snapshot
 from modules.service_session_registry import save_service_sessions
+from modules.platform_validation_registry import save_platform_validation_registry, update_platform_validation
 
 
 def test_assess_platform_readiness_marks_missing_session(tmp_path, monkeypatch):
@@ -14,6 +15,7 @@ def test_assess_platform_readiness_marks_missing_session(tmp_path, monkeypatch):
     reports.mkdir(parents=True, exist_ok=True)
 
     save_service_sessions({})
+    save_platform_validation_registry({})
     results = assess_platform_readiness(["etsy"])
     assert results[0]["service"] == "etsy"
     assert results[0]["blocker"] == "missing_session"
@@ -34,11 +36,33 @@ def test_assess_platform_readiness_can_validate_when_session_and_probe_exist(tmp
             }
         }
     )
+    save_platform_validation_registry({})
     results = assess_platform_readiness(["etsy"])
     assert results[0]["session_present"] is True
     assert results[0]["probe_present"] is True
     assert results[0]["can_validate_now"] is True
     assert results[0]["recommended_action"] == "owner_grade_validate:etsy"
+
+
+def test_assess_platform_readiness_prefers_registry_missing_session_blocker(tmp_path):
+    runtime = PROJECT_ROOT / "runtime"
+    runtime.mkdir(parents=True, exist_ok=True)
+    probe = runtime / "etsy_owner_grade_probe.json"
+    probe.write_text("{}", encoding="utf-8")
+    save_service_sessions(
+        {
+            "etsy": {
+                "storage_exists": True,
+                "verified_at": "2026-03-10T00:00:00+00:00",
+                "storage_state_path": str(runtime / "etsy_storage_state.json"),
+            }
+        }
+    )
+    save_platform_validation_registry({})
+    update_platform_validation("etsy", state="blocked", blocker="missing_session", owner_grade_ok=False)
+    results = assess_platform_readiness(["etsy"])
+    assert results[0]["blocker"] == "missing_session"
+    assert results[0]["recommended_action"] == "reauth:etsy"
 
 
 def test_render_platform_readiness_summary_includes_counts():
