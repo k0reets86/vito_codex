@@ -78,6 +78,96 @@ _RECOVERY_PACKS: dict[str, dict[str, Any]] = {
             "block_publish_until_basis_found",
         ],
     },
+    "content_creator": {
+        "family": "content_growth",
+        "failure_signatures": [
+            "missing_asset_manifest",
+            "weak_platform_fit",
+            "quality_reject",
+            "copy_too_generic",
+        ],
+        "preferred_actions": [
+            "reload_content_patterns",
+            "request_seo_pack_refresh",
+            "request_marketing_angle_refresh",
+            "generate_replacement_assets",
+        ],
+    },
+    "marketing_agent": {
+        "family": "content_growth",
+        "failure_signatures": [
+            "unclear_audience",
+            "no_budget_fit",
+            "weak_offer_angle",
+            "strategy_conflict",
+        ],
+        "preferred_actions": [
+            "request_research_refresh",
+            "request_analytics_snapshot",
+            "switch_to_conservative_gtm_mode",
+            "escalate_positioning_review",
+        ],
+    },
+    "trend_scout": {
+        "family": "intelligence_research",
+        "failure_signatures": [
+            "source_drought",
+            "only_fallback_sources",
+            "conflicting_signal_direction",
+            "weak_trend_confidence",
+        ],
+        "preferred_actions": [
+            "reload_signal_sources",
+            "request_research_validation",
+            "request_marketing_context",
+            "fallback_to_multi_source_scan",
+        ],
+    },
+    "email_agent": {
+        "family": "content_growth",
+        "failure_signatures": [
+            "missing_audience",
+            "sequence_gap",
+            "send_blocker",
+            "weak_subject_line",
+        ],
+        "preferred_actions": [
+            "load_email_templates",
+            "request_marketing_pack",
+            "request_analytics_baseline",
+            "switch_to_draft_only_mode",
+        ],
+    },
+    "research_agent": {
+        "family": "intelligence_research",
+        "failure_signatures": [
+            "weak_source_mix",
+            "gap_count_high",
+            "judge_reject",
+            "comparison_missing",
+        ],
+        "preferred_actions": [
+            "expand_source_mix",
+            "request_trend_validation",
+            "request_document_ingest",
+            "rerun_judge_stage",
+        ],
+    },
+    "document_agent": {
+        "family": "intelligence_research",
+        "failure_signatures": [
+            "unsupported_format",
+            "missing_source_file",
+            "ocr_unavailable",
+            "extract_quality_low",
+        ],
+        "preferred_actions": [
+            "switch_parser",
+            "fallback_to_ocr",
+            "request_source_retry",
+            "escalate_ingest_review",
+        ],
+    },
 }
 
 
