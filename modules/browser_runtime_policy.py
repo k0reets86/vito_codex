@@ -54,7 +54,7 @@ _SERVICE_MAP: dict[str, dict[str, Any]] = {
         "profile_completion": True,
         "profile_route": "https://kdp.amazon.com/account",
         "otp_supported": True,
-        "otp_prompt": "Нужен 6-значный код Amazon Authenticator. Отправь 6 цифр одним сообщением.",
+        "otp_prompt": "Нужен 6-значный код Amazon Authenticator. Пришли 6 цифр одним сообщением.",
     },
     "etsy": {
         "storage": "runtime/etsy_storage_state.json",

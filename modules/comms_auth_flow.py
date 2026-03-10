@@ -370,7 +370,10 @@ async def handle_kdp_login_flow(agent: Any, text: str, send_reply, with_button: 
                 "requested_at": datetime.now(timezone.utc).isoformat(),
                 "forced": True,
             }
-            await send_reply("Пришли 6-значный код Amazon Authenticator. Приму его как forced OTP и попробую завершить вход.")
+            await send_reply(
+                "Нужен 6-значный код Amazon Authenticator. "
+                "Пришли 6-значный код одним сообщением, и я попробую завершить вход."
+            )
             return True
         rc2, out2 = await agent._run_kdp_auto_login()
         if rc2 == 0:
