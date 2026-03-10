@@ -40,8 +40,8 @@
 - Аргумент: `modules/agent_event_bus.py` теперь пишет события в SQLite и читает `recent()` из persistent store.
 
 8. `Gumroad -> patchright/shared browser runtime`
-- Статус: `partial`
-- Аргумент: общий human browser runtime и browser policy внедрены, но `platforms/gumroad.py` все еще содержит собственные raw launch helpers и требует полного выравнивания на shared runtime.
+- Статус: `done`
+- Аргумент: `platforms/gumroad.py` переведен на общий launcher/runtime (`modules/browser_runtime_launcher.py`) и больше не держит отдельный raw browser launch path; таргетные `gumroad + launcher` регрессии зеленые.
 
 ## P2
 9. `LLM navigation: screenshot -> action`
@@ -113,3 +113,7 @@
 25. `captcha solver real integrations`
 - Статус: `blocked_policy`
 - Аргумент: внешние solver/anti-bot bypass stacks не внедряются в рамках допустимой части.
+
+26. `cross-layer knowledge / memory consolidation runtime`
+- Статус: `done`
+- Аргумент: добавлен `modules/knowledge_consolidator.py` и `MemoryManager.build_runtime_knowledge_pack(...)`, который сводит semantic knowledge, reflections, platform knowledge, evolution archive и knowledge graph в единый runtime pack для owner/runtime use.

@@ -29,6 +29,7 @@ from modules.failure_memory import FailureMemory
 from modules.failure_substrate import build_failure_substrate
 from modules.mem0_bridge import Mem0Bridge
 from modules.memory_blocks import MemoryBlocks
+from modules.knowledge_consolidator import KnowledgeConsolidator
 from modules.memory_policy import decide_save, retention_classes
 from modules.knowledge_graph import KnowledgeGraph
 from modules.platform_knowledge import search_entries as search_platform_knowledge
@@ -563,6 +564,28 @@ class MemoryManager:
             "promoted": promoted,
             "missing": [doc_id for doc_id in items if doc_id not in by_id],
         }
+
+    def build_runtime_knowledge_pack(
+        self,
+        *,
+        query: str,
+        services: list[str] | None = None,
+        task_root_id: str = "",
+        limit: int = 5,
+        reflector: Any | None = None,
+        evolution_archive: Any | None = None,
+    ) -> dict[str, Any]:
+        consolidator = KnowledgeConsolidator(
+            memory_manager=self,
+            reflector=reflector,
+            evolution_archive=evolution_archive,
+        )
+        return consolidator.consolidate(
+            query=query,
+            services=services or [],
+            task_root_id=task_root_id,
+            limit=limit,
+        )
 
     def _promote_memory_blocks(self, blocks: list[dict[str, Any]], *, source: str) -> int:
         promoted = 0

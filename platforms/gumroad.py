@@ -16,6 +16,7 @@ import aiohttp
 from config.paths import PROJECT_ROOT
 from config.logger import get_logger
 from config.settings import settings
+from modules.browser_runtime_launcher import launch_browser, resolve_browser_engine
 from platforms.base_platform import BasePlatform
 from platforms.gumroad_selector_bank import (
     CONTENT_TAB_SELECTORS,
@@ -36,66 +37,6 @@ COOKIE_FILE = Path("/tmp/gumroad_cookie.txt")
 LOGIN_SHOT = Path("/tmp/gumroad_login.png")
 PUBLISH_SHOT = Path("/tmp/gumroad_publish.png")
 STORAGE_STATE_FILE = PROJECT_ROOT / "runtime" / "gumroad_storage_state.json"
-
-
-async def _launch_browser(p):
-    try:
-        chromium_exe = None
-        base = Path.home() / ".cache" / "ms-playwright"
-        # Prefer headless_shell for lower resource usage
-        for cand in sorted(base.glob("chromium_headless_shell-*/chrome-linux/headless_shell"), reverse=True):
-            chromium_exe = cand
-            break
-        if not chromium_exe:
-            for cand in sorted(base.glob("chromium-*/chrome-linux/chrome"), reverse=True):
-                chromium_exe = cand
-                break
-        headless = os.environ.get("VITO_BROWSER_HEADLESS", "1").lower() not in ("0", "false", "no")
-        constrained = bool(getattr(settings, "BROWSER_CONSTRAINED_MODE", True))
-        launch_kwargs = {
-            "headless": headless,
-            "args": [
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-                "--disable-software-rasterizer",
-                "--disable-crashpad",
-                "--no-crash-upload",
-                "--disable-features=Crashpad",
-                "--disable-site-isolation-trials",
-                "--renderer-process-limit=1",
-            ],
-            "chromium_sandbox": False,
-        }
-        if constrained:
-            launch_kwargs["args"].extend(["--no-zygote", "--single-process"])
-        if chromium_exe and chromium_exe.exists():
-            launch_kwargs["executable_path"] = str(chromium_exe)
-        return await p.chromium.launch(**launch_kwargs)
-    except Exception as e:
-        logger.warning(f"Chromium launch failed, falling back to Firefox: {e}")
-        try:
-            return await p.firefox.launch(headless=True)
-        except Exception as e2:
-            logger.error(f"Firefox launch failed: {e2}")
-            raise
-
-
-async def _launch_gumroad_publish_browser(p):
-    """Stable browser profile for Gumroad creation flow."""
-    headless = os.environ.get("VITO_BROWSER_HEADLESS", "1").lower() not in ("0", "false", "no")
-    return await p.chromium.launch(
-        headless=headless,
-        args=[
-            "--no-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-gpu",
-            "--disable-software-rasterizer",
-            "--disable-blink-features=AutomationControlled",
-        ],
-        chromium_sandbox=False,
-    )
 
 
 class GumroadPlatform(BasePlatform):
@@ -134,6 +75,15 @@ class GumroadPlatform(BasePlatform):
             locale=str(getattr(settings, "BROWSER_LOCALE", "en-US") or "en-US"),
             timezone_id=str(getattr(settings, "BROWSER_TIMEZONE_ID", "America/New_York") or "America/New_York"),
         )
+
+    def _browser_profile(self, *, include_storage: bool = True) -> dict[str, Any]:
+        profile = {
+            "service": "gumroad",
+            "headless_preferred": os.environ.get("VITO_BROWSER_HEADLESS", "1").lower() not in ("0", "false", "no"),
+            "proxy": None,
+        }
+        profile.update(self._browser_context_kwargs(include_storage=include_storage))
+        return profile
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -471,13 +421,10 @@ class GumroadPlatform(BasePlatform):
             logger.warning("Gumroad login missing email/password")
             return False
         try:
-            from playwright.async_api import async_playwright
-        except ImportError:
-            logger.error("playwright not installed")
-            return False
-        try:
-            async with async_playwright() as p:
-                br = await _launch_gumroad_publish_browser(p)
+            _engine_name, engine_factory = resolve_browser_engine()
+            playwright_inst = await engine_factory().start()
+            try:
+                br = await launch_browser(playwright_inst, profile=self._browser_profile(include_storage=False))
                 ctx = await br.new_context(**self._browser_context_kwargs(include_storage=False))
                 page = await ctx.new_page()
                 page.set_default_timeout(20000)
@@ -533,6 +480,8 @@ class GumroadPlatform(BasePlatform):
                 await page.screenshot(path=str(LOGIN_SHOT), full_page=True)
                 await br.close()
                 return False
+            finally:
+                await playwright_inst.stop()
         except Exception as e:
             logger.error(f"Gumroad login error: {e}", exc_info=True)
             return False
@@ -608,16 +557,12 @@ class GumroadPlatform(BasePlatform):
                 before_ids = set()
 
         try:
-            from playwright.async_api import async_playwright
-        except ImportError:
-            logger.error("playwright not installed")
-            return {"platform": "gumroad", "status": "error", "error": "playwright not installed"}
-
-        try:
-            async with async_playwright() as p:
+            _engine_name, engine_factory = resolve_browser_engine()
+            playwright_inst = await engine_factory().start()
+            try:
                 # Use stable publish launcher for Gumroad wizard (single-process constrained mode
                 # can break /products/new React flow and bounce to affiliated page).
-                br = await _launch_gumroad_publish_browser(p)
+                br = await launch_browser(playwright_inst, profile=self._browser_profile(include_storage=has_storage))
                 if has_storage:
                     ctx = await br.new_context(**self._browser_context_kwargs(include_storage=True))
                 else:
@@ -953,105 +898,105 @@ class GumroadPlatform(BasePlatform):
                         await page.goto(f"https://gumroad.com/products/{fast_slug}/edit", wait_until="domcontentloaded")
                         await asyncio.sleep(1.2)
                     else:
-                    # Step 1: Create product (may hit daily limit)
+                        # Step 1: Create product (may hit daily limit)
                         logger.info("Gumroad: open new product page", extra={"event": "gumroad_new_product"})
                         await page.goto("https://gumroad.com/products/new", wait_until="domcontentloaded")
                         await asyncio.sleep(2)
-                    # New Gumroad flow may land on /products/affiliated chooser; continue into real draft editor.
-                    try:
-                        if "/products/affiliated" in (page.url or ""):
-                            opened = await _open_new_product_via_products_tab()
-                            if not opened:
+                        # New Gumroad flow may land on /products/affiliated chooser; continue into real draft editor.
+                        try:
+                            if "/products/affiliated" in (page.url or ""):
+                                opened = await _open_new_product_via_products_tab()
+                                if not opened:
+                                    await page.goto("https://gumroad.com/products/new", wait_until="domcontentloaded")
+                                    await asyncio.sleep(2)
+                        except Exception:
+                            pass
+                        # Explicitly detect expired auth before daily-limit heuristics.
+                        if "gumroad.com/login" in (page.url or ""):
+                            if auth_retry >= 2:
+                                await br.close()
+                                return {"platform": "gumroad", "status": "cookie_expired", "error": "Session refresh loop limit reached."}
+                            await br.close()
+                            ok = await self._ensure_session_cookie()
+                            if not ok:
+                                return {"platform": "gumroad", "status": "cookie_expired", "error": "Session cookie/storage_state expired."}
+                            retried = dict(content or {})
+                            retried["_auth_retry"] = auth_retry + 1
+                            return await self._publish_via_browser(retried)
+                        # Recover flaky redirects until new-product form is actually present.
+                        if not await _has_new_product_form():
+                            recovered_form = False
+                            for _ in range(3):
+                                if page.url.rstrip("/").endswith("/products"):
+                                    await _reopen_new_product_from_products_page()
+                                if await _has_new_product_form():
+                                    recovered_form = True
+                                    break
                                 await page.goto("https://gumroad.com/products/new", wait_until="domcontentloaded")
                                 await asyncio.sleep(2)
-                    except Exception:
-                        pass
-                    # Explicitly detect expired auth before daily-limit heuristics.
-                    if "gumroad.com/login" in (page.url or ""):
-                        if auth_retry >= 2:
-                            await br.close()
-                            return {"platform": "gumroad", "status": "cookie_expired", "error": "Session refresh loop limit reached."}
-                        await br.close()
-                        ok = await self._ensure_session_cookie()
-                        if not ok:
-                            return {"platform": "gumroad", "status": "cookie_expired", "error": "Session cookie/storage_state expired."}
-                        retried = dict(content or {})
-                        retried["_auth_retry"] = auth_retry + 1
-                        return await self._publish_via_browser(retried)
-                    # Recover flaky redirects until new-product form is actually present.
-                    if not await _has_new_product_form():
-                        recovered_form = False
-                        for _ in range(3):
-                            if page.url.rstrip("/").endswith("/products"):
-                                await _reopen_new_product_from_products_page()
-                            if await _has_new_product_form():
-                                recovered_form = True
-                                break
-                            await page.goto("https://gumroad.com/products/new", wait_until="domcontentloaded")
-                            await asyncio.sleep(2)
-                        if recovered_form:
-                            logger.info("Gumroad: new product form recovered", extra={"event": "gumroad_new_form_recovered"})
-                        elif not content.get("allow_existing_update"):
-                            return {
-                                "platform": "gumroad",
-                                "status": "daily_limit",
-                                "error": "new_product_form_unavailable",
-                                "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
-                            }
-                    # If redirected to products list and updates are not allowed, stop immediately
-                    try:
-                        if page.url.rstrip("/").endswith("/products") and not content.get("allow_existing_update"):
-                            # Some Gumroad layouts render new-product form inline on /products.
-                            if await _has_new_product_form():
-                                logger.info("Gumroad: inline new-product form detected on /products", extra={"event": "gumroad_inline_new_form"})
-                            else:
-                            # Sometimes Gumroad creates draft but returns to list; detect and attach to that draft.
-                                new_pid, new_slug = await _find_newly_created_draft()
-                                if new_slug:
-                                    slug_from_api = new_slug
-                                    product_id = new_pid
-                                    await page.goto(f"https://gumroad.com/products/{new_slug}/edit", wait_until="domcontentloaded")
-                                    await asyncio.sleep(2)
-                                    logger.info("Gumroad: adopted newly created draft after list redirect", extra={"event": "gumroad_adopt_new_draft", "context": {"product_id": new_pid}})
+                            if recovered_form:
+                                logger.info("Gumroad: new product form recovered", extra={"event": "gumroad_new_form_recovered"})
+                            elif not content.get("allow_existing_update"):
+                                return {
+                                    "platform": "gumroad",
+                                    "status": "daily_limit",
+                                    "error": "new_product_form_unavailable",
+                                    "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
+                                }
+                        # If redirected to products list and updates are not allowed, stop immediately
+                        try:
+                            if page.url.rstrip("/").endswith("/products") and not content.get("allow_existing_update"):
+                                # Some Gumroad layouts render new-product form inline on /products.
+                                if await _has_new_product_form():
+                                    logger.info("Gumroad: inline new-product form detected on /products", extra={"event": "gumroad_inline_new_form"})
                                 else:
-                                    recovered = await _reopen_new_product_from_products_page()
-                                    if not recovered or (page.url.rstrip("/").endswith("/products") and not await _has_new_product_form()):
-                                        return {
-                                            "platform": "gumroad",
-                                            "status": "daily_limit",
-                                            "error": "redirected_to_products_list_update_not_allowed",
-                                            "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
-                                        }
-                                    logger.info("Gumroad: create flow recovered from /products redirect", extra={"event": "gumroad_recover_new_flow"})
-                    except Exception:
-                        pass
-                    if "login" in page.url:
-                        await br.close()
-                        # Retry login and re-open
-                        ok = await self._ensure_session_cookie()
-                        if not ok:
-                            return {"platform": "gumroad", "status": "cookie_expired", "error": "Session cookie expired."}
-                        return await self._publish_via_browser(content)
-                    try:
-                        content_html = await page.content()
-                        if "only create 10 products per day" in content_html:
-                            logger.warning("Gumroad: daily limit reached", extra={"event": "gumroad_daily_limit"})
-                            slug_from_api = await _open_existing_product(name, allow_update=allow_existing_update)
-                            if not slug_from_api:
-                                await br.close()
-                                return {"platform": "gumroad", "status": "daily_limit", "error": "Daily limit reached; update_existing_not_allowed"}
-                    except Exception:
-                        pass
-                    # If we got redirected to the products list, open an existing product
-                    try:
-                        if page.url.rstrip("/").endswith("/products"):
-                            # If inline creation form is available, continue creation instead of falling back to existing products.
-                            if not await _has_new_product_form():
+                                    # Sometimes Gumroad creates draft but returns to list; detect and attach to that draft.
+                                    new_pid, new_slug = await _find_newly_created_draft()
+                                    if new_slug:
+                                        slug_from_api = new_slug
+                                        product_id = new_pid
+                                        await page.goto(f"https://gumroad.com/products/{new_slug}/edit", wait_until="domcontentloaded")
+                                        await asyncio.sleep(2)
+                                        logger.info("Gumroad: adopted newly created draft after list redirect", extra={"event": "gumroad_adopt_new_draft", "context": {"product_id": new_pid}})
+                                    else:
+                                        recovered = await _reopen_new_product_from_products_page()
+                                        if not recovered or (page.url.rstrip("/").endswith("/products") and not await _has_new_product_form()):
+                                            return {
+                                                "platform": "gumroad",
+                                                "status": "daily_limit",
+                                                "error": "redirected_to_products_list_update_not_allowed",
+                                                "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else "",
+                                            }
+                                        logger.info("Gumroad: create flow recovered from /products redirect", extra={"event": "gumroad_recover_new_flow"})
+                        except Exception:
+                            pass
+                        if "login" in page.url:
+                            await br.close()
+                            # Retry login and re-open
+                            ok = await self._ensure_session_cookie()
+                            if not ok:
+                                return {"platform": "gumroad", "status": "cookie_expired", "error": "Session cookie expired."}
+                            return await self._publish_via_browser(content)
+                        try:
+                            content_html = await page.content()
+                            if "only create 10 products per day" in content_html:
+                                logger.warning("Gumroad: daily limit reached", extra={"event": "gumroad_daily_limit"})
                                 slug_from_api = await _open_existing_product(name, allow_update=allow_existing_update)
                                 if not slug_from_api:
-                                    return {"platform": "gumroad", "status": "daily_limit", "error": "redirected_to_products_list_update_not_allowed", "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else ""}
-                    except Exception:
-                        pass
+                                    await br.close()
+                                    return {"platform": "gumroad", "status": "daily_limit", "error": "Daily limit reached; update_existing_not_allowed"}
+                        except Exception:
+                            pass
+                        # If we got redirected to the products list, open an existing product
+                        try:
+                            if page.url.rstrip("/").endswith("/products"):
+                                # If inline creation form is available, continue creation instead of falling back to existing products.
+                                if not await _has_new_product_form():
+                                    slug_from_api = await _open_existing_product(name, allow_update=allow_existing_update)
+                                    if not slug_from_api:
+                                        return {"platform": "gumroad", "status": "daily_limit", "error": "redirected_to_products_list_update_not_allowed", "screenshot_path": str(PUBLISH_SHOT) if PUBLISH_SHOT.exists() else ""}
+                        except Exception:
+                            pass
 
                 is_edit_page = "/products/" in str(page.url or "") and "/edit" in str(page.url or "")
 
@@ -2504,6 +2449,8 @@ class GumroadPlatform(BasePlatform):
                 except Exception:
                     pass
                 await br.close()
+            finally:
+                await playwright_inst.stop()
 
             async def _verify_public(url: str) -> bool:
                 try:

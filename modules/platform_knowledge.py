@@ -9,11 +9,12 @@ from pathlib import Path
 from typing import Any
 
 from config.logger import get_logger
+from config.paths import PROJECT_ROOT
 
 logger = get_logger("platform_knowledge", agent="platform_knowledge")
 
-KB_PATH = Path("/home/vito/vito-agent/docs/platform_knowledge.md")
-JSON_DB_PATH = Path("/home/vito/vito-agent/runtime/platform_knowledge.json")
+KB_PATH = PROJECT_ROOT / "docs" / "platform_knowledge.md"
+JSON_DB_PATH = PROJECT_ROOT / "runtime" / "platform_knowledge.json"
 
 
 def _ensure_header() -> None:
