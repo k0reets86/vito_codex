@@ -53,8 +53,8 @@
 - Аргумент: добавлен persistent `KnowledgeGraph` и запись связей `knowledge/lesson -> agent/platform/task_family/skill/goal` встроена в `MemoryManager.store_knowledge()` и `SelfLearningEngine.record_lesson()`.
 
 11. `Instagram via instagrapi`
-- Статус: `not_done`
-- Аргумент: текущий Instagram path усилен, но `instagrapi`-based operational route не внедрен.
+- Статус: `done`
+- Аргумент: в `platforms/instagram.py` добавлен optional operational path через `instagrapi` с persistent session file, login/session reuse и publish через `photo_upload(...)`; path покрыт таргетными тестами без ломки существующего Graph API + browser fallback.
 
 12. `comms_agent` / `conversation_engine` decomposition`
 - Статус: `done`

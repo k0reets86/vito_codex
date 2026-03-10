@@ -28,6 +28,52 @@ async def test_instagram_browser_fallback_publish(mock_browser):
 
 
 @pytest.mark.asyncio
+async def test_instagram_instagrapi_publish_path(mock_browser, tmp_path):
+    class _FakeMedia:
+        pk = "123"
+        code = "ABCXYZ"
+
+    class _FakeClient:
+        def __init__(self):
+            self.loaded = None
+            self.dumped = None
+            self.logged_in = False
+
+        def load_settings(self, path):
+            self.loaded = path
+
+        def login(self, username, password):
+            self.logged_in = username == "user" and password == "pass"
+            return self.logged_in
+
+        def dump_settings(self, path):
+            self.dumped = path
+
+        def photo_upload(self, path, caption):
+            assert str(path).endswith(".jpg")
+            assert caption == "hello"
+            return _FakeMedia()
+
+    fake_mod = MagicMock()
+    fake_mod.Client = _FakeClient
+    image_path = tmp_path / "photo.jpg"
+    image_path.write_bytes(b"jpg")
+    with patch.dict("sys.modules", {"instagrapi": fake_mod}):
+        with patch("platforms.instagram.settings") as s:
+            s.INSTAGRAM_ACCESS_TOKEN = ""
+            s.INSTAGRAM_BUSINESS_ACCOUNT_ID = ""
+            s.INSTAGRAM_STORAGE_STATE_FILE = "runtime/instagram_storage_state.json"
+            s.INSTAGRAM_SESSION_FILE = str(tmp_path / "ig_session.json")
+            s.INSTAGRAM_USERNAME = "user"
+            s.INSTAGRAM_PASSWORD = "pass"
+            platform = InstagramPlatform(browser_agent=mock_browser)
+            result = await platform.publish({"caption": "hello", "image_path": str(image_path)})
+            assert result["status"] == "published"
+            assert result["repeatability_profile"]["mode"] == "instagrapi"
+            assert result["url"].endswith("/ABCXYZ/")
+
+
+@pytest.mark.asyncio
 async def test_linkedin_browser_fallback_publish(mock_browser):
     with patch("platforms.linkedin.settings") as s:
         s.LINKEDIN_ACCESS_TOKEN = ""
