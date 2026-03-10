@@ -106,6 +106,7 @@ class ConversationEngine:
         self.owner_task_state = owner_task_state
         self.owner_model = OwnerModel()
         self._session_id = "default"
+        self._defer_owner_actions = False
         self._context: list[Turn] = []
         if self.conversation_memory:
             self._load_context_from_memory()
@@ -117,6 +118,9 @@ class ConversationEngine:
             return
         self._session_id = sid
         self._load_context_from_memory()
+
+    def set_defer_owner_actions(self, enabled: bool) -> None:
+        self._defer_owner_actions = bool(enabled)
 
     async def process_message(self, text: str) -> dict[str, Any]:
         """Обрабатывает сообщение от владельца."""
@@ -188,7 +192,7 @@ class ConversationEngine:
                     self._ensure_owner_task_state(text, routed.get("intent"))
                 except Exception:
                     pass
-                if routed.get("actions") and not routed.get("needs_confirmation"):
+                if routed.get("actions") and not routed.get("needs_confirmation") and not self._defer_owner_actions:
                     try:
                         action_out = await self._execute_actions(routed.get("actions") or [])
                         if action_out:
@@ -273,8 +277,8 @@ class ConversationEngine:
         # 3. Process by intent
         result = await self._process_by_intent(intent, text)
 
-        # 4. Execute actions if LLM requested them
-        if result.get("actions") and not result.get("needs_confirmation", False):
+        # 4. Execute actions if current caller allows blocking execution
+        if result.get("actions") and not result.get("needs_confirmation", False) and not self._defer_owner_actions:
             action_results = await self._execute_actions(result["actions"])
             if action_results:
                 friendly = self._owner_friendly_action_results(action_results)
@@ -333,6 +337,16 @@ class ConversationEngine:
         ):
             actions = [{"action": "run_printful_etsy_sync", "params": {"topic": self._extract_product_topic(text), "auto_publish": True}}]
             self._ensure_owner_task_state(text, Intent.SYSTEM_ACTION.value)
+            if self._defer_owner_actions:
+                return {
+                    "intent": Intent.SYSTEM_ACTION.value,
+                    "response": (
+                        "Запускаю связку Printful → Etsy (создание POD-товара и проверка листинга). "
+                        "Принял в выполнение."
+                    ),
+                    "actions": actions,
+                    "needs_confirmation": False,
+                }
             out = await self._execute_actions(actions)
             return {
                 "intent": Intent.SYSTEM_ACTION.value,
@@ -354,6 +368,16 @@ class ConversationEngine:
         if platform_key and self._looks_like_imperative_request(text) and self._has_keywords(normalized, platform_op_kw, fuzzy=True):
             actions = [{"action": "run_platform_task", "params": {"platform": platform_key, "request": text}}]
             self._ensure_owner_task_state(text, Intent.SYSTEM_ACTION.value)
+            if self._defer_owner_actions:
+                return {
+                    "intent": Intent.SYSTEM_ACTION.value,
+                    "response": (
+                        f"Запускаю задачу на платформе {platform_key}. "
+                        "Принял в выполнение."
+                    ),
+                    "actions": actions,
+                    "needs_confirmation": False,
+                }
             out = await self._execute_actions(actions)
             return {
                 "intent": Intent.SYSTEM_ACTION.value,
@@ -418,6 +442,13 @@ class ConversationEngine:
             topic = self._extract_research_topic(text)
             actions = [{"action": "run_deep_research", "params": {"topic": topic}}]
             self._ensure_owner_task_state(text, Intent.SYSTEM_ACTION.value)
+            if self._defer_owner_actions:
+                return {
+                    "intent": Intent.SYSTEM_ACTION.value,
+                    "response": f"Запускаю глубокое исследование по теме: {topic}. Собираю источники и готовлю детальный отчёт.",
+                    "actions": actions,
+                    "needs_confirmation": False,
+                }
             out = await self._execute_actions(actions)
             return {
                 "intent": Intent.SYSTEM_ACTION.value,
@@ -428,6 +459,13 @@ class ConversationEngine:
         if trend_request and trend_verb and self.agent_registry:
             actions = [{"action": "scan_trends", "params": {}}]
             self._ensure_owner_task_state(text, Intent.SYSTEM_ACTION.value)
+            if self._defer_owner_actions:
+                return {
+                    "intent": Intent.SYSTEM_ACTION.value,
+                    "response": "Сканирование трендов запущено. Запуск принят, формирую результат.",
+                    "actions": actions,
+                    "needs_confirmation": False,
+                }
             out = await self._execute_actions(actions)
             return {
                 "intent": Intent.SYSTEM_ACTION.value,
@@ -904,6 +942,16 @@ class ConversationEngine:
             and any(kw in lower for kw in ("листинг", "товар", "publish", "опубликуй", "создай"))
         ):
             actions = [{"action": "run_printful_etsy_sync", "params": {"topic": self._extract_product_topic(text), "auto_publish": True}}]
+            if self._defer_owner_actions:
+                return {
+                    "intent": Intent.SYSTEM_ACTION.value,
+                    "response": (
+                        "Запускаю связку Printful → Etsy (POD pipeline). "
+                        "Принял в выполнение."
+                    ),
+                    "actions": actions,
+                    "needs_confirmation": False,
+                }
             out = await self._execute_actions(actions)
             return {
                 "intent": Intent.SYSTEM_ACTION.value,
@@ -917,6 +965,13 @@ class ConversationEngine:
         platform_key = self._extract_platform_key(text)
         if platform_key and self._looks_like_imperative_request(text):
             actions = [{"action": "run_platform_task", "params": {"platform": platform_key, "request": text}}]
+            if self._defer_owner_actions:
+                return {
+                    "intent": Intent.SYSTEM_ACTION.value,
+                    "response": f"Запускаю задачу на платформе {platform_key}. Принял в выполнение.",
+                    "actions": actions,
+                    "needs_confirmation": False,
+                }
             out = await self._execute_actions(actions)
             return {
                 "intent": Intent.SYSTEM_ACTION.value,
@@ -930,6 +985,16 @@ class ConversationEngine:
             target_title = self._extract_target_title(text)
             if target_title:
                 actions = [{"action": "run_kdp_draft_maintenance", "params": {"target_title": target_title, "language": "English"}}]
+                if self._defer_owner_actions:
+                    return {
+                        "intent": Intent.SYSTEM_ACTION.value,
+                        "response": (
+                            f"Запускаю заполнение KDP-драфта: {target_title}. "
+                            "Выполняю и проверяю результат."
+                        ),
+                        "actions": actions,
+                        "needs_confirmation": False,
+                    }
                 out = await self._execute_actions(actions)
                 return {
                     "intent": Intent.SYSTEM_ACTION.value,
@@ -962,6 +1027,13 @@ class ConversationEngine:
         if any(kw in lower for kw in ("глубок", "deep research", "deep", "глубокое исслед", "детальный анализ")):
             topic = self._extract_research_topic(text)
             actions = [{"action": "run_deep_research", "params": {"topic": topic}}]
+            if self._defer_owner_actions:
+                return {
+                    "intent": Intent.SYSTEM_ACTION.value,
+                    "response": f"Запускаю глубокое исследование: {topic}. Собираю данные и источники.",
+                    "actions": actions,
+                    "needs_confirmation": False,
+                }
             out = await self._execute_actions(actions)
             return {
                 "intent": Intent.SYSTEM_ACTION.value,
@@ -1014,6 +1086,13 @@ class ConversationEngine:
             }
         if trend_request and trend_verb:
             actions = [{"action": "scan_trends", "params": {}}]
+            if self._defer_owner_actions:
+                return {
+                    "intent": Intent.SYSTEM_ACTION.value,
+                    "response": "Запустил скан трендов. Результат формируется, скоро пришлю сводку.",
+                    "actions": actions,
+                    "needs_confirmation": False,
+                }
             out = await self._execute_actions(actions)
             return {
                 "intent": Intent.SYSTEM_ACTION.value,

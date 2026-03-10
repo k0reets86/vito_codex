@@ -2944,6 +2944,8 @@ class CommsAgent:
             try:
                 if hasattr(self._conversation_engine, "set_session"):
                     self._conversation_engine.set_session("owner_inbox")
+                if hasattr(self._conversation_engine, "set_defer_owner_actions"):
+                    self._conversation_engine.set_defer_owner_actions(True)
                 result = await self._conversation_engine.process_message(text)
                 if result.get("create_goal") and self._goal_engine:
                     from goal_engine import GoalPriority, GoalStatus
@@ -2982,6 +2984,11 @@ class CommsAgent:
                                 "actions": result.get("actions", []),
                                 "origin_text": text,
                             }
+                    elif result.get("actions"):
+                        self._schedule_system_actions_background(
+                            result.get("actions", []),
+                            origin_text=text,
+                        )
                 else:
                     await self.send_message("Понял. Чем могу помочь?")
                 return
@@ -3015,6 +3022,45 @@ class CommsAgent:
             await self._send_response(update, msg)
         else:
             await self.send_message(msg, level="result")
+
+    def _schedule_system_actions_background(
+        self,
+        actions: list[dict[str, Any]],
+        *,
+        update: Update | None = None,
+        origin_text: str = "",
+    ) -> None:
+        if not actions or not self._conversation_engine:
+            return
+
+        async def _runner() -> None:
+            try:
+                out = await self._conversation_engine._execute_actions(actions)
+                msg = out or "Действие выполнено."
+            except Exception as e:
+                msg = f"Ошибка выполнения действия: {e}"
+            try:
+                if update is not None:
+                    await self._send_response(update, msg)
+                else:
+                    await self.send_message(msg, level="result")
+            except Exception:
+                logger.exception(
+                    "Background system action follow-up failed",
+                    extra={
+                        "event": "background_system_action_followup_failed",
+                        "context": {"origin_text": origin_text[:200], "actions_count": len(actions)},
+                    },
+                )
+
+        task = asyncio.create_task(_runner())
+        logger.info(
+            "Scheduled background system actions",
+            extra={
+                "event": "background_system_actions_scheduled",
+                "context": {"origin_text": origin_text[:200], "actions_count": len(actions), "task_id": id(task)},
+            },
+        )
 
     async def _poll_owner_inbox(self) -> None:
         """Poll file-based owner inbox for offline testing and fallback comms."""
@@ -4868,6 +4914,8 @@ class CommsAgent:
                 if hasattr(self._conversation_engine, "set_session"):
                     sid = str(update.effective_chat.id) if update and update.effective_chat else "telegram_owner"
                     self._conversation_engine.set_session(sid)
+                if hasattr(self._conversation_engine, "set_defer_owner_actions"):
+                    self._conversation_engine.set_defer_owner_actions(True)
                 result = await self._conversation_engine.process_message(text_for_engine)
 
                 # Pass-through для команд и одобрений (обработаны выше)
@@ -4912,6 +4960,12 @@ class CommsAgent:
                                 "actions": result.get("actions", []),
                                 "origin_text": text_for_engine,
                             }
+                    elif result.get("actions"):
+                        self._schedule_system_actions_background(
+                            result.get("actions", []),
+                            update=update,
+                            origin_text=text_for_engine,
+                        )
                 else:
                     await update.message.reply_text(
                         "Понял. Чем могу помочь?", reply_markup=self._main_keyboard()
