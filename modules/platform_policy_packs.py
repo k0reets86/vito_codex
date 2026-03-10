@@ -1,13 +1,9 @@
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from typing import Any
 
-from config.paths import PROJECT_ROOT
-
-KNOWLEDGE_MD = PROJECT_ROOT / 'docs' / 'platform_knowledge.md'
-RULES_UPDATES_MD = PROJECT_ROOT / 'docs' / 'platform_rules_updates.md'
+from modules.platform_docs_runtime import get_docs_runtime
 
 ALIASES = {
     'amazon': 'amazon_kdp',
@@ -112,28 +108,15 @@ def _extract_updates(service: str, text: str, limit: int = 10) -> list[dict[str,
 
 def build_service_policy_pack(service: str) -> dict[str, Any]:
     svc = _alias(service)
-    knowledge = _read(KNOWLEDGE_MD)
-    sections = _split_sections(knowledge)
-    matched = [(t, b) for t, b in sections if _matches(svc, t, b)]
-    policy_notes: list[str] = []
-    section_titles: list[str] = []
-    for title, body in matched:
-        section_titles.append(title)
-        policy_notes.extend(_extract_bullets(body, limit=50))
-    dedup_notes: list[str] = []
-    seen: set[str] = set()
-    for note in policy_notes:
-        k = note.lower()
-        if not note or k in seen:
-            continue
-        seen.add(k)
-        dedup_notes.append(note)
-    updates = _extract_updates(svc, _read(RULES_UPDATES_MD), limit=10)
+    docs_runtime = get_docs_runtime(svc, refresh=False)
     return {
         'service': svc,
-        'policy_section_titles': section_titles[:20],
-        'policy_notes': dedup_notes[:30],
-        'rules_updates': updates,
-        'has_policy_knowledge': bool(matched),
-        'has_rules_updates': bool(updates),
+        'policy_section_titles': list(docs_runtime.get('knowledge_sections') or [])[:20],
+        'policy_notes': list(docs_runtime.get('policy_notes') or [])[:30],
+        'rules_updates': list(docs_runtime.get('rules_updates') or [])[:10],
+        'has_policy_knowledge': bool(docs_runtime.get('knowledge_count')),
+        'has_rules_updates': bool(docs_runtime.get('rules_count')),
+        'lessons': list(docs_runtime.get('lessons') or [])[:20],
+        'anti_patterns': list(docs_runtime.get('anti_patterns') or [])[:20],
+        'evidence_fragments': list(docs_runtime.get('evidence_fragments') or [])[:10],
     }

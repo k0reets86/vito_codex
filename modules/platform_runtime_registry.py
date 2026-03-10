@@ -102,8 +102,8 @@ def build_runtime_entry(service: str) -> dict[str, Any]:
             ev = row.get("evidence") or {}
             if isinstance(ev, dict):
                 evidence_keys.extend([str(k) for k in ev.keys()])
-    recommended_steps = _dedupe_strings(list(base.get("preferred_actions") or []) + lessons, limit=30)
-    avoid_patterns = _dedupe_strings(anti_patterns + list(policy_pack.get("policy_notes") or []), limit=30)
+    recommended_steps = _dedupe_strings(list(base.get("preferred_actions") or []) + lessons + list(policy_pack.get("lessons") or []), limit=30)
+    avoid_patterns = _dedupe_strings(anti_patterns + list(policy_pack.get("policy_notes") or []) + list(policy_pack.get("anti_patterns") or []), limit=30)
     return {
         "service": svc,
         "service_patterns": list(SERVICE_PATTERNS.get(svc, [])),
@@ -118,6 +118,11 @@ def build_runtime_entry(service: str) -> dict[str, Any]:
         "policy_section_titles": list(policy_pack.get("policy_section_titles") or [])[:20],
         "policy_notes": list(policy_pack.get("policy_notes") or [])[:30],
         "rules_updates": _normalize_rule_updates(list(policy_pack.get("rules_updates") or []), limit=10),
+        "docs_runtime": {
+            "knowledge_count": int(policy_pack.get("has_policy_knowledge") or 0),
+            "rules_count": int(policy_pack.get("has_rules_updates") or 0),
+            "evidence_fragments": list(policy_pack.get("evidence_fragments") or [])[:5],
+        },
         "recent_success_count": len(success_rows),
         "recent_failure_count": len(failure_rows),
         "knowledge_updated_at": str(knowledge.get("updated_at") or ""),
