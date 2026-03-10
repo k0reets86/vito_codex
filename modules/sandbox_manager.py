@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 import tempfile
 import uuid
@@ -29,6 +30,7 @@ class SandboxManager:
         self.base_path = Path(base_path or PROJECT_ROOT).resolve()
         self.sandbox_root = Path(sandbox_root or tempfile.gettempdir()).resolve() / 'vito_sandboxes'
         self.sandbox_root.mkdir(parents=True, exist_ok=True)
+        self._allowed_env = self._parse_allowed_env()
 
     async def create(self) -> tuple[str, Path]:
         sandbox_id = f"exp_{uuid.uuid4().hex[:8]}"
@@ -75,11 +77,13 @@ class SandboxManager:
         shutil.rmtree(sandbox_path, ignore_errors=True)
 
     async def _run_tests(self, sandbox_path: Path, test_command: list[str]) -> dict[str, Any]:
+        env = self._build_subprocess_env()
         proc = await asyncio.create_subprocess_exec(
             *test_command,
             cwd=str(sandbox_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            env=env,
         )
         out, _ = await proc.communicate()
         output = out.decode(errors='replace')
@@ -89,6 +93,22 @@ class SandboxManager:
             'test_output': output,
             'metrics': metrics,
         }
+
+    def _parse_allowed_env(self) -> set[str]:
+        from config.settings import settings
+        raw = str(getattr(settings, "EVOLUTION_SANDBOX_ALLOWED_ENV", "") or "")
+        allowed = {x.strip() for x in raw.split(",") if x.strip()}
+        allowed.update({"PATH", "HOME", "LANG", "LC_ALL", "PYTHONPATH", "VIRTUAL_ENV", "TZ"})
+        return allowed
+
+    def _build_subprocess_env(self) -> dict[str, str]:
+        env: dict[str, str] = {}
+        for key in self._allowed_env:
+            if key in os.environ:
+                env[key] = os.environ[key]
+        if "PATH" not in env:
+            env["PATH"] = os.environ.get("PATH", "")
+        return env
 
     def _parse_metrics(self, output: str) -> dict[str, Any]:
         import re

@@ -110,6 +110,8 @@ class DecisionLoop:
         self._last_opportunity_scout_tick = 0
         self._last_curriculum_tick = 0
         self._last_self_evolver_tick = 0
+        self._last_module_discovery_tick = 0
+        self._last_overseer_tick = 0
         self.autonomy_proposals = AutonomyProposalStore(sqlite_path=_runtime_sqlite_path(goal_engine))
         self.autonomy_schedule = AutonomyScheduleState(sqlite_path=_runtime_sqlite_path(goal_engine))
         self._kdp_watchdog_state: dict[str, Any] = self._load_kdp_watchdog_state()
@@ -238,6 +240,8 @@ class DecisionLoop:
         await self._maybe_run_weekly_governance_report()
         await self._maybe_run_autonomous_improvement()
         await self._maybe_run_autonomy_v2()
+        await self._maybe_run_evolution_discovery()
+        await self._maybe_run_autonomy_overseer()
         await self._maybe_run_kdp_session_watchdog()
         if self._is_cancelled():
             logger.info("Tick skipped: cancel-state active", extra={"event": "tick_cancelled_skip"})
@@ -2921,6 +2925,89 @@ class DecisionLoop:
             await self._maybe_run_opportunity_scout()
             await self._maybe_run_curriculum_review()
             await self._maybe_run_self_evolver_weekly()
+        except Exception:
+            pass
+
+    async def _maybe_run_evolution_discovery(self) -> None:
+        try:
+            if not bool(getattr(settings, "VITO_EVOLUTION_ENABLED", False)):
+                return
+            if not bool(getattr(settings, "EVOLUTION_DISCOVERY_ENABLED", True)):
+                return
+            interval = max(288, int(getattr(settings, "EVOLUTION_DISCOVERY_INTERVAL_TICKS", 2016) or 2016))
+            if self._tick_count - int(self._last_module_discovery_tick or 0) < interval:
+                return
+            discovery = getattr(self, "_module_discovery", None)
+            events = getattr(self, "_evolution_events", None)
+            if discovery is None:
+                return
+            raw = str(getattr(settings, "EVOLUTION_DISCOVERY_QUERIES", "") or "")
+            queries = [x.strip() for x in raw.split(";") if x.strip()]
+            if not queries:
+                return
+            results: list[dict[str, Any]] = []
+            for query in queries[:4]:
+                try:
+                    discovered = discovery.discover(query, limit=3)
+                    results.append({"query": query, "items": list(discovered.get("items") or [])[:3]})
+                except Exception as exc:
+                    results.append({"query": query, "error": str(exc)})
+            if self.memory:
+                self.memory.store_knowledge(
+                    doc_id=f"evolution_discovery_{self._tick_count}",
+                    text=json.dumps(results[:4], ensure_ascii=False),
+                    metadata={"type": "evolution_discovery", "tick": self._tick_count},
+                )
+            if events is not None:
+                events.record_event(
+                    event_type="evolution_discovery",
+                    source="decision_loop",
+                    title="weekly_module_discovery",
+                    status="ok",
+                    severity="info",
+                    payload={"results": results[:4], "tick": self._tick_count},
+                )
+            self._last_module_discovery_tick = self._tick_count
+        except Exception:
+            pass
+
+    async def _maybe_run_autonomy_overseer(self) -> None:
+        try:
+            if not bool(getattr(settings, "VITO_EVOLUTION_ENABLED", False)):
+                return
+            if not bool(getattr(settings, "EVOLUTION_OVERSEER_ENABLED", True)):
+                return
+            interval = max(12, int(getattr(settings, "EVOLUTION_OVERSEER_INTERVAL_TICKS", 72) or 72))
+            if self._tick_count - int(self._last_overseer_tick or 0) < interval:
+                return
+            overseer = getattr(self, "_autonomy_overseer", None)
+            events = getattr(self, "_evolution_events", None)
+            if overseer is None:
+                return
+            sessions = []
+            try:
+                sessions = self.orchestrator.list_sessions(limit=200)
+            except Exception:
+                sessions = []
+            report = overseer.inspect(
+                tick_count=self._tick_count,
+                proposal_store=self.autonomy_proposals,
+                workflow_sessions=sessions,
+            )
+            if events is not None:
+                events.record_event(
+                    event_type="autonomy_overseer",
+                    source="decision_loop",
+                    title="autonomy_overseer_scan",
+                    status="ok" if report.get("ok") else "warning",
+                    severity="info" if report.get("ok") else "warning",
+                    payload={"report": report, "tick": self._tick_count},
+                )
+            if not report.get("ok") and hasattr(self, "_comms") and self._comms:
+                findings = list(report.get("findings") or [])
+                summary = "; ".join(str(x.get("type") or "issue") for x in findings[:4]) or "issues_detected"
+                await self._comms.send_message(f"Autonomy overseer: {summary}", level="warning")
+            self._last_overseer_tick = self._tick_count
         except Exception:
             pass
 

@@ -157,6 +157,17 @@ class Settings:
     PROACTIVE_ENABLED: bool = os.getenv("PROACTIVE_ENABLED", "false").lower() in ("1", "true", "yes", "on")
     BRAINSTORM_WEEKLY: bool = os.getenv("BRAINSTORM_WEEKLY", "true").lower() in ("1", "true", "yes", "on")
     VITO_EVOLUTION_ENABLED: bool = os.getenv("VITO_EVOLUTION_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+    EVOLUTION_DISCOVERY_ENABLED: bool = os.getenv("EVOLUTION_DISCOVERY_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+    EVOLUTION_DISCOVERY_INTERVAL_TICKS: int = int(os.getenv("EVOLUTION_DISCOVERY_INTERVAL_TICKS", "2016") or 2016)
+    EVOLUTION_DISCOVERY_QUERIES: str = os.getenv(
+        "EVOLUTION_DISCOVERY_QUERIES",
+        "python autonomous agents memory benchmark runtime;python browser automation resilience;python self-healing sandbox patch apply",
+    )
+    EVOLUTION_OVERSEER_ENABLED: bool = os.getenv("EVOLUTION_OVERSEER_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+    EVOLUTION_OVERSEER_INTERVAL_TICKS: int = int(os.getenv("EVOLUTION_OVERSEER_INTERVAL_TICKS", "72") or 72)
+    EVOLUTION_OVERSEER_STUCK_TICKS: int = int(os.getenv("EVOLUTION_OVERSEER_STUCK_TICKS", "288") or 288)
+    EVOLUTION_AUDIT_SECRET: str = os.getenv("EVOLUTION_AUDIT_SECRET", "")
+    EVOLUTION_SANDBOX_ALLOWED_ENV: str = os.getenv("EVOLUTION_SANDBOX_ALLOWED_ENV", "PATH,HOME,LANG,LC_ALL,PYTHONPATH,VIRTUAL_ENV,TZ")
 
     # LLM cache
     LLM_CACHE_TTL_HOURS: int = int(os.getenv("LLM_CACHE_TTL_HOURS", "24"))

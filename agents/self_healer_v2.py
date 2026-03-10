@@ -7,6 +7,7 @@ from typing import Any
 from agents.base_agent import BaseAgent, TaskResult
 from modules.apply_engine import ApplyEngine
 from modules.evolution_archive import EvolutionArchive
+from modules.evolution_events import EvolutionEventStore
 from modules.sandbox_manager import SandboxManager
 
 
@@ -16,13 +17,14 @@ class SelfHealerV2(BaseAgent):
         '*': ['reflector'],
     }
 
-    def __init__(self, *, sandbox_manager: SandboxManager, apply_engine: ApplyEngine, reflector=None, archive: EvolutionArchive | None = None, legacy_healer=None, **kwargs):
+    def __init__(self, *, sandbox_manager: SandboxManager, apply_engine: ApplyEngine, reflector=None, archive: EvolutionArchive | None = None, legacy_healer=None, event_store: EvolutionEventStore | None = None, **kwargs):
         super().__init__(name='self_healer_v2', description='Sandbox-first self-healing engine', **kwargs)
         self.sandbox_manager = sandbox_manager
         self.apply_engine = apply_engine
         self.reflector = reflector
         self.archive = archive or EvolutionArchive()
         self.legacy_healer = legacy_healer
+        self.event_store = event_store or EvolutionEventStore()
 
     @property
     def capabilities(self) -> list[str]:
@@ -43,6 +45,15 @@ class SelfHealerV2(BaseAgent):
         task_root_id = str(ctx.get("task_root_id") or "")[:120]
         if patch_files:
             result = await self.heal(error, ctx, patch_files)
+            self.event_store.record_event(
+                event_type="self_heal_v2",
+                source="self_healer_v2",
+                title=f"{agent}:{type(error).__name__}",
+                status="ok" if result.get("success") else "failed",
+                severity="warning" if result.get("success") else "error",
+                payload={"agent": agent, "result": result},
+                task_root_id=task_root_id,
+            )
             self.archive.record(
                 archive_type="self_heal_v2",
                 title=f"{agent}:{type(error).__name__}",
@@ -53,6 +64,15 @@ class SelfHealerV2(BaseAgent):
             return result
         if self.legacy_healer is not None:
             legacy = await self.legacy_healer.handle_error(agent, error, ctx)
+            self.event_store.record_event(
+                event_type="self_heal_legacy_bridge",
+                source="self_healer_v2",
+                title=f"{agent}:{type(error).__name__}",
+                status="ok" if legacy.get("resolved") else "failed",
+                severity="warning",
+                payload={"agent": agent, "result": legacy},
+                task_root_id=task_root_id,
+            )
             self.archive.record(
                 archive_type="self_heal_legacy_bridge",
                 title=f"{agent}:{type(error).__name__}",
@@ -71,6 +91,15 @@ class SelfHealerV2(BaseAgent):
             title=f"{agent}:{type(error).__name__}",
             payload={"agent": agent, "result": result, "context": ctx},
             success=False,
+            task_root_id=task_root_id,
+        )
+        self.event_store.record_event(
+            event_type="self_heal_v2",
+            source="self_healer_v2",
+            title=f"{agent}:{type(error).__name__}",
+            status="failed",
+            severity="error",
+            payload={"agent": agent, "result": result},
             task_root_id=task_root_id,
         )
         return result

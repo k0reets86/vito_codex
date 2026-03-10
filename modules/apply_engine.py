@@ -12,6 +12,7 @@ from typing import Any
 
 from config.paths import PROJECT_ROOT
 from modules.prompt_guard import has_prompt_injection_signals
+from modules.evolution_audit import EvolutionAuditTrail
 
 
 @dataclass
@@ -39,6 +40,7 @@ class ApplyEngine:
         self.project_root = Path(project_root or PROJECT_ROOT).resolve()
         self.backup_root = Path(backup_root or (self.project_root / 'runtime' / 'evolution_backups')).resolve()
         self.backup_root.mkdir(parents=True, exist_ok=True)
+        self.audit_trail = EvolutionAuditTrail()
 
     def create_snapshot(self) -> ApplySnapshot:
         head_commit = self._git_output(['rev-parse', 'HEAD']).strip()
@@ -62,10 +64,31 @@ class ApplyEngine:
                 applied.append(str(rel_path))
             health_ok, details = await self.health_check(health_check)
             if not health_ok:
+                self.audit_trail.record(
+                    event_type="apply_health_failed",
+                    snapshot_id=snapshot.snapshot_id,
+                    files=applied,
+                    success=False,
+                    details=details,
+                )
                 self.rollback(snapshot)
                 return ApplyResult(success=False, snapshot_id=snapshot.snapshot_id, applied_files=applied, health_ok=False, rollback_performed=True, details=details)
+            self.audit_trail.record(
+                event_type="apply_success",
+                snapshot_id=snapshot.snapshot_id,
+                files=applied,
+                success=True,
+                details=details,
+            )
             return ApplyResult(success=True, snapshot_id=snapshot.snapshot_id, applied_files=applied, health_ok=True, details=details)
         except Exception as exc:
+            self.audit_trail.record(
+                event_type="apply_exception",
+                snapshot_id=snapshot.snapshot_id,
+                files=[str(Path(x)) for x in files.keys()],
+                success=False,
+                details=str(exc),
+            )
             self.rollback(snapshot)
             return ApplyResult(success=False, snapshot_id=snapshot.snapshot_id, rollback_performed=True, details=str(exc))
 

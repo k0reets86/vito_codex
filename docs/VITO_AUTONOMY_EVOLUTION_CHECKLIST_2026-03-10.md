@@ -8,7 +8,7 @@
   - `not_done`
   - `paused_blocked`
 
-Общий прогресс: `68%`
+Общий прогресс: `86%`
 
 ## Phase AE1 — Evolution Engine Foundations
 1. `SandboxManager`
@@ -91,45 +91,45 @@
 
 ## Phase AE4 — Discovery / Overseer / Governance
 20. `Weekly automated module discovery`
-- Status: `not_done`
-- Почему: discovery scheduler отсутствует.
+- Status: `done`
+- Почему: `decision_loop.py` теперь имеет `_maybe_run_evolution_discovery()`, использует `ModuleDiscovery`, пишет результаты в memory и `EvolutionEventStore`.
 
 21. `Async Overseer / stuck-loop watcher`
-- Status: `not_done`
-- Почему: отдельного overseer слоя нет.
+- Status: `done`
+- Почему: добавлен `modules/autonomy_overseer.py`, `DecisionLoop` периодически запускает overseer и пишет findings в evolution events.
 
 22. `Dashboard evolution events`
-- Status: `partial`
-- Почему: EventBus есть, но отдельного evolution event lane нет.
+- Status: `done`
+- Почему: добавлен `EvolutionEventStore`, endpoint `/api/evolution_events` и dashboard visibility card в `dashboard_server.py`.
 
 23. `AGENTS evolution rules in repo`
-- Status: `partial`
-- Почему: общие rules есть, но evolution-specific layer не оформлен.
+- Status: `done`
+- Почему: в `AGENTS.md` добавлен отдельный раздел `Evolution rules` с обязательными runtime/governance правилами.
 
 24. `Apply-engine security audit trail`
-- Status: `not_done`
-- Почему: apply engine еще не реализован.
+- Status: `done`
+- Почему: добавлен `modules/evolution_audit.py`, `ApplyEngine` теперь пишет signed audit trail на success/fail/exception.
 
 25. `Control-plane secrets discipline for sandbox`
-- Status: `not_done`
-- Почему: sandbox policy еще не реализована.
+- Status: `done`
+- Почему: `SandboxManager` теперь запускает subprocesses с sanitized env allowlist через `EVOLUTION_SANDBOX_ALLOWED_ENV`.
 
 ## Phase AE5 — Combat Validation
 26. `Sandbox/apply/heal/evolve/discovery tests`
-- Status: `not_done`
-- Почему: зависит от AE1-AE4.
+- Status: `partial`
+- Почему: AE1-AE4 покрыты пакетными и таргетными тестами, но полного consolidated validation bundle для всего evolution loop еще нет.
 
 27. `Runtime evolution smoke`
-- Status: `not_done`
-- Почему: зависит от AE1-AE4.
+- Status: `partial`
+- Почему: runtime wiring AE1-AE4 подтвержден `py_compile` и таргетными smoke/tests, но полного AE5 scenario-run еще нет.
 
 28. `Fail-to-pass patch validation`
 - Status: `not_done`
 - Почему: отдельной метрики и сценария пока нет.
 
 29. `Owner-facing evolution summary`
-- Status: `not_done`
-- Почему: специального summary/reporting lane нет.
+- Status: `partial`
+- Почему: evolution events уже видны в dashboard/API, но отдельный owner-facing summary/report lane еще не оформлен.
 
 30. `Full review against both docs`
 - Status: `not_done`

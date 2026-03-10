@@ -27,6 +27,7 @@ from modules.orchestration_manager import OrchestrationManager
 from modules.owner_preference_model import OwnerPreferenceModel
 from modules.owner_pref_metrics import OwnerPreferenceMetrics
 from modules.self_learning import SelfLearningEngine
+from modules.evolution_events import EvolutionEventStore
 
 
 
@@ -236,6 +237,18 @@ class DashboardServer:
                         "test_jobs": test_jobs,
                         "thresholds": thresholds,
                     })
+                    return
+                if parsed.path == "/api/evolution_events":
+                    try:
+                        limit = int(query.get("limit", ["80"])[0] or 80)
+                        event_type = str(query.get("event_type", [""])[0] or "")
+                        status = str(query.get("status", [""])[0] or "")
+                        store = EvolutionEventStore()
+                        events = store.list_events(limit=limit, event_type=event_type, status=status)
+                        summary = store.summary(days=7)
+                    except Exception:
+                        events, summary = [], {}
+                    self._json({"events": events, "summary": summary})
                     return
                 if parsed.path == "/api/memory_policy":
                     try:
@@ -840,6 +853,7 @@ class DashboardServer:
         </div>
       </div>
       <div class=\"card\"><div class=\"mut\">Tooling Registry</div><div id=\"tooling_registry\"></div></div>
+      <div class=\"card\"><div class=\"mut\">Evolution Events</div><div id=\"evolution_events\"></div></div>
       <div class=\"card\"><div class=\"mut\">Tooling Discovery</div><div id=\"tooling_discovery\"></div></div>
       <div class=\"card\"><div class=\"mut\">Revenue Engine</div><div id=\"revenue_engine\"></div>
         <div style=\"margin-top:8px\">
@@ -962,7 +976,7 @@ async function load(){
     const endpoints = {
     status:'/api/status', network:'/api/network', agents:'/api/agents', finance:'/api/finance',
     goals:'/api/goals', schedules:'/api/schedules', config:'/api/config',
-    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', guardrails:'/api/guardrails', llm_evals:'/api/llm_evals', tooling_registry:'/api/tooling_registry', tooling_discovery:'/api/tooling_discovery', revenue_engine:'/api/revenue_engine', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs', skills:'/api/skills', operator_policy:'/api/operator_policy', self_learning:'/api/self_learning', memory_policy:'/api/memory_policy?limit=80', workflow_threads:'/api/workflow_threads', workflow_interrupts:'/api/workflow_interrupts', workflow_sessions:'/api/workflow_sessions', secrets_status:'/api/secrets_status', provider_health:'/api/provider_health',
+    platforms:'/api/platforms', platform_scorecard:'/api/platform_scorecard', rss:'/api/rss', kpi:'/api/kpi', kpi_trend:'/api/kpi_trend', models:'/api/models', llm_policy:'/api/llm_policy', guardrails:'/api/guardrails', llm_evals:'/api/llm_evals', tooling_registry:'/api/tooling_registry', tooling_discovery:'/api/tooling_discovery', revenue_engine:'/api/revenue_engine', prefs:'/api/prefs', prefs_metrics:'/api/prefs_metrics', capability_packs:'/api/capability_packs', skills:'/api/skills', operator_policy:'/api/operator_policy', self_learning:'/api/self_learning', evolution_events:'/api/evolution_events', memory_policy:'/api/memory_policy?limit=80', workflow_threads:'/api/workflow_threads', workflow_interrupts:'/api/workflow_interrupts', workflow_sessions:'/api/workflow_sessions', secrets_status:'/api/secrets_status', provider_health:'/api/provider_health',
     facts:'/api/execution_facts', approvals:'/api/approvals', events:'/api/events', decisions:'/api/decisions', budget:'/api/budget', workflow_events:'/api/workflow_events'
   };
     for (const [k,url] of Object.entries(endpoints)){
@@ -1002,6 +1016,7 @@ async function load(){
     else if (k === 'guardrails') renderGuardrails(j);
     else if (k === 'llm_evals') renderLlmEvals(j);
     else if (k === 'tooling_registry') renderToolingRegistry(j.adapters||[], j.approvals||[], j.stage_approvals||[], j.key_rotations||[], j.history||[], j.governance||{}, j.signature_policy||{});
+    else if (k === 'evolution_events') renderEvolutionEvents(j.events||[], j.summary||{});
     else if (k === 'tooling_discovery') renderToolingDiscovery(j.candidates||[], j.summary||{}, j.rollout_state||{});
     else if (k === 'revenue_engine') renderRevenueEngine(j.cycles||[], j.latest||{}, j.summary||{});
   }
@@ -1113,6 +1128,13 @@ function renderToolingRegistry(items, approvals, stageApprovals, keyRotations, h
     keySummary +
     `<div class=\"mut\" style=\"margin-top:8px\">Governance</div><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>${govRows}</tbody></table>` +
     `<div class=\"mut\" style=\"margin-top:8px\">Remediations</div><ul>${rem}</ul>`;
+}
+function renderEvolutionEvents(items, summary){
+  const el = document.getElementById('evolution_events');
+  if(!el) return;
+  const top = `<div class="mut">total: ${(summary||{}).total||0}</div>`;
+  const rows = (items||[]).slice(0,12).map(x => `<div><b>${x.event_type||''}</b> [${x.status||''}] ${x.title||''}</div>`).join('') || '<div class=\"mut\">empty</div>';
+  el.innerHTML = top + rows;
 }
 function renderToolingDiscovery(items, summary, rolloutState){
   const el = document.getElementById('tooling_discovery');

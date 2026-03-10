@@ -173,6 +173,23 @@ class AutonomyProposalStore:
         finally:
             conn.close()
 
+    def list_proposals(self, status: str = "", limit: int = 100) -> list[dict[str, Any]]:
+        conn = self._conn()
+        try:
+            if status:
+                rows = conn.execute(
+                    "SELECT * FROM autonomy_proposals WHERE status = ? ORDER BY datetime(updated_at) DESC, proposal_id DESC LIMIT ?",
+                    (str(status), int(limit or 100)),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM autonomy_proposals ORDER BY datetime(updated_at) DESC, proposal_id DESC LIMIT ?",
+                    (int(limit or 100),),
+                ).fetchall()
+            return [self._row_to_dict(r) for r in rows]
+        finally:
+            conn.close()
+
     def _make_key(self, source_agent: str, proposal_kind: str, title: str, payload: dict[str, Any]) -> str:
         blob = json.dumps(
             {

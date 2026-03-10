@@ -7,6 +7,7 @@ from agents.base_agent import BaseAgent, TaskResult
 from modules.apply_engine import ApplyEngine
 from modules.autonomy_runtime import build_self_evolve_runtime_profile
 from modules.evolution_archive import EvolutionArchive
+from modules.evolution_events import EvolutionEventStore
 from modules.module_discovery import ModuleDiscovery
 from modules.sandbox_manager import SandboxManager
 from modules.skill_library import VITOSkillLibrary
@@ -19,7 +20,7 @@ class SelfEvolverV2(BaseAgent):
         '*': ['reflector'],
     }
 
-    def __init__(self, *, sandbox_manager: SandboxManager, apply_engine: ApplyEngine, benchmarks: VITOBenchmarks, discovery: ModuleDiscovery, reflector=None, archive: EvolutionArchive | None = None, **kwargs):
+    def __init__(self, *, sandbox_manager: SandboxManager, apply_engine: ApplyEngine, benchmarks: VITOBenchmarks, discovery: ModuleDiscovery, reflector=None, archive: EvolutionArchive | None = None, event_store: EvolutionEventStore | None = None, **kwargs):
         super().__init__(name='self_evolver_v2', description='Benchmark-driven self-evolution engine', **kwargs)
         self.sandbox_manager = sandbox_manager
         self.apply_engine = apply_engine
@@ -28,6 +29,7 @@ class SelfEvolverV2(BaseAgent):
         self.reflector = reflector
         self.archive = archive or EvolutionArchive()
         self.skill_lib = VITOSkillLibrary()
+        self.event_store = event_store or EvolutionEventStore()
 
     @property
     def capabilities(self) -> list[str]:
@@ -82,6 +84,14 @@ class SelfEvolverV2(BaseAgent):
             payload={"baseline_score": baseline_score, "candidates": candidates, "result": result},
             success=bool(result.get("approved")),
         )
+        self.event_store.record_event(
+            event_type="self_evolve_v2",
+            source="self_evolver_v2",
+            title="benchmark_proposals",
+            status="ok" if result.get("approved") else "review",
+            severity="info",
+            payload={"baseline_score": baseline_score, "candidate_count": len(candidates or []), "approved": bool(result.get("approved"))},
+        )
         result = dict(result or {})
         result["used_skills"] = used_skills[:4]
         result["runtime_profile"] = build_self_evolve_runtime_profile(
@@ -120,5 +130,13 @@ class SelfEvolverV2(BaseAgent):
             title="weekly_evolve_cycle",
             payload=payload,
             success=bool(result.get("approved")),
+        )
+        self.event_store.record_event(
+            event_type="self_evolve_cycle",
+            source="self_evolver_v2",
+            title="weekly_evolve_cycle",
+            status="ok" if result.get("approved") else "review",
+            severity="info",
+            payload={"query_count": len(search_terms), "candidate_count": len(candidates), "approved": bool(result.get("approved"))},
         )
         return payload

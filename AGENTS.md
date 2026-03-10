@@ -59,3 +59,10 @@
   - Security/cost/observability: weekly governance report aggregation + automated remediation suggestions.
   - Tooling standards: add signature key lifecycle hardening (rotation cadence checks + expiry alerts).
   - Отметка: self-learning, безопасность и tooling-стандарты пока в работе / не завершены.
+
+## Evolution rules
+- Evolution scope cannot be reduced without explicit owner approval.
+- `SelfHealerV2` and `SelfEvolverV2` are primary runtime lanes when evolution is enabled.
+- Any self-heal / self-evolve action must leave signed audit evidence and an evolution event.
+- Sandbox subprocesses must run with a sanitized environment allowlist, not inherited full control-plane secrets.
+- Weekly module discovery and autonomy overseer findings must be persisted and visible through dashboard/API.

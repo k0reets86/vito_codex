@@ -146,6 +146,8 @@ from modules.playbook_registry import PlaybookRegistry
 from modules.publisher_queue import PublisherQueue
 from modules.reflector import VITOReflector
 from modules.evolution_archive import EvolutionArchive
+from modules.evolution_events import EvolutionEventStore
+from modules.autonomy_overseer import AutonomyOverseer
 from modules.skill_library import seed_initial_skills
 from modules.sandbox_manager import SandboxManager
 from modules.apply_engine import ApplyEngine
@@ -232,6 +234,8 @@ class VITO:
         self.module_discovery = None
         self.self_healer_v2 = None
         self.self_evolver_v2 = None
+        self.evolution_events = None
+        self.autonomy_overseer = None
         if getattr(settings, "VITO_EVOLUTION_ENABLED", False):
             try:
                 self.sandbox_manager = SandboxManager()
@@ -239,12 +243,17 @@ class VITO:
                 self.vito_benchmarks = VITOBenchmarks()
                 self.module_discovery = ModuleDiscovery()
                 self.evolution_archive = EvolutionArchive()
+                self.evolution_events = EvolutionEventStore()
+                self.autonomy_overseer = AutonomyOverseer(
+                    stuck_tick_threshold=int(getattr(settings, "EVOLUTION_OVERSEER_STUCK_TICKS", 288) or 288)
+                )
                 self.self_healer_v2 = SelfHealerV2(
                     sandbox_manager=self.sandbox_manager,
                     apply_engine=self.apply_engine,
                     reflector=VITOReflector(),
                     archive=self.evolution_archive,
                     legacy_healer=self.self_healer,
+                    event_store=self.evolution_events,
                     **dict(llm_router=self.llm_router, memory=self.memory, finance=self.finance, comms=self.comms),
                 )
                 self.self_evolver_v2 = SelfEvolverV2(
@@ -254,6 +263,7 @@ class VITO:
                     discovery=self.module_discovery,
                     reflector=VITOReflector(),
                     archive=self.evolution_archive,
+                    event_store=self.evolution_events,
                     **dict(llm_router=self.llm_router, memory=self.memory, finance=self.finance, comms=self.comms),
                 )
             except Exception:
@@ -323,6 +333,12 @@ class VITO:
             self.decision_loop._self_healer_v2 = self.self_healer_v2
         if self.self_evolver_v2:
             self.decision_loop._self_evolver_v2 = self.self_evolver_v2
+        if self.evolution_events:
+            self.decision_loop._evolution_events = self.evolution_events
+        if self.module_discovery:
+            self.decision_loop._module_discovery = self.module_discovery
+        if self.autonomy_overseer:
+            self.decision_loop._autonomy_overseer = self.autonomy_overseer
         self.decision_loop._code_generator = self.code_generator
         # Smart routing: give decision_loop access to platforms
         self.decision_loop._platforms = self._platforms_commerce
