@@ -19,6 +19,27 @@ class ConversationMemory:
             self._migrate_from_json_snapshot()
         self._sync_json_snapshot()
 
+    @staticmethod
+    def _compact_payload(payload: dict) -> dict:
+        compact = {
+            "session_id": str(payload.get("session_id") or "default"),
+            "role": str(payload.get("role") or "user"),
+            "text": str(payload.get("text") or "")[:4000],
+            "intent": str(payload.get("intent") or "")[:200],
+            "timestamp": str(payload.get("timestamp") or "")[:100],
+        }
+        extras = {
+            k: v
+            for k, v in dict(payload or {}).items()
+            if k not in {"session_id", "role", "text", "intent", "timestamp"}
+        }
+        if extras:
+            compact["payload_meta"] = {
+                "keys": sorted(str(k) for k in extras.keys())[:20],
+                "raw_size": len(json.dumps(extras, ensure_ascii=False, default=str)),
+            }
+        return compact
+
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path)
         conn.row_factory = sqlite3.Row
@@ -183,12 +204,23 @@ class ConversationMemory:
 
     def _snapshot_payload(self) -> dict:
         sessions: dict[str, list[dict]] = {}
+        session_stats: dict[str, dict[str, int]] = {}
         with self._connect() as conn:
             session_rows = conn.execute("SELECT DISTINCT session_id FROM conversation_messages").fetchall()
         for row in session_rows:
             sid = self._normalize_session(row["session_id"])
-            sessions[sid] = self._session_rows(sid)
-        return {"version": 3, "backend": "sqlite+json_snapshot", "sessions": sessions}
+            raw_rows = self._session_rows(sid)
+            sessions[sid] = [self._compact_payload(item) for item in raw_rows]
+            session_stats[sid] = {
+                "message_count": len(raw_rows),
+                "snapshot_count": len(sessions[sid]),
+            }
+        return {
+            "version": 4,
+            "backend": "sqlite+json_snapshot",
+            "sessions": sessions,
+            "session_stats": session_stats,
+        }
 
     def _sync_json_snapshot(self) -> None:
         self.path.write_text(json.dumps(self._snapshot_payload(), ensure_ascii=False), encoding="utf-8")
@@ -236,4 +268,3 @@ class ConversationMemory:
                 conn.execute("DELETE FROM conversation_messages WHERE session_id = ?", (sid,))
             conn.commit()
         self._sync_json_snapshot()
-

@@ -80,7 +80,7 @@
 
 17. `ConversationMemory` flat JSON limits
 - Статус: `done`
-- Аргумент: `modules/conversation_memory.py` переведен на versioned session-map storage (`{\"version\": 2, \"sessions\": ...}`) с обратной совместимостью по старому list-формату; формат и старые conversation-memory кейсы покрыты тестами.
+- Аргумент: `modules/conversation_memory.py` теперь пишет compact versioned snapshot (`version=4`) поверх SQLite-backend: в JSON остаются только короткие поля (`role/text/intent/timestamp/session_id`) и `payload_meta`, а не сырые полные payload'ы. Добавлены `session_stats`, сохранена обратная совместимость со старым list/session-map форматом и покрытие регрессиями на reload/migration/compaction.
 
 18. `MemoryBlocks on-demand consolidation`
 - Статус: `done`

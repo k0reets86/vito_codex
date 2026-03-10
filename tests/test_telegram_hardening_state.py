@@ -84,3 +84,17 @@ def test_conversation_memory_migrates_legacy_json_into_sqlite_backend(tmp_path):
     rows = cm.load(session_id="legacy", limit=10)
     assert [r["text"] for r in rows] == ["hello", "world"]
     assert path.with_suffix(".json.sqlite3").exists()
+
+
+def test_conversation_memory_snapshot_compacts_payload(tmp_path):
+    path = tmp_path / "conversation_history.json"
+    cm = ConversationMemory(path=path, limit=2)
+    cm.append({"role": "user", "text": "hello", "debug_blob": "x" * 10000, "meta": {"a": 1}}, session_id="owner_a")
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    row = payload["sessions"]["owner_a"][0]
+    assert row["text"] == "hello"
+    assert "debug_blob" not in row
+    assert "payload_meta" in row
+    assert payload["version"] >= 4
+    assert payload["session_stats"]["owner_a"]["message_count"] == 1
