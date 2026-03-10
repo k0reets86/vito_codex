@@ -64,6 +64,9 @@ from modules.comms_views import help_inline_keyboard as _help_inline_keyboard_im
 from modules.comms_views import render_auth_hub as _render_auth_hub_impl
 from modules.comms_views import render_help as _render_help_impl
 from modules.comms_views import render_more_menu as _render_more_menu_impl
+from modules.comms_views import render_create_hub as _render_create_hub_impl
+from modules.comms_views import render_platforms_hub as _render_platforms_hub_impl
+from modules.comms_views import render_research_hub as _render_research_hub_impl
 from modules.comms_status_lane import (
     cancel_goal_queue as _cancel_goal_queue_impl,
     cmd_balances as _cmd_balances_impl,
@@ -407,11 +410,15 @@ class CommsAgent:
         self._button_map: dict[str, str] = {
             "Главная": "start",
             "Статус": "status",
-            "Задачи": "tasks",
-            "Создать": "goal",
+            "В работе": "tasks",
+            "Исследовать": "research_hub",
+            "Создать": "create_hub",
+            "Платформы": "platforms_hub",
             "Входы": "auth_hub",
+            "Сводка": "report",
             "Отчёт": "report",
             "Еще": "more",
+            "Ещё": "more",
             "Цели": "goals",
             "Расходы": "spend",
             "Одобрить": "approve",
@@ -449,12 +456,16 @@ class CommsAgent:
         normalized = re.sub(r"\s+", " ", normalized)
         aliases = {
             "статус": "status",
+            "в работе": "tasks",
             "цели": "goals",
             "расходы": "spend",
             "новая цель": "goal",
             "задачи": "tasks",
+            "исследовать": "research_hub",
             "создать": "goal",
+            "платформы": "platforms_hub",
             "входы": "auth_hub",
+            "сводка": "report",
             "отчёт": "report",
             "отчет": "report",
             "еще": "more",
@@ -1740,12 +1751,13 @@ class CommsAgent:
             )
 
     def _main_keyboard(self) -> ReplyKeyboardMarkup:
-        """Компактная persistent-клавиатура (6 кнопок на главном экране)."""
+        """Компактная persistent-клавиатура owner-сценариев."""
         return ReplyKeyboardMarkup(
             [
-                [KeyboardButton("Статус"), KeyboardButton("Задачи")],
-                [KeyboardButton("Создать"), KeyboardButton("Входы")],
-                [KeyboardButton("Отчёт"), KeyboardButton("Еще")],
+                [KeyboardButton("Статус"), KeyboardButton("В работе")],
+                [KeyboardButton("Исследовать"), KeyboardButton("Создать")],
+                [KeyboardButton("Платформы"), KeyboardButton("Входы")],
+                [KeyboardButton("Сводка"), KeyboardButton("Ещё")],
             ],
             resize_keyboard=True,
             is_persistent=True,
@@ -2678,13 +2690,16 @@ class CommsAgent:
             return
         await update.message.reply_text(
             "VITO на связи.\n\n"
-            "Чтобы не путаться в командах:\n"
+            "Главные сценарии теперь вынесены в меню:\n"
+            "- Исследовать\n"
+            "- Создать\n"
+            "- Платформы\n"
+            "- Входы\n\n"
+            "Если нужен каталог команд:\n"
             "/help — обзор\n"
             "/help_daily — ежедневные\n"
             "/help_rare — редкие\n"
-            "/help_system — системные\n\n"
-            "Быстрый старт:\n"
-            "/status, /goals, /goal <текст>",
+            "/help_system — системные",
             reply_markup=self._main_keyboard(),
         )
 
@@ -2721,6 +2736,18 @@ class CommsAgent:
     @staticmethod
     def _render_more_menu() -> str:
         return _render_more_menu_impl()
+
+    @staticmethod
+    def _render_research_hub() -> str:
+        return _render_research_hub_impl()
+
+    @staticmethod
+    def _render_create_hub() -> str:
+        return _render_create_hub_impl()
+
+    @staticmethod
+    def _render_platforms_hub() -> str:
+        return _render_platforms_hub_impl()
 
     def _render_unified_status(self, *, title: str = "VITO Status") -> str:
         snap = build_status_snapshot(
@@ -3938,6 +3965,15 @@ class CommsAgent:
                 return
             if cmd == "auth_hub":
                 await update.message.reply_text(self._render_auth_hub(), reply_markup=self._main_keyboard())
+                return
+            if cmd == "research_hub":
+                await update.message.reply_text(self._render_research_hub(), reply_markup=self._main_keyboard())
+                return
+            if cmd == "create_hub":
+                await update.message.reply_text(self._render_create_hub(), reply_markup=self._main_keyboard())
+                return
+            if cmd == "platforms_hub":
+                await update.message.reply_text(self._render_platforms_hub(), reply_markup=self._main_keyboard())
                 return
             if cmd == "more":
                 await update.message.reply_text(self._render_more_menu(), reply_markup=self._main_keyboard())

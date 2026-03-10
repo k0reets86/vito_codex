@@ -28,4 +28,5 @@ reports/*.json
 reports/*.txt
 reports/tz19_extracted/
 runtime/
+.learnings/
 tmp_*.tsx
