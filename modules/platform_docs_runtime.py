@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from config.paths import PROJECT_ROOT
 KNOWLEDGE_MD = PROJECT_ROOT / 'docs' / 'platform_knowledge.md'
 RULES_UPDATES_MD = PROJECT_ROOT / 'docs' / 'platform_rules_updates.md'
 CACHE_PATH = PROJECT_ROOT / 'runtime' / 'platform_docs_runtime.json'
+SCHEMA_VERSION = 2
 
 ALIASES = {
     'amazon': 'amazon_kdp',
@@ -52,6 +54,10 @@ def _read(path: Path) -> str:
         return path.read_text(encoding='utf-8')
     except Exception:
         return ''
+
+
+def _hash_text(text: str) -> str:
+    return hashlib.sha256((text or '').encode('utf-8')).hexdigest()
 
 
 def _split_sections(text: str) -> list[tuple[str, str]]:
@@ -122,8 +128,10 @@ def _extract_labeled_list(body: str, label: str, limit: int = 20) -> list[str]:
 
 def build_docs_runtime(services: list[str] | None = None) -> dict[str, Any]:
     wanted = {_alias(s) for s in (services or []) if str(s).strip()}
-    knowledge_sections = _split_sections(_read(KNOWLEDGE_MD))
-    rules_sections = _split_sections(_read(RULES_UPDATES_MD))
+    knowledge_text = _read(KNOWLEDGE_MD)
+    rules_text = _read(RULES_UPDATES_MD)
+    knowledge_sections = _split_sections(knowledge_text)
+    rules_sections = _split_sections(rules_text)
     services_out: dict[str, Any] = {}
     all_services = wanted or set(SERVICE_PATTERNS.keys())
     for svc in sorted(all_services):
@@ -161,6 +169,13 @@ def build_docs_runtime(services: list[str] | None = None) -> dict[str, Any]:
         }
     return {
         'services': services_out,
+        'schema_version': SCHEMA_VERSION,
+        'source_meta': {
+            'knowledge_md': str(KNOWLEDGE_MD),
+            'rules_updates_md': str(RULES_UPDATES_MD),
+            'knowledge_hash': _hash_text(knowledge_text),
+            'rules_hash': _hash_text(rules_text),
+        },
         'updated_at': datetime.now(timezone.utc).isoformat(),
     }
 
@@ -180,6 +195,8 @@ def get_docs_runtime(service: str, *, refresh: bool = False) -> dict[str, Any]:
     try:
         data = json.loads(CACHE_PATH.read_text(encoding='utf-8'))
     except Exception:
+        data = sync_docs_runtime([svc])
+    if not isinstance(data, dict) or int(data.get('schema_version') or 0) < SCHEMA_VERSION:
         data = sync_docs_runtime([svc])
     services = data.get('services') if isinstance(data, dict) else {}
     entry = services.get(svc) if isinstance(services, dict) else None

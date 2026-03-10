@@ -117,7 +117,7 @@
 
 26. `cross-layer knowledge / memory consolidation runtime`
 - Статус: `done`
-- Аргумент: добавлены `modules/platform_runtime_registry.py` и `modules/platform_requirements.py`; platform rules/knowledge теперь синхронизируются в machine-readable runtime registry, а не читаются только напрямую из markdown. `modules/knowledge_consolidator.py` и `MemoryManager.build_runtime_knowledge_pack(...)` используют этот слой вместе с semantic knowledge, reflections, evolution archive и knowledge graph. `platform_runbook_packs` теперь отдают `runtime_registry`, а lessons/rules updates автоматически пересинхронизируют runtime entry после `record_platform_lesson(...)` и `sync_platform_rules(...)`.
+- Аргумент: добавлены `modules/platform_runtime_registry.py` и `modules/platform_requirements.py`; platform rules/knowledge теперь синхронизируются в machine-readable runtime registry, а не читаются только напрямую из markdown. Registry хранит `docs_runtime_meta` (`knowledge_hash`, `rules_hash`, schema version), а `platform_policy_packs` теперь предпочитают runtime entry и используют markdown только как source-of-sync. `modules/knowledge_consolidator.py` и `MemoryManager.build_runtime_knowledge_pack(...)` используют этот слой вместе с semantic knowledge, reflections, evolution archive и knowledge graph. `platform_runbook_packs` теперь отдают `runtime_registry`, а lessons/rules updates автоматически пересинхронизируют runtime entry после `record_platform_lesson(...)` и `sync_platform_rules(...)`.
 
 27. `platform_readiness goals as deterministic execution lane`
 - Статус: `done`

@@ -108,15 +108,24 @@ def _extract_updates(service: str, text: str, limit: int = 10) -> list[dict[str,
 
 def build_service_policy_pack(service: str) -> dict[str, Any]:
     svc = _alias(service)
+    from modules.platform_runtime_registry import get_runtime_entry
+
+    runtime_entry = get_runtime_entry(svc)
     docs_runtime = get_docs_runtime(svc, refresh=False)
+    policy_section_titles = list(runtime_entry.get('policy_section_titles') or docs_runtime.get('knowledge_sections') or [])[:20]
+    policy_notes = list(runtime_entry.get('policy_notes') or docs_runtime.get('policy_notes') or [])[:30]
+    rules_updates = list(runtime_entry.get('rules_updates') or docs_runtime.get('rules_updates') or [])[:10]
+    lessons = list(runtime_entry.get('recommended_steps') or docs_runtime.get('lessons') or [])[:20]
+    anti_patterns = list(runtime_entry.get('avoid_patterns') or docs_runtime.get('anti_patterns') or [])[:20]
+    evidence_fragments = list(((runtime_entry.get('docs_runtime') or {}).get('evidence_fragments')) or docs_runtime.get('evidence_fragments') or [])[:10]
     return {
         'service': svc,
-        'policy_section_titles': list(docs_runtime.get('knowledge_sections') or [])[:20],
-        'policy_notes': list(docs_runtime.get('policy_notes') or [])[:30],
-        'rules_updates': list(docs_runtime.get('rules_updates') or [])[:10],
-        'has_policy_knowledge': bool(docs_runtime.get('knowledge_count')),
-        'has_rules_updates': bool(docs_runtime.get('rules_count')),
-        'lessons': list(docs_runtime.get('lessons') or [])[:20],
-        'anti_patterns': list(docs_runtime.get('anti_patterns') or [])[:20],
-        'evidence_fragments': list(docs_runtime.get('evidence_fragments') or [])[:10],
+        'policy_section_titles': policy_section_titles,
+        'policy_notes': policy_notes,
+        'rules_updates': rules_updates,
+        'has_policy_knowledge': bool(policy_section_titles or docs_runtime.get('knowledge_count')),
+        'has_rules_updates': bool(rules_updates or docs_runtime.get('rules_count')),
+        'lessons': lessons,
+        'anti_patterns': anti_patterns,
+        'evidence_fragments': evidence_fragments,
     }

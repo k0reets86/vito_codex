@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from config.paths import PROJECT_ROOT
+from modules.platform_docs_runtime import sync_docs_runtime
 from modules.platform_knowledge import get_service_knowledge
 from modules.platform_policy_packs import build_service_policy_pack, SERVICE_PATTERNS
 from modules.platform_requirements import RUNBOOK_REQUIREMENTS
@@ -136,10 +137,13 @@ def sync_platform_runtime_registry(services: list[str] | None = None) -> dict[st
     wanted = [_alias(s) for s in (services or []) if str(s).strip()]
     if not wanted:
         wanted = sorted({*_REGISTRY_SERVICE_SET()})
+    docs_runtime = sync_docs_runtime(wanted)
     synced: list[str] = []
     for svc in wanted:
         svc_map[svc] = build_runtime_entry(svc)
         synced.append(svc)
+    reg["docs_runtime_meta"] = dict(docs_runtime.get("source_meta") or {})
+    reg["docs_runtime_schema_version"] = int(docs_runtime.get("schema_version") or 0)
     _write_registry(reg)
     return {"synced": synced, "count": len(synced), "updated_at": reg.get("updated_at")}
 
