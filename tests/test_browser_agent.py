@@ -166,6 +166,28 @@ def test_resolve_browser_engine_falls_back_to_playwright(monkeypatch):
     assert callable(factory)
 
 
+def test_resolve_browser_engine_prefers_patchright_when_available(monkeypatch):
+    import builtins
+    from agents.browser_agent import _resolve_browser_engine
+
+    real_import = builtins.__import__
+
+    class _FakePatchright:
+        @staticmethod
+        def async_playwright():
+            return lambda: None
+
+    def fake_import(name, *args, **kwargs):
+        if name.startswith("patchright.async_api"):
+            return _FakePatchright
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(settings, "BROWSER_AUTOMATION_ENGINE", "auto")
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    engine, _factory = _resolve_browser_engine()
+    assert engine == "patchright"
+
+
 def test_runtime_profile_carries_proxy(monkeypatch):
     from modules.browser_runtime_policy import get_browser_runtime_profile
 

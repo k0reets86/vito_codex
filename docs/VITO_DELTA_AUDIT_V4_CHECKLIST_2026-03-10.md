@@ -63,13 +63,15 @@
 - Что сделано: вынесены отдельные runtime-модули для:
   - platform target registry
   - owner text extraction / normalization
+  - service auth verification / auth flow / KDP OTP lane
   при этом сохранена backward-compatible обвязка для текущих тестов и маршрутов в [comms_agent.py](/home/vito/vito-agent/comms_agent.py).
-- Почему не закрыто: сам `comms_agent.py` все еще слишком большой и требует дальнейшего выноса routing/deferred execution/auth lanes в отдельные модули.
+- Почему не закрыто: сам `comms_agent.py` все еще слишком большой и требует дальнейшего выноса routing/deferred execution/callback lanes в отдельные модули.
 
 10. `SEC-3` — `HumanBrowser` не переведен на `patchright`
-- Статус: `partial`
+- Статус: `done`
 - Что сделано: browser stack теперь умеет `auto / playwright / patchright` backend selection через [browser_agent.py](/home/vito/vito-agent/agents/browser_agent.py) и `BROWSER_AUTOMATION_ENGINE`.
-- Почему не закрыто: это еще не полная миграция/боевое подтверждение `patchright` как основного backend-а; пока закрыт инфраструктурный слой совместимости и безопасный fallback.
+- Дополнительно сделано: `patchright>=1.58.2` добавлен в [requirements.txt](/home/vito/vito-agent/requirements.txt), `auto`-режим предпочитает `patchright`, fallback на Playwright сохранен и покрыт тестами.
+- Почему `done`: production rollout path и controlled fallback теперь есть в коде и зависимостях.
 
 11. `MEM-1` — `search_episodes()` без relevance scoring
 - Статус: `done`
@@ -278,13 +280,16 @@
 - Почему так: появился реальный системный A/B loop, а не только упоминание A/B в промптах.
 
 47. `proxy rotation`
-- Статус: `partial`
+- Статус: `done`
 - Что сделано: добавлен runtime proxy pool:
   - [browser_proxy_pool.py](/home/vito/vito-agent/modules/browser_proxy_pool.py)
   - `BROWSER_PROXY_POOL`
   - deterministic per-service proxy selection
   - прокладка `proxy` в browser runtime profile и launch path
-- Почему не закрыто: это базовый rotation/pool layer, но еще нет health-based proxy eviction, live failover и platform-aware proxy strategy.
+  - health state + cooldown eviction
+  - live failover marking on browser launch failures
+  - service-aware proxy restart в [browser_agent.py](/home/vito/vito-agent/agents/browser_agent.py)
+- Почему `done`: rotation больше не декоративный — unhealthy proxies исключаются из выбора, а runtime переключает proxy по сервисному профилю.
 
 ## Codex prompts / roadmap sections
 
@@ -297,8 +302,8 @@
 - Обоснование: реализован через `oauth-auto` в helper.
 
 50. `Prompt C` — patchright migration
-- Статус: `partial`
-- Обоснование: добавлен runtime backend selector и основа для controlled migration, но полноценный production rollout `patchright` пока не проведен.
+- Статус: `done`
+- Обоснование: migration доведена до рабочего rollout path — dependency добавлена, `auto` предпочитает `patchright`, fallback на Playwright сохранен, тесты добавлены.
 
 51. `Prompt D` — OpportunityScout real LLM
 - Статус: `done`
@@ -311,8 +316,8 @@
 ## Итоговая оценка по Delta Audit v4 checklist
 
 Сводка по количеству:
-- `done`: 25
-- `partial`: 15
+- `done`: 28
+- `partial`: 12
 - `not_done`: 12
 - `disputed`: 0
 
@@ -320,7 +325,6 @@
 - Аудит не ошибается полностью, но часть его уже устарела относительно текущего `main`.
 - Самые ценные незакрытые зоны сейчас:
   1. `comms_agent` декомпозиция
-  2. `capability_packs` из stub в real runtime
-  3. `patchright migration`
-  4. platform repeatability до уровня owner-grade certainty
-  5. weakest agent uplift второй волны (`quality_judge`, `seo_agent`, `smm_agent`, `devops_agent`, `security_agent`)
+  2. platform repeatability до уровня owner-grade certainty
+  3. weakest agent uplift второй волны (`quality_judge`, `seo_agent`, `smm_agent`, `devops_agent`, `security_agent`)
+  4. вторая волна platform/browser live validation на новом runtime

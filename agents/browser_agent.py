@@ -28,6 +28,7 @@ from config.settings import settings
 from modules.human_browser import HumanBrowser
 from modules.browser_recovery_runtime import build_browser_recovery, build_form_fill_preflight, looks_like_selector
 from modules.browser_runtime_policy import build_auth_interrupt_output, get_browser_runtime_profile
+from modules.browser_proxy_pool import report_proxy_result
 
 logger = get_logger("browser_agent", agent="browser_agent")
 
@@ -166,6 +167,7 @@ class BrowserAgent(BaseAgent):
     _browser = None
     _playwright_inst = None
     _browser_engine = "playwright"
+    _browser_proxy_server = ""
     _lock: Optional[asyncio.Lock] = None
     _page_sem: Optional[asyncio.Semaphore] = None
 
@@ -194,7 +196,7 @@ class BrowserAgent(BaseAgent):
     def capabilities(self) -> list[str]:
         return ["browse", "web_scrape", "form_fill", "register_with_email"]
 
-    async def start(self) -> None:
+    async def start(self, service: str = "") -> None:
         await super().start()
         lock = BrowserAgent._lock or asyncio.Lock()
         async with lock:
@@ -218,31 +220,48 @@ class BrowserAgent(BaseAgent):
                     try:
                         _set_memory_limit()
                         engine_name, engine_factory = _resolve_browser_engine()
+                        runtime_profile = self._runtime_profile(service)
+                        proxy_cfg = runtime_profile.get("proxy") or None
+                        proxy_server = str((proxy_cfg or {}).get("server") or "").strip()
                         if BrowserAgent._playwright_inst is None:
                             BrowserAgent._playwright_inst = await engine_factory().start()
                             BrowserAgent._browser_engine = engine_name
                         BrowserAgent._browser = await BrowserAgent._playwright_inst.chromium.launch(
                             headless=True,
                             args=_chromium_launch_args(),
-                            proxy=(self._runtime_profile("").get("proxy") or None),
+                            proxy=proxy_cfg,
                         )
                         context_kwargs = self._human_browser.context_kwargs(
-                            self._runtime_profile(""),
+                            runtime_profile,
                             user_agent=_browser_user_agent(),
                             locale=str(getattr(settings, "BROWSER_LOCALE", "en-US") or "en-US"),
                             timezone_id=str(getattr(settings, "BROWSER_TIMEZONE_ID", "America/New_York") or "America/New_York"),
                         )
                         self._context = await BrowserAgent._browser.new_context(**context_kwargs)
                         self._context_service = ""
+                        BrowserAgent._browser_proxy_server = proxy_server
                         if bool(getattr(settings, "BROWSER_STEALTH_ENABLED", True)):
                             await self._context.add_init_script(_stealth_init_script())
+                        if proxy_server:
+                            report_proxy_result(proxy_server, ok=True, service=service, reason="browser_launch_ok")
                         logger.info(
                             f"{BrowserAgent._browser_engine} Chromium запущен (attempt={attempt})",
-                            extra={"event": "browser_started", "context": {"attempt": attempt, "engine": BrowserAgent._browser_engine}},
+                            extra={
+                                "event": "browser_started",
+                                "context": {
+                                    "attempt": attempt,
+                                    "engine": BrowserAgent._browser_engine,
+                                    "proxy": proxy_server,
+                                    "service": str(service or ""),
+                                },
+                            },
                         )
                         return
                     except Exception as e:
                         last_error = e
+                        proxy_server = str((self._runtime_profile(service).get("proxy") or {}).get("server") or "").strip()
+                        if proxy_server:
+                            report_proxy_result(proxy_server, ok=False, service=service, reason=str(e)[:240])
                         logger.warning(
                             f"Playwright start attempt {attempt} failed: {str(e)[:240]}",
                             extra={"event": "browser_start_retry", "context": {"attempt": attempt}},
@@ -274,6 +293,7 @@ class BrowserAgent(BaseAgent):
         except Exception:
             pass
         BrowserAgent._browser = None
+        BrowserAgent._browser_proxy_server = ""
 
         try:
             if BrowserAgent._playwright_inst:
@@ -291,6 +311,7 @@ class BrowserAgent(BaseAgent):
             if BrowserAgent._browser:
                 await BrowserAgent._browser.close()
                 BrowserAgent._browser = None
+                BrowserAgent._browser_proxy_server = ""
             if BrowserAgent._playwright_inst:
                 await BrowserAgent._playwright_inst.stop()
                 BrowserAgent._playwright_inst = None
@@ -308,7 +329,7 @@ class BrowserAgent(BaseAgent):
 
     async def _ensure_browser(self, service: str = "") -> None:
         if BrowserAgent._browser is None or self._context is None:
-            await self.start()
+            await self.start(service)
         if BrowserAgent._browser is None or self._context is None:
             raise RuntimeError("browser_unavailable")
         await self._ensure_service_context(service)
@@ -317,6 +338,11 @@ class BrowserAgent(BaseAgent):
         svc = str(service or "").strip().lower()
         if not svc or BrowserAgent._browser is None:
             return
+        desired_proxy = str((self._runtime_profile(svc).get("proxy") or {}).get("server") or "").strip()
+        current_proxy = str(BrowserAgent._browser_proxy_server or "").strip()
+        if desired_proxy != current_proxy:
+            await self._force_cleanup()
+            await self.start(svc)
         if self._context is not None and self._context_service == svc:
             return
         if self._context is not None:
