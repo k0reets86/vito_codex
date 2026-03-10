@@ -56,6 +56,16 @@ _PACKS: dict[str, dict[str, Any]] = {
         "evidence": ["platform", "published", "file_path", "post_package"],
         "preferred_workflows": ["W05"],
     },
+    "marketing_agent": {
+        "skills": ["channel_mix_strategy", "funnel_design", "ad_copy_packaging", "budget_profile_selection"],
+        "evidence": ["marketing_runtime_profile", "offer_angle", "channel_mix", "timeline"],
+        "preferred_workflows": ["W01", "W05", "W06"],
+    },
+    "email_agent": {
+        "skills": ["newsletter_packaging", "sequence_planning", "subscriber_management", "send_readiness_checks"],
+        "evidence": ["email_runtime_profile", "subject", "cta", "audience"],
+        "preferred_workflows": ["W05"],
+    },
     "publisher_agent": {
         "skills": ["article_publish_packaging", "quality_gate_before_publish", "owner_approval_before_publish", "platform_publish_result_capture"],
         "evidence": ["platform", "preview_path", "quality_score", "publish_result"],
@@ -85,6 +95,16 @@ _PACKS: dict[str, dict[str, Any]] = {
         "skills": ["platform_policy_pack_resolution", "copyright_risk_screening", "gdpr_checklist_generation", "publish_blocker_detection"],
         "evidence": ["policy_basis", "risk_score", "decision"],
         "preferred_workflows": ["W01", "W07"],
+    },
+    "risk_agent": {
+        "skills": ["risk_assessment", "reputation_triage", "complaint_resolution_safeguards", "block_recommendation"],
+        "evidence": ["risk_runtime_profile", "risk_level", "risk_factors", "next_actions"],
+        "preferred_workflows": ["W07"],
+    },
+    "partnership_agent": {
+        "skills": ["candidate_shortlisting", "partner_scoring", "referral_tracking", "collaboration_pitching"],
+        "evidence": ["partnership_runtime_profile", "candidate_count", "top_candidates", "proposal"],
+        "preferred_workflows": ["growth_pipeline", "W05"],
     },
 }
 

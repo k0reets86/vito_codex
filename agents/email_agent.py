@@ -6,6 +6,7 @@ from typing import Any
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from llm_router import TaskType
+from modules.growth_runtime import build_email_runtime_profile
 
 logger = get_logger("email_agent", agent="email_agent")
 
@@ -48,7 +49,7 @@ class EmailAgent(BaseAgent):
     async def create_newsletter(self, topic: str, audience: str, tone: str = "professional") -> TaskResult:
         local = self._local_newsletter(topic, audience, tone)
         if not self.llm_router:
-            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
+            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", "email_runtime_profile": build_email_runtime_profile(topic, audience), **self.get_skill_pack()})
         response = await self._call_llm(
             task_type=TaskType.CONTENT,
             prompt=f"Напиши email-рассылку.\nТема: {topic}\nАудитория: {audience}\nТон: {tone}\nВключи: subject line, preheader, тело письма, CTA.",
@@ -57,12 +58,12 @@ class EmailAgent(BaseAgent):
         if response:
             self._record_expense(0.01, f"Newsletter: {topic[:50]}")
             local["llm_notes"] = response
-        return TaskResult(success=True, output=local, cost_usd=0.01 if response else 0.0)
+        return TaskResult(success=True, output=local, cost_usd=0.01 if response else 0.0, metadata={"email_runtime_profile": build_email_runtime_profile(topic, audience), **self.get_skill_pack()})
 
     async def create_sequence(self, goal: str, emails_count: int = 5) -> TaskResult:
         local = self._local_sequence(goal, emails_count)
         if not self.llm_router:
-            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
+            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", "email_runtime_profile": build_email_runtime_profile(goal, "sequence", emails_count), **self.get_skill_pack()})
         response = await self._call_llm(
             task_type=TaskType.CONTENT,
             prompt=f"Создай email-автосерию из {emails_count} писем.\nЦель: {goal}\nДля каждого: subject, тело, CTA, интервал отправки.",
@@ -71,15 +72,15 @@ class EmailAgent(BaseAgent):
         if response:
             self._record_expense(0.02, f"Email sequence: {goal[:50]}")
             local["llm_notes"] = response
-        return TaskResult(success=True, output=local, cost_usd=0.02 if response else 0.0)
+        return TaskResult(success=True, output=local, cost_usd=0.02 if response else 0.0, metadata={"email_runtime_profile": build_email_runtime_profile(goal, "sequence", emails_count), **self.get_skill_pack()})
 
     async def manage_subscribers(self, action: str, data: dict) -> TaskResult:
         if action == "list":
-            return TaskResult(success=True, output={"subscribers": self._subscribers, "total": len(self._subscribers)})
+            return TaskResult(success=True, output={"subscribers": self._subscribers, "total": len(self._subscribers)}, metadata={"email_runtime_profile": build_email_runtime_profile("subscriber_management", action, len(self._subscribers)), **self.get_skill_pack()})
         if action == "add":
             self._subscribers.append(data)
-            return TaskResult(success=True, output={"added": True, "total": len(self._subscribers)})
-        return TaskResult(success=True, output={"action": action, "status": "noted"})
+            return TaskResult(success=True, output={"added": True, "total": len(self._subscribers)}, metadata={"email_runtime_profile": build_email_runtime_profile("subscriber_management", action, len(self._subscribers)), **self.get_skill_pack()})
+        return TaskResult(success=True, output={"action": action, "status": "noted"}, metadata={"email_runtime_profile": build_email_runtime_profile("subscriber_management", action, len(self._subscribers)), **self.get_skill_pack()})
 
     def _local_newsletter(self, topic: str, audience: str, tone: str) -> dict[str, Any]:
         topic = (topic or "Weekly update").strip()

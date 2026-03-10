@@ -5,11 +5,11 @@
 - `in_progress`
 - `done`
 
-Общий прогресс: `55%`
+Общий прогресс: `72%`
 
 Текущий baseline:
 - previous benchmark matrix: `6.89 / 10`
-- current benchmark matrix: `7.41 / 10`
+- current benchmark matrix: `7.52 / 10`
 
 ## Package 1 — Recovery Depth Uplift
 - [x] `browser_agent` recovery depth uplift
@@ -54,15 +54,16 @@
 - Status: `in_progress`
 
 ## Current verified deltas
-- overall benchmark: `6.89 -> 7.30 -> 7.41`
+- overall benchmark: `6.89 -> 7.30 -> 7.41 -> 7.52`
 - `intelligence_research`: `6.92 -> 7.56`
 - `research_agent`: `7.16 -> 7.58`
 - `trend_scout`: `6.87 -> 7.45`
 - `analytics_agent`: `6.96 -> 7.55`
 - `document_agent`: `6.67 -> 7.65`
+- `marketing_agent`: `6.86 -> 7.44`
+- `risk_agent`: `6.86 -> 7.44`
+- `email_agent`: `6.96 -> 7.54`
+- `partnership_agent`: `6.53 -> 7.25`
 
 ## Current kill-list (< 7.0)
-- `partnership_agent`
-- `marketing_agent`
-- `risk_agent`
-- `email_agent`
+- none

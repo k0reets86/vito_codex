@@ -29,6 +29,7 @@ class TestRiskAgent:
         assert result.success is True
         assert isinstance(result.output, dict)
         assert "risk_level" in result.output
+        assert "risk_runtime_profile" in result.metadata
 
     @pytest.mark.asyncio
     async def test_monitor_reputation(self, agent):
@@ -63,3 +64,4 @@ class TestRiskAgent:
         result = await agent.assess_risk("bulk automated posting")
         assert result.success is True
         assert result.output["risk_level"] in {"medium", "high"}
+        assert result.metadata["risk_runtime_profile"]["block_recommended"] in {True, False}

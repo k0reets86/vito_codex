@@ -19,6 +19,7 @@ class TestEmailAgent:
         result = await agent.create_newsletter("AI launch", "creators")
         assert result.success is True
         assert "subject" in result.output
+        assert result.metadata["email_runtime_profile"]["mode"] == "single_send"
 
     @pytest.mark.asyncio
     async def test_create_sequence(self, agent):
@@ -26,6 +27,7 @@ class TestEmailAgent:
         result = await agent.create_sequence("conversion", 3)
         assert result.success is True
         assert len(result.output["emails"]) == 3
+        assert result.metadata["email_runtime_profile"]["mode"] == "sequence"
 
     @pytest.mark.asyncio
     async def test_manage_subscribers(self, agent):
@@ -33,3 +35,4 @@ class TestEmailAgent:
         assert added.success is True
         listed = await agent.manage_subscribers("list", {})
         assert listed.output["total"] == 1
+        assert "email_runtime_profile" in listed.metadata

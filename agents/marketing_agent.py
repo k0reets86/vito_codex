@@ -6,6 +6,7 @@ from typing import Any
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from llm_router import TaskType
+from modules.growth_runtime import build_marketing_runtime_profile
 
 logger = get_logger("marketing_agent", agent="marketing_agent")
 
@@ -53,7 +54,7 @@ class MarketingAgent(BaseAgent):
         local = self._local_strategy(product, target_audience, budget_usd)
         if not self.llm_router:
             self._cache[key] = str(local)
-            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
+            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", "marketing_runtime_profile": build_marketing_runtime_profile(product, target_audience, budget_usd), **self.get_skill_pack()})
 
         response = await self._call_llm(
             task_type=TaskType.STRATEGY,
@@ -68,12 +69,12 @@ class MarketingAgent(BaseAgent):
             self._record_expense(0.03, f"Marketing strategy: {product[:50]}")
             local["llm_notes"] = response
         self._cache[key] = str(local)
-        return TaskResult(success=True, output=local, cost_usd=0.03 if response else 0.0)
+        return TaskResult(success=True, output=local, cost_usd=0.03 if response else 0.0, metadata={"marketing_runtime_profile": build_marketing_runtime_profile(product, target_audience, budget_usd), **self.get_skill_pack()})
 
     async def design_funnel(self, product: str, stages: list[str] = None) -> TaskResult:
         local = self._local_funnel(product, stages)
         if not self.llm_router:
-            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
+            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", "marketing_runtime_profile": build_marketing_runtime_profile(product, "funnel", 0), **self.get_skill_pack()})
         stages_str = f"Этапы: {', '.join(stages)}" if stages else "Стандартная воронка: awareness → interest → desire → action"
         response = await self._call_llm(
             task_type=TaskType.STRATEGY,
@@ -82,12 +83,12 @@ class MarketingAgent(BaseAgent):
         )
         if response:
             local["llm_notes"] = response
-        return TaskResult(success=True, output=local, cost_usd=0.02 if response else 0.0)
+        return TaskResult(success=True, output=local, cost_usd=0.02 if response else 0.0, metadata={"marketing_runtime_profile": build_marketing_runtime_profile(product, "funnel", 0), **self.get_skill_pack()})
 
     async def create_ad_copy(self, product: str, platform: str, style: str = "direct") -> TaskResult:
         local = self._local_ad_copy(product, platform, style)
         if not self.llm_router:
-            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
+            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", "marketing_runtime_profile": build_marketing_runtime_profile(product, platform, 0), **self.get_skill_pack()})
         response = await self._call_llm(
             task_type=TaskType.CONTENT,
             prompt=f"Напиши рекламный текст для {platform}. Продукт: {product}. Стиль: {style}. 3 варианта.",
@@ -95,12 +96,12 @@ class MarketingAgent(BaseAgent):
         )
         if response:
             local["llm_variants"] = response
-        return TaskResult(success=True, output=local, cost_usd=0.01 if response else 0.0)
+        return TaskResult(success=True, output=local, cost_usd=0.01 if response else 0.0, metadata={"marketing_runtime_profile": build_marketing_runtime_profile(product, platform, 0), **self.get_skill_pack()})
 
     async def suggest_channels(self, product: str, budget_usd: float = 100) -> TaskResult:
         local = self._local_channels(product, budget_usd)
         if not self.llm_router:
-            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
+            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", "marketing_runtime_profile": build_marketing_runtime_profile(product, "channel_selection", budget_usd), **self.get_skill_pack()})
         response = await self._call_llm(
             task_type=TaskType.STRATEGY,
             prompt=f"Предложи лучшие маркетинговые каналы для: {product}, бюджет ${budget_usd}.",
@@ -108,7 +109,7 @@ class MarketingAgent(BaseAgent):
         )
         if response:
             local["llm_notes"] = response
-        return TaskResult(success=True, output=local, cost_usd=0.01 if response else 0.0)
+        return TaskResult(success=True, output=local, cost_usd=0.01 if response else 0.0, metadata={"marketing_runtime_profile": build_marketing_runtime_profile(product, "channel_selection", budget_usd), **self.get_skill_pack()})
 
     def _local_strategy(self, product: str, target_audience: str, budget_usd: float) -> dict[str, Any]:
         product_name = (product or "Digital product").strip()

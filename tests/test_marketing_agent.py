@@ -27,6 +27,7 @@ class TestMarketingAgent:
         assert result.success is True
         assert isinstance(result.output, dict)
         assert result.output["target_audience"] == "millennials"
+        assert result.metadata["marketing_runtime_profile"]["budget_profile"] in {"test_and_scale", "lean", "growth"}
 
     @pytest.mark.asyncio
     async def test_design_funnel(self, agent):
@@ -63,3 +64,4 @@ class TestMarketingAgent:
         assert strategy.output["target_audience"] == "creators"
         ad_copy = await agent.create_ad_copy("Planner", "facebook")
         assert ad_copy.success is True
+        assert "marketing_runtime_profile" in ad_copy.metadata

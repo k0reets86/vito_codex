@@ -6,6 +6,7 @@ from typing import Any
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from llm_router import TaskType
+from modules.growth_runtime import build_risk_runtime_profile
 
 logger = get_logger("risk_agent", agent="risk_agent")
 
@@ -48,7 +49,7 @@ class RiskAgent(BaseAgent):
     async def assess_risk(self, action: str) -> TaskResult:
         local = self._local_risk_assessment(action)
         if not self.llm_router:
-            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
+            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", "risk_runtime_profile": build_risk_runtime_profile(action, local.get("risk_level"), local.get("factors")), **self.get_skill_pack()})
         response = await self._call_llm(
             task_type=TaskType.STRATEGY,
             prompt=f"Оцени риски действия: {action}\nОтветь в формате JSON:\n{{\"risk_level\": \"low/medium/high\", \"factors\": [...], \"recommendation\": \"...\"}}",
@@ -57,12 +58,12 @@ class RiskAgent(BaseAgent):
         if response:
             self._record_expense(0.01, f"Risk assessment: {action[:50]}")
             local["llm_notes"] = response
-        return TaskResult(success=True, output=local, cost_usd=0.01 if response else 0.0)
+        return TaskResult(success=True, output=local, cost_usd=0.01 if response else 0.0, metadata={"risk_runtime_profile": build_risk_runtime_profile(action, local.get("risk_level"), local.get("factors")), **self.get_skill_pack()})
 
     async def monitor_reputation(self) -> TaskResult:
         local = self._local_reputation_monitor()
         if not self.llm_router:
-            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
+            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", "risk_runtime_profile": build_risk_runtime_profile("reputation", "medium" if local.get("status") != "neutral" else "low", local.get("escalate_if")), **self.get_skill_pack()})
         response = await self._call_llm(
             task_type=TaskType.ROUTINE,
             prompt="Составь чеклист мониторинга репутации для AI-бизнеса:\n- Отзывы на платформах\n- Упоминания в соцсетях\n- Рейтинги\nДай текущий статус: positive/neutral/negative.",
@@ -70,12 +71,12 @@ class RiskAgent(BaseAgent):
         )
         if response:
             local["llm_notes"] = response
-        return TaskResult(success=True, output=local)
+        return TaskResult(success=True, output=local, metadata={"risk_runtime_profile": build_risk_runtime_profile("reputation", "medium" if local.get("status") != "neutral" else "low", local.get("escalate_if")), **self.get_skill_pack()})
 
     async def handle_complaint(self, complaint: dict) -> TaskResult:
         local = self._local_complaint_response(complaint)
         if not self.llm_router:
-            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
+            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", "risk_runtime_profile": build_risk_runtime_profile(str((complaint or {}).get("type") or "complaint"), "medium", [str((complaint or {}).get("type") or "general")]), **self.get_skill_pack()})
         complaint_text = "\n".join(f"{k}: {v}" for k, v in complaint.items())
         response = await self._call_llm(
             task_type=TaskType.CONTENT,
@@ -84,7 +85,7 @@ class RiskAgent(BaseAgent):
         )
         if response:
             local["llm_notes"] = response
-        return TaskResult(success=True, output=local)
+        return TaskResult(success=True, output=local, metadata={"risk_runtime_profile": build_risk_runtime_profile(str((complaint or {}).get("type") or "complaint"), "medium", [str((complaint or {}).get("type") or "general")]), **self.get_skill_pack()})
 
     def _local_risk_assessment(self, action: str) -> dict[str, Any]:
         text = (action or "").lower()

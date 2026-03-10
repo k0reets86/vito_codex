@@ -19,6 +19,7 @@ class TestPartnershipAgent:
         result = await agent.find_affiliates("digital templates")
         assert result.success is True
         assert len(result.output["candidates"]) >= 3
+        assert result.metadata["partnership_runtime_profile"]["candidate_count"] >= 3
 
     @pytest.mark.asyncio
     async def test_track_referrals(self, agent):
@@ -32,3 +33,4 @@ class TestPartnershipAgent:
         result = await agent.propose_collaboration("Creator Hub")
         assert result.success is True
         assert result.output["partner"] == "Creator Hub"
+        assert "partnership_runtime_profile" in result.metadata
