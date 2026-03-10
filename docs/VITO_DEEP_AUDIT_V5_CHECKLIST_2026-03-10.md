@@ -120,4 +120,4 @@
 
 27. `platform_readiness goals as deterministic execution lane`
 - Статус: `done`
-- Аргумент: добавлен `modules/platform_readiness_actions.py`; `DecisionLoop` теперь строит для целей `source=platform_readiness` детерминированный plan-step `platform_readiness:<action>` и исполняет его без LLM через прямые ветки `reauth / run_probe / owner_grade_validate`, с тестами на remediation/probe/validation path.
+- Аргумент: добавлен `modules/platform_readiness_actions.py`; `DecisionLoop` теперь строит для целей `source=platform_readiness` детерминированный plan-step `platform_readiness:<action>` и исполняет его без LLM через прямые ветки `reauth / run_probe / owner_grade_validate`, с тестами на remediation/probe/validation path. `reauth` больше не абстрактная рекомендация: для `etsy / printful / twitter` readiness теперь выдает конкретный `reauth_command` (`python3 scripts/browser_auth_capture.py <service>`) и точные пути `storage_state/profile_dir`.

@@ -47,3 +47,11 @@ def test_owner_grade_validate_uses_registry(monkeypatch) -> None:
     out = execute_platform_readiness_action(service='etsy', action='owner_grade_validate:etsy')
     assert out['status'] == 'completed'
     assert out['output']['owner_grade_ok'] is True
+
+
+def test_reauth_action_returns_capture_command() -> None:
+    out = execute_platform_readiness_action(service='twitter', action='reauth:twitter', blocker='missing_session')
+    payload = out['output']
+    assert payload['reauth_command'].startswith('python3 scripts/browser_auth_capture.py twitter')
+    assert 'twitter_storage_state.json' in str(payload['storage_state_path'])
+    assert 'browser_profiles' in str(payload['persistent_profile_dir'])

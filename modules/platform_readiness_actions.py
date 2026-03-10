@@ -10,6 +10,7 @@ from typing import Any
 from config.paths import PROJECT_ROOT
 from config.settings import settings
 from modules.account_auth_remediation import build_auth_remediation
+from modules.browser_runtime_policy import get_browser_runtime_profile
 from modules.platform_auth_interrupts import PlatformAuthInterrupts
 from modules.platform_validation_registry import load_platform_validation_registry
 
@@ -70,6 +71,23 @@ def _run_platform_probe(service: str) -> tuple[bool, str]:
         return _run_python(specific)
     return _run_python('scripts/platform_live_validation_wave.py')
 
+def _reauth_command_for_service(service: str) -> str:
+    svc = str(service or '').strip().lower()
+    if svc in {'etsy', 'printful', 'twitter'}:
+        return f"python3 scripts/browser_auth_capture.py {svc}"
+    if svc == 'amazon_kdp':
+        return "python3 scripts/kdp_login_stabilizer.py"
+    if svc == 'gumroad':
+        return "python3 scripts/gumroad_cookie_capture.py"
+    if svc == 'kofi':
+        return "python3 scripts/kofi_auth_helper.py browser-capture"
+    if svc == 'reddit':
+        return "python3 scripts/reddit_auth_helper.py browser-capture"
+    if svc == 'pinterest':
+        return "python3 scripts/pinterest_auth_helper.py browser-capture"
+    return ""
+
+
 
 def execute_platform_readiness_action(
     *,
@@ -86,10 +104,19 @@ def execute_platform_readiness_action(
     if act.startswith('reauth:'):
         interrupt_id = PlatformAuthInterrupts().raise_interrupt(svc, block or 'missing_session', detail=act)
         remediation = build_auth_remediation(svc, error=block or 'missing_session', configured=True)
+        profile = get_browser_runtime_profile(svc)
+        cmd = _reauth_command_for_service(svc)
         return {
             'status': 'waiting_approval',
             'error': f'Нужна повторная авторизация для {svc}',
-            'output': {**remediation, 'platform_auth_interrupt_id': interrupt_id},
+            'output': {
+                **remediation,
+                'platform_auth_interrupt_id': interrupt_id,
+                'reauth_command': cmd,
+                'login_url': str(profile.get('profile_completion_route') or ''),
+                'storage_state_path': str(profile.get('storage_state_path') or ''),
+                'persistent_profile_dir': str(profile.get('persistent_profile_dir') or ''),
+            },
             'agent': 'platform_readiness',
         }
 
