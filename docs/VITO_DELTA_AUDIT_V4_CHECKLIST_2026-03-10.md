@@ -59,9 +59,12 @@
 - Почему так: хардкод был реальным bottleneck для автономных market proposals.
 
 9. `PERF-1` — `comms_agent.py` 6528 строк, монолит
-- Статус: `not_done`
-- Что сделано: прямой декомпозиции файла пока нет.
-- Почему не закрыто: это архитектурный долг, а не ложное замечание. Да, часть логики была вынесена в compiler/router/runtime, но сам монолит еще жив.
+- Статус: `partial`
+- Что сделано: вынесены отдельные runtime-модули для:
+  - platform target registry
+  - owner text extraction / normalization
+  при этом сохранена backward-compatible обвязка для текущих тестов и маршрутов в [comms_agent.py](/home/vito/vito-agent/comms_agent.py).
+- Почему не закрыто: сам `comms_agent.py` все еще слишком большой и требует дальнейшего выноса routing/deferred execution/auth lanes в отдельные модули.
 
 10. `SEC-3` — `HumanBrowser` не переведен на `patchright`
 - Статус: `not_done`
@@ -200,15 +203,15 @@
 
 39. `QualityJudge`
 - Статус: `partial`
-- Обоснование: агент сильно усилен, но все еще остается одним из слабейших по benchmark matrix и требует post-uplift следующей волны.
+- Обоснование: агент усилен `recovery_plan/evidence`, но по свежей матрице все еще ниже целевого уровня (`7.11`) из-за слабого `data_usage/recovery`.
 
 40. `Analytics / SEO / SMM`
 - Статус: `partial`
-- Обоснование: они уже не thin wrappers в старом смысле, но глубокая operational depth еще не дотянута до целевого уровня.
+- Обоснование: `SEO/SMM` получили recovery/evidence uplift, но по свежей матрице все еще не дотягивают до owner-grade depth (`SEO 7.06`, `SMM 7.16`); `Analytics` сильнее, но семейство целиком еще не закрыто.
 
 41. `HR / Legal / Risk / Partnership`
 - Статус: `partial`
-- Обоснование: существенный uplift уже был, но замечание про недостаточную боевую глубину еще частично справедливо.
+- Обоснование: uplift проведен, но по свежей матрице `Risk` и `Partnership` еще ниже желаемого operational уровня, поэтому замечание остается частично актуальным.
 
 ## Архитектурные / стратегические пункты
 
