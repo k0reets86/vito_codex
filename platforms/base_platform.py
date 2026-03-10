@@ -34,12 +34,14 @@ class BasePlatform(ABC):
         *,
         mode: str,
         artifact_flags: dict[str, Any] | None = None,
+        required_artifacts: list[str] | tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
         return attach_publish_repeatability(
             result,
             platform=self.name,
             mode=mode,
             artifact_flags=artifact_flags,
+            required_artifacts=required_artifacts,
         )
 
     def _finalize_analytics_result(self, result: dict[str, Any], *, source: str) -> dict[str, Any]:

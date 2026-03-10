@@ -85,6 +85,18 @@
 
 ## Платформенный блок из аудита
 
+Общее усиление по платформенному блоку:
+- На текущем `main` repeatability/evidence слой стал строже:
+  - [platform_repeatability.py](/home/vito/vito-agent/modules/platform_repeatability.py) теперь считает:
+    - `required_artifacts`
+    - `missing_required_artifacts`
+    - `verification_channels`
+    - `proof_count`
+    - `owner_grade_ready`
+  - добавлен owner-grade validator:
+    - [platform_live_validation.py](/home/vito/vito-agent/modules/platform_live_validation.py)
+- Почему статусы ниже все еще `partial`: теперь разрыв уже не в отсутствии контракта, а в том, что live owner-grade revalidation по всем этим платформам еще нужно реально прогнать и подтвердить.
+
 12. `Gumroad` full
 - Статус: `partial`
 - Что сделано: есть рабочие runbook-и, quality gates, hard object invariants, human browser rollout.

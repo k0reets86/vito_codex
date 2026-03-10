@@ -81,6 +81,7 @@ async def browser_publish_form(
         platform=service,
         mode="browser_form",
         artifact_flags={"editor_url": bool(current_url), "screenshot": bool(screenshot_path)},
+        required_artifacts=("editor_url", "screenshot"),
     )
 
 
