@@ -54,7 +54,7 @@ class TestSubstackPublish:
     @pytest.mark.asyncio
     async def test_publish_with_browser(self, substack):
         result = await substack.publish({"title": "Post"})
-        assert result["status"] == "published"
+        assert result["status"] == "draft"
 
 
 class TestSubstackAnalytics:

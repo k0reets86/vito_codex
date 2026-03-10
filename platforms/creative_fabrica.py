@@ -1,8 +1,8 @@
-"""Creative Fabrica Platform — Browser-based интеграция через BrowserAgent."""
-
-from typing import Any
+"""Creative Fabrica Platform — browser-first operational adapter."""
 
 from config.logger import get_logger
+from config.settings import settings
+from modules.browser_platform_runtime import browser_auth_probe, browser_extract_analytics, browser_publish_form, resolve_storage_state
 from platforms.base_platform import BasePlatform
 
 logger = get_logger("creative_fabrica", agent="creative_fabrica")
@@ -11,20 +11,23 @@ logger = get_logger("creative_fabrica", agent="creative_fabrica")
 class CreativeFabricaPlatform(BasePlatform):
     def __init__(self, browser_agent=None, **kwargs):
         super().__init__(name="creative_fabrica", browser_agent=browser_agent, **kwargs)
+        self._storage_state_path = resolve_storage_state(
+            getattr(settings, "CREATIVE_FABRICA_STORAGE_STATE_FILE", ""),
+            "runtime/creative_fabrica_storage_state.json",
+        )
 
     async def authenticate(self) -> bool:
-        """Аутентификация через BrowserAgent."""
         if not self.browser_agent:
             logger.warning("BrowserAgent не подключён для Creative Fabrica", extra={"event": "cf_no_browser"})
             self._authenticated = False
             return False
         try:
-            result = await self.browser_agent.execute_task(
-                task_type="browse",
-                url="https://www.creativefabrica.com/dashboard",
-                action="check_login",
+            self._authenticated = await browser_auth_probe(
+                browser_agent=self.browser_agent,
+                service="creative_fabrica",
+                url="https://www.creativefabrica.com/designer/dashboard",
+                storage_state_path=self._storage_state_path,
             )
-            self._authenticated = result.success if result else False
             return self._authenticated
         except Exception as e:
             logger.error(f"Creative Fabrica auth error: {e}", extra={"event": "cf_auth_error"})
@@ -32,40 +35,30 @@ class CreativeFabricaPlatform(BasePlatform):
             return False
 
     async def publish(self, content: dict) -> dict:
-        """Публикация через BrowserAgent — загрузка продукта."""
         if not self.browser_agent:
             return {"platform": "creative_fabrica", "status": "no_browser"}
         try:
-            result = await self.browser_agent.execute_task(
-                task_type="form_fill",
+            return await browser_publish_form(
+                browser_agent=self.browser_agent,
+                service="creative_fabrica",
                 url="https://www.creativefabrica.com/designer/upload",
                 form_data=content,
+                success_status="draft",
             )
-            return {
-                "platform": "creative_fabrica",
-                "status": "published" if result and result.success else "failed",
-                "output": result.output if result else None,
-            }
         except Exception as e:
             logger.error(f"Creative Fabrica publish error: {e}", extra={"event": "cf_publish_error"})
             return {"platform": "creative_fabrica", "status": "error", "error": str(e)}
 
     async def get_analytics(self) -> dict:
-        """Аналитика через BrowserAgent."""
         if not self.browser_agent:
             return {"platform": "creative_fabrica", "sales": 0, "revenue": 0.0}
         try:
-            result = await self.browser_agent.execute_task(
-                task_type="browse",
+            result = await browser_extract_analytics(
+                browser_agent=self.browser_agent,
+                service="creative_fabrica",
                 url="https://www.creativefabrica.com/designer/earnings",
-                action="extract_text",
             )
-            return {
-                "platform": "creative_fabrica",
-                "raw_data": result.output if result else None,
-                "sales": 0,
-                "revenue": 0.0,
-            }
+            return {**result, "sales": 0, "revenue": 0.0}
         except Exception as e:
             logger.error(f"Creative Fabrica analytics error: {e}", extra={"event": "cf_analytics_error"})
             return {"platform": "creative_fabrica", "sales": 0, "revenue": 0.0}

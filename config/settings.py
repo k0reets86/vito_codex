@@ -73,6 +73,9 @@ class Settings:
     FACEBOOK_STORAGE_STATE_FILE: str = os.getenv("FACEBOOK_STORAGE_STATE_FILE", "runtime/facebook_storage_state.json")
     TIKTOK_STORAGE_STATE_FILE: str = os.getenv("TIKTOK_STORAGE_STATE_FILE", "runtime/tiktok_storage_state.json")
     LINKEDIN_STORAGE_STATE_FILE: str = os.getenv("LINKEDIN_STORAGE_STATE_FILE", "runtime/linkedin_storage_state.json")
+    SHOPIFY_STORAGE_STATE_FILE: str = os.getenv("SHOPIFY_STORAGE_STATE_FILE", "runtime/shopify_storage_state.json")
+    SUBSTACK_STORAGE_STATE_FILE: str = os.getenv("SUBSTACK_STORAGE_STATE_FILE", "runtime/substack_storage_state.json")
+    CREATIVE_FABRICA_STORAGE_STATE_FILE: str = os.getenv("CREATIVE_FABRICA_STORAGE_STATE_FILE", "runtime/creative_fabrica_storage_state.json")
     YOUTUBE_STORAGE_STATE_FILE: str = os.getenv("YOUTUBE_STORAGE_STATE_FILE", "runtime/youtube_storage_state.json")
     GUMROAD_MODE: str = os.getenv("GUMROAD_MODE", "api")
 
@@ -111,7 +114,13 @@ class Settings:
     # Social official APIs
     THREADS_ACCESS_TOKEN: str = os.getenv("THREADS_ACCESS_TOKEN", "")
     THREADS_USER_ID: str = os.getenv("THREADS_USER_ID", "")
+    INSTAGRAM_ACCESS_TOKEN: str = os.getenv("INSTAGRAM_ACCESS_TOKEN", "")
+    INSTAGRAM_BUSINESS_ACCOUNT_ID: str = os.getenv("INSTAGRAM_BUSINESS_ACCOUNT_ID", "")
     TIKTOK_ACCESS_TOKEN: str = os.getenv("TIKTOK_ACCESS_TOKEN", "")
+    LINKEDIN_ACCESS_TOKEN: str = os.getenv("LINKEDIN_ACCESS_TOKEN", "")
+    LINKEDIN_AUTHOR_URN: str = os.getenv("LINKEDIN_AUTHOR_URN", "")
+    SHOPIFY_ACCESS_TOKEN: str = os.getenv("SHOPIFY_ACCESS_TOKEN", "")
+    SHOPIFY_STORE_URL: str = os.getenv("SHOPIFY_STORE_URL", "")
     YOUTUBE_CLIENT_ID: str = os.getenv("YOUTUBE_CLIENT_ID", "")
     YOUTUBE_CLIENT_SECRET: str = os.getenv("YOUTUBE_CLIENT_SECRET", "")
     YOUTUBE_REFRESH_TOKEN: str = os.getenv("YOUTUBE_REFRESH_TOKEN", "")

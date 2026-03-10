@@ -54,7 +54,7 @@ class TestCFPublish:
     @pytest.mark.asyncio
     async def test_publish_with_browser(self, cf):
         result = await cf.publish({"title": "Design"})
-        assert result["status"] == "published"
+        assert result["status"] == "draft"
 
 
 class TestCFAnalytics:

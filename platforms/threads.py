@@ -1,8 +1,9 @@
-"""ThreadsPlatform — Graph API adapter (safe-first with dry-run)."""
+"""ThreadsPlatform — Graph API adapter with browser-aware fallback."""
 
 import aiohttp
 from platforms.base_platform import BasePlatform
 from config.settings import settings
+from modules.browser_platform_runtime import browser_auth_probe, browser_extract_analytics, browser_publish_form, resolve_storage_state
 from modules.execution_facts import ExecutionFacts
 
 
@@ -11,6 +12,10 @@ class ThreadsPlatform(BasePlatform):
         super().__init__(name="threads", **kwargs)
         self._token = getattr(settings, "THREADS_ACCESS_TOKEN", "")
         self._user_id = getattr(settings, "THREADS_USER_ID", "")
+        self._storage_state_path = resolve_storage_state(
+            getattr(settings, "THREADS_STORAGE_STATE_FILE", ""),
+            "runtime/threads_storage_state.json",
+        )
         self._session: aiohttp.ClientSession | None = None
 
     async def _get_session(self) -> aiohttp.ClientSession:
@@ -19,7 +24,15 @@ class ThreadsPlatform(BasePlatform):
         return self._session
 
     async def authenticate(self) -> bool:
-        self._authenticated = bool(self._token and self._user_id)
+        if self._token and self._user_id:
+            self._authenticated = True
+            return True
+        self._authenticated = await browser_auth_probe(
+            browser_agent=self.browser_agent,
+            service="threads",
+            url="https://www.threads.net/",
+            storage_state_path=self._storage_state_path,
+        )
         return self._authenticated
 
     async def publish(self, content: dict) -> dict:
@@ -38,13 +51,18 @@ class ThreadsPlatform(BasePlatform):
                 pass
             return {"platform": "threads", "status": "prepared", "dry_run": True}
 
-        if not self._token:
-            return {"platform": "threads", "status": "not_configured", "error": "THREADS_ACCESS_TOKEN missing"}
-        if not self._user_id:
-            return {"platform": "threads", "status": "not_configured", "error": "THREADS_USER_ID missing"}
         text = str(content.get("text", "")).strip()
         if not text:
             return {"platform": "threads", "status": "error", "error": "text required"}
+        if not self._token or not self._user_id:
+            return await browser_publish_form(
+                browser_agent=self.browser_agent,
+                service="threads",
+                url="https://www.threads.net/",
+                form_data={"title": text[:80], "text": text},
+                success_status="prepared",
+                title_field="text",
+            )
         try:
             session = await self._get_session()
             params = {"media_type": "TEXT", "text": text, "access_token": self._token}
@@ -84,10 +102,16 @@ class ThreadsPlatform(BasePlatform):
             return {"platform": "threads", "status": "error", "error": str(e)}
 
     async def get_analytics(self) -> dict:
-        return {"platform": "threads", "note": "basic adapter"}
+        if self._token and self._user_id:
+            return {"platform": "threads", "status": "ok", "note": "basic adapter"}
+        return await browser_extract_analytics(
+            browser_agent=self.browser_agent,
+            service="threads",
+            url="https://www.threads.net/",
+        )
 
     async def health_check(self) -> bool:
-        return bool(self._token and self._user_id)
+        return await self.authenticate()
 
     async def close(self) -> None:
         if self._session and not self._session.closed:

@@ -1,8 +1,8 @@
-"""Substack Platform — Browser-based интеграция через BrowserAgent."""
-
-from typing import Any
+"""Substack Platform — browser-first operational adapter."""
 
 from config.logger import get_logger
+from config.settings import settings
+from modules.browser_platform_runtime import browser_auth_probe, browser_extract_analytics, browser_publish_form, resolve_storage_state
 from platforms.base_platform import BasePlatform
 
 logger = get_logger("substack", agent="substack")
@@ -11,20 +11,23 @@ logger = get_logger("substack", agent="substack")
 class SubstackPlatform(BasePlatform):
     def __init__(self, browser_agent=None, **kwargs):
         super().__init__(name="substack", browser_agent=browser_agent, **kwargs)
+        self._storage_state_path = resolve_storage_state(
+            getattr(settings, "SUBSTACK_STORAGE_STATE_FILE", ""),
+            "runtime/substack_storage_state.json",
+        )
 
     async def authenticate(self) -> bool:
-        """Аутентификация через BrowserAgent."""
         if not self.browser_agent:
             logger.warning("BrowserAgent не подключён для Substack", extra={"event": "substack_no_browser"})
             self._authenticated = False
             return False
         try:
-            result = await self.browser_agent.execute_task(
-                task_type="browse",
-                url="https://substack.com/dashboard",
-                action="check_login",
+            self._authenticated = await browser_auth_probe(
+                browser_agent=self.browser_agent,
+                service="substack",
+                url="https://substack.com/home",
+                storage_state_path=self._storage_state_path,
             )
-            self._authenticated = result.success if result else False
             return self._authenticated
         except Exception as e:
             logger.error(f"Substack auth error: {e}", extra={"event": "substack_auth_error"})
@@ -32,40 +35,30 @@ class SubstackPlatform(BasePlatform):
             return False
 
     async def publish(self, content: dict) -> dict:
-        """Публикация через BrowserAgent — создание поста."""
         if not self.browser_agent:
             return {"platform": "substack", "status": "no_browser"}
         try:
-            result = await self.browser_agent.execute_task(
-                task_type="form_fill",
+            return await browser_publish_form(
+                browser_agent=self.browser_agent,
+                service="substack",
                 url="https://substack.com/publish/post",
                 form_data=content,
+                success_status="draft",
             )
-            return {
-                "platform": "substack",
-                "status": "published" if result and result.success else "failed",
-                "output": result.output if result else None,
-            }
         except Exception as e:
             logger.error(f"Substack publish error: {e}", extra={"event": "substack_publish_error"})
             return {"platform": "substack", "status": "error", "error": str(e)}
 
     async def get_analytics(self) -> dict:
-        """Аналитика через BrowserAgent (Substack Dashboard)."""
         if not self.browser_agent:
             return {"platform": "substack", "subscribers": 0, "posts": 0}
         try:
-            result = await self.browser_agent.execute_task(
-                task_type="browse",
-                url="https://substack.com/dashboard",
-                action="extract_text",
+            result = await browser_extract_analytics(
+                browser_agent=self.browser_agent,
+                service="substack",
+                url="https://substack.com/home",
             )
-            return {
-                "platform": "substack",
-                "raw_data": result.output if result else None,
-                "subscribers": 0,
-                "posts": 0,
-            }
+            return {**result, "subscribers": 0, "posts": 0}
         except Exception as e:
             logger.error(f"Substack analytics error: {e}", extra={"event": "substack_analytics_error"})
             return {"platform": "substack", "subscribers": 0, "posts": 0}

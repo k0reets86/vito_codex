@@ -134,34 +134,66 @@
 - Почему не `done`: несмотря на существенный прогресс, fully repeatable owner-grade flow без ручного дожима еще не доказан.
 
 23. `Substack`
-- Статус: `not_done`
-- Что сделано: интеграция есть как browser-only.
-- Почему не закрыто: по аудиту нужен production-grade path, его в этом цикле не доводили.
+- Статус: `partial`
+- Что сделано: [substack.py](/home/vito/vito-agent/platforms/substack.py) переведен в browser-first operational adapter с:
+  - auth probe
+  - draft-oriented publish path
+  - analytics extract
+  - structured recovery hints/evidence
+- Почему не закрыто: owner-grade repeatability и live revalidation в этом цикле не проводились.
 
 24. `Creative Fabrica`
-- Статус: `not_done`
-- Что сделано: базовый browser-only слой есть.
-- Почему не закрыто: хрупкость runbook-а не убрана и live боевого пакета не было.
+- Статус: `partial`
+- Что сделано: [creative_fabrica.py](/home/vito/vito-agent/platforms/creative_fabrica.py) переведен в browser-first operational adapter с:
+  - auth probe
+  - draft-oriented publish path
+  - analytics extract
+  - structured recovery hints/evidence
+- Почему не закрыто: owner-grade repeatability и live боевой пакет еще не доказаны.
 
 25. `TikTok` stub
-- Статус: `not_done`
-- Что сделано: по сути ничего достаточного для снятия замечания.
+- Статус: `partial`
+- Что сделано: [tiktok.py](/home/vito/vito-agent/platforms/tiktok.py) теперь не просто skeleton:
+  - API path живой
+  - browser-aware fallback добавлен
+  - auth/analytics browser probes есть
+  - dry-run/evidence path сохранен
+- Почему не закрыто: live production posting в этом цикле не подтвержден.
 
 26. `Instagram` stub
-- Статус: `not_done`
-- Что сделано: production implementation не делалась.
+- Статус: `partial`
+- Что сделано: [instagram.py](/home/vito/vito-agent/platforms/instagram.py) получил:
+  - Graph API publish path для `image_url`
+  - browser-first fallback
+  - auth/analytics paths
+  - evidence recording
+- Почему не закрыто: live production validation не проводилась; часть боевых flows зависит от business account setup.
 
 27. `LinkedIn` stub
-- Статус: `not_done`
-- Что сделано: production implementation не делалась.
+- Статус: `partial`
+- Что сделано: [linkedin.py](/home/vito/vito-agent/platforms/linkedin.py) получил:
+  - REST posts API path
+  - browser-first fallback
+  - auth/analytics paths
+  - evidence recording
+- Почему не закрыто: owner-grade live validation не проводилась; часть боевых flows зависит от app/product access на стороне LinkedIn.
 
 28. `Shopify` stub
-- Статус: `not_done`
-- Что сделано: production implementation не делалась.
+- Статус: `partial`
+- Что сделано: [shopify.py](/home/vito/vito-agent/platforms/shopify.py) получил:
+  - GraphQL `productCreate`
+  - browser-first fallback
+  - auth/analytics paths
+  - evidence recording
+- Почему не закрыто: не доведен digital-delivery/product-media lane и нет live owner-grade validation.
 
 29. `Threads` stub
-- Статус: `not_done`
-- Что сделано: production implementation не делалась.
+- Статус: `partial`
+- Что сделано: [threads.py](/home/vito/vito-agent/platforms/threads.py) усилен:
+  - Graph API path сохранен
+  - browser-aware fallback добавлен
+  - auth/analytics browser probes есть
+- Почему не закрыто: live production posting через этот путь в последнем цикле не подтверждался.
 
 ## Агентный блок из аудита
 
@@ -175,7 +207,11 @@
 
 32. `SelfEvolver`
 - Статус: `partial`
-- Обоснование: autonomy v2 встроен, но в аудите справедливо отмечено, что proposal-quality и глубина реального failure analysis еще не максимальны.
+- Обоснование: autonomy v2 встроен, дополнительно усилены:
+  - owner-model alignment
+  - issue bucketing
+  - evidence/next_actions в proposals
+  Но proposal-quality и глубина реального failure analysis еще не дотягивают до максимального уровня.
 
 33. `PlatformOnboardingAgent`
 - Статус: `done`

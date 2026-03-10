@@ -1,10 +1,11 @@
-"""TikTokPlatform — lightweight Content Posting API adapter (safe-first)."""
+"""TikTokPlatform — API adapter with browser-aware fallback."""
 
 from __future__ import annotations
 
 import aiohttp
 
 from config.settings import settings
+from modules.browser_platform_runtime import browser_auth_probe, browser_extract_analytics, browser_publish_form, resolve_storage_state
 from modules.execution_facts import ExecutionFacts
 from platforms.base_platform import BasePlatform
 
@@ -13,6 +14,10 @@ class TikTokPlatform(BasePlatform):
     def __init__(self, **kwargs):
         super().__init__(name="tiktok", **kwargs)
         self._token = getattr(settings, "TIKTOK_ACCESS_TOKEN", "")
+        self._storage_state_path = resolve_storage_state(
+            getattr(settings, "TIKTOK_STORAGE_STATE_FILE", ""),
+            "runtime/tiktok_storage_state.json",
+        )
         self._session: aiohttp.ClientSession | None = None
 
     async def _get_session(self) -> aiohttp.ClientSession:
@@ -21,11 +26,18 @@ class TikTokPlatform(BasePlatform):
         return self._session
 
     async def authenticate(self) -> bool:
-        self._authenticated = bool(self._token)
+        if self._token:
+            self._authenticated = True
+            return True
+        self._authenticated = await browser_auth_probe(
+            browser_agent=self.browser_agent,
+            service="tiktok",
+            url="https://www.tiktok.com/upload",
+            storage_state_path=self._storage_state_path,
+        )
         return self._authenticated
 
     async def publish(self, content: dict) -> dict:
-        # Safe mode: always support dry_run and evidence-first
         if content.get("dry_run"):
             caption = str(content.get("caption", ""))[:150]
             try:
@@ -41,13 +53,17 @@ class TikTokPlatform(BasePlatform):
                 pass
             return {"platform": "tiktok", "status": "prepared", "dry_run": True}
 
-        if not self._token:
-            return {"platform": "tiktok", "status": "not_configured", "error": "TIKTOK_ACCESS_TOKEN missing"}
-
-        # Minimal direct-post skeleton (requires full app approvals on TikTok side).
-        # We return prepared unless real upload_url/video_url is provided.
         video_url = str(content.get("video_url", "")).strip()
         caption = str(content.get("caption", "")).strip()
+        if not self._token:
+            return await browser_publish_form(
+                browser_agent=self.browser_agent,
+                service="tiktok",
+                url="https://www.tiktok.com/upload",
+                form_data={"title": caption[:80] or "TikTok upload", "caption": caption, "video_url": video_url},
+                success_status="prepared",
+                title_field="caption",
+            )
         if not video_url:
             return {"platform": "tiktok", "status": "prepared", "note": "video_url required for live post"}
 
@@ -83,10 +99,16 @@ class TikTokPlatform(BasePlatform):
             return {"platform": "tiktok", "status": "error", "error": str(e)}
 
     async def get_analytics(self) -> dict:
-        return {"platform": "tiktok", "note": "adapter skeleton"}
+        if self._token:
+            return {"platform": "tiktok", "note": "adapter skeleton"}
+        return await browser_extract_analytics(
+            browser_agent=self.browser_agent,
+            service="tiktok",
+            url="https://www.tiktok.com/",
+        )
 
     async def health_check(self) -> bool:
-        return bool(self._token)
+        return await self.authenticate()
 
     async def close(self) -> None:
         if self._session and not self._session.closed:
