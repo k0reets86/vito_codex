@@ -1378,6 +1378,21 @@ class EtsyPlatform(BasePlatform):
                         "category_confirmed": bool(audit.get("categoryConfirmed")),
                         "editor_audit": audit,
                     }
+                    result = self._finalize_publish_result(
+                        result,
+                        mode="browser_only",
+                        artifact_flags={
+                            "listing_id": bool(listing_id),
+                            "url": bool(url),
+                            "file": bool(result.get("file_attached")),
+                            "images": int(result.get("image_count") or 0) > 0,
+                            "tags": bool(result.get("tags_confirmed")),
+                            "materials": bool(result.get("materials_confirmed")),
+                            "category": bool(result.get("category_confirmed")),
+                            "screenshot": bool(shot),
+                        },
+                        required_artifacts=("listing_id", "url", "file", "images", "tags", "materials", "category", "screenshot"),
+                    )
                     self._record_browser_lesson(result, source="etsy.publish.browser")
                     return result
                 if draft_only and allow_existing_update and target_listing_id:
@@ -1400,6 +1415,21 @@ class EtsyPlatform(BasePlatform):
                         "category_confirmed": bool(audit.get("categoryConfirmed")),
                         "editor_audit": audit,
                     }
+                    result = self._finalize_publish_result(
+                        result,
+                        mode="browser_only",
+                        artifact_flags={
+                            "listing_id": bool(target_listing_id),
+                            "url": bool(fallback_url),
+                            "file": bool(result.get("file_attached")),
+                            "images": int(result.get("image_count") or 0) > 0,
+                            "tags": bool(result.get("tags_confirmed")),
+                            "materials": bool(result.get("materials_confirmed")),
+                            "category": bool(result.get("category_confirmed")),
+                            "screenshot": bool(shot),
+                        },
+                        required_artifacts=("listing_id", "url", "file", "images", "tags", "materials", "category", "screenshot"),
+                    )
                     self._record_browser_lesson(result, source="etsy.publish.browser")
                     return result
                 editor_debug = editor_probe or await _editor_debug()
@@ -1786,7 +1816,7 @@ class EtsyPlatform(BasePlatform):
                     )
                 except Exception:
                     pass
-                return {
+                result = {
                     "platform": "etsy",
                     "status": "created",
                     "listing_id": listing_id,
@@ -1794,6 +1824,15 @@ class EtsyPlatform(BasePlatform):
                     "state": "draft",
                     "data": data,
                 }
+                return self._finalize_publish_result(
+                    result,
+                    mode="api",
+                    artifact_flags={
+                        "listing_id": bool(listing_id),
+                        "url": bool(listing_url),
+                    },
+                    required_artifacts=("listing_id", "url"),
+                )
 
             error = data.get("error", str(status_code))
             logger.warning(f"Etsy publish failed: {error}", extra={"event": "etsy_publish_fail"})

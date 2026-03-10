@@ -116,6 +116,24 @@ class TestPrintfulPublish:
         assert result["status"] == "needs_sync_update_flow"
         assert result["sync_product_id"] == "9911"
 
+    @pytest.mark.asyncio
+    async def test_browser_existing_linked_result_has_repeatability_profile(self, printful):
+        printful._finalize_publish_result = MagicMock(side_effect=lambda result, **_: {**result, "repeatability_profile": {"repeatability_grade": "owner_grade"}})
+        result = printful._finalize_publish_result(
+            {
+                "platform": "printful",
+                "status": "published",
+                "url": "https://printful.test/my-products",
+                "etsy_edit_url": "https://www.etsy.com/your/shops/me/tools/listings/1",
+                "title": "Test Product",
+                "screenshot_path": "/tmp/x.png",
+            },
+            mode="browser_only",
+            artifact_flags={"url": True, "etsy_edit_url": True, "title": True, "screenshot": True},
+            required_artifacts=("url", "etsy_edit_url", "title", "screenshot"),
+        )
+        assert result["repeatability_profile"]["repeatability_grade"] == "owner_grade"
+
 
 class TestPrintfulAnalytics:
     @pytest.mark.asyncio

@@ -230,13 +230,22 @@ class TwitterPlatform(BasePlatform):
                         )
                     except Exception:
                         pass
-                    return {
-                        "platform": "twitter",
-                        "status": "published",
-                        "tweet_id": tweet_id,
-                        "url": tweet_url,
-                        "text": text,
-                    }
+                    return self._finalize_publish_result(
+                        {
+                            "platform": "twitter",
+                            "status": "published",
+                            "tweet_id": tweet_id,
+                            "url": tweet_url,
+                            "text": text,
+                        },
+                        mode="api",
+                        artifact_flags={
+                            "tweet_id": bool(tweet_id),
+                            "url": bool(tweet_url),
+                            "text": bool(text),
+                        },
+                        required_artifacts=("tweet_id", "url", "text"),
+                    )
                 else:
                     error = data.get("detail", data.get("title", str(resp.status)))
                     logger.warning(f"Tweet failed: {error}", extra={"event": "twitter_publish_fail"})
@@ -577,7 +586,7 @@ class TwitterPlatform(BasePlatform):
                     )
                 except Exception:
                     pass
-                return {
+                browser_result = {
                     "platform": "twitter",
                     "status": status,
                     "url": tweet_url or current_url or "https://x.com/home",
@@ -589,6 +598,16 @@ class TwitterPlatform(BasePlatform):
                     "mode": "browser_only",
                     "screenshot_path": shot,
                 }
+                return self._finalize_publish_result(
+                    browser_result,
+                    mode="browser_only",
+                    artifact_flags={
+                        "url": bool(browser_result.get("url")),
+                        "id": bool(browser_result.get("id")),
+                        "screenshot": bool(shot),
+                    },
+                    required_artifacts=("url", "id", "screenshot") if status == "published" else ("url", "screenshot"),
+                )
         except Exception as e:
             return {"platform": "twitter", "status": "error", "error": str(e), "screenshot_path": shot}
         finally:

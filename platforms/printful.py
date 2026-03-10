@@ -268,7 +268,8 @@ class PrintfulPlatform(BasePlatform):
 
                 existing_linked = await _find_synced_product(await _resolve_my_products_url(), target_title)
                 if existing_linked.get("etsy_edit_url"):
-                    result = {
+                    result = self._finalize_publish_result(
+                        {
                         "platform": "printful",
                         "status": "published",
                         "url": existing_linked.get("my_products_url") or "",
@@ -279,7 +280,16 @@ class PrintfulPlatform(BasePlatform):
                         "title": target_title[:200],
                         "template_id": "",
                         "etsy_edit_url": existing_linked.get("etsy_edit_url") or "",
-                    }
+                        },
+                        mode="browser_only",
+                        artifact_flags={
+                            "url": bool(existing_linked.get("my_products_url")),
+                            "etsy_edit_url": bool(existing_linked.get("etsy_edit_url")),
+                            "title": bool(target_title),
+                            "screenshot": bool(shot),
+                        },
+                        required_artifacts=("url", "etsy_edit_url", "title", "screenshot"),
+                    )
                     try:
                         ExecutionFacts().record(
                             action="platform:publish",
@@ -446,18 +456,39 @@ class PrintfulPlatform(BasePlatform):
                     page_body = (await page.locator("body").inner_text())[:4000]
                 except Exception:
                     page_body = ""
-                result = {
-                    "platform": "printful",
-                    "status": result_status,
-                    "url": result_url,
-                    "mode": "browser_only",
-                    "screenshot_path": shot,
-                    "html_path": html_dump,
-                    "store_type": self._store_type or "",
-                    "title": page_title[:200],
-                    "template_id": template_id,
-                    "etsy_edit_url": etsy_edit_url,
-                }
+                result = self._finalize_publish_result(
+                    {
+                        "platform": "printful",
+                        "status": result_status,
+                        "url": result_url,
+                        "mode": "browser_only",
+                        "screenshot_path": shot,
+                        "html_path": html_dump,
+                        "store_type": self._store_type or "",
+                        "title": page_title[:200],
+                        "template_id": template_id,
+                        "etsy_edit_url": etsy_edit_url,
+                    },
+                    mode="browser_only",
+                    artifact_flags={
+                        "url": bool(result_url),
+                        "etsy_edit_url": bool(etsy_edit_url),
+                        "title": bool(page_title),
+                        "template_id": bool(template_id),
+                        "screenshot": bool(shot),
+                    },
+                    required_artifacts=(
+                        "url",
+                        "etsy_edit_url",
+                        "title",
+                        "template_id",
+                        "screenshot",
+                    ) if result_status == "published" else (
+                        "url",
+                        "title",
+                        "screenshot",
+                    ),
+                )
                 try:
                     ExecutionFacts().record(
                         action="platform:publish",
