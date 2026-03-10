@@ -220,20 +220,23 @@
 - Почему так: теперь repeated platform failures открывают cooldown и режут повторное выполнение через общий durable gate.
 
 43. `rate limiter для LLM`
-- Статус: `partial`
-- Почему: есть budget/controller/policy слои, но прямой rate-limiter как отдельный системный компонент не доведен до уровня замечания.
+- Статус: `done`
+- Что сделано: добавлен [llm_rate_limiter.py](/home/vito/vito-agent/modules/llm_rate_limiter.py) и встроен в [llm_router.py](/home/vito/vito-agent/llm_router.py) как provider-scoped RPM gate с durable логом вызовов.
+- Почему так: теперь это отдельный системный компонент, а не только Gemini-specific wait и не только budget policy.
 
 44. `distributed tracing`
 - Статус: `done`
 - Почему: `AgentEventBus` wired и `/api/events` уже есть.
 
 45. `memory consolidation`
-- Статус: `partial`
-- Почему: memory pipeline сильно усилен, но именно как отдельный ночной consolidation job с полным policy loop тема еще не исчерпана.
+- Статус: `done`
+- Что сделано: добавлен [memory_consolidation.py](/home/vito/vito-agent/modules/memory_consolidation.py) и встроен в [decision_loop.py](/home/vito/vito-agent/decision_loop.py) как отдельный policy-driven consolidation cycle с run log.
+- Почему так: теперь short->long promotion живет не как разрозненный helper, а как отдельный runtime policy loop.
 
 46. `A/B тест контента`
-- Статус: `not_done`
-- Почему: системного A/B loop нет.
+- Статус: `done`
+- Что сделано: добавлен [content_experiments.py](/home/vito/vito-agent/modules/content_experiments.py); [marketing_agent.py](/home/vito/vito-agent/agents/marketing_agent.py) теперь создает content experiments с вариантами, хранит experiment_id и поддерживает выбор winner по метрикам.
+- Почему так: появился реальный системный A/B loop, а не только упоминание A/B в промптах.
 
 47. `proxy rotation`
 - Статус: `not_done`
@@ -264,9 +267,9 @@
 ## Итоговая оценка по Delta Audit v4 checklist
 
 Сводка по количеству:
-- `done`: 22
-- `partial`: 17
-- `not_done`: 13
+- `done`: 25
+- `partial`: 15
+- `not_done`: 12
 - `disputed`: 0
 
 Главный вывод:

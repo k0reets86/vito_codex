@@ -29,6 +29,7 @@ from openai import AsyncOpenAI
 from config.logger import get_logger
 from config.settings import settings
 from modules.llm_guardrails import LLMGuardrails
+from modules.llm_rate_limiter import LLMRateLimiter
 from modules.research_url_context import ResearchURLContextPipeline
 
 logger = get_logger("llm_router", agent="llm_router")
@@ -165,6 +166,7 @@ class LLMRouter:
         self._finance = finance  # FinancialController — set via set_finance()
         self._comms = comms
         self._guardrails = LLMGuardrails(sqlite_path=self._sqlite_path)
+        self._rate_limiter = LLMRateLimiter(sqlite_path=self._sqlite_path)
         self._research_url_context = ResearchURLContextPipeline()
         self._provider_cooldown_until: dict[str, float] = {}
         self._init_spend_table()
@@ -819,6 +821,13 @@ class LLMRouter:
         """Вызов конкретного провайдера. Возвращает (text, real_cost_usd)."""
         if task_type is None:
             task_type = getattr(self, "_provider_task_type_ctx", None)
+        decision = await self._rate_limiter.wait_for_slot(
+            provider=model.provider,
+            model=model.model_id,
+            task_type=(task_type.value if task_type else "unknown"),
+        )
+        if not decision.allowed:
+            raise RuntimeError(f"rate_limit_local_block:{model.provider}:{decision.reason}")
         if model.provider == "anthropic":
             response = await asyncio.wait_for(
                 self.anthropic_client.messages.create(

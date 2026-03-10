@@ -42,6 +42,7 @@ class TestMarketingAgent:
         assert result.success is True
         assert isinstance(result.output, dict)
         assert len(result.output["variants"]) == 3
+        assert "experiment" in result.output
 
     @pytest.mark.asyncio
     async def test_execute_task(self, agent):

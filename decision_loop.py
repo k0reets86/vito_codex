@@ -40,6 +40,7 @@ from modules.step_contract import validate_step_output, validate_step_result
 from modules.tooling_registry import ToolingRegistry
 from modules.tooling_discovery import ToolingDiscovery, parse_tooling_discovery_sources
 from modules.memory_skill_reports import MemorySkillReporter
+from modules.memory_consolidation import MemoryConsolidationEngine
 from modules.governance_reporter import GovernanceReporter
 from modules.autonomous_improvement import AutonomousImprovementEngine
 from modules.runtime_remediation import (
@@ -101,6 +102,7 @@ class DecisionLoop:
         self._last_tooling_discovery_tick = 0
         self._last_platform_rules_sync_tick = 0
         self._last_memory_weekly_report_tick = 0
+        self._last_memory_consolidation_tick = 0
         self._last_weekly_governance_tick = 0
         self._last_autonomous_improvement_tick = 0
         self._last_opportunity_scout_tick = 0
@@ -218,6 +220,7 @@ class DecisionLoop:
         # 1.5. LLM risk monitoring (cost anomaly / fail-rate)
         await self._maybe_send_llm_risk_alert()
         await self._maybe_run_memory_retention()
+        await self._maybe_run_memory_consolidation()
         await self._maybe_run_memory_weekly_report()
         await self._maybe_run_self_learning_optimization()
         await self._maybe_run_self_learning_test_jobs()
@@ -506,6 +509,26 @@ class DecisionLoop:
                     extra={"event": "memory_retention_cleanup", "context": {"result": applied}},
                 )
             self._last_memory_retention_tick = self._tick_count
+        except Exception:
+            pass
+
+    async def _maybe_run_memory_consolidation(self) -> None:
+        try:
+            if not bool(getattr(settings, "MEMORY_CONSOLIDATION_ENABLED", True)):
+                return
+            interval = max(24, int(getattr(settings, "MEMORY_CONSOLIDATION_INTERVAL_TICKS", 288) or 288))
+            if self._tick_count - int(self._last_memory_consolidation_tick or 0) < interval:
+                return
+            engine = MemoryConsolidationEngine(self.memory, sqlite_path=settings.SQLITE_PATH)
+            result = engine.run_cycle(
+                min_age_days=max(1, int(getattr(settings, "MEMORY_CONSOLIDATION_MIN_AGE_DAYS", 5) or 5)),
+                limit=max(1, int(getattr(settings, "MEMORY_CONSOLIDATION_LIMIT", 25) or 25)),
+            )
+            logger.info(
+                "Memory consolidation cycle completed",
+                extra={"event": "memory_consolidation_cycle", "context": result},
+            )
+            self._last_memory_consolidation_tick = self._tick_count
         except Exception:
             pass
 
