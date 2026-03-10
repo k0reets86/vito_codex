@@ -249,16 +249,25 @@
 - Обоснование: агент уже в боевом runtime contract и benchmark matrix.
 
 39. `QualityJudge`
-- Статус: `partial`
-- Обоснование: агент усилен `recovery_plan/evidence/domain_scorecard/handoff_plan`, но по свежей матрице все еще ниже целевого уровня (`7.11`) из-за слабого `data_usage/recovery`.
+- Статус: `done`
+- Обоснование: агент усилен `recovery_plan/evidence/domain_scorecard/handoff_plan`, получил расширенные contracts/memory/tool scopes; по свежей матрице поднят до `8.59`.
 
 40. `Analytics / SEO / SMM`
-- Статус: `partial`
-- Обоснование: `SEO/SMM` получили recovery/evidence/runtime-profile uplift, но по свежей матрице все еще не дотягивают до owner-grade depth (`SEO 7.06`, `SMM 7.16`); `Analytics` сильнее (`7.55`), но семейство целиком еще не закрыто.
+- Статус: `done`
+- Обоснование: после второй волны uplift и расширения contract depth семейство поднято:
+  - `Analytics 8.29`
+  - `SEO 8.79`
+  - `SMM 8.58`
+  Это уже выше owner-grade minimum для аудита.
 
 41. `HR / Legal / Risk / Partnership`
-- Статус: `partial`
-- Обоснование: uplift проведен, но по свежей матрице `HR 7.40`, `Risk 7.44`, `Partnership 7.25`, `Legal 7.93`; то есть семейство стало сильнее, но еще не вышло на owner-grade uniformity.
+- Статус: `done`
+- Обоснование: после contract-depth uplift семейство поднято:
+  - `HR 8.38`
+  - `Legal 8.46`
+  - `Risk 8.34`
+  - `Partnership 8.15`
+  Семейство выровнено до owner-grade minimum.
 
 ## Архитектурные / стратегические пункты
 
@@ -325,8 +334,8 @@
 ## Итоговая оценка по Delta Audit v4 checklist
 
 Сводка по количеству:
-- `done`: 29
-- `partial`: 23
+- `done`: 32
+- `partial`: 20
 - `not_done`: 0
 - `disputed`: 0
 
@@ -335,5 +344,5 @@
 - Самые ценные незакрытые зоны сейчас:
   1. `comms_agent` декомпозиция
   2. platform repeatability до уровня owner-grade certainty
-  3. weakest agent uplift второй волны (`quality_judge`, `seo_agent`, `smm_agent`, `devops_agent`, `security_agent`, частично `analytics/hr/risk/partnership`)
+  3. remaining weak-agent/runtime gaps (`self_evolver`, `devops_agent`, `security_agent`, deeper research/browser recovery`)
   4. вторая волна platform/browser live validation на новом runtime

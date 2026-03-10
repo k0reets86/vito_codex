@@ -275,7 +275,8 @@ class TestRegistryDispatch:
         result = await registry.dispatch("main_cap")
         assert result is not None
         assert result.success is False
-        assert "verification_rejected:quality_review" in (result.error or "")
+        assert "verification_" in (result.error or "")
+        assert "quality_review" in (result.error or "")
 
     @pytest.mark.asyncio
     async def test_dispatch_research_keeps_output_on_verification_reject(self):

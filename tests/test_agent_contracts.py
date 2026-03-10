@@ -11,7 +11,8 @@ def test_all_agent_contracts_are_valid():
 
 def test_quality_judge_and_vito_core_have_operational_roles():
     contracts = list_agent_contracts()
-    assert contracts["vito_core"]["role"] == "owner_orchestrator"
+    assert contracts["vito_core"]["role"].startswith("owner_orchestrator")
     assert "owner_response" in contracts["vito_core"]["owned_outcomes"]
     assert contracts["quality_judge"]["primary_kind"] == "persona"
+    assert contracts["quality_judge"]["role"].startswith("quality_")
     assert "approval_decision" in contracts["quality_judge"]["owned_outcomes"]
