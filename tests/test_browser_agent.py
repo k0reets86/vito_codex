@@ -165,6 +165,14 @@ def test_resolve_browser_engine_falls_back_to_playwright(monkeypatch):
     assert engine == "playwright"
     assert callable(factory)
 
+
+def test_runtime_profile_carries_proxy(monkeypatch):
+    from modules.browser_runtime_policy import get_browser_runtime_profile
+
+    monkeypatch.setattr(settings, "BROWSER_PROXY_POOL", "http://proxy1:8080")
+    profile = get_browser_runtime_profile("etsy")
+    assert profile["proxy"]["server"] == "http://proxy1:8080"
+
     @pytest.mark.asyncio
     async def test_fill_form_uses_default_screenshot_for_screenshot_first_service(self, agent):
         mock_page = AsyncMock()

@@ -224,6 +224,7 @@ class BrowserAgent(BaseAgent):
                         BrowserAgent._browser = await BrowserAgent._playwright_inst.chromium.launch(
                             headless=True,
                             args=_chromium_launch_args(),
+                            proxy=(self._runtime_profile("").get("proxy") or None),
                         )
                         context_kwargs = self._human_browser.context_kwargs(
                             self._runtime_profile(""),

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from config.paths import root_path
+from modules.browser_proxy_pool import select_proxy_for_service
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,7 @@ class BrowserRuntimeProfile:
     profile_completion_route: str
     otp_supported: bool
     otp_prompt: str
+    proxy: dict[str, Any] | None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -36,6 +38,7 @@ class BrowserRuntimeProfile:
             "profile_completion_route": self.profile_completion_route,
             "otp_supported": self.otp_supported,
             "otp_prompt": self.otp_prompt,
+            "proxy": dict(self.proxy or {}) if self.proxy else None,
         }
 
 
@@ -161,6 +164,7 @@ def storage_state_path_for_service(service: str) -> Path | None:
 def get_browser_runtime_profile(service: str) -> dict[str, Any]:
     svc = str(service or "").strip().lower()
     data = _SERVICE_MAP.get(svc)
+    proxy = select_proxy_for_service(svc)
     if not data:
         return BrowserRuntimeProfile(
             service=svc,
@@ -175,6 +179,7 @@ def get_browser_runtime_profile(service: str) -> dict[str, Any]:
             profile_completion_route="",
             otp_supported=False,
             otp_prompt="",
+            proxy=proxy,
         ).to_dict()
     return BrowserRuntimeProfile(
         service=svc,
@@ -189,6 +194,7 @@ def get_browser_runtime_profile(service: str) -> dict[str, Any]:
         profile_completion_route=str(data["profile_route"]),
         otp_supported=bool(data["otp_supported"]),
         otp_prompt=str(data["otp_prompt"]),
+        proxy=proxy,
     ).to_dict()
 
 

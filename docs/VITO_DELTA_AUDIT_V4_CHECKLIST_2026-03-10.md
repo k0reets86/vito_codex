@@ -242,8 +242,13 @@
 - Почему так: появился реальный системный A/B loop, а не только упоминание A/B в промптах.
 
 47. `proxy rotation`
-- Статус: `not_done`
-- Почему: не реализовывалось.
+- Статус: `partial`
+- Что сделано: добавлен runtime proxy pool:
+  - [browser_proxy_pool.py](/home/vito/vito-agent/modules/browser_proxy_pool.py)
+  - `BROWSER_PROXY_POOL`
+  - deterministic per-service proxy selection
+  - прокладка `proxy` в browser runtime profile и launch path
+- Почему не закрыто: это базовый rotation/pool layer, но еще нет health-based proxy eviction, live failover и platform-aware proxy strategy.
 
 ## Codex prompts / roadmap sections
 
