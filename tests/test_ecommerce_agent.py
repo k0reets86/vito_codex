@@ -7,6 +7,12 @@ from agents.base_agent import TaskResult
 
 
 class TestECommerceAgent:
+    @pytest.fixture(autouse=True)
+    def _isolated_sqlite(self, tmp_sqlite, monkeypatch):
+        from config.settings import settings
+
+        monkeypatch.setattr(settings, "SQLITE_PATH", str(tmp_sqlite))
+
     @pytest.fixture
     def mock_platform(self):
         platform = MagicMock()

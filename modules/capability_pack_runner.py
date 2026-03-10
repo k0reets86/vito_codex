@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 from typing import Any
 
@@ -21,11 +22,15 @@ class CapabilityPackRunner:
             result = {"status": "error", "error": "adapter_not_found"}
             _record_pack_event(name, result)
             return result
-        if spec_path.exists() and not settings.CAPABILITY_PACK_ALLOW_PENDING:
+        spec_data: dict[str, Any] = {}
+        if spec_path.exists():
             try:
-                import json
-                spec = json.loads(spec_path.read_text(encoding="utf-8"))
-                if str(spec.get("acceptance_status", "pending")).lower() != "accepted":
+                spec_data = json.loads(spec_path.read_text(encoding="utf-8"))
+            except Exception:
+                spec_data = {}
+        if spec_data and not settings.CAPABILITY_PACK_ALLOW_PENDING:
+            try:
+                if str(spec_data.get("acceptance_status", "pending")).lower() != "accepted":
                     result = {"status": "error", "error": "pack_not_accepted"}
                     _record_pack_event(name, result)
                     return result
@@ -43,7 +48,45 @@ class CapabilityPackRunner:
             _record_pack_event(name, result)
             return result
         result = module.run(input_data or {})
+        result = self._normalize_result(name, spec_data, result)
         _record_pack_event(name, result)
+        return result
+
+    @staticmethod
+    def _normalize_result(name: str, spec_data: dict[str, Any], result: dict[str, Any] | Any) -> dict[str, Any]:
+        if not isinstance(result, dict):
+            return {
+                "status": "error",
+                "error": "invalid_capability_result",
+                "output": {
+                    "capability": name,
+                    "verification_ok": False,
+                    "details": {"raw_type": type(result).__name__},
+                },
+            }
+        output = result.get("output")
+        if not isinstance(output, dict):
+            output = {"value": output}
+        output.setdefault("capability", str(spec_data.get("name") or name))
+        output.setdefault("category", str(spec_data.get("category") or ""))
+        output.setdefault("description", str(spec_data.get("description") or ""))
+        output.setdefault("required_inputs", list(spec_data.get("inputs") or []))
+        output.setdefault("declared_outputs", list(spec_data.get("outputs") or []))
+        output.setdefault("verification_ok", str(result.get("status") or "").strip().lower() == "ok")
+        output.setdefault("evidence", {})
+        output.setdefault("next_actions", [])
+        output.setdefault("recovery_hints", [])
+        if spec_data:
+            output.setdefault(
+                "runtime_profile",
+                {
+                    "acceptance_status": str(spec_data.get("acceptance_status") or "pending"),
+                    "risk_score": float(spec_data.get("risk_score") or 0),
+                    "tests_coverage": float(spec_data.get("tests_coverage") or 0),
+                    "version": str(spec_data.get("version") or ""),
+                },
+            )
+        result["output"] = output
         return result
 
 

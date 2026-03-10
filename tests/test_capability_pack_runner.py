@@ -18,3 +18,5 @@ def test_capability_pack_runner(tmp_path: Path):
     res = runner.run("demo", {"x": 1})
     assert res["status"] == "ok"
     assert res["output"]["x"] == 1
+    assert res["output"]["capability"] == "demo"
+    assert res["output"]["runtime_profile"]["version"] == "0.1.0"

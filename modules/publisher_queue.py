@@ -13,6 +13,7 @@ from modules.execution_facts import ExecutionFacts
 from modules.platform_final_verifier import verify_platform_result
 from modules.platform_result_contract import normalize_platform_result, validate_platform_result_contract
 from modules.publish_contract import build_publish_signature
+from modules.platform_circuit_breaker import PlatformCircuitBreaker
 
 
 @dataclass
@@ -196,6 +197,18 @@ class PublisherQueue:
             payload = {}
 
         self._set_status(job_id, "running", attempts, error="", evidence=job.get("evidence", ""))
+        breaker = PlatformCircuitBreaker(sqlite_path=self.sqlite_path)
+        allowed, block_reason = breaker.allow(platform)
+        if not allowed:
+            self._set_status(job_id, "failed", attempts, error=block_reason)
+            self.facts.record(
+                action="platform:publish_job",
+                status="failed",
+                detail=f"{platform} job_id={job_id} err={block_reason}",
+                source="publisher_queue",
+                evidence_dict={"platform": platform, "job_id": job_id, "trace_id": trace_id},
+            )
+            return {"job_id": job_id, "platform": platform, "status": "failed", "error": block_reason}
 
         pl = self.platforms.get(platform)
         if not pl:
@@ -223,6 +236,7 @@ class PublisherQueue:
             normalized = verification.normalized
             if not verification.ok:
                 err = ";".join(verification.errors)
+                breaker.record_failure(platform, err)
                 final = "failed" if attempts >= max_attempts else "queued"
                 self._set_status(job_id, final, attempts, error=err)
                 self.facts.record(
@@ -239,6 +253,7 @@ class PublisherQueue:
             ok_status = st in {"published", "created", "draft", "prepared", "completed", "success", "draft_saved"}
             evidence_optional = st in {"draft", "prepared", "draft_saved"}
             if ok_status and (evidence or evidence_optional):
+                breaker.record_success(platform)
                 self._set_status(job_id, "done", attempts, evidence=evidence)
                 self.facts.record(
                     action="platform:publish_job",
@@ -258,6 +273,7 @@ class PublisherQueue:
         except Exception as e:
             err = str(e)
 
+        breaker.record_failure(platform, err)
         final = "failed" if attempts >= max_attempts else "queued"
         self._set_status(job_id, final, attempts, error=err)
         self.facts.record(

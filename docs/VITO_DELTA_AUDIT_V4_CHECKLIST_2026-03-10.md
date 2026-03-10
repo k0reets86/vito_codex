@@ -44,9 +44,14 @@
 - Почему `done`, а не `disputed`: замечание было актуально для старой ревизии, но на текущем `main` уже закрыто.
 
 7. `QUAL-1` — `capability_packs/*/adapter.py` стабы
-- Статус: `not_done`
-- Что сделано: полного наполнения capability packs нет.
-- Почему не закрыто: это по-прежнему вводит в заблуждение метрики покрытия, пока packs не стали реальными operational adapters.
+- Статус: `done`
+- Что сделано: все `capability_packs/*/adapter.py` переведены из echo/stub в structured operational adapters с:
+  - валидацией входов
+  - evidence
+  - next actions
+  - recovery hints
+  - runtime profile через [capability_pack_runner.py](/home/vito/vito-agent/modules/capability_pack_runner.py)
+- Почему так: теперь capability packs стали реальным runtime слоем, а не декоративными стаба-обертками.
 
 8. `ARCH-4` — `OpportunityScout` с хардкодом вместо реального LLM-анализа
 - Статус: `done`
@@ -208,8 +213,11 @@
 ## Архитектурные / стратегические пункты
 
 42. `circuit breaker для платформ`
-- Статус: `not_done`
-- Почему: fail-closed и quality gates есть, но отдельного platform circuit breaker с cooldown policy еще нет.
+- Статус: `done`
+- Что сделано: добавлен [platform_circuit_breaker.py](/home/vito/vito-agent/modules/platform_circuit_breaker.py) и встроен в:
+  - [ecommerce_agent.py](/home/vito/vito-agent/agents/ecommerce_agent.py)
+  - [publisher_queue.py](/home/vito/vito-agent/modules/publisher_queue.py)
+- Почему так: теперь repeated platform failures открывают cooldown и режут повторное выполнение через общий durable gate.
 
 43. `rate limiter для LLM`
 - Статус: `partial`
@@ -256,9 +264,9 @@
 ## Итоговая оценка по Delta Audit v4 checklist
 
 Сводка по количеству:
-- `done`: 20
+- `done`: 22
 - `partial`: 17
-- `not_done`: 15
+- `not_done`: 13
 - `disputed`: 0
 
 Главный вывод:

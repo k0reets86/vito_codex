@@ -16,6 +16,7 @@ from modules.platform_runbook_packs import build_service_runbook_pack
 from modules.commerce_runtime import build_listing_runtime_profile
 from modules.workflow_recipes import platform_recipe
 from modules.workflow_recipe_executor import WorkflowRecipeExecutor
+from modules.platform_circuit_breaker import PlatformCircuitBreaker
 
 logger = get_logger("ecommerce_agent", agent="ecommerce_agent")
 
@@ -176,6 +177,23 @@ class ECommerceAgent(BaseAgent):
 
     async def create_listing(self, platform: str, data: dict) -> TaskResult:
         platform = str(platform or "gumroad").strip().lower()
+        breaker = PlatformCircuitBreaker()
+        allowed, block_reason = breaker.allow(platform)
+        if not allowed:
+            return TaskResult(
+                success=False,
+                error=block_reason,
+                metadata={
+                    "listing_runtime_profile": _listing_failure_profile(
+                        platform,
+                        "blocked",
+                        [block_reason],
+                        retryable=True,
+                        stage="circuit_breaker",
+                    ),
+                    **self.get_skill_pack(),
+                },
+            )
         knowledge = get_service_knowledge(platform)
         # Responsible agent behavior: always prepare full publish package first.
         if not bool((data or {}).get("_package_ready")):
@@ -293,6 +311,7 @@ class ECommerceAgent(BaseAgent):
                 accepted_statuses.update({"prepared", "created", "draft"})
             if status and status not in accepted_statuses:
                 err = result.get("error") if isinstance(result, dict) else "unknown_error"
+                breaker.record_failure(platform, str(err or f"publish_failed:{status}"))
                 logger.warning(
                     f"Листинг НЕ создан на {platform}: {status}",
                     extra={"event": "listing_failed", "context": {"platform": platform, "status": status}},
@@ -300,6 +319,7 @@ class ECommerceAgent(BaseAgent):
                 return TaskResult(success=False, error=err or f"publish_failed:{status}", output=result)
             if not verification.ok:
                 err = ";".join(verification.errors)
+                breaker.record_failure(platform, err)
                 logger.warning(
                     f"Листинг НЕ принят по финальному verifier на {platform}",
                     extra={"event": "listing_contract_failed", "context": {"platform": platform, "errors": verification.errors, "status": status}},
@@ -320,6 +340,7 @@ class ECommerceAgent(BaseAgent):
                     },
                 )
             if recipe and not recipe_ok:
+                breaker.record_failure(platform, recipe_reason or "publish_recipe_gate_failed")
                 logger.warning(
                     f"Листинг НЕ принят по recipe gate на {platform}",
                     extra={"event": "listing_recipe_failed", "context": {"platform": platform, "reason": recipe_reason, "status": status}},
@@ -353,6 +374,7 @@ class ECommerceAgent(BaseAgent):
             if isinstance(result, dict):
                 result["agent_skill_pack"] = self.get_skill_pack()
                 result["handled_by"] = "ecommerce_agent"
+            breaker.record_success(platform)
             return TaskResult(
                 success=True,
                 output=result,
@@ -367,6 +389,7 @@ class ECommerceAgent(BaseAgent):
                 },
             )
         except Exception as e:
+            breaker.record_failure(platform, f"exception:{e}")
             return TaskResult(success=False, error=f"Ошибка создания листинга на {platform}: {e}")
 
     async def update_listing(self, platform: str, listing_id: str, data: dict) -> TaskResult:
