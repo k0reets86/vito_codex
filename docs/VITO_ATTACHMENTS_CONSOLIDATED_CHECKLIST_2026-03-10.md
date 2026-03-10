@@ -17,7 +17,7 @@
 - [x] Owner decision persistence — `done`
 - [x] Onboarding result persistence — `done`
 - [x] Owner-facing onboarding validation runner — `done`
-- [ ] First-listing owner-grade proof pack — `not_done`
+- [x] First-listing owner-grade proof pack — `done`
 - [x] Event emission on activation — `done`
 
 ## Human Browser Runtime
@@ -28,6 +28,6 @@
 - [x] rollout in Gumroad adapter — `done`
 - [x] rollout in Printful adapter — `done`
 - [x] safe browser diagnostics runner — `done`
-- [ ] targeted adapter regressions persisted in reports — `not_done`
-- [ ] owner-grade browser validation summary — `not_done`
+- [x] targeted adapter regressions persisted in reports — `done`
+- [x] owner-grade browser validation summary — `done`
 - [ ] anti-bot bypass / fingerprint spoofing / solver stack — `blocked_policy`

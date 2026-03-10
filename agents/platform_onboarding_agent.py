@@ -10,6 +10,7 @@ from modules.platform_onboarding_records import PlatformOnboardingRecords
 from modules.platform_registrar import PlatformRegistrar
 from modules.platform_registry import PlatformRegistry
 from modules.platform_researcher import PlatformResearcher
+from modules.platform_repeatability import attach_publish_repeatability
 
 logger = get_logger("platform_onboarding_agent", agent="platform_onboarding_agent")
 
@@ -153,7 +154,26 @@ class PlatformOnboardingAgent(BaseAgent):
                 data={"name": f"{profile.get('name')} Onboarding Test", "description": "Onboarding validation listing"},
             )
             if result and result.success and isinstance(result.output, dict):
-                return result.output
+                payload = dict(result.output)
+                payload = attach_publish_repeatability(
+                    payload,
+                    platform=platform_id,
+                    mode="onboarding_first_listing",
+                    artifact_flags={
+                        "listing_id": bool(str(payload.get("id") or payload.get("listing_id") or "").strip()),
+                        "url": bool(str(payload.get("url") or "").strip()),
+                        "screenshot": bool(str(payload.get("screenshot_path") or "").strip()),
+                    },
+                    required_artifacts=("listing_id", "url"),
+                )
+                self._records.write_result(
+                    f"{platform_id}_first_listing",
+                    {
+                        "platform_id": platform_id,
+                        "proof_pack": payload,
+                    },
+                )
+                return payload
             return {"skipped": True, "reason": getattr(result, "error", "dispatch_failed")}
         except Exception as e:
             return {"error": str(e)}
