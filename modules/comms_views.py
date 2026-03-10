@@ -164,6 +164,25 @@ def render_create_hub() -> str:
     )
 
 
+
+def render_platform_readiness_summary(items: list[dict[str, Any]]) -> str:
+    if not items:
+        return "- Готовность платформ: нет данных"
+    owner_grade = sum(1 for x in items if str(x.get("owner_grade_state") or "") == "owner_grade")
+    ready_now = sum(1 for x in items if bool(x.get("can_validate_now")))
+    blocked = sum(1 for x in items if str(x.get("blocker") or "").strip())
+    lines = [
+        f"- Готовность платформ: owner-grade={owner_grade}, можно валидировать сейчас={ready_now}, блокеры={blocked}"
+    ]
+    for item in items[:5]:
+        svc = str(item.get("service") or "?")
+        state = str(item.get("owner_grade_state") or "unknown")
+        blocker = str(item.get("blocker") or "")
+        suffix = f" | blocker={blocker}" if blocker else ""
+        lines.append(f"  - {svc}: {state}{suffix}")
+    return "\n".join(lines)
+
+
 def render_platforms_hub() -> str:
     return (
         "Платформы\n"

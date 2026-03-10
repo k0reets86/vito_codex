@@ -66,6 +66,7 @@ from modules.comms_views import render_help as _render_help_impl
 from modules.comms_views import render_more_menu as _render_more_menu_impl
 from modules.comms_views import render_create_hub as _render_create_hub_impl
 from modules.comms_views import render_platforms_hub as _render_platforms_hub_impl
+from modules.comms_views import render_platform_readiness_summary as _render_platform_readiness_summary
 from modules.comms_views import render_research_hub as _render_research_hub_impl
 from modules.comms_status_lane import (
     cancel_goal_queue as _cancel_goal_queue_impl,
@@ -2544,7 +2545,12 @@ class CommsAgent:
 
     @staticmethod
     def _render_platforms_hub() -> str:
-        return _render_platforms_hub_impl()
+        base = _render_platforms_hub_impl()
+        try:
+            readiness = assess_platform_readiness()
+        except Exception:
+            readiness = []
+        return f"{base}\n\n{_render_platform_readiness_summary(readiness)}"
 
     def _render_unified_status(self, *, title: str = "VITO Status") -> str:
         snap = build_status_snapshot(

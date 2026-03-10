@@ -2,6 +2,7 @@ from pathlib import Path
 
 from config.paths import PROJECT_ROOT
 from modules.platform_readiness import assess_platform_readiness
+from modules.comms_views import render_platform_readiness_summary
 from modules.service_session_registry import save_service_sessions
 
 
@@ -35,3 +36,13 @@ def test_assess_platform_readiness_can_validate_when_session_and_probe_exist(tmp
     assert results[0]["session_present"] is True
     assert results[0]["probe_present"] is True
     assert results[0]["can_validate_now"] is True
+
+
+def test_render_platform_readiness_summary_includes_counts():
+    text = render_platform_readiness_summary([
+        {"service": "etsy", "owner_grade_state": "owner_grade", "can_validate_now": True, "blocker": ""},
+        {"service": "printful", "owner_grade_state": "partial", "can_validate_now": False, "blocker": "missing_session"},
+    ])
+    assert "owner-grade=1" in text
+    assert "можно валидировать сейчас=1" in text
+    assert "printful: partial | blocker=missing_session" in text
