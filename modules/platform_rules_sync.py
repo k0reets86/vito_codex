@@ -12,13 +12,14 @@ from pathlib import Path
 from typing import Any
 
 from config.logger import get_logger
+from config.paths import PROJECT_ROOT
 from config.settings import settings
 from modules.platform_knowledge import append_entry
 
 logger = get_logger("platform_rules_sync", agent="platform_rules_sync")
 
-STATE_PATH = Path("/home/vito/vito-agent/runtime/platform_rules_state.json")
-REPORT_PATH = Path("/home/vito/vito-agent/docs/platform_rules_updates.md")
+STATE_PATH = PROJECT_ROOT / "runtime" / "platform_rules_state.json"
+REPORT_PATH = PROJECT_ROOT / "docs" / "platform_rules_updates.md"
 
 
 @dataclass(frozen=True)
@@ -165,4 +166,3 @@ def configured_services() -> list[str]:
     if not raw.strip():
         return []
     return [x.strip().lower() for x in raw.split(",") if x.strip()]
-

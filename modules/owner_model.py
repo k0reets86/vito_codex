@@ -5,11 +5,12 @@ from pathlib import Path
 from typing import Any, Optional
 
 from config.logger import get_logger
+from config.paths import PROJECT_ROOT
 from modules.owner_preference_model import OwnerPreferenceModel
 
 logger = get_logger("owner_model", agent="owner_model")
 
-OWNER_MODEL_FILE = Path("/home/vito/vito-agent/.learnings/owner_model.json")
+OWNER_MODEL_FILE = PROJECT_ROOT / ".learnings" / "owner_model.json"
 
 
 class OwnerModel:

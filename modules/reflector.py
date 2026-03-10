@@ -7,11 +7,12 @@ from pathlib import Path
 from typing import Any, Optional
 
 from config.logger import get_logger
+from config.paths import PROJECT_ROOT
 from config.settings import settings
 
 logger = get_logger("reflector", agent="reflector")
 
-LEARNINGS_DIR = Path("/home/vito/vito-agent/.learnings")
+LEARNINGS_DIR = PROJECT_ROOT / ".learnings"
 LEARNINGS_FILE = LEARNINGS_DIR / "LEARNINGS.md"
 ATTRIBUTION_FILE = LEARNINGS_DIR / "attribution_map.json"
 

@@ -7,13 +7,14 @@ from pathlib import Path
 from typing import Any, Optional
 
 from config.logger import get_logger
+from config.paths import PROJECT_ROOT
 from config.settings import settings
 from memory.memory_manager import MemoryManager
 from modules.skill_registry import SkillRegistry
 
 logger = get_logger("skill_library", agent="skill_library")
 
-SKILL_LIBRARY_DIR = Path("/home/vito/vito-agent/.learnings/skills")
+SKILL_LIBRARY_DIR = PROJECT_ROOT / ".learnings" / "skills"
 
 
 class VITOSkillLibrary:
