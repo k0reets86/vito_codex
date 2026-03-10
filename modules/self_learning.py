@@ -10,12 +10,14 @@ from typing import Optional
 
 from config.settings import settings
 from modules.failure_memory import FailureMemory
+from modules.knowledge_graph import KnowledgeGraph
 from modules.playbook_registry import PlaybookRegistry
 
 
 class SelfLearningEngine:
     def __init__(self, sqlite_path: Optional[str] = None):
         self.sqlite_path = sqlite_path or settings.SQLITE_PATH
+        self._knowledge_graph = KnowledgeGraph()
         self._init_db()
 
     def _get_conn(self):
@@ -132,6 +134,17 @@ class SelfLearningEngine:
                 """
             )
             conn.commit()
+            try:
+                self._knowledge_graph.record_lesson(
+                    f"lesson:{goal_id[:60]}:{step_text[:80]}:{status[:20]}",
+                    goal_id=goal_id,
+                    task_family=task_family,
+                    source_agent=source_agent,
+                    candidate_skill=candidate_skill,
+                    metadata=evidence or {},
+                )
+            except Exception:
+                pass
         finally:
             conn.close()
 

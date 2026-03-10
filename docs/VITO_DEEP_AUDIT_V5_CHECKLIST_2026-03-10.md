@@ -49,8 +49,8 @@
 - Аргумент: screenshot-first и browser runtime policy уже есть, но полного LLM-driven page-action loop по образцу `browser-use` еще нет.
 
 10. `Knowledge Graph`
-- Статус: `not_done`
-- Аргумент: явного graph-memory слоя с связями `skill -> platform -> result` пока нет.
+- Статус: `done`
+- Аргумент: добавлен persistent `KnowledgeGraph` и запись связей `knowledge/lesson -> agent/platform/task_family/skill/goal` встроена в `MemoryManager.store_knowledge()` и `SelfLearningEngine.record_lesson()`.
 
 11. `Instagram via instagrapi`
 - Статус: `not_done`

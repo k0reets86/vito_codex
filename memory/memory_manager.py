@@ -29,6 +29,7 @@ from modules.failure_memory import FailureMemory
 from modules.failure_substrate import build_failure_substrate
 from modules.memory_blocks import MemoryBlocks
 from modules.memory_policy import decide_save, retention_classes
+from modules.knowledge_graph import KnowledgeGraph
 from modules.platform_knowledge import search_entries as search_platform_knowledge
 from modules.playbook_registry import PlaybookRegistry
 from modules.platform_runbook_packs import build_runbook_packs_for_services
@@ -49,6 +50,7 @@ class MemoryManager:
         self._sqlite_conn: Optional[sqlite3.Connection] = None
         self._pg_pool: Optional[asyncpg.Pool] = None
         self._memory_blocks = MemoryBlocks()
+        self._knowledge_graph = KnowledgeGraph()
         self._gemini_embed_client = None
         self._gemini_embed_lock = threading.Lock()
         self._embed_query_fallback_only = False
@@ -237,6 +239,10 @@ class MemoryManager:
                     importance=importance,
                     priority=priority,
                 )
+            try:
+                self._knowledge_graph.record_knowledge(doc_id=doc_id, metadata=meta)
+            except Exception:
+                pass
             return True
         except Exception as e:
             logger.error(
