@@ -26,6 +26,7 @@ from config.logger import get_logger
 from config.resource_guard import resource_guard
 from config.settings import settings
 from modules.human_browser import HumanBrowser
+from modules.browser_llm_navigation import BrowserActionCandidate, suggest_browser_action
 from modules.browser_recovery_runtime import build_browser_recovery, build_form_fill_preflight, looks_like_selector
 from modules.browser_runtime_policy import build_auth_interrupt_output, get_browser_runtime_profile
 from modules.browser_proxy_pool import report_proxy_result
@@ -934,6 +935,76 @@ class BrowserAgent(BaseAgent):
             except Exception:
                 pass
 
+    async def suggest_next_action(
+        self,
+        url: str,
+        candidates: list[dict[str, Any]] | list[BrowserActionCandidate],
+        screenshot_path: str = "",
+        service: str = "",
+    ) -> TaskResult:
+        page = await self._new_page(service)
+        try:
+            await self._goto_with_policy(page, url, timeout_ms=30000)
+            profile = self._runtime_profile(service)
+            if not profile.get("llm_navigation_allowed"):
+                return TaskResult(
+                    success=False,
+                    error="llm_navigation_disabled",
+                    output={"browser_runtime_profile": profile},
+                )
+            shot = str(screenshot_path or self._default_screenshot_path(service, "llm_nav"))
+            await page.screenshot(path=shot, full_page=True)
+            try:
+                title = await page.title()
+            except Exception:
+                title = ""
+            try:
+                body_excerpt = (await page.inner_text("body") or "")[:4000]
+            except Exception:
+                body_excerpt = ""
+            normalized: list[BrowserActionCandidate] = []
+            for item in candidates or []:
+                if isinstance(item, BrowserActionCandidate):
+                    normalized.append(item)
+                    continue
+                if isinstance(item, dict):
+                    normalized.append(
+                        BrowserActionCandidate(
+                            action=str(item.get("action") or "").strip(),
+                            selector=str(item.get("selector") or "").strip(),
+                            value=str(item.get("value") or "").strip(),
+                            label=str(item.get("label") or "").strip(),
+                            priority=int(item.get("priority") or 50),
+                        )
+                    )
+            choice = await suggest_browser_action(
+                llm_router=self.llm_router,
+                service=service,
+                url=str(getattr(page, "url", url) or url),
+                screenshot_path=shot,
+                title=title,
+                body_excerpt=body_excerpt,
+                candidates=normalized,
+            )
+            return TaskResult(
+                success=True,
+                output={
+                    "suggested_action": choice,
+                    "screenshot_path": shot,
+                    "url": str(getattr(page, "url", url) or url),
+                    "title": title,
+                    "browser_runtime_profile": profile,
+                },
+            )
+        except Exception as e:
+            artifacts = await self._capture_failure_artifacts(page, "llm_nav_fail")
+            return TaskResult(success=False, error=str(e), output={"url": url, **artifacts})
+        finally:
+            try:
+                await page.close()
+            except Exception:
+                pass
+
     async def solve_captcha(self, page) -> Optional[str]:
         """Detect and solve CAPTCHA on a Playwright page.
 
@@ -980,6 +1051,13 @@ class BrowserAgent(BaseAgent):
                     screenshot_path=kwargs.get("screenshot_path", ""),
                     verify_selectors=kwargs.get("verify_selectors", []) or [],
                     require_verify=bool(kwargs.get("require_verify", False)),
+                    service=kwargs.get("service", ""),
+                )
+            elif task_type == "suggest_next_action":
+                return await self.suggest_next_action(
+                    kwargs.get("url", ""),
+                    kwargs.get("candidates", []) or [],
+                    kwargs.get("screenshot_path", ""),
                     service=kwargs.get("service", ""),
                 )
             elif task_type == "solve_captcha":

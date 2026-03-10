@@ -45,8 +45,8 @@
 
 ## P2
 9. `LLM navigation: screenshot -> action`
-- Статус: `partial`
-- Аргумент: screenshot-first и browser runtime policy уже есть, но полного LLM-driven page-action loop по образцу `browser-use` еще нет.
+- Статус: `done`
+- Аргумент: добавлен bounded planner `modules/browser_llm_navigation.py` и runtime task `browser_agent.execute_task('suggest_next_action', ...)`, который выбирает следующий шаг из ограниченного action/selector набора на основе `screenshot_path + url + title + body_excerpt`, с safe fallback и тестами.
 
 10. `Knowledge Graph`
 - Статус: `done`
