@@ -31,13 +31,4 @@ jobs:
 
       - name: Smoke import boot
         run: |
-          python3 - <<'PY'
-          import os
-          os.environ.setdefault("VITO_ALLOW_MULTI", "1")
-          os.environ.setdefault("TELEGRAM_OWNER_CHAT_ID", "1")
-          os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test-token")
-          from main import VITO
-          print("VITO import smoke ok")
-          _ = VITO()
-          print("VITO init smoke ok")
-          PY
+          python3 scripts/ci_smoke_boot.py
