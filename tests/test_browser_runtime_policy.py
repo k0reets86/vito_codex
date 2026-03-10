@@ -24,6 +24,8 @@ def test_get_browser_runtime_profile_contains_auth_prompt():
     profile = get_browser_runtime_profile("amazon_kdp")
     assert profile["otp_supported"] is True
     assert "6 цифр" in profile["otp_prompt"]
+    assert "browser_profiles" in profile["persistent_profile_dir"]
+    assert profile["llm_navigation_allowed"] is True
 
 
 def test_build_auth_interrupt_output_for_kdp_otp():

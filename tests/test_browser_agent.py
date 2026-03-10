@@ -193,6 +193,32 @@ class TestBrowserAgent:
             assert res.success is True
             assert res.output["registration_state"] == "preflight_incomplete"
 
+    @pytest.mark.asyncio
+    async def test_new_page_rebuilds_context_for_requested_service(self, agent):
+        first_page = AsyncMock()
+        second_page = AsyncMock()
+        first_context = AsyncMock()
+        second_context = AsyncMock()
+        first_context.new_page = AsyncMock(return_value=first_page)
+        second_context.new_page = AsyncMock(return_value=second_page)
+        first_context.add_init_script = AsyncMock()
+        second_context.add_init_script = AsyncMock()
+        first_context.close = AsyncMock()
+        second_context.close = AsyncMock()
+
+        mock_browser = AsyncMock()
+        mock_browser.new_context = AsyncMock(return_value=second_context)
+
+        agent._context = first_context
+        agent._context_service = "etsy"
+        from agents.browser_agent import BrowserAgent
+        BrowserAgent._browser = mock_browser
+
+        page = await agent._new_page("gumroad")
+        assert page is second_page
+        first_context.close.assert_awaited()
+        assert agent._context_service == "gumroad"
+
 
 class TestOOMProtection:
     """Tests for OOM protection mechanisms."""

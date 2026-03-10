@@ -12,9 +12,11 @@ class BrowserRuntimeProfile:
     service: str
     session_scope: str
     storage_state_path: str
+    persistent_profile_dir: str
     screenshot_first_default: bool
     anti_bot_humanize: bool
     headless_preferred: bool
+    llm_navigation_allowed: bool
     requires_profile_completion: bool
     profile_completion_route: str
     otp_supported: bool
@@ -25,9 +27,11 @@ class BrowserRuntimeProfile:
             "service": self.service,
             "session_scope": self.session_scope,
             "storage_state_path": self.storage_state_path,
+            "persistent_profile_dir": self.persistent_profile_dir,
             "screenshot_first_default": self.screenshot_first_default,
             "anti_bot_humanize": self.anti_bot_humanize,
             "headless_preferred": self.headless_preferred,
+            "llm_navigation_allowed": self.llm_navigation_allowed,
             "requires_profile_completion": self.requires_profile_completion,
             "profile_completion_route": self.profile_completion_route,
             "otp_supported": self.otp_supported,
@@ -38,10 +42,12 @@ class BrowserRuntimeProfile:
 _SERVICE_MAP: dict[str, dict[str, Any]] = {
     "amazon_kdp": {
         "storage": "runtime/kdp_storage_state.json",
+        "profile_dir": "runtime/browser_profiles/amazon_kdp",
         "scope": "marketplace_publishing",
         "screenshot_first": True,
         "humanize": True,
         "headless": True,
+        "llm_navigation_allowed": True,
         "profile_completion": True,
         "profile_route": "https://kdp.amazon.com/account",
         "otp_supported": True,
@@ -49,10 +55,12 @@ _SERVICE_MAP: dict[str, dict[str, Any]] = {
     },
     "etsy": {
         "storage": "runtime/etsy_storage_state.json",
+        "profile_dir": "runtime/browser_profiles/etsy",
         "scope": "marketplace_listing",
         "screenshot_first": True,
         "humanize": True,
         "headless": True,
+        "llm_navigation_allowed": True,
         "profile_completion": True,
         "profile_route": "https://www.etsy.com/your/account",
         "otp_supported": False,
@@ -60,10 +68,12 @@ _SERVICE_MAP: dict[str, dict[str, Any]] = {
     },
     "gumroad": {
         "storage": "runtime/gumroad_storage_state.json",
+        "profile_dir": "runtime/browser_profiles/gumroad",
         "scope": "digital_product_listing",
         "screenshot_first": True,
         "humanize": True,
         "headless": True,
+        "llm_navigation_allowed": True,
         "profile_completion": False,
         "profile_route": "https://app.gumroad.com/settings",
         "otp_supported": True,
@@ -71,10 +81,12 @@ _SERVICE_MAP: dict[str, dict[str, Any]] = {
     },
     "kofi": {
         "storage": "runtime/kofi_storage_state.json",
+        "profile_dir": "runtime/browser_profiles/kofi",
         "scope": "creator_storefront",
         "screenshot_first": True,
         "humanize": True,
         "headless": True,
+        "llm_navigation_allowed": True,
         "profile_completion": True,
         "profile_route": "https://ko-fi.com/manage/profile",
         "otp_supported": False,
@@ -82,10 +94,12 @@ _SERVICE_MAP: dict[str, dict[str, Any]] = {
     },
     "printful": {
         "storage": "runtime/printful_storage_state.json",
+        "profile_dir": "runtime/browser_profiles/printful",
         "scope": "print_on_demand",
         "screenshot_first": True,
         "humanize": True,
         "headless": True,
+        "llm_navigation_allowed": True,
         "profile_completion": True,
         "profile_route": "https://www.printful.com/dashboard/store/connect",
         "otp_supported": False,
@@ -93,10 +107,12 @@ _SERVICE_MAP: dict[str, dict[str, Any]] = {
     },
     "reddit": {
         "storage": "runtime/reddit_storage_state.json",
+        "profile_dir": "runtime/browser_profiles/reddit",
         "scope": "community_posting",
         "screenshot_first": True,
         "humanize": True,
         "headless": True,
+        "llm_navigation_allowed": True,
         "profile_completion": True,
         "profile_route": "https://www.reddit.com/settings/profile",
         "otp_supported": False,
@@ -104,10 +120,12 @@ _SERVICE_MAP: dict[str, dict[str, Any]] = {
     },
     "twitter": {
         "storage": "runtime/twitter_storage_state.json",
+        "profile_dir": "runtime/browser_profiles/twitter",
         "scope": "social_posting",
         "screenshot_first": False,
         "humanize": True,
         "headless": True,
+        "llm_navigation_allowed": True,
         "profile_completion": True,
         "profile_route": "https://x.com/settings/profile",
         "otp_supported": False,
@@ -115,10 +133,12 @@ _SERVICE_MAP: dict[str, dict[str, Any]] = {
     },
     "pinterest": {
         "storage": "runtime/pinterest_storage_state.json",
+        "profile_dir": "runtime/browser_profiles/pinterest",
         "scope": "social_pinning",
         "screenshot_first": True,
         "humanize": True,
         "headless": True,
+        "llm_navigation_allowed": True,
         "profile_completion": True,
         "profile_route": "https://www.pinterest.com/settings/profile/",
         "otp_supported": False,
@@ -146,9 +166,11 @@ def get_browser_runtime_profile(service: str) -> dict[str, Any]:
             service=svc,
             session_scope="generic_browser",
             storage_state_path="",
+            persistent_profile_dir=str(root_path("runtime", "browser_profiles", "generic")),
             screenshot_first_default=False,
             anti_bot_humanize=True,
             headless_preferred=True,
+            llm_navigation_allowed=False,
             requires_profile_completion=False,
             profile_completion_route="",
             otp_supported=False,
@@ -158,9 +180,11 @@ def get_browser_runtime_profile(service: str) -> dict[str, Any]:
         service=svc,
         session_scope=str(data["scope"]),
         storage_state_path=str(root_path(str(data["storage"]))),
+        persistent_profile_dir=str(root_path(str(data["profile_dir"]))),
         screenshot_first_default=bool(data["screenshot_first"]),
         anti_bot_humanize=bool(data["humanize"]),
         headless_preferred=bool(data["headless"]),
+        llm_navigation_allowed=bool(data.get("llm_navigation_allowed", False)),
         requires_profile_completion=bool(data["profile_completion"]),
         profile_completion_route=str(data["profile_route"]),
         otp_supported=bool(data["otp_supported"]),
@@ -233,4 +257,3 @@ def get_profile_completion_runbook(service: str) -> dict[str, Any]:
         "route": str(profile.get("profile_completion_route") or ""),
         "required_steps": routes.get(svc, []),
     }
-

@@ -25,6 +25,7 @@ from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from config.resource_guard import resource_guard
 from config.settings import settings
+from modules.human_browser import HumanBrowser
 from modules.browser_recovery_runtime import build_browser_recovery, build_form_fill_preflight, looks_like_selector
 from modules.browser_runtime_policy import build_auth_interrupt_output, get_browser_runtime_profile
 
@@ -152,7 +153,9 @@ class BrowserAgent(BaseAgent):
         super().__init__(name="browser_agent", description="Headless-браузер: навигация, скриншоты, скрейпинг, формы", **kwargs)
         self._initialized = True
         self._context = None
+        self._context_service = ""
         self._page = None
+        self._human_browser = HumanBrowser(logger=logger)
         if BrowserAgent._lock is None:
             BrowserAgent._lock = asyncio.Lock()
         if BrowserAgent._page_sem is None:
@@ -195,15 +198,14 @@ class BrowserAgent(BaseAgent):
                             headless=True,
                             args=_chromium_launch_args(),
                         )
-                        context_kwargs: dict[str, Any] = {
-                            "viewport": {"width": 1280, "height": 720},
-                            "user_agent": _browser_user_agent(),
-                            "locale": str(getattr(settings, "BROWSER_LOCALE", "en-US") or "en-US"),
-                            "timezone_id": str(getattr(settings, "BROWSER_TIMEZONE_ID", "America/New_York") or "America/New_York"),
-                        }
-                        self._context = await BrowserAgent._browser.new_context(
-                            **context_kwargs,
+                        context_kwargs = self._human_browser.context_kwargs(
+                            self._runtime_profile(""),
+                            user_agent=_browser_user_agent(),
+                            locale=str(getattr(settings, "BROWSER_LOCALE", "en-US") or "en-US"),
+                            timezone_id=str(getattr(settings, "BROWSER_TIMEZONE_ID", "America/New_York") or "America/New_York"),
                         )
+                        self._context = await BrowserAgent._browser.new_context(**context_kwargs)
+                        self._context_service = ""
                         if bool(getattr(settings, "BROWSER_STEALTH_ENABLED", True)):
                             await self._context.add_init_script(_stealth_init_script())
                         logger.info(
@@ -236,6 +238,7 @@ class BrowserAgent(BaseAgent):
         except Exception:
             pass
         self._context = None
+        self._context_service = ""
 
         try:
             if BrowserAgent._browser:
@@ -256,6 +259,7 @@ class BrowserAgent(BaseAgent):
             if self._context:
                 await self._context.close()
                 self._context = None
+                self._context_service = ""
             if BrowserAgent._browser:
                 await BrowserAgent._browser.close()
                 BrowserAgent._browser = None
@@ -274,31 +278,55 @@ class BrowserAgent(BaseAgent):
             _kill_orphan_headless_shells()
             await super().stop()
 
-    async def _ensure_browser(self) -> None:
+    async def _ensure_browser(self, service: str = "") -> None:
         if BrowserAgent._browser is None or self._context is None:
             await self.start()
         if BrowserAgent._browser is None or self._context is None:
             raise RuntimeError("browser_unavailable")
+        await self._ensure_service_context(service)
 
-    async def _new_page(self):
+    async def _ensure_service_context(self, service: str = "") -> None:
+        svc = str(service or "").strip().lower()
+        if not svc or BrowserAgent._browser is None:
+            return
+        if self._context is not None and self._context_service == svc:
+            return
+        if self._context is not None:
+            try:
+                await self._context.close()
+            except Exception:
+                pass
+            self._context = None
+        profile = self._runtime_profile(svc)
+        context_kwargs = self._human_browser.context_kwargs(
+            profile,
+            user_agent=_browser_user_agent(),
+            locale=str(getattr(settings, "BROWSER_LOCALE", "en-US") or "en-US"),
+            timezone_id=str(getattr(settings, "BROWSER_TIMEZONE_ID", "America/New_York") or "America/New_York"),
+        )
+        self._context = await BrowserAgent._browser.new_context(**context_kwargs)
+        self._context_service = svc
+        if bool(getattr(settings, "BROWSER_STEALTH_ENABLED", True)):
+            await self._context.add_init_script(_stealth_init_script())
+
+    async def _new_page(self, service: str = ""):
         sem = BrowserAgent._page_sem
         if sem is None:
             BrowserAgent._page_sem = asyncio.Semaphore(2)
             sem = BrowserAgent._page_sem
         async with sem:
-            await self._ensure_browser()
+            profile = self._runtime_profile(service)
+            await self._ensure_browser(service)
             try:
                 page = await self._context.new_page()
-                if bool(getattr(settings, "BROWSER_HUMANIZE_ENABLED", True)):
-                    await page.wait_for_timeout(random.randint(120, 420))
+                await self._human_browser.prepare_page(page, profile=profile)
                 return page
             except Exception:
                 await self._force_cleanup()
                 await self.start()
-                await self._ensure_browser()
+                await self._ensure_browser(service)
                 page = await self._context.new_page()
-                if bool(getattr(settings, "BROWSER_HUMANIZE_ENABLED", True)):
-                    await page.wait_for_timeout(random.randint(120, 420))
+                await self._human_browser.prepare_page(page, profile=profile)
                 return page
 
     @staticmethod
@@ -361,11 +389,13 @@ class BrowserAgent(BaseAgent):
             return False, ""
 
     async def _goto_with_policy(self, page, url: str, timeout_ms: int = 30000):
+        profile = self._runtime_profile(self._context_service)
         if bool(getattr(settings, "BROWSER_SAFE_MODE_ENABLED", True)):
             await self._apply_safe_domain_cooldown(url)
             min_d = int(getattr(settings, "BROWSER_MIN_ACTION_DELAY_MS", 180) or 180)
             max_d = int(getattr(settings, "BROWSER_MAX_ACTION_DELAY_MS", 700) or 700)
             await page.wait_for_timeout(self._random_delay_ms(min_d, max_d))
+        await self._human_browser.before_navigation(page, profile=profile, url=url)
 
         max_attempts = max(1, int(getattr(settings, "BROWSER_NAV_RETRY_MAX", 2) or 2))
         backoff_ms = max(0, int(getattr(settings, "BROWSER_NAV_RETRY_BACKOFF_MS", 900) or 900))
@@ -375,6 +405,7 @@ class BrowserAgent(BaseAgent):
             try:
                 response = await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
                 await page.wait_for_timeout(400)
+                await self._human_browser.after_navigation(page, profile=profile, url=url)
                 return response
             except Exception as e:
                 last_exc = e
@@ -416,7 +447,7 @@ class BrowserAgent(BaseAgent):
         return f"/tmp/{svc}_{task}_{ts}.png"
 
     async def navigate(self, url: str, service: str = "") -> TaskResult:
-        page = await self._new_page()
+        page = await self._new_page(service)
         try:
             response = await self._goto_with_policy(page, url, timeout_ms=30000)
             profile = self._runtime_profile(service)
@@ -471,7 +502,7 @@ class BrowserAgent(BaseAgent):
     async def screenshot(self, url: str, path: str = "", service: str = "") -> TaskResult:
         if not path:
             path = f"/tmp/vito_screenshot_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.png"
-        page = await self._new_page()
+        page = await self._new_page(service)
         try:
             await self._goto_with_policy(page, url, timeout_ms=30000)
             body_text = ""
@@ -502,7 +533,7 @@ class BrowserAgent(BaseAgent):
                 pass
 
     async def extract_text(self, url: str, selector: str = "body", service: str = "") -> TaskResult:
-        page = await self._new_page()
+        page = await self._new_page(service)
         try:
             await self._goto_with_policy(page, url, timeout_ms=30000)
             body_text = ""
@@ -537,7 +568,7 @@ class BrowserAgent(BaseAgent):
                 pass
 
     async def fill_form(self, url: str, data: dict[str, str], screenshot_path: str = "", service: str = "") -> TaskResult:
-        page = await self._new_page()
+        page = await self._new_page(service)
         try:
             await self._goto_with_policy(page, url, timeout_ms=30000)
             profile = self._runtime_profile(service)
@@ -586,9 +617,7 @@ class BrowserAgent(BaseAgent):
                 if not looks_like_selector(sel):
                     continue
                 try:
-                    await page.fill(sel, val)
-                    if bool(getattr(settings, "BROWSER_HUMANIZE_ENABLED", True)):
-                        await page.wait_for_timeout(self._random_delay_ms(60, 220))
+                    await self._human_browser.type_text(page, sel, val, profile=profile)
                     filled += 1
                 except Exception:
                     pass
@@ -642,7 +671,7 @@ class BrowserAgent(BaseAgent):
     async def upload_file(self, url: str, file_path: str, selector: str = 'input[type="file"]', screenshot_path: str = "", service: str = "") -> TaskResult:
         if not os.path.isfile(file_path):
             return TaskResult(success=False, error=f"Файл не найден: {file_path}")
-        page = await self._new_page()
+        page = await self._new_page(service)
         try:
             await self._goto_with_policy(page, url, timeout_ms=30000)
             profile = self._runtime_profile(service)
@@ -712,7 +741,7 @@ class BrowserAgent(BaseAgent):
         service: str = "",
     ) -> TaskResult:
         """Generic registration flow: fill form, submit, fetch email code/link, submit."""
-        page = await self._new_page()
+        page = await self._new_page(service)
         try:
             await self._goto_with_policy(page, url, timeout_ms=30000)
             profile = self._runtime_profile(service)
@@ -764,13 +793,13 @@ class BrowserAgent(BaseAgent):
                 )
             for sel, val in (form or {}).items():
                 try:
-                    await page.fill(sel, val)
+                    await self._human_browser.type_text(page, sel, val, profile=profile)
                     filled += 1
                 except Exception:
                     pass
             # Submit form
             try:
-                await page.click(submit_selector, timeout=5000)
+                await self._human_browser.click(page, submit_selector, profile=profile, timeout=5000)
             except Exception:
                 pass
 
@@ -793,11 +822,13 @@ class BrowserAgent(BaseAgent):
                 if code_val:
                     try:
                         await page.fill(code_selector, code_val)
+                        if bool(getattr(settings, "BROWSER_HUMANIZE_ENABLED", True)):
+                            await page.wait_for_timeout(self._random_delay_ms(40, 140))
                     except Exception:
                         pass
                     if code_submit_selector:
                         try:
-                            await page.click(code_submit_selector, timeout=5000)
+                            await self._human_browser.click(page, code_submit_selector, profile=profile, timeout=5000)
                         except Exception:
                             pass
             shot = ""
