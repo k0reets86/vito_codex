@@ -177,6 +177,21 @@ class FakeMemoryAwareAgent(BaseAgent):
         )
 
 
+class FakeSemanticMemory:
+    def __init__(self):
+        self.calls = []
+
+    def store_knowledge(self, doc_id, text, metadata, **kwargs):
+        self.calls.append({"doc_id": doc_id, "text": text, "metadata": metadata, "kwargs": kwargs})
+        return True
+
+    def save_skill(self, **kwargs):
+        return True
+
+    def update_skill_last_result(self, *args, **kwargs):
+        return True
+
+
 class TestRegistryRegister:
     def test_register(self):
         registry = AgentRegistry()
@@ -432,6 +447,22 @@ class TestRegistryLifecycle:
         assert str(result.metadata.get("agent_work_id") or "").startswith("VTTESTROOT123ABC")
         delegations = list(result.metadata.get("delegations") or [])
         assert delegations
+
+    @pytest.mark.asyncio
+    async def test_dispatch_writes_successful_agent_outcome_to_semantic_memory(self):
+        registry = AgentRegistry()
+        memory = FakeSemanticMemory()
+        agent = FakeMemoryAwareAgent("memory_writer", ["semantic_cap"], memory=memory)
+        registry.register(agent)
+
+        result = await registry.dispatch("semantic_cap", task_root_id="VTSEMROOT123")
+        assert result is not None
+        assert result.success is True
+        assert memory.calls
+        stored = memory.calls[-1]
+        assert stored["metadata"]["type"] == "agent_outcome"
+        assert stored["metadata"]["task_type"] == "semantic_cap"
+        assert stored["metadata"]["task_root_id"] == "VTSEMROOT123"
 
     def test_get_all_statuses(self):
         registry = AgentRegistry()

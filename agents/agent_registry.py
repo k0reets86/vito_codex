@@ -11,6 +11,7 @@
 import asyncio
 import json
 import time
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
@@ -598,6 +599,45 @@ class AgentRegistry:
                             agent.memory.update_skill_last_result(skill_name, str(result.output))
                         except Exception:
                             pass
+                except Exception:
+                    pass
+                # Mirror successful agent outcomes into semantic knowledge so runtime can recall proven outputs.
+                try:
+                    if result and result.success and agent.memory and result.output not in (None, "", {}):
+                        md = result.metadata or {}
+                        task_root_id = str(md.get("task_root_id") or task_kwargs.get("task_root_id") or "").strip()
+                        agent_work_id = str(md.get("agent_work_id") or "").strip()
+                        doc_id_parts = [
+                            "agent_outcome",
+                            agent.name,
+                            task_type,
+                            agent_work_id or task_root_id or datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S"),
+                        ]
+                        doc_id = "_".join(p.replace(" ", "_") for p in doc_id_parts if p)
+                        if isinstance(result.output, dict):
+                            try:
+                                text = json.dumps(result.output, ensure_ascii=False)[:4000]
+                            except Exception:
+                                text = str(result.output)[:4000]
+                        else:
+                            text = str(result.output)[:4000]
+                        if text.strip():
+                            agent.memory.store_knowledge(
+                                doc_id=doc_id,
+                                text=text,
+                                metadata={
+                                    "type": "agent_outcome",
+                                    "block_type": "agent_outcome",
+                                    "agent": agent.name,
+                                    "task_type": task_type,
+                                    "task_root_id": task_root_id,
+                                    "agent_work_id": agent_work_id,
+                                    "source": "agent_registry",
+                                    "success": True,
+                                    "importance_score": 0.8,
+                                    "priority": 0.8,
+                                },
+                            )
                 except Exception:
                     pass
                 # Record failures for anti-skill memory

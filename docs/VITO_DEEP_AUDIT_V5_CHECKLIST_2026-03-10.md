@@ -87,16 +87,16 @@
 - Аргумент: consolidation engine есть, но явного on-demand path из аудита еще нет.
 
 19. `automatic knowledge write from successful agent tasks`
-- Статус: `partial`
-- Аргумент: lessons now record more widely, reflections теперь тоже сохраняются в semantic knowledge layer, но не вся успешная agent output автоматически уходит в Chroma/semantic memory.
+- Статус: `done`
+- Аргумент: `AgentRegistry.dispatch()` теперь автоматически пишет успешные agent outcomes в semantic knowledge layer через `memory.store_knowledge(...)` с lineage-aware metadata (`type=agent_outcome`, `task_root_id`, `agent_work_id`).
 
 20. `9 thin wrapper agents specialization`
 - Статус: `partial`
 - Аргумент: agent uplift проведен сильно, но audit v5 still pushes deeper specialization; это уже не `not_done`, но еще не потолок.
 
 21. `agent health monitoring`
-- Статус: `partial`
-- Аргумент: есть benchmarks, failure substrate и autonomy oversight, но отдельного health monitor по агентам с dynamic degradation logic еще нет.
+- Статус: `done`
+- Аргумент: добавлен `AgentHealthMonitor`, который агрегирует `DataLake`, `AgentFeedback` и `FailureSubstrate` в runtime health report по агентам с `healthy/degraded/critical` классификацией.
 
 22. `registry.dispatch()` fan-out / parallel delegations`
 - Статус: `done`
