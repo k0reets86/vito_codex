@@ -3116,3 +3116,572 @@ Lessons:
 Anti-patterns:
 - Не считай publish успешным только по открытому wizard без synced product evidence.
 Evidence: {"platform": "printful", "status": "prepared", "url": "https://www.printful.com/dashboard/product-templates/published/17803130", "mode": "browser_only", "screenshot_path": "/home/vito/vito-agent/runtime/printful_browser_publish.png", "html_path": "/home/vito/vito-agent/runtime/printful_browser_publish.html", "store_type": "", "title": "My products | Printful", "template_id": "", "etsy_edit_url": ""}
+
+## etsy lesson
+
+Status: draft
+Source: test
+URL: https://www.etsy.com/listing/123
+Summary: Draft updated
+Details: File and images attached
+Lessons:
+- Reuse one working draft.
+- Verify file after reload.
+Anti-patterns:
+- Do not publish during tests.
+Evidence: {"listing_id": "123", "file_attached": true}
+
+## etsy lesson
+
+Status: draft
+Source: test
+URL: https://www.etsy.com/listing/123
+Summary: Draft updated
+Details: File and images attached
+Lessons:
+- Reuse one working draft.
+- Verify file after reload.
+Anti-patterns:
+- Do not publish during tests.
+Evidence: {"listing_id": "123", "file_attached": true}
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: ef79ab8603d5 -> cb2d50896a33.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"9caaeef32ee44e54893f9de795dfff47","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## twitter rules update
+
+Source: https://developer.x.com/en/docs
+Detected rules/content change by hash diff: 8ebe53b9bd40 -> 386fba70dfca.
+Excerpt: X Developer Platform - X Skip to main content X home page English Search... ⌘ K Ask AI Support Developer Console Developer Console Search... Navigation Getting Started X Developer Platform Home X API X Ads API XDKs Tutorials Use Cases Success Stories Status Changelog Developer Console Forums GitHub Getting Started Overview Fundamentals Apps Developer Console Authentication Counting Characters Rate Limits X IDs Security Partners &amp; Customers Partner Directory Customer Directory Request Access Resources Tools and Libraries Tutorials Newsletter Livestreams Billing Support Developer Terms Getting Started X Developer Platform Copy page Build with X’s real-time data and APIs Copy page Pay-per-usage pricing: Now Available Pay only for what you use. Plus, earn free xAI API credits when you purc
+
+## Mega test task
+
+## Executive Summary
+Stub response: operational output.
+
+## Sources
+- google_trends, product_hunt, reddit
+
+## Confidence Score (0-100)
+- 100 (based on available live sources and evidence density)
+- Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
+
+## Judge Review
+Decision: accept
+Score: 0/100
+Stub response: operational output.
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: cb2d50896a33 -> d2139d4a4c3c.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"eda5c73fa704407e80b26320108d333a","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## twitter rules update
+
+Source: https://developer.x.com/en/docs
+Detected rules/content change by hash diff: 386fba70dfca -> 988ae31f07ad.
+Excerpt: X Developer Platform - X Skip to main content X home page English Search... ⌘ K Ask AI Support Developer Console Developer Console Search... Navigation Getting Started X Developer Platform Home X API X Ads API XDKs Tutorials Use Cases Success Stories Status Changelog Developer Console Forums GitHub Getting Started Overview Fundamentals Apps Developer Console Authentication Counting Characters Rate Limits X IDs Security Partners &amp; Customers Partner Directory Customer Directory Request Access Resources Tools and Libraries Tutorials Newsletter Livestreams Billing Support Developer Terms Getting Started X Developer Platform Copy page Build with X’s real-time data and APIs Copy page Pay-per-usage pricing: Now Available Pay only for what you use. Plus, earn free xAI API credits when you purc
+
+## Mega test task
+
+## Executive Summary
+Stub response: operational output.
+
+## Sources
+- product_hunt, reddit
+
+## Confidence Score (0-100)
+- 80 (based on available live sources and evidence density)
+- Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
+
+## Judge Review
+Decision: accept
+Score: 0/100
+Stub response: operational output.
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: d2139d4a4c3c -> b227418c81bc.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"abcf8d9a95234ddaa20310f39ff66477","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## Mega test task
+
+## Executive Summary
+Stub response: operational output.
+
+## Sources
+- product_hunt
+
+## Confidence Score (0-100)
+- 60 (based on available live sources and evidence density)
+- Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
+
+## Judge Review
+Decision: accept
+Score: 0/100
+Stub response: operational output.
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: b227418c81bc -> 5e5668a13d59.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"c58f34dc33774e5e8567031aa57dbb37","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## Mega test task
+
+## Executive Summary
+Stub response: operational output.
+
+## Sources
+- product_hunt, reddit
+
+## Confidence Score (0-100)
+- 80 (based on available live sources and evidence density)
+- Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
+
+## Judge Review
+Decision: accept
+Score: 0/100
+Stub response: operational output.
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: 5e5668a13d59 -> 775c51393536.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"4f60bd31e66c4ba1a70e5dabec45681d","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## twitter rules update
+
+Source: https://developer.x.com/en/docs
+Detected rules/content change by hash diff: 988ae31f07ad -> 9596b06580a2.
+Excerpt: X Developer Platform - X Skip to main content X home page English Search... ⌘ K Ask AI Support Developer Console Developer Console Search... Navigation Getting Started X Developer Platform Home X API X Ads API XDKs Tutorials Use Cases Success Stories Status Changelog Developer Console Forums GitHub Getting Started Overview Fundamentals Apps Developer Console Authentication Counting Characters Rate Limits X IDs Security Partners &amp; Customers Partner Directory Customer Directory Request Access Resources Tools and Libraries Tutorials Newsletter Livestreams Billing Support Developer Terms Getting Started X Developer Platform Copy page Build with X’s real-time data and APIs Copy page Pay-per-usage pricing: Now Available Pay only for what you use. Plus, earn free xAI API credits when you purc
+
+## Mega test task
+
+## Executive Summary
+Stub response: operational output.
+
+## Sources
+- product_hunt, reddit
+
+## Confidence Score (0-100)
+- 80 (based on available live sources and evidence density)
+- Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
+
+## Judge Review
+Decision: accept
+Score: 0/100
+Stub response: operational output.
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: 775c51393536 -> afa1f7fe0450.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"a6de92cf35294727abf6f3fe3b3177e8","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## Mega test task
+
+## Executive Summary
+Stub response: operational output.
+
+## Sources
+- product_hunt, reddit
+
+## Confidence Score (0-100)
+- 80 (based on available live sources and evidence density)
+- Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
+
+## Judge Review
+Decision: accept
+Score: 0/100
+Stub response: operational output.
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: afa1f7fe0450 -> 742bd22b7e80.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"040c01447a0e4760af3e732aa8a0ed5d","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: afa1f7fe0450 -> 4c72d391ed40.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"3eab924f82d14a53abccce3cc43149dc","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## Mega test task
+
+## Executive Summary
+Stub response: operational output.
+
+## Sources
+- product_hunt, reddit
+
+## Confidence Score (0-100)
+- 80 (based on available live sources and evidence density)
+- Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
+
+## Judge Review
+Decision: accept
+Score: 0/100
+Stub response: operational output.
+
+## Mega test task
+
+## Executive Summary
+Stub response: operational output.
+
+## Sources
+- product_hunt, reddit
+
+## Confidence Score (0-100)
+- 80 (based on available live sources and evidence density)
+- Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
+
+## Judge Review
+Decision: accept
+Score: 0/100
+Stub response: operational output.
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: 4c72d391ed40 -> 3ef270d03a43.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"8459d656153f4dd6a6aec97ab22330f6","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: 4c72d391ed40 -> 8951b124b51f.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"136d08567c6c45669c9f3f62b8a61692","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## Mega test task
+
+## Executive Summary
+Stub response: operational output.
+
+## Sources
+- product_hunt, reddit
+
+## Confidence Score (0-100)
+- 80 (based on available live sources and evidence density)
+- Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
+
+## Judge Review
+Decision: accept
+Score: 0/100
+Stub response: operational output.
+
+## Mega test task
+
+## Executive Summary
+Stub response: operational output.
+
+## Sources
+- product_hunt, reddit
+
+## Confidence Score (0-100)
+- 80 (based on available live sources and evidence density)
+- Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
+
+## Judge Review
+Decision: accept
+Score: 0/100
+Stub response: operational output.
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: 3ef270d03a43 -> ad3163b5e885.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"e6180ec9f31d4ae2920b2b3d916f19c9","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## twitter rules update
+
+Source: https://developer.x.com/en/docs
+Detected rules/content change by hash diff: 9596b06580a2 -> 6749aa7c9dfc.
+Excerpt: X Developer Platform - X Skip to main content X home page English Search... ⌘ K Ask AI Support Developer Console Developer Console Search... Navigation Getting Started X Developer Platform Home X API X Ads API XDKs Tutorials Use Cases Success Stories Status Changelog Developer Console Forums GitHub Getting Started Overview Fundamentals Apps Developer Console Authentication Counting Characters Rate Limits X IDs Security Partners &amp; Customers Partner Directory Customer Directory Request Access Resources Tools and Libraries Tutorials Newsletter Livestreams Billing Support Developer Terms Getting Started X Developer Platform Copy page Build with X’s real-time data and APIs Copy page Pay-per-usage pricing: Now Available Pay only for what you use. Plus, earn free xAI API credits when you purc
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: 3ef270d03a43 -> 1322f92881d6.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"a18741293e93470e92ac66237c333881","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## twitter rules update
+
+Source: https://developer.x.com/en/docs
+Detected rules/content change by hash diff: 9596b06580a2 -> 6749aa7c9dfc.
+Excerpt: X Developer Platform - X Skip to main content X home page English Search... ⌘ K Ask AI Support Developer Console Developer Console Search... Navigation Getting Started X Developer Platform Home X API X Ads API XDKs Tutorials Use Cases Success Stories Status Changelog Developer Console Forums GitHub Getting Started Overview Fundamentals Apps Developer Console Authentication Counting Characters Rate Limits X IDs Security Partners &amp; Customers Partner Directory Customer Directory Request Access Resources Tools and Libraries Tutorials Newsletter Livestreams Billing Support Developer Terms Getting Started X Developer Platform Copy page Build with X’s real-time data and APIs Copy page Pay-per-usage pricing: Now Available Pay only for what you use. Plus, earn free xAI API credits when you purc
+
+## Mega test task
+
+## Executive Summary
+Stub response: operational output.
+
+## Sources
+- product_hunt, reddit
+
+## Confidence Score (0-100)
+- 80 (based on available live sources and evidence density)
+- Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
+
+## Judge Review
+Decision: accept
+Score: 0/100
+Stub response: operational output.
+
+## Mega test task
+
+## Executive Summary
+Stub response: operational output.
+
+## Sources
+- product_hunt, reddit
+
+## Confidence Score (0-100)
+- 80 (based on available live sources and evidence density)
+- Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
+
+## Judge Review
+Decision: accept
+Score: 0/100
+Stub response: operational output.
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: 1322f92881d6 -> bd90b4208cdd.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"4e1a5a712d904558b333743e867011a9","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: 1322f92881d6 -> c1e240850923.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"77db73c43660440f91a17ec3faefb205","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## Mega test task
+
+## Executive Summary
+Stub response: operational output.
+
+## Sources
+- product_hunt, reddit
+
+## Confidence Score (0-100)
+- 80 (based on available live sources and evidence density)
+- Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
+
+## Judge Review
+Decision: accept
+Score: 0/100
+Stub response: operational output.
+
+## Mega test task
+
+## Executive Summary
+Stub response: operational output.
+
+## Sources
+- product_hunt, reddit
+
+## Confidence Score (0-100)
+- 80 (based on available live sources and evidence density)
+- Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
+
+## Judge Review
+Decision: accept
+Score: 0/100
+Stub response: operational output.
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: c1e240850923 -> e7db89743465.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"bb0d653ce3e641f8b2cefc51431f51d2","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: c1e240850923 -> 4026034bfbad.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"8771c7b200674c57950ff840d199633f","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## Mega test task
+
+## Executive Summary
+Stub response: operational output.
+
+## Sources
+- product_hunt, reddit
+
+## Confidence Score (0-100)
+- 80 (based on available live sources and evidence density)
+- Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
+
+## Judge Review
+Decision: accept
+Score: 0/100
+Stub response: operational output.
+
+## Mega test task
+
+## Executive Summary
+Stub response: operational output.
+
+## Sources
+- product_hunt, reddit
+
+## Confidence Score (0-100)
+- 80 (based on available live sources and evidence density)
+- Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
+
+## Judge Review
+Decision: accept
+Score: 0/100
+Stub response: operational output.
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: 4026034bfbad -> 083ffc2b686a.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"dbd5641063674c47974df35aa6436000","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## Mega test task
+
+## Executive Summary
+Stub response: operational output.
+
+## Sources
+- product_hunt, reddit
+
+## Confidence Score (0-100)
+- 80 (based on available live sources and evidence density)
+- Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
+
+## Judge Review
+Decision: accept
+Score: 0/100
+Stub response: operational output.
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: 083ffc2b686a -> e7a69744d05c.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"bf179d63364a4cf6a4fdea9f8927c971","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## Mega test task
+
+## Executive Summary
+Stub response: operational output.
+
+## Sources
+- product_hunt, reddit
+
+## Confidence Score (0-100)
+- 80 (based on available live sources and evidence density)
+- Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
+
+## Judge Review
+Decision: accept
+Score: 0/100
+Stub response: operational output.
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: e7a69744d05c -> 6bc05751e4bb.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"b4735e43a7984dc6a8381cea00a87141","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## twitter rules update
+
+Source: https://developer.x.com/en/docs
+Detected rules/content change by hash diff: 6749aa7c9dfc -> 43555004c1f3.
+Excerpt: X Developer Platform - X Skip to main content X home page English Search... ⌘ K Ask AI Support Developer Console Developer Console Search... Navigation Getting Started X Developer Platform Home X API X Ads API XDKs Tutorials Use Cases Success Stories Status Changelog Developer Console Forums GitHub Getting Started Overview Fundamentals Apps Developer Console Authentication Counting Characters Rate Limits X IDs Security Partners &amp; Customers Partner Directory Customer Directory Request Access Resources Tools and Libraries Tutorials Newsletter Livestreams Billing Support Developer Terms Getting Started X Developer Platform Copy page Build with X’s real-time data and APIs Copy page Pay-per-usage pricing: Now Available Pay only for what you use. Plus, earn free xAI API credits when you purc
+
+## Mega test task
+
+## Executive Summary
+Stub response: operational output.
+
+## Sources
+- product_hunt, reddit
+
+## Confidence Score (0-100)
+- 80 (based on available live sources and evidence density)
+- Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
+
+## Judge Review
+Decision: accept
+Score: 0/100
+Stub response: operational output.
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: 6bc05751e4bb -> ca565ab9b076.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"567a20303b6848988ec90771dd30f6fe","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## pinterest rules update
+
+Source: https://developers.pinterest.com/docs/
+Detected rules/content change by hash diff: 6bc05751e4bb -> 680528f802a0.
+Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"80ae6e5af9714306adfd32d3f73f1bb4","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the current operation user_account defined by the access token has access to another user s ad accounts via pinterest business access you can modify your request to make use of the current operation_user_account s permissions to those ad accounts by including the ad_account_id in the path parameters for the
+
+## Mega test task
+
+## Executive Summary
+Stub response: operational output.
+
+## Sources
+- product_hunt, reddit
+
+## Confidence Score (0-100)
+- 80 (based on available live sources and evidence density)
+- Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
+
+## Judge Review
+Decision: accept
+Score: 0/100
+Stub response: operational output.
+
+## Mega test task
+
+## Executive Summary
+Stub response: operational output.
+
+## Sources
+- product_hunt, reddit
+
+## Confidence Score (0-100)
+- 80 (based on available live sources and evidence density)
+- Topic: Find official docs, GitHub repos, and community pitfalls for service/platform: Mega test task. Provide key requirements, auth, formats, limits.
+
+## Judge Review
+Decision: accept
+Score: 0/100
+Stub response: operational output.
+
+## etsy lesson
+
+Status: needs_browser_login
+Source: etsy.publish.browser
+Summary: Etsy browser publish result: needs_browser_login
+Details: error=Etsy browser session required. Run: python3 scripts/etsy_auth_helper.py browser-capture
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: Etsy browser session required. Run: python3 scripts/etsy_auth_helper.py browser-capture
+Evidence: {"status": "needs_browser_login", "listing_id": null, "url": null, "screenshot_path": null, "draft_only": null, "debug": {}}
+
+## etsy lesson
+
+Status: blocked
+Source: etsy.publish.browser
+Summary: Etsy browser publish result: blocked
+Details: error=create_mode_forbids_existing_update
+Anti-patterns:
+- Не считай Etsy create успешным только по открытому editor без listing_id.
+- Ошибка: create_mode_forbids_existing_update
+Evidence: {"status": "blocked", "listing_id": null, "url": null, "screenshot_path": null, "draft_only": null, "debug": {}}
