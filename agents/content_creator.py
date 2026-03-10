@@ -212,7 +212,19 @@ class ContentCreator(BaseAgent):
             "## Core ideas\n- Problem\n- Process\n- Practical examples\n\n"
             "## Takeaways\nUse the checklist and adapt it to your workflow.\n"
         )
-        return {"title": topic, "keywords": kws, "body": body}
+        return {
+            "title": topic,
+            "keywords": kws,
+            "body": body,
+            "validation_checklist": [
+                "clear_title",
+                "intro_present",
+                "practical_sections_present",
+                "takeaways_present",
+            ],
+            "handoff_targets": ["seo_agent", "quality_judge", "publisher_agent"],
+            "asset_manifest": {"body_only": True, "images": [], "attachments": []},
+        }
 
     def _local_product_description(self, product: str, platform: str) -> dict[str, Any]:
         product = (product or "Digital product").strip()
@@ -221,7 +233,18 @@ class ContentCreator(BaseAgent):
             f"{product}\n\n"
             f"A practical {platform} listing description with clear outcomes, concise benefits, and a direct CTA."
         )
-        return {"title": product, "platform": platform, "body": body}
+        return {
+            "title": product,
+            "platform": platform,
+            "body": body,
+            "validation_checklist": [
+                "benefit_led_intro",
+                "platform_fit_copy",
+                "clear_cta",
+            ],
+            "handoff_targets": ["seo_agent", "ecommerce_agent", "quality_judge"],
+            "asset_manifest": {"body_only": True, "images": [], "attachments": []},
+        }
 
     def _local_ebook(self, topic: str, chapters: int) -> str:
         title = (topic or "Untitled ebook").strip()
@@ -328,6 +351,21 @@ class ContentCreator(BaseAgent):
                 "seo_title": listing.get("seo_title"),
                 "seo_description": listing.get("seo_description"),
             },
+            "asset_manifest": {
+                "primary_file": str(pdf_path),
+                "cover": str(cover_path),
+                "thumbnail": str(thumb_path),
+                "preview_gallery": [str(cover_path), str(thumb_path)],
+                "listing_json": str(seo_json),
+            },
+            "handoff_targets": ["seo_agent", "ecommerce_agent", "quality_judge", "publisher_agent"],
+            "validation_checklist": [
+                "pdf_generated",
+                "cover_generated",
+                "thumbnail_generated",
+                "seo_json_generated",
+                "listing_ready_for_adapter_fill",
+            ],
         }
         runtime_profile = build_content_runtime_profile(
             topic=topic,

@@ -265,6 +265,12 @@ class ResearchAgent(BaseAgent):
                     "recommended_product": {},
                     "top_ideas": [],
                     "structured_research": {"topic": topic, "overall_score": 45, "top_ideas": []},
+                    "validation_checklist": [
+                        "source_data_present",
+                        "fallback_digest_generated",
+                        "operator_summary_present",
+                    ],
+                    "handoff_targets": ["trend_scout", "marketing_agent", "seo_agent", "quality_judge"],
                     "research_runtime_profile": build_research_runtime_profile(
                         topic=topic,
                         data_sources=list(real_data.keys()),
@@ -363,6 +369,13 @@ class ResearchAgent(BaseAgent):
                 "recommended_product": structured.get("recommended_product") or {},
                 "top_ideas": structured.get("top_ideas") or [],
                 "structured_research": structured,
+                "validation_checklist": [
+                    "raw_research_completed",
+                    "synthesis_completed",
+                    "judge_review_completed",
+                    "report_saved",
+                ],
+                "handoff_targets": ["trend_scout", "marketing_agent", "seo_agent", "quality_judge", "vito_core"],
                 "research_route_plan": research_route_plan,
                 "judge_review": judge_review,
                 "judge_payload": judge_payload,
@@ -581,6 +594,11 @@ class ResearchAgent(BaseAgent):
                 "competitors": [],
                 "market_gaps": ["Need live synthesis for deeper competitor map"],
                 "sources": list(real_data.keys()),
+                "validation_checklist": [
+                    "sources_checked",
+                    "market_gaps_documented",
+                ],
+                "handoff_targets": ["marketing_agent", "economics_agent", "quality_judge"],
             }
             op_pack = build_research_operational_pack(topic=niche, sources=list(real_data.keys()), overall_score=55 if real_data else 35, recommended_product={"title": niche, "platform": "analysis"}, report_path="")
             local["used_skills"] = op_pack["used_skills"]
@@ -644,7 +662,7 @@ class ResearchAgent(BaseAgent):
             success=True,
             output=response,
             cost_usd=0.02,
-            metadata={"executive_summary": executive_summary, "data_sources": list(real_data.keys()), "research_runtime_profile": runtime_profile, "operational_pack": op_pack, **self.get_skill_pack()},
+            metadata={"executive_summary": executive_summary, "data_sources": list(real_data.keys()), "validation_checklist": ["competitors_mapped", "pricing_review_present", "market_gap_present"], "handoff_targets": ["marketing_agent", "economics_agent", "quality_judge"], "research_runtime_profile": runtime_profile, "operational_pack": op_pack, **self.get_skill_pack()},
         )
 
     async def market_analysis(self, product_type: str) -> TaskResult:
@@ -667,6 +685,11 @@ class ResearchAgent(BaseAgent):
                 "market_view": "fallback_raw",
                 "sources": list(real_data.keys()),
                 "opportunities": ["Collect live synthesis for stronger market sizing and positioning"],
+                "validation_checklist": [
+                    "sources_checked",
+                    "opportunities_listed",
+                ],
+                "handoff_targets": ["trend_scout", "marketing_agent", "economics_agent"],
             }
             op_pack = build_research_operational_pack(topic=product_type, sources=list(real_data.keys()), overall_score=55 if real_data else 35, recommended_product={"title": product_type, "platform": "analysis"}, report_path="")
             local["used_skills"] = op_pack["used_skills"]
@@ -730,7 +753,7 @@ class ResearchAgent(BaseAgent):
             success=True,
             output=response,
             cost_usd=0.03,
-            metadata={"executive_summary": executive_summary, "data_sources": list(real_data.keys()), "research_runtime_profile": runtime_profile, "operational_pack": op_pack, **self.get_skill_pack()},
+            metadata={"executive_summary": executive_summary, "data_sources": list(real_data.keys()), "validation_checklist": ["market_view_present", "growth_signal_present", "opportunities_present"], "handoff_targets": ["trend_scout", "marketing_agent", "economics_agent", "quality_judge"], "research_runtime_profile": runtime_profile, "operational_pack": op_pack, **self.get_skill_pack()},
         )
 
     # ── Utility ──

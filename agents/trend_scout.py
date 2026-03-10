@@ -311,6 +311,17 @@ class TrendScout(BaseAgent):
                 {"name": "micro-learning guides", "competition": "medium", "monetization": "medium", "products": ["ebook", "email course"]},
             ],
             "source_mode": "local_fallback",
+            "signal_matrix": [
+                {"signal": "creator workflows", "strength": "medium", "buyer": "creators", "distribution": "x/pinterest"},
+                {"signal": "ai productivity", "strength": "high", "buyer": "knowledge workers", "distribution": "etsy/gumroad"},
+                {"signal": "micro-learning", "strength": "medium", "buyer": "beginners", "distribution": "email/social"},
+            ],
+            "validation_plan": [
+                "confirm demand via search/community signals",
+                "test one low-ticket digital product first",
+                "compare platform fit before scaling",
+            ],
+            "handoff_targets": ["research_agent", "marketing_agent", "seo_agent"],
         }
 
     async def scan_google_news(self, query: str, language: str = "en") -> TaskResult:

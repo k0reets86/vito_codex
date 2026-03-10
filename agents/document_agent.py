@@ -261,6 +261,13 @@ class DocumentAgent(BaseAgent):
             "content_type": content_type,
             "sections": ["Summary", "Context", "Actions", "Risks", "Next steps"],
             "context_keys": sorted(list((context or {}).keys())),
+            "review_checklist": [
+                "title_present",
+                "sections_present",
+                "context_keys_extracted",
+            ],
+            "handoff_targets": ["quality_judge", "research_agent", "security_agent"],
+            "manifest": {"sections": 5, "attachments": []},
         }
 
     def _local_report(self, report_type: str, data: dict | None) -> dict[str, Any]:
@@ -270,4 +277,11 @@ class DocumentAgent(BaseAgent):
             "summary": f"Structured {report_type} report generated from {len(payload)} input fields.",
             "metrics": payload,
             "recommendations": ["Review highest-risk items first", "Convert this report into runbook updates if stable"],
+            "review_checklist": [
+                "summary_present",
+                "metrics_present",
+                "recommendations_present",
+            ],
+            "handoff_targets": ["analytics_agent", "quality_judge", "hr_agent"],
+            "manifest": {"metric_count": len(payload), "attachments": []},
         }

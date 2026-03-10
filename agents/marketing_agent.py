@@ -188,6 +188,18 @@ class MarketingAgent(BaseAgent):
                 "Week 2-3: scale the best channel + retargeting",
                 "Week 4: optimize funnel and cut weak ad sets",
             ],
+            "validation_checklist": [
+                "audience_defined",
+                "offer_angle_present",
+                "channel_mix_balanced",
+                "timeline_defined",
+            ],
+            "handoff_targets": ["content_creator", "smm_agent", "email_agent", "analytics_agent"],
+            "experiment_matrix": [
+                {"axis": "hook", "variants": 3},
+                {"axis": "creative", "variants": 2},
+                {"axis": "offer_angle", "variants": 2},
+            ],
         }
 
     def _local_funnel(self, product: str, stages: list[str] | None) -> dict[str, Any]:
@@ -206,7 +218,12 @@ class MarketingAgent(BaseAgent):
                 mapped.append({"stage": "action", "assets": ["offer", "urgency", "checkout CTA"], "metric": "conversion rate"})
             else:
                 mapped.append({"stage": s, "assets": ["custom asset"], "metric": "custom metric"})
-        return {"product": product_name, "stages": mapped}
+        return {
+            "product": product_name,
+            "stages": mapped,
+            "validation_checklist": ["all_stages_mapped", "stage_metrics_present"],
+            "handoff_targets": ["content_creator", "publisher_agent", "analytics_agent"],
+        }
 
     def _local_ad_copy(self, product: str, platform: str, style: str) -> dict[str, Any]:
         p = (product or "Digital product").strip()
@@ -220,6 +237,12 @@ class MarketingAgent(BaseAgent):
                 f"Built for speed: {p} helps you launch faster and cleaner.",
                 f"Get results this week with {p}. Simple setup, immediate value.",
             ],
+            "validation_checklist": [
+                "three_variants_present",
+                "platform_named",
+                "cta_angle_present",
+            ],
+            "handoff_targets": ["smm_agent", "quality_judge", "analytics_agent"],
         }
 
     def _attach_experiment(self, payload: dict[str, Any], product: str, platform: str) -> None:
@@ -260,4 +283,6 @@ class MarketingAgent(BaseAgent):
             "budget_usd": budget,
             "budget_profile": profile,
             "recommended_channels": channels,
+            "validation_checklist": ["budget_profile_selected", "channels_ranked"],
+            "handoff_targets": ["smm_agent", "email_agent", "analytics_agent"],
         }

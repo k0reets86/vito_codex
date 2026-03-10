@@ -12,14 +12,14 @@ _PACKS: dict[str, dict[str, Any]] = {
         "preferred_workflows": ["W01", "W02"],
     },
     "research_agent": {
-        "skills": ["iterative_market_research", "evidence_digest", "opportunity_scoring", "operator_ready_recommendation", "competitor_mapping", "market_gap_analysis", "judge_rework_loop"],
-        "evidence": ["report_path", "data_sources", "overall_score", "recommended_product", "operational_pack"],
-        "preferred_workflows": ["W01", "W08"],
+        "skills": ["iterative_market_research", "evidence_digest", "opportunity_scoring", "operator_ready_recommendation", "competitor_mapping", "market_gap_analysis", "judge_rework_loop", "source_mix_expansion", "research_gap_triage", "source_coverage_audit", "commercial_recommendation_packaging"],
+        "evidence": ["report_path", "data_sources", "overall_score", "recommended_product", "operational_pack", "source_failures", "research_runtime_profile", "judge_payload", "structured_research"],
+        "preferred_workflows": ["W01", "W06", "W08"],
     },
     "trend_scout": {
-        "skills": ["multi_source_trend_scan", "fallback_trend_collection", "trend_signal_ranking", "niche_seed_generation", "trend_conflict_detection", "signal_strength_review"],
-        "evidence": ["trend_runtime_profile", "source_count", "fallback_reason", "next_actions", "operational_pack"],
-        "preferred_workflows": ["W01", "W08"],
+        "skills": ["multi_source_trend_scan", "fallback_trend_collection", "trend_signal_ranking", "niche_seed_generation", "trend_conflict_detection", "signal_strength_review", "buyer_signal_hypothesis", "trend_validation_plan", "distribution_seed_mapping", "signal_confidence_review"],
+        "evidence": ["trend_runtime_profile", "source_count", "fallback_reason", "next_actions", "operational_pack", "signal_matrix", "validation_plan"],
+        "preferred_workflows": ["W01", "W05", "W08"],
     },
     "analytics_agent": {
         "skills": ["dashboard_snapshot", "anomaly_triage", "forecast_packaging", "agent_performance_review"],
@@ -27,9 +27,9 @@ _PACKS: dict[str, dict[str, Any]] = {
         "preferred_workflows": ["W03", "W06"],
     },
     "document_agent": {
-        "skills": ["document_ingest", "recovery_aware_parse", "ocr_extract", "knowledge_capture", "parser_selection", "source_integrity_check", "extract_quality_review"],
-        "evidence": ["document_runtime_profile", "path", "next_actions", "source_status", "operational_pack"],
-        "preferred_workflows": ["W01", "W08"],
+        "skills": ["document_ingest", "recovery_aware_parse", "ocr_extract", "knowledge_capture", "parser_selection", "source_integrity_check", "extract_quality_review", "report_manifest_generation", "documentation_outline_building", "knowledge_update_packaging"],
+        "evidence": ["document_runtime_profile", "path", "next_actions", "source_status", "operational_pack", "review_checklist", "handoff_targets"],
+        "preferred_workflows": ["W01", "W02", "W08"],
     },
     "browser_agent": {
         "skills": ["screenshot_first_execution", "auth_interrupt_detection", "challenge_detection", "form_upload_navigation", "selector_mapping_preflight", "browser_recovery_decisions"],
@@ -57,14 +57,14 @@ _PACKS: dict[str, dict[str, Any]] = {
         "preferred_workflows": ["W05"],
     },
     "marketing_agent": {
-        "skills": ["channel_mix_strategy", "funnel_design", "ad_copy_packaging", "budget_profile_selection", "offer_angle_selection", "campaign_test_mapping", "timeline_execution_mapping"],
-        "evidence": ["marketing_runtime_profile", "offer_angle", "channel_mix", "timeline", "operational_pack"],
-        "preferred_workflows": ["W01", "W05", "W06"],
+        "skills": ["channel_mix_strategy", "funnel_design", "ad_copy_packaging", "budget_profile_selection", "offer_angle_selection", "campaign_test_mapping", "timeline_execution_mapping", "positioning_risk_review", "channel_experiment_design", "audience_hypothesis_validation", "creative_test_matrix_building"],
+        "evidence": ["marketing_runtime_profile", "offer_angle", "channel_mix", "timeline", "operational_pack", "validation_checklist", "handoff_targets"],
+        "preferred_workflows": ["W01", "W05", "W06", "W08"],
     },
     "email_agent": {
-        "skills": ["newsletter_packaging", "sequence_planning", "subscriber_management", "send_readiness_checks", "subject_line_packaging", "audience_alignment", "cadence_planning"],
-        "evidence": ["email_runtime_profile", "subject", "cta", "audience", "operational_pack"],
-        "preferred_workflows": ["W05"],
+        "skills": ["newsletter_packaging", "sequence_planning", "subscriber_management", "send_readiness_checks", "subject_line_packaging", "audience_alignment", "cadence_planning", "deliverability_review", "segmentation_plan", "email_test_matrix", "sequence_gap_detection"],
+        "evidence": ["email_runtime_profile", "subject", "cta", "audience", "operational_pack", "send_checklist", "sequence_summary"],
+        "preferred_workflows": ["W05", "W06"],
     },
     "publisher_agent": {
         "skills": ["article_publish_packaging", "quality_gate_before_publish", "owner_approval_before_publish", "platform_publish_result_capture"],
@@ -107,9 +107,9 @@ _PACKS: dict[str, dict[str, Any]] = {
         "preferred_workflows": ["growth_pipeline", "W05"],
     },
     "content_creator": {
-        "skills": ["article_drafting", "ebook_packaging", "listing_copy_building", "asset_manifest_assembly", "platform_fit_copy_packaging", "listing_seo_alignment", "content_quality_self_check"],
-        "evidence": ["content_runtime_profile", "file_path", "asset_paths", "operational_pack"],
-        "preferred_workflows": ["W01", "W02", "W05"],
+        "skills": ["article_drafting", "ebook_packaging", "listing_copy_building", "asset_manifest_assembly", "platform_fit_copy_packaging", "listing_seo_alignment", "content_quality_self_check", "preview_gallery_packaging", "handoff_manifest_building", "validation_checklist_generation", "angle_refresh_recovery"],
+        "evidence": ["content_runtime_profile", "file_path", "asset_paths", "operational_pack", "validation_checklist", "handoff_targets", "asset_manifest"],
+        "preferred_workflows": ["W01", "W02", "W05", "W08"],
     },
 }
 

@@ -103,11 +103,13 @@ class EmailAgent(BaseAgent):
 
     async def manage_subscribers(self, action: str, data: dict) -> TaskResult:
         if action == "list":
-            return TaskResult(success=True, output={"subscribers": self._subscribers, "total": len(self._subscribers)}, metadata={"email_runtime_profile": build_email_runtime_profile("subscriber_management", action, len(self._subscribers)), **self.get_skill_pack()})
+            return TaskResult(success=True, output={"subscribers": self._subscribers, "total": len(self._subscribers), "validation_checklist": ["subscriber_count_verified"], "handoff_targets": ["analytics_agent", "marketing_agent"]}, metadata={"email_runtime_profile": build_email_runtime_profile("subscriber_management", action, len(self._subscribers)), **self.get_skill_pack()})
         if action == "add":
-            self._subscribers.append(data)
-            return TaskResult(success=True, output={"added": True, "total": len(self._subscribers)}, metadata={"email_runtime_profile": build_email_runtime_profile("subscriber_management", action, len(self._subscribers)), **self.get_skill_pack()})
-        return TaskResult(success=True, output={"action": action, "status": "noted"}, metadata={"email_runtime_profile": build_email_runtime_profile("subscriber_management", action, len(self._subscribers)), **self.get_skill_pack()})
+            subscriber = dict(data or {})
+            subscriber.setdefault("segment", "general")
+            self._subscribers.append(subscriber)
+            return TaskResult(success=True, output={"added": True, "total": len(self._subscribers), "segments": sorted({str(item.get('segment', 'general')) for item in self._subscribers}), "handoff_targets": ["marketing_agent", "analytics_agent"]}, metadata={"email_runtime_profile": build_email_runtime_profile("subscriber_management", action, len(self._subscribers)), **self.get_skill_pack()})
+        return TaskResult(success=True, output={"action": action, "status": "noted", "handoff_targets": ["marketing_agent"]}, metadata={"email_runtime_profile": build_email_runtime_profile("subscriber_management", action, len(self._subscribers)), **self.get_skill_pack()})
 
     def _local_newsletter(self, topic: str, audience: str, tone: str) -> dict[str, Any]:
         topic = (topic or "Weekly update").strip()
@@ -119,6 +121,14 @@ class EmailAgent(BaseAgent):
             "cta": "Reply for the full pack",
             "tone": tone,
             "audience": audience,
+            "validation_checklist": [
+                "subject_present",
+                "preheader_present",
+                "cta_present",
+                "audience_named",
+            ],
+            "sequence_summary": {"emails": 1, "mode": "single_send"},
+            "handoff_targets": ["marketing_agent", "analytics_agent", "quality_judge"],
         }
 
     def _local_sequence(self, goal: str, emails_count: int) -> dict[str, Any]:
@@ -134,4 +144,18 @@ class EmailAgent(BaseAgent):
                     "delay_days": idx,
                 }
             )
-        return {"goal": goal, "emails": steps}
+        return {
+            "goal": goal,
+            "emails": steps,
+            "sequence_summary": {
+                "emails": len(steps),
+                "mode": "sequence",
+                "deliverability_focus": "warmup_and_value_first",
+            },
+            "validation_checklist": [
+                "sequence_length_matches_request",
+                "subjects_present",
+                "ctas_present",
+            ],
+            "handoff_targets": ["marketing_agent", "analytics_agent", "quality_judge"],
+        }

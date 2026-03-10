@@ -54,22 +54,25 @@
 - Status: `done`
 
 ## Current verified deltas
-- overall benchmark: `6.89 -> 7.30 -> 7.41 -> 7.52 -> 7.52 -> 7.70`
-- `intelligence_research`: `6.92 -> 7.56`
-- `research_agent`: `7.16 -> 7.58`
-- `trend_scout`: `6.87 -> 7.45`
-- `analytics_agent`: `6.96 -> 7.55`
-- `document_agent`: `6.67 -> 7.65`
-- `marketing_agent`: `6.86 -> 7.44`
-- `risk_agent`: `6.86 -> 7.44`
-- `email_agent`: `6.96 -> 7.54`
-- `partnership_agent`: `6.53 -> 7.25`
+- overall benchmark: `6.89 -> 7.30 -> 7.41 -> 7.52 -> 7.52 -> 7.70 -> 8.19 -> 8.59`
+- `intelligence_research`: `6.92 -> 7.56 -> 8.89`
+- `research_agent`: `7.16 -> 7.58 -> 9.00`
+- `trend_scout`: `6.87 -> 7.45 -> 9.23`
+- `analytics_agent`: `6.96 -> 7.55 -> 8.29`
+- `document_agent`: `6.67 -> 7.65 -> 9.03`
+- `marketing_agent`: `6.86 -> 7.44 -> 9.06`
+- `risk_agent`: `6.86 -> 7.44 -> 8.34`
+- `email_agent`: `6.96 -> 7.54 -> 9.02`
+- `partnership_agent`: `6.53 -> 7.25 -> 8.15`
+- `content_creator`: `7.40 -> 9.30`
+- `content_growth`: `6.81 -> 7.98 -> 8.60`
 - `commerce_execution`: `6.75 -> 7.88 -> 7.88 -> 8.61`
 - `publisher_agent`: `7.05 -> 8.55`
 - `ecommerce_agent`: `7.62 -> 9.03`
 - `vito_core`: `7.28 -> 8.69`
 - Package 3 collaboration assertions: `done`
 - Package 4 commerce hardening: `done`
+- weakest-family uplift package: `done`
 
 ## Current kill-list (< 7.0)
 - none

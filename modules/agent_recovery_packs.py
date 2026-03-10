@@ -91,6 +91,8 @@ _RECOVERY_PACKS: dict[str, dict[str, Any]] = {
             "request_seo_pack_refresh",
             "request_marketing_angle_refresh",
             "generate_replacement_assets",
+            "rebuild_asset_manifest",
+            "run_quality_self_check",
         ],
     },
     "marketing_agent": {
@@ -106,6 +108,8 @@ _RECOVERY_PACKS: dict[str, dict[str, Any]] = {
             "request_analytics_snapshot",
             "switch_to_conservative_gtm_mode",
             "escalate_positioning_review",
+            "rebuild_test_matrix",
+            "resegment_target_audience",
         ],
     },
     "trend_scout": {
@@ -121,6 +125,8 @@ _RECOVERY_PACKS: dict[str, dict[str, Any]] = {
             "request_research_validation",
             "request_marketing_context",
             "fallback_to_multi_source_scan",
+            "build_signal_matrix",
+            "tighten_confidence_thresholds",
         ],
     },
     "email_agent": {
@@ -136,6 +142,8 @@ _RECOVERY_PACKS: dict[str, dict[str, Any]] = {
             "request_marketing_pack",
             "request_analytics_baseline",
             "switch_to_draft_only_mode",
+            "run_deliverability_checklist",
+            "rebuild_sequence_summary",
         ],
     },
     "research_agent": {
@@ -151,6 +159,8 @@ _RECOVERY_PACKS: dict[str, dict[str, Any]] = {
             "request_trend_validation",
             "request_document_ingest",
             "rerun_judge_stage",
+            "rebuild_source_coverage_map",
+            "compress_findings_into_operator_pack",
         ],
     },
     "document_agent": {
@@ -166,6 +176,8 @@ _RECOVERY_PACKS: dict[str, dict[str, Any]] = {
             "fallback_to_ocr",
             "request_source_retry",
             "escalate_ingest_review",
+            "build_review_checklist",
+            "repackage_extracted_manifest",
         ],
     },
 }
