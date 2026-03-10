@@ -51,6 +51,7 @@ class TestSMMAgent:
         agent.llm_router = None
         result = await agent.create_post("twitter", "Проверка автономного режима")
         assert result.success is True
+        assert "smm_runtime_profile" in result.metadata
 
     @pytest.mark.asyncio
     async def test_create_post_skips_approval_when_platform_not_authenticated(self, agent):

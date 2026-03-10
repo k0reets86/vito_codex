@@ -80,16 +80,16 @@ class MediumPlatform(BasePlatform):
                   canonicalUrl (optional)}
         """
         if not self._token:
-            return {
+            return self._finalize_publish_result({
                 "platform": "medium",
                 "status": "not_configured",
                 "error": "Set MEDIUM_TOKEN in .env (get from medium.com/me/settings)",
-            }
+            }, mode="api")
 
         if not self._authenticated:
             auth_ok = await self.authenticate()
             if not auth_ok:
-                return {"platform": "medium", "status": "not_authenticated"}
+                return self._finalize_publish_result({"platform": "medium", "status": "not_authenticated"}, mode="api")
 
         try:
             session = await self._get_session()
@@ -119,30 +119,30 @@ class MediumPlatform(BasePlatform):
                         f"Medium story created: {story_id}",
                         extra={"event": "medium_publish_ok", "context": {"story_id": story_id}},
                     )
-                    return {
+                    return self._finalize_publish_result({
                         "platform": "medium",
                         "status": "published" if post_data["publishStatus"] == "public" else "draft",
                         "story_id": story_id,
                         "url": story_url,
-                    }
+                    }, mode="api", artifact_flags={"story_id": bool(story_id), "url": bool(story_url)})
                 error_msg = data.get("errors", [{}])[0].get("message", str(resp.status)) if data.get("errors") else str(resp.status)
                 logger.warning(f"Medium publish failed: {error_msg}", extra={"event": "medium_publish_fail"})
-                return {"platform": "medium", "status": "error", "error": error_msg}
+                return self._finalize_publish_result({"platform": "medium", "status": "error", "error": error_msg}, mode="api")
 
         except Exception as e:
             logger.error(f"Medium publish error: {e}", exc_info=True)
-            return {"platform": "medium", "status": "error", "error": str(e)}
+            return self._finalize_publish_result({"platform": "medium", "status": "error", "error": str(e)}, mode="api")
 
     async def get_analytics(self) -> dict:
         """Medium API doesn't provide analytics. Returns basic info."""
         # Medium's public API is very limited — no analytics endpoint
-        return {
+        return self._finalize_analytics_result({
             "platform": "medium",
             "stories": 0,
             "views": 0,
             "claps": 0,
             "note": "Medium API does not expose analytics. Use medium.com/me/stats.",
-        }
+        }, source="api_limited")
 
     async def health_check(self) -> bool:
         if not self._token:

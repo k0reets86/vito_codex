@@ -14,11 +14,13 @@ from typing import Any
 
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
+from config.paths import PROJECT_ROOT
 from config.settings import settings
+from modules.ops_runtime import build_devops_runtime_profile
 
 logger = get_logger("devops_agent", agent="devops_agent")
 
-BACKUP_DIR = "/home/vito/vito-agent/backups"
+BACKUP_DIR = str(PROJECT_ROOT / "backups")
 
 SHELL_TIMEOUT = 30  # секунд
 
@@ -211,6 +213,13 @@ class DevOpsAgent(BaseAgent):
             "issues": issues,
             "recovery_hints": self._recovery_hints_for_issues(issues),
             "skill_pack": self.get_skill_pack(),
+        }, metadata={
+            "devops_runtime_profile": build_devops_runtime_profile(
+                operation="health_check",
+                success=all_ok,
+                issue_count=len(issues),
+                can_auto_remediate=bool(issues),
+            ),
         })
 
     # ── Backup ──
@@ -233,6 +242,13 @@ class DevOpsAgent(BaseAgent):
             "manifest": {"file_count": len(backed_up), "timestamp": ts},
             "recovery_hints": ["Verify backup readability before deleting old snapshots."],
             "skill_pack": self.get_skill_pack(),
+        }, metadata={
+            "devops_runtime_profile": build_devops_runtime_profile(
+                operation="backup",
+                success=True,
+                issue_count=0,
+                can_auto_remediate=False,
+            ),
         })
 
     # ── Self-heal (теперь использует execute_shell) ──
@@ -266,6 +282,13 @@ class DevOpsAgent(BaseAgent):
             "actions": actions_taken,
             "recovery_hints": self._recovery_hints_for_issues([issue]),
             "skill_pack": self.get_skill_pack(),
+        }, metadata={
+            "devops_runtime_profile": build_devops_runtime_profile(
+                operation="self_heal",
+                success=bool(actions_taken),
+                issue_count=0 if actions_taken else 1,
+                can_auto_remediate=bool(actions_taken and actions_taken[0].get("action") != "none"),
+            ),
         })
 
     def _recovery_hints_for_issues(self, issues: list[str]) -> list[str]:

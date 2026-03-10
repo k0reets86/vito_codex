@@ -20,6 +20,7 @@ class TestPartnershipAgent:
         assert result.success is True
         assert len(result.output["candidates"]) >= 3
         assert result.metadata["partnership_runtime_profile"]["candidate_count"] >= 3
+        assert "partnership_execution_profile" in result.metadata
 
     @pytest.mark.asyncio
     async def test_track_referrals(self, agent):

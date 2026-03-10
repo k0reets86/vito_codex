@@ -5,6 +5,7 @@ import time
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from llm_router import TaskType
+from modules.ops_runtime import build_security_runtime_profile
 
 logger = get_logger("security_agent", agent="security_agent")
 
@@ -71,7 +72,15 @@ class SecurityAgent(BaseAgent):
             "Rotate weak or short credentials and re-check runtime secret health.",
         ]
         logger.info(f"Аудит ключей: {report['configured_count']}/{report['total']} настроено", extra={"event": "key_audit"})
-        return TaskResult(success=True, output=report)
+        return TaskResult(success=True, output=report, metadata={
+            "security_runtime_profile": build_security_runtime_profile(
+                operation="audit_keys",
+                risk_score=report["risk_score"],
+                missing_count=len(report["missing"]),
+                weak_count=len(report["weak"]),
+                block_recommended=bool(report["missing"] or report["weak"]),
+            ),
+        })
 
     async def rotate_key(self, service: str) -> TaskResult:
         logger.warning(f"Запрос ротации ключа: {service}", extra={"event": "key_rotation_request"})
@@ -83,6 +92,14 @@ class SecurityAgent(BaseAgent):
                 "Create new secret, update runtime env, then revoke the old credential.",
                 "Verify dependent platform logins after rotation completes.",
             ],
+        }, metadata={
+            "security_runtime_profile": build_security_runtime_profile(
+                operation="rotate_key",
+                risk_score=5,
+                missing_count=0,
+                weak_count=0,
+                block_recommended=False,
+            ),
         })
 
     async def encrypt_backup(self, path: str) -> TaskResult:
@@ -110,7 +127,15 @@ class SecurityAgent(BaseAgent):
                 "Confirm secrets are not tracked in git history.",
                 "Close missing env gaps before re-running live integrations.",
             ]
-            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
+            return TaskResult(success=True, output=local, metadata={
+                "mode": "local_fallback",
+                "security_runtime_profile": build_security_runtime_profile(
+                    operation="scan_vulnerabilities",
+                    risk_score=4 if any(c["status"] != "ok" for c in checks) else 8,
+                    weak_count=sum(1 for c in checks if c["status"] != "ok"),
+                    block_recommended=any(c["status"] != "ok" for c in checks),
+                ),
+            })
         response = await self._call_llm(
             task_type=TaskType.ROUTINE,
             prompt=f"Проанализируй результаты проверки безопасности и дай рекомендации:\n{checks}",
@@ -122,4 +147,11 @@ class SecurityAgent(BaseAgent):
             "Fix warnings in priority order: secrets exposure, missing envs, then policy drift.",
             "Re-run security scan after each remediation batch.",
         ]
-        return TaskResult(success=True, output=local)
+        return TaskResult(success=True, output=local, metadata={
+            "security_runtime_profile": build_security_runtime_profile(
+                operation="scan_vulnerabilities",
+                risk_score=4 if any(c["status"] != "ok" for c in checks) else 8,
+                weak_count=sum(1 for c in checks if c["status"] != "ok"),
+                block_recommended=any(c["status"] != "ok" for c in checks),
+            ),
+        })

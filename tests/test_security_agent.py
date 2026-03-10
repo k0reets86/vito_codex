@@ -27,12 +27,14 @@ class TestSecurityAgent:
         result = await agent.audit_keys()
         assert result.success is True
         assert result.output is not None
+        assert result.metadata["security_runtime_profile"]["operation"] == "audit_keys"
 
     @pytest.mark.asyncio
     async def test_scan_vulnerabilities(self, agent):
         agent.llm_router.call_llm = AsyncMock(return_value="No critical vulnerabilities found")
         result = await agent.scan_vulnerabilities()
         assert result.success is True
+        assert result.metadata["security_runtime_profile"]["operation"] == "scan_vulnerabilities"
 
     @pytest.mark.asyncio
     async def test_rotate_key(self, agent):

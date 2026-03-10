@@ -71,6 +71,11 @@ class AnalyticsAgent(BaseAgent):
             "roi_percent": round((profit / spend) * 100, 2) if spend > 0 else None,
             "health": "ok" if profit >= 0 else "watch",
         }
+        data["evidence"] = {
+            "has_spend": spend > 0,
+            "has_revenue": revenue > 0,
+            "profit_sign": "positive" if profit >= 0 else "negative",
+        }
         return TaskResult(
             success=True,
             output=data,
@@ -80,6 +85,7 @@ class AnalyticsAgent(BaseAgent):
                     health=data.get("health"),
                     forecast_confidence=None,
                 ),
+                "analytics_handoff_targets": ["marketing_agent", "ecommerce_agent"] if data.get("health") == "watch" else ["analytics_agent"],
                 **self.get_skill_pack(),
             },
         )
@@ -104,6 +110,7 @@ class AnalyticsAgent(BaseAgent):
                     health=local.get("status"),
                     forecast_confidence=None,
                 ),
+                "analytics_handoff_targets": ["marketing_agent", "ecommerce_agent"] if local.get("anomalies") else ["analytics_agent"],
                 **self.get_skill_pack(),
             },
         )
@@ -130,6 +137,7 @@ class AnalyticsAgent(BaseAgent):
                     health="forecast",
                     forecast_confidence=local.get("confidence"),
                 ),
+                "analytics_handoff_targets": ["economics_agent", "marketing_agent"],
                 **self.get_skill_pack(),
             },
         )
@@ -149,6 +157,8 @@ class AnalyticsAgent(BaseAgent):
             }
             for s in statuses
         ]
+        weakest = sorted(summary, key=lambda row: row.get("failed", 0), reverse=True)
+        strongest = sorted(summary, key=lambda row: row.get("completed", 0), reverse=True)
         return TaskResult(
             success=True,
             output={"agents": summary, "agent_count": len(summary)},
@@ -158,6 +168,8 @@ class AnalyticsAgent(BaseAgent):
                     health="agent_performance",
                     forecast_confidence=None,
                 ),
+                "analytics_handoff_targets": ["hr_agent", "vito_core"],
+                "benchmark_snapshot": {"weakest": weakest[:5], "strongest": strongest[:5]},
                 **self.get_skill_pack(),
             },
         )
@@ -176,6 +188,7 @@ class AnalyticsAgent(BaseAgent):
             "metrics": data,
             "anomalies": anomalies,
             "status": "ok" if not anomalies else "review_required",
+            "investigation_plan": ["continue_monitoring"] if not anomalies else ["compare_channel_spend", "check_platform_publish_health", "review_offer_conversion"],
         }
 
     async def _local_forecast(self, days: int) -> dict[str, Any]:

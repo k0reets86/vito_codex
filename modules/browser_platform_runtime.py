@@ -6,6 +6,7 @@ from typing import Any
 from agents.base_agent import TaskResult
 from config.paths import PROJECT_ROOT
 from modules.execution_facts import ExecutionFacts
+from modules.platform_repeatability import attach_analytics_repeatability, attach_publish_repeatability
 
 
 def resolve_storage_state(path_value: str | None, default_rel: str) -> Path:
@@ -67,23 +68,32 @@ async def browser_publish_form(
                 "title": title,
             },
         )
-    return {
-        "platform": service,
-        "status": success_status if success else "failed",
-        link_field: current_url,
-        "title": title,
-        "screenshot_path": screenshot_path,
-        "output": output,
-        "recovery_hints": [] if success else [f"verify_{service}_selectors", f"rerun_{service}_browser_flow"],
-    }
+    return attach_publish_repeatability(
+        {
+            "platform": service,
+            "status": success_status if success else "failed",
+            link_field: current_url,
+            "title": title,
+            "screenshot_path": screenshot_path,
+            "output": output,
+            "recovery_hints": [] if success else [f"verify_{service}_selectors", f"rerun_{service}_browser_flow"],
+        },
+        platform=service,
+        mode="browser_form",
+        artifact_flags={"editor_url": bool(current_url), "screenshot": bool(screenshot_path)},
+    )
 
 
 async def browser_extract_analytics(*, browser_agent, service: str, url: str) -> dict[str, Any]:
     if not browser_agent:
         return {"platform": service, "status": "no_browser", "raw_data": None}
     result = await browser_agent.execute_task(task_type="extract_text", url=url, selector="body", service=service)
-    return {
-        "platform": service,
-        "status": "ok" if result and result.success else "failed",
-        "raw_data": result.output if result else None,
-    }
+    return attach_analytics_repeatability(
+        {
+            "platform": service,
+            "status": "ok" if result and result.success else "failed",
+            "raw_data": result.output if result else None,
+        },
+        platform=service,
+        source="browser_extract",
+    )

@@ -58,6 +58,7 @@ class RiskAgent(BaseAgent):
         if response:
             self._record_expense(0.01, f"Risk assessment: {action[:50]}")
             local["llm_notes"] = response
+        local["escalation_targets"] = ["legal_agent", "quality_judge"] if local.get("risk_level") == "high" else ["quality_judge"]
         return TaskResult(success=True, output=local, cost_usd=0.01 if response else 0.0, metadata={"risk_runtime_profile": build_risk_runtime_profile(action, local.get("risk_level"), local.get("factors")), **self.get_skill_pack()})
 
     async def monitor_reputation(self) -> TaskResult:
@@ -71,6 +72,7 @@ class RiskAgent(BaseAgent):
         )
         if response:
             local["llm_notes"] = response
+        local["escalation_targets"] = ["marketing_agent", "smm_agent"] if local.get("status") != "neutral" else []
         return TaskResult(success=True, output=local, metadata={"risk_runtime_profile": build_risk_runtime_profile("reputation", "medium" if local.get("status") != "neutral" else "low", local.get("escalate_if")), **self.get_skill_pack()})
 
     async def handle_complaint(self, complaint: dict) -> TaskResult:
@@ -85,6 +87,7 @@ class RiskAgent(BaseAgent):
         )
         if response:
             local["llm_notes"] = response
+        local["escalation_targets"] = ["legal_agent", "support_lane"]
         return TaskResult(success=True, output=local, metadata={"risk_runtime_profile": build_risk_runtime_profile(str((complaint or {}).get("type") or "complaint"), "medium", [str((complaint or {}).get("type") or "general")]), **self.get_skill_pack()})
 
     def _local_risk_assessment(self, action: str) -> dict[str, Any]:

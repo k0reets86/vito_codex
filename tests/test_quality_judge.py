@@ -68,3 +68,5 @@ class TestQualityJudge:
         assert result.success is True
         assert "domain_scorecard" in result.output
         assert result.output["domain_scorecard"]["completeness"] == 8
+        assert "quality_runtime_profile" in result.metadata
+        assert "handoff_plan" in result.output

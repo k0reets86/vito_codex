@@ -51,12 +51,12 @@ class TikTokPlatform(BasePlatform):
                 )
             except Exception:
                 pass
-            return {"platform": "tiktok", "status": "prepared", "dry_run": True}
+            return self._finalize_publish_result({"platform": "tiktok", "status": "prepared", "dry_run": True}, mode="dry_run")
 
         video_url = str(content.get("video_url", "")).strip()
         caption = str(content.get("caption", "")).strip()
         if not self._token:
-            return await browser_publish_form(
+            result = await browser_publish_form(
                 browser_agent=self.browser_agent,
                 service="tiktok",
                 url="https://www.tiktok.com/upload",
@@ -64,8 +64,9 @@ class TikTokPlatform(BasePlatform):
                 success_status="prepared",
                 title_field="caption",
             )
+            return self._finalize_publish_result(result, mode="browser")
         if not video_url:
-            return {"platform": "tiktok", "status": "prepared", "note": "video_url required for live post"}
+            return self._finalize_publish_result({"platform": "tiktok", "status": "prepared", "note": "video_url required for live post"}, mode="api")
 
         try:
             session = await self._get_session()
@@ -93,19 +94,20 @@ class TikTokPlatform(BasePlatform):
                         )
                     except Exception:
                         pass
-                    return {"platform": "tiktok", "status": "prepared", "response": data}
-                return {"platform": "tiktok", "status": "error", "error": str(data)[:300]}
+                    return self._finalize_publish_result({"platform": "tiktok", "status": "prepared", "response": data}, mode="api")
+                return self._finalize_publish_result({"platform": "tiktok", "status": "error", "error": str(data)[:300]}, mode="api")
         except Exception as e:
-            return {"platform": "tiktok", "status": "error", "error": str(e)}
+            return self._finalize_publish_result({"platform": "tiktok", "status": "error", "error": str(e)}, mode="api")
 
     async def get_analytics(self) -> dict:
         if self._token:
-            return {"platform": "tiktok", "note": "adapter skeleton"}
-        return await browser_extract_analytics(
+            return self._finalize_analytics_result({"platform": "tiktok", "note": "adapter skeleton"}, source="api_limited")
+        result = await browser_extract_analytics(
             browser_agent=self.browser_agent,
             service="tiktok",
             url="https://www.tiktok.com/",
         )
+        return self._finalize_analytics_result(result, source="browser_home")
 
     async def health_check(self) -> bool:
         return await self.authenticate()

@@ -62,12 +62,12 @@ class YouTubePlatform(BasePlatform):
                 )
             except Exception:
                 pass
-            return {"platform": "youtube", "status": "prepared", "dry_run": True}
-        return {"platform": "youtube", "status": "not_supported", "reason": "upload flow requires OAuth upload scope"}
+            return self._finalize_publish_result({"platform": "youtube", "status": "prepared", "dry_run": True}, mode="dry_run")
+        return self._finalize_publish_result({"platform": "youtube", "status": "not_supported", "reason": "upload flow requires OAuth upload scope"}, mode="api")
 
     async def get_analytics(self) -> dict:
         """Получение трендовых видео."""
-        return await self.search_trending()
+        return self._finalize_analytics_result(await self.search_trending(), source="api_trending")
 
     async def search_trending(self, region: str = "US", max_results: int = 10) -> dict:
         """GET /videos?chart=mostPopular — трендовые видео."""

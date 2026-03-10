@@ -8,6 +8,7 @@ from typing import Any
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from llm_router import TaskType
+from modules.growth_runtime import build_seo_runtime_profile
 from modules.listing_optimizer import optimize_listing_payload
 
 logger = get_logger("seo_agent", agent="seo_agent")
@@ -89,26 +90,80 @@ class SEOAgent(BaseAgent):
             "lsi_count": len(output.get("lsi_keywords", []) or []),
         }
         self._cache[key] = json.dumps(output, ensure_ascii=False)
-        return TaskResult(success=True, output=output, cost_usd=cost)
+        return TaskResult(
+            success=True,
+            output=output,
+            cost_usd=cost,
+            metadata={
+                "seo_runtime_profile": build_seo_runtime_profile(
+                    platform="research",
+                    topic=str(topic or ""),
+                    keywords=output.get("primary_keywords"),
+                    seo_score=None,
+                    publish_ready=False,
+                ),
+                **self.get_skill_pack(),
+            },
+        )
 
     async def optimize_content(self, content: str, keywords: list[str]) -> TaskResult:
         local = self._local_optimize_content(content, keywords)
         if not self.llm_router:
-            return TaskResult(success=True, output=local)
+            return TaskResult(
+                success=True,
+                output=local,
+                metadata={
+                    "seo_runtime_profile": build_seo_runtime_profile(
+                        platform="content",
+                        topic=str((keywords or ["content"])[0] if keywords else "content"),
+                        keywords=keywords,
+                        seo_score=local.get("seo_readiness"),
+                        publish_ready=False,
+                    ),
+                    **self.get_skill_pack(),
+                },
+            )
         response = await self._call_llm(
             task_type=TaskType.CONTENT,
             prompt=f"Оптимизируй контент для SEO. Keywords: {', '.join(keywords)}\n\nКонтент:\n{content[:5000]}",
             estimated_tokens=2200,
         )
         if not response:
-            return TaskResult(success=True, output=local)
+            return TaskResult(
+                success=True,
+                output=local,
+                metadata={
+                    "seo_runtime_profile": build_seo_runtime_profile(
+                        platform="content",
+                        topic=str((keywords or ["content"])[0] if keywords else "content"),
+                        keywords=keywords,
+                        seo_score=local.get("seo_readiness"),
+                        publish_ready=False,
+                    ),
+                    **self.get_skill_pack(),
+                },
+            )
         self._record_expense(0.01, "SEO optimize content")
         local["llm_rewrite"] = response
         local["recovery_hints"] = [
             "Re-check title/H1 keyword placement if readiness stays below target.",
             "Shorten meta text if SERP snippets exceed length budgets.",
         ]
-        return TaskResult(success=True, output=local, cost_usd=0.01)
+        return TaskResult(
+            success=True,
+            output=local,
+            cost_usd=0.01,
+            metadata={
+                "seo_runtime_profile": build_seo_runtime_profile(
+                    platform="content",
+                    topic=str((keywords or ["content"])[0] if keywords else "content"),
+                    keywords=keywords,
+                    seo_score=local.get("seo_readiness"),
+                    publish_ready=False,
+                ),
+                **self.get_skill_pack(),
+            },
+        )
 
     async def analyze_rankings(self, url: str) -> TaskResult:
         local = {
@@ -130,7 +185,20 @@ class SEOAgent(BaseAgent):
     async def generate_meta(self, content: str, keywords: list[str]) -> TaskResult:
         local = self._local_meta(content, keywords)
         if not self.llm_router:
-            return TaskResult(success=True, output=local)
+            return TaskResult(
+                success=True,
+                output=local,
+                metadata={
+                    "seo_runtime_profile": build_seo_runtime_profile(
+                        platform="meta",
+                        topic=str((keywords or ["meta"])[0] if keywords else "meta"),
+                        keywords=keywords,
+                        seo_score=None,
+                        publish_ready=True,
+                    ),
+                    **self.get_skill_pack(),
+                },
+            )
         response = await self._call_llm(
             task_type=TaskType.CONTENT,
             prompt=(
@@ -140,13 +208,40 @@ class SEOAgent(BaseAgent):
             estimated_tokens=900,
         )
         if not response:
-            return TaskResult(success=True, output=local)
+            return TaskResult(
+                success=True,
+                output=local,
+                metadata={
+                    "seo_runtime_profile": build_seo_runtime_profile(
+                        platform="meta",
+                        topic=str((keywords or ["meta"])[0] if keywords else "meta"),
+                        keywords=keywords,
+                        seo_score=None,
+                        publish_ready=True,
+                    ),
+                    **self.get_skill_pack(),
+                },
+            )
         meta = self._safe_json_loads(response)
         if isinstance(meta, dict):
             local.update({k: str(v) for k, v in meta.items() if str(v).strip()})
         else:
             local["llm_notes"] = response
-        return TaskResult(success=True, output=local, cost_usd=0.005)
+        return TaskResult(
+            success=True,
+            output=local,
+            cost_usd=0.005,
+            metadata={
+                "seo_runtime_profile": build_seo_runtime_profile(
+                    platform="meta",
+                    topic=str((keywords or ["meta"])[0] if keywords else "meta"),
+                    keywords=keywords,
+                    seo_score=None,
+                    publish_ready=True,
+                ),
+                **self.get_skill_pack(),
+            },
+        )
 
     async def listing_seo_pack(self, platform: str, title: str, description: str, tags: list[str] | None = None) -> TaskResult:
         payload = optimize_listing_payload(
@@ -181,7 +276,21 @@ class SEOAgent(BaseAgent):
                 "If category is weak, rerun listing optimizer with platform-specific intent.",
             ],
         }
-        return TaskResult(success=True, output=pack)
+        pack["handoff_targets"] = ["ecommerce_agent", "publisher_agent"] if pack.get("publish_ready") else ["content_creator", "marketing_agent"]
+        return TaskResult(
+            success=True,
+            output=pack,
+            metadata={
+                "seo_runtime_profile": build_seo_runtime_profile(
+                    platform=platform,
+                    topic=str(title or ""),
+                    keywords=pack.get("keywords"),
+                    seo_score=pack.get("seo_score"),
+                    publish_ready=pack.get("publish_ready"),
+                ),
+                **self.get_skill_pack(),
+            },
+        )
 
     def _local_keyword_research(self, topic: str, language: str = "en") -> dict[str, Any]:
         tokens = [t for t in re.split(r"[^a-zA-Z0-9а-яА-Я]+", (topic or "").lower()) if len(t) > 2]

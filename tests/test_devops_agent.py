@@ -29,6 +29,7 @@ class TestDevOpsAgent:
         result = await agent.health_check()
         assert result.success is True
         assert "disk" in result.output or "health" in str(result.output).lower()
+        assert result.metadata["devops_runtime_profile"]["operation"] == "health_check"
 
     @pytest.mark.asyncio
     async def test_backup(self, agent):
@@ -37,6 +38,7 @@ class TestDevOpsAgent:
              patch("os.path.exists", return_value=True):
             result = await agent.backup()
             assert result.success is True
+            assert result.metadata["devops_runtime_profile"]["operation"] == "backup"
 
     @pytest.mark.asyncio
     async def test_execute_task_health_check(self, agent):

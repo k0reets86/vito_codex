@@ -19,6 +19,7 @@ class TestAnalyticsAgent:
         assert result.success is True
         assert "daily_revenue" in result.output
         assert result.metadata["analytics_runtime_profile"]["health"] in {"ok", "watch"}
+        assert "evidence" in result.output
 
     @pytest.mark.asyncio
     async def test_detect_anomalies(self, agent):
@@ -27,6 +28,7 @@ class TestAnalyticsAgent:
         assert result.success is True
         assert "status" in result.output
         assert "analytics_runtime_profile" in result.metadata
+        assert "analytics_handoff_targets" in result.metadata
 
     @pytest.mark.asyncio
     async def test_forecast(self, agent):

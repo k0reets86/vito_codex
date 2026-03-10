@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from agents.base_agent import BaseAgent, TaskResult
+from modules.autonomy_runtime import build_self_evolve_runtime_profile, score_improvement_proposal
 from modules.owner_model import OwnerModel
 from modules.reflector import VITOReflector
 from modules.skill_library import VITOSkillLibrary
@@ -41,10 +42,16 @@ class SelfEvolver(BaseAgent):
         issues = self.reflector.get_recent(n=15, category="technical")
         proposals = await self.propose_improvements(issues=issues)
         await self._notify_report(proposals)
+        owner_profile = self.owner_model.get_preferences() if hasattr(self.owner_model, "get_preferences") else {}
         return {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "issue_count": len(issues),
             "proposals": proposals,
+            "runtime_profile": build_self_evolve_runtime_profile(
+                proposal_count=len(proposals),
+                issue_buckets=Counter(self._classify_issue(issue) for issue in issues),
+                owner_alignment=bool(owner_profile),
+            ),
         }
 
     async def propose_improvements(self, issues: list[str] | None = None) -> list[dict[str, Any]]:
@@ -118,7 +125,20 @@ class SelfEvolver(BaseAgent):
                     ],
                 }
             )
-        return proposals[:4]
+        ranked = []
+        for item in proposals[:4]:
+            enriched = dict(item)
+            enriched.update(
+                score_improvement_proposal(
+                    issue_buckets=issue_types,
+                    owner_alignment=bool(owner_profile),
+                    skill_count=len(skills),
+                    title=str(item.get("title") or ""),
+                )
+            )
+            ranked.append(enriched)
+        ranked.sort(key=lambda row: float(row.get("proposal_score", 0.0)), reverse=True)
+        return ranked[:4]
 
     def _classify_issue(self, issue: str) -> str:
         low = str(issue or "").lower()

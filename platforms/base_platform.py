@@ -3,6 +3,8 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
+from modules.platform_repeatability import attach_analytics_repeatability, attach_publish_repeatability
+
 
 class BasePlatform(ABC):
     def __init__(self, name: str, browser_agent=None):
@@ -25,3 +27,20 @@ class BasePlatform(ABC):
     @abstractmethod
     async def health_check(self) -> bool:
         ...
+
+    def _finalize_publish_result(
+        self,
+        result: dict[str, Any],
+        *,
+        mode: str,
+        artifact_flags: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return attach_publish_repeatability(
+            result,
+            platform=self.name,
+            mode=mode,
+            artifact_flags=artifact_flags,
+        )
+
+    def _finalize_analytics_result(self, result: dict[str, Any], *, source: str) -> dict[str, Any]:
+        return attach_analytics_repeatability(result, platform=self.name, source=source)

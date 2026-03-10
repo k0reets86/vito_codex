@@ -118,7 +118,7 @@ class WordPressPlatform(BasePlatform):
         if not self._authenticated:
             auth_ok = await self.authenticate()
             if not auth_ok:
-                return {"platform": "wordpress", "status": "not_authenticated"}
+                return self._finalize_publish_result({"platform": "wordpress", "status": "not_authenticated"}, mode="api")
 
         try:
             session = await self._get_session()
@@ -160,19 +160,19 @@ class WordPressPlatform(BasePlatform):
                         )
                     except Exception:
                         pass
-                    return {
+                    return self._finalize_publish_result({
                         "platform": "wordpress",
                         "status": "published" if post_data["status"] == "publish" else "draft",
                         "post_id": str(post_id),
                         "url": post_url,
-                    }
+                    }, mode="api", artifact_flags={"post_id": bool(post_id), "url": bool(post_url)})
                 error = data.get("message", str(resp.status))
                 logger.warning(f"WordPress publish failed: {error}", extra={"event": "wp_publish_fail"})
-                return {"platform": "wordpress", "status": "error", "error": error}
+                return self._finalize_publish_result({"platform": "wordpress", "status": "error", "error": error}, mode="api")
 
         except Exception as e:
             logger.error(f"WordPress publish error: {e}", exc_info=True)
-            return {"platform": "wordpress", "status": "error", "error": str(e)}
+            return self._finalize_publish_result({"platform": "wordpress", "status": "error", "error": str(e)}, mode="api")
 
     async def upload_media(self, file_path: str, alt_text: str = "") -> dict:
         """POST /wp-json/wp/v2/media — upload image/file."""
@@ -206,7 +206,7 @@ class WordPressPlatform(BasePlatform):
     async def get_analytics(self) -> dict:
         """Get basic post stats."""
         if not self._authenticated:
-            return {"platform": "wordpress", "posts": 0, "views": 0}
+            return self._finalize_analytics_result({"platform": "wordpress", "posts": 0, "views": 0}, source="api_posts")
 
         try:
             session = await self._get_session()
@@ -217,15 +217,15 @@ class WordPressPlatform(BasePlatform):
             ) as resp:
                 if resp.status == 200:
                     posts = await resp.json()
-                    return {
+                    return self._finalize_analytics_result({
                         "platform": "wordpress",
                         "posts": len(posts),
                         "views": 0,  # WP REST API doesn't expose views natively
-                    }
+                    }, source="api_posts")
         except Exception as e:
             logger.error(f"WordPress analytics error: {e}", exc_info=True)
 
-        return {"platform": "wordpress", "posts": 0, "views": 0}
+        return self._finalize_analytics_result({"platform": "wordpress", "posts": 0, "views": 0}, source="api_posts")
 
     async def health_check(self) -> bool:
         if not self._url:

@@ -11,6 +11,7 @@ from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from config.settings import settings
 from llm_router import TaskType
+from modules.quality_runtime import build_quality_handoff_plan, build_quality_runtime_profile
 
 logger = get_logger("quality_judge", agent="quality_judge")
 
@@ -94,9 +95,29 @@ class QualityJudge(BaseAgent):
             scorecard=result_output["domain_scorecard"],
             approved=approved,
         )
+        result_output["handoff_plan"] = build_quality_handoff_plan(
+            issues=result_output["issues"],
+            scorecard=result_output["domain_scorecard"],
+        )
         result_output["evidence"] = self._build_evidence(content=str(content or ""), content_type=str(content_type or "article"))
         logger.info(f"Quality review: score={score}, approved={approved}, threshold={threshold}", extra={"event": "quality_review", "context": result_output})
-        return TaskResult(success=True, output=result_output, cost_usd=0.005, duration_ms=duration_ms)
+        return TaskResult(
+            success=True,
+            output=result_output,
+            cost_usd=0.005,
+            duration_ms=duration_ms,
+            metadata={
+                "quality_runtime_profile": build_quality_runtime_profile(
+                    content_type=str(content_type or "article"),
+                    score=score,
+                    threshold=threshold,
+                    approved=approved,
+                    issues=result_output["issues"],
+                    scorecard=result_output["domain_scorecard"],
+                ),
+                **self.get_skill_pack(),
+            },
+        )
 
     def _local_review(self, content: str, content_type: str) -> dict[str, Any]:
         text = (content or "").strip()
@@ -112,7 +133,7 @@ class QualityJudge(BaseAgent):
             issues.append("listing_lacks_depth")
             score -= 1
         threshold = max(1, min(10, int(getattr(settings, "QUALITY_JUDGE_APPROVAL_THRESHOLD", APPROVAL_THRESHOLD) or APPROVAL_THRESHOLD)))
-        return {
+        out = {
             "score": max(score, 1),
             "feedback": "Local heuristic review completed.",
             "approved": score >= threshold,
@@ -122,6 +143,11 @@ class QualityJudge(BaseAgent):
             "recovery_plan": self._build_recovery_plan(issues=issues, scorecard=self._normalize_domain_scorecard(None, content=text, content_type=content_type), approved=score >= threshold),
             "evidence": self._build_evidence(content=text, content_type=content_type),
         }
+        out["handoff_plan"] = build_quality_handoff_plan(
+            issues=out["issues"],
+            scorecard=out["domain_scorecard"],
+        )
+        return out
 
     def _normalize_domain_scorecard(self, raw: Any, *, content: str, content_type: str) -> dict[str, int]:
         scorecard = raw if isinstance(raw, dict) else {}

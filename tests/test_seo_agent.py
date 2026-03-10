@@ -61,3 +61,5 @@ class TestSEOAgent:
         )
         assert result.success is True
         assert result.output["evidence"]["tag_count"] >= 2
+        assert "seo_runtime_profile" in result.metadata
+        assert "handoff_targets" in result.output

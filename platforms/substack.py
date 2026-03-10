@@ -36,32 +36,33 @@ class SubstackPlatform(BasePlatform):
 
     async def publish(self, content: dict) -> dict:
         if not self.browser_agent:
-            return {"platform": "substack", "status": "no_browser"}
+            return self._finalize_publish_result({"platform": "substack", "status": "no_browser"}, mode="browser")
         try:
-            return await browser_publish_form(
+            result = await browser_publish_form(
                 browser_agent=self.browser_agent,
                 service="substack",
                 url="https://substack.com/publish/post",
                 form_data=content,
                 success_status="draft",
             )
+            return self._finalize_publish_result(result, mode="browser")
         except Exception as e:
             logger.error(f"Substack publish error: {e}", extra={"event": "substack_publish_error"})
-            return {"platform": "substack", "status": "error", "error": str(e)}
+            return self._finalize_publish_result({"platform": "substack", "status": "error", "error": str(e)}, mode="browser")
 
     async def get_analytics(self) -> dict:
         if not self.browser_agent:
-            return {"platform": "substack", "subscribers": 0, "posts": 0}
+            return self._finalize_analytics_result({"platform": "substack", "subscribers": 0, "posts": 0}, source="browser_home")
         try:
             result = await browser_extract_analytics(
                 browser_agent=self.browser_agent,
                 service="substack",
                 url="https://substack.com/home",
             )
-            return {**result, "subscribers": 0, "posts": 0}
+            return self._finalize_analytics_result({**result, "subscribers": 0, "posts": 0}, source="browser_home")
         except Exception as e:
             logger.error(f"Substack analytics error: {e}", extra={"event": "substack_analytics_error"})
-            return {"platform": "substack", "subscribers": 0, "posts": 0}
+            return self._finalize_analytics_result({"platform": "substack", "subscribers": 0, "posts": 0}, source="browser_home")
 
     async def health_check(self) -> bool:
         return self.browser_agent is not None

@@ -5,6 +5,7 @@ import time
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from llm_router import TaskType
+from modules.governance_runtime import build_legal_runtime_profile
 from modules.legal_policy_packs import build_policy_basis
 
 logger = get_logger("legal_agent", agent="legal_agent")
@@ -59,8 +60,34 @@ class LegalAgent(BaseAgent):
         if response:
             self._record_expense(0.01, f"TOS check: {platform}")
             local["llm_notes"] = response
-            return TaskResult(success=True, output=local, cost_usd=0.01, metadata=self.get_skill_pack())
-        return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", **self.get_skill_pack()})
+            return TaskResult(
+                success=True,
+                output=local,
+                cost_usd=0.01,
+                metadata={
+                    "legal_runtime_profile": build_legal_runtime_profile(
+                        platform=platform,
+                        verdict=local.get("verdict"),
+                        risk_score=local.get("risk_score", 0),
+                        issues=local.get("risk_flags"),
+                    ),
+                    **self.get_skill_pack(),
+                },
+            )
+        return TaskResult(
+            success=True,
+            output=local,
+            metadata={
+                "mode": "local_fallback",
+                "legal_runtime_profile": build_legal_runtime_profile(
+                    platform=platform,
+                    verdict=local.get("verdict"),
+                    risk_score=local.get("risk_score", 0),
+                    issues=local.get("risk_flags"),
+                ),
+                **self.get_skill_pack(),
+            },
+        )
 
     async def check_copyright(self, content: str) -> TaskResult:
         response = None
@@ -74,8 +101,33 @@ class LegalAgent(BaseAgent):
         local["policy_basis"] = build_policy_basis("generic", content)
         if response:
             local["llm_notes"] = response
-            return TaskResult(success=True, output=local, metadata=self.get_skill_pack())
-        return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", **self.get_skill_pack()})
+            return TaskResult(
+                success=True,
+                output=local,
+                metadata={
+                    "legal_runtime_profile": build_legal_runtime_profile(
+                        platform="generic",
+                        verdict=local.get("verdict"),
+                        risk_score=local.get("risk_score", 0),
+                        issues=local.get("issues"),
+                    ),
+                    **self.get_skill_pack(),
+                },
+            )
+        return TaskResult(
+            success=True,
+            output=local,
+            metadata={
+                "mode": "local_fallback",
+                "legal_runtime_profile": build_legal_runtime_profile(
+                    platform="generic",
+                    verdict=local.get("verdict"),
+                    risk_score=local.get("risk_score", 0),
+                    issues=local.get("issues"),
+                ),
+                **self.get_skill_pack(),
+            },
+        )
 
     async def gdpr_audit(self) -> TaskResult:
         response = None
@@ -90,8 +142,34 @@ class LegalAgent(BaseAgent):
         if response:
             self._record_expense(0.02, "GDPR audit")
             local["llm_notes"] = response
-            return TaskResult(success=True, output=local, cost_usd=0.02, metadata=self.get_skill_pack())
-        return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", **self.get_skill_pack()})
+            return TaskResult(
+                success=True,
+                output=local,
+                cost_usd=0.02,
+                metadata={
+                    "legal_runtime_profile": build_legal_runtime_profile(
+                        platform="gdpr",
+                        verdict=local.get("overall"),
+                        risk_score=local.get("risk_score", 0),
+                        issues=[x.get("item") for x in local.get("checklist", []) if x.get("status") == "todo"],
+                    ),
+                    **self.get_skill_pack(),
+                },
+            )
+        return TaskResult(
+            success=True,
+            output=local,
+            metadata={
+                "mode": "local_fallback",
+                "legal_runtime_profile": build_legal_runtime_profile(
+                    platform="gdpr",
+                    verdict=local.get("overall"),
+                    risk_score=local.get("risk_score", 0),
+                    issues=[x.get("item") for x in local.get("checklist", []) if x.get("status") == "todo"],
+                ),
+                **self.get_skill_pack(),
+            },
+        )
 
     def _local_tos_check(self, platform: str) -> dict:
         p = (platform or "unknown").strip().lower()

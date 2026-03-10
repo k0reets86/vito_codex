@@ -6,6 +6,7 @@ from typing import Any
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from llm_router import TaskType
+from modules.governance_runtime import build_partnership_execution_profile
 from modules.growth_runtime import build_partnership_runtime_profile
 
 logger = get_logger("partnership_agent", agent="partnership_agent")
@@ -61,16 +62,48 @@ class PartnershipAgent(BaseAgent):
         if response:
             self._record_expense(0.01, f"Find affiliates: {niche[:50]}")
             local["llm_notes"] = response
-        local["runtime_candidates"] = build_partnership_runtime_profile(niche, local.get("candidates"))["top_candidates"]
-        return TaskResult(success=True, output=local, cost_usd=0.01 if response else 0.0, metadata={"partnership_runtime_profile": build_partnership_runtime_profile(niche, local.get("candidates")), **self.get_skill_pack()})
+        runtime_profile = build_partnership_runtime_profile(niche, local.get("candidates"))
+        local["runtime_candidates"] = runtime_profile["top_candidates"]
+        local["outreach_plan"] = [f"personalize_outreach::{row.get('name')}" for row in local["runtime_candidates"]]
+        return TaskResult(
+            success=True,
+            output=local,
+            cost_usd=0.01 if response else 0.0,
+            metadata={
+                "partnership_runtime_profile": runtime_profile,
+                "partnership_execution_profile": build_partnership_execution_profile(
+                    niche=niche,
+                    candidate_count=runtime_profile.get("candidate_count", 0),
+                    shortlist_count=len(local.get("runtime_candidates") or []),
+                ),
+                **self.get_skill_pack(),
+            },
+        )
 
     async def track_referrals(self) -> TaskResult:
-        return TaskResult(success=True, output={"referrals": self._referrals, "total": len(self._referrals)}, metadata={"partnership_runtime_profile": build_partnership_runtime_profile("referrals", []), **self.get_skill_pack()})
+        return TaskResult(
+            success=True,
+            output={"referrals": self._referrals, "total": len(self._referrals)},
+            metadata={
+                "partnership_runtime_profile": build_partnership_runtime_profile("referrals", []),
+                "partnership_execution_profile": build_partnership_execution_profile(niche="referrals", candidate_count=len(self._referrals), shortlist_count=0),
+                **self.get_skill_pack(),
+            },
+        )
 
     async def propose_collaboration(self, partner: str) -> TaskResult:
         local = self._local_collaboration(partner)
         if not self.llm_router:
-            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", "partnership_runtime_profile": build_partnership_runtime_profile(partner, []), **self.get_skill_pack()})
+            return TaskResult(
+                success=True,
+                output=local,
+                metadata={
+                    "mode": "local_fallback",
+                    "partnership_runtime_profile": build_partnership_runtime_profile(partner, []),
+                    "partnership_execution_profile": build_partnership_execution_profile(niche=partner, candidate_count=1, shortlist_count=1),
+                    **self.get_skill_pack(),
+                },
+            )
         response = await self._call_llm(
             task_type=TaskType.CONTENT,
             prompt=f"Напиши предложение о сотрудничестве для: {partner}\nТон: профессиональный, дружелюбный. Включи: взаимные выгоды, предложение, CTA.",
@@ -78,7 +111,15 @@ class PartnershipAgent(BaseAgent):
         )
         if response:
             local["llm_notes"] = response
-        return TaskResult(success=True, output=local, metadata={"partnership_runtime_profile": build_partnership_runtime_profile(partner, []), **self.get_skill_pack()})
+        return TaskResult(
+            success=True,
+            output=local,
+            metadata={
+                "partnership_runtime_profile": build_partnership_runtime_profile(partner, []),
+                "partnership_execution_profile": build_partnership_execution_profile(niche=partner, candidate_count=1, shortlist_count=1),
+                **self.get_skill_pack(),
+            },
+        )
 
     def _local_affiliates(self, niche: str) -> dict[str, Any]:
         niche = (niche or "creator tools").strip()

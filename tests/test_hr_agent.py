@@ -43,6 +43,7 @@ class TestHRAgent:
         result = await agent.agent_ranking()
         assert result.success is True
         assert isinstance(result.output, list)
+        assert "hr_runtime_profile" in result.metadata
 
     @pytest.mark.asyncio
     async def test_suggest_improvements(self, agent):

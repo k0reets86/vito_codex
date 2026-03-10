@@ -46,7 +46,7 @@ class InstagramPlatform(BasePlatform):
     async def publish(self, content: dict) -> dict:
         if content.get("dry_run"):
             caption = str(content.get("caption") or content.get("text") or "")[:180]
-            return {"platform": "instagram", "status": "prepared", "dry_run": True, "caption_preview": caption}
+            return self._finalize_publish_result({"platform": "instagram", "status": "prepared", "dry_run": True, "caption_preview": caption}, mode="dry_run")
 
         caption = str(content.get("caption") or content.get("text") or "").strip()
         image_url = str(content.get("image_url") or "").strip()
@@ -62,7 +62,7 @@ class InstagramPlatform(BasePlatform):
                     data = await resp.json()
                     creation_id = data.get("id", "")
                     if resp.status not in (200, 201) or not creation_id:
-                        return {"platform": "instagram", "status": "error", "error": str(data)[:300]}
+                        return self._finalize_publish_result({"platform": "instagram", "status": "error", "error": str(data)[:300]}, mode="api")
                 async with session.post(
                     f"https://graph.facebook.com/v22.0/{self._account_id}/media_publish",
                     data={"creation_id": creation_id, "access_token": self._token},
@@ -80,12 +80,12 @@ class InstagramPlatform(BasePlatform):
                             source="instagram.publish",
                             evidence_dict={"platform": "instagram", "post_id": post_id, "url": url},
                         )
-                        return {"platform": "instagram", "status": "published", "post_id": post_id, "url": url}
-                    return {"platform": "instagram", "status": "error", "error": str(data2)[:300]}
+                        return self._finalize_publish_result({"platform": "instagram", "status": "published", "post_id": post_id, "url": url}, mode="api", artifact_flags={"post_id": bool(post_id), "url": bool(url)})
+                    return self._finalize_publish_result({"platform": "instagram", "status": "error", "error": str(data2)[:300]}, mode="api")
             except Exception as e:
-                return {"platform": "instagram", "status": "error", "error": str(e)}
+                return self._finalize_publish_result({"platform": "instagram", "status": "error", "error": str(e)}, mode="api")
 
-        return await browser_publish_form(
+        result = await browser_publish_form(
             browser_agent=self.browser_agent,
             service="instagram",
             url="https://www.instagram.com/create/style/",
@@ -93,15 +93,17 @@ class InstagramPlatform(BasePlatform):
             success_status="prepared",
             title_field="caption",
         )
+        return self._finalize_publish_result(result, mode="browser")
 
     async def get_analytics(self) -> dict:
         if self._token and self._account_id:
-            return {"platform": "instagram", "status": "ok", "note": "analytics endpoint not yet wired"}
-        return await browser_extract_analytics(
+            return self._finalize_analytics_result({"platform": "instagram", "status": "ok", "note": "analytics endpoint not yet wired"}, source="api_limited")
+        result = await browser_extract_analytics(
             browser_agent=self.browser_agent,
             service="instagram",
             url="https://www.instagram.com/",
         )
+        return self._finalize_analytics_result(result, source="browser_home")
 
     async def health_check(self) -> bool:
         return await self.authenticate()

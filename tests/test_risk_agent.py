@@ -30,6 +30,7 @@ class TestRiskAgent:
         assert isinstance(result.output, dict)
         assert "risk_level" in result.output
         assert "risk_runtime_profile" in result.metadata
+        assert "escalation_targets" in result.output
 
     @pytest.mark.asyncio
     async def test_monitor_reputation(self, agent):

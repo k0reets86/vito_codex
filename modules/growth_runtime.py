@@ -81,3 +81,54 @@ def build_partnership_runtime_profile(niche: str, candidates: list[dict[str, Any
         "next_actions": ["shortlist_top_candidates", "prepare_outreach", "match_offer_to_partner_audience"],
     }
 
+
+def build_seo_runtime_profile(
+    *,
+    platform: str,
+    topic: str,
+    keywords: list[str] | None,
+    seo_score: float | int | None = None,
+    publish_ready: bool | None = None,
+) -> dict[str, Any]:
+    kw = [str(x).strip() for x in (keywords or []) if str(x).strip()]
+    score = float(seo_score or 0.0)
+    ready = bool(publish_ready)
+    return {
+        "platform": str(platform or "").strip() or "generic",
+        "topic": str(topic or "").strip(),
+        "keyword_count": len(kw),
+        "primary_keywords": kw[:8],
+        "seo_score": round(score, 2),
+        "publish_ready": ready,
+        "next_actions": (
+            ["handoff_to_ecommerce_agent", "attach_seo_pack_to_listing", "track_search_signals"]
+            if ready
+            else ["expand_long_tail_set", "tighten_title_and_meta", "rerun_listing_optimizer"]
+        ),
+    }
+
+
+def build_smm_runtime_profile(
+    *,
+    platform: str,
+    text: str,
+    hashtags: str | list[str] | None,
+    published: bool,
+) -> dict[str, Any]:
+    if isinstance(hashtags, str):
+        tags = [x for x in hashtags.split() if x.startswith("#")]
+    else:
+        tags = [str(x).strip() for x in (hashtags or []) if str(x).strip()]
+    body = str(text or "")
+    return {
+        "platform": str(platform or "").strip(),
+        "text_length": len(body),
+        "hashtag_count": len(tags),
+        "published": bool(published),
+        "moderation_mode": "native_value_first",
+        "next_actions": (
+            ["capture_permalink", "monitor_replies", "compare_engagement_to_baseline"]
+            if published
+            else ["review_native_tone", "check_platform_auth", "retry_with_safer_copy"]
+        ),
+    }

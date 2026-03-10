@@ -46,7 +46,7 @@ class LinkedInPlatform(BasePlatform):
     async def publish(self, content: dict) -> dict:
         if content.get("dry_run"):
             text = str(content.get("text", ""))[:200]
-            return {"platform": "linkedin", "status": "prepared", "dry_run": True, "text_preview": text}
+            return self._finalize_publish_result({"platform": "linkedin", "status": "prepared", "dry_run": True, "text_preview": text}, mode="dry_run")
 
         text = str(content.get("text") or content.get("content") or "").strip()
         link = str(content.get("link") or "").strip()
@@ -87,27 +87,29 @@ class LinkedInPlatform(BasePlatform):
                             source="linkedin.publish",
                             evidence_dict={"platform": "linkedin", "post_id": post_id},
                         )
-                        return {"platform": "linkedin", "status": "published", "post_id": post_id}
-                    return {"platform": "linkedin", "status": "error", "error": str(data)[:300]}
+                        return self._finalize_publish_result({"platform": "linkedin", "status": "published", "post_id": post_id}, mode="api", artifact_flags={"post_id": bool(post_id)})
+                    return self._finalize_publish_result({"platform": "linkedin", "status": "error", "error": str(data)[:300]}, mode="api")
             except Exception as e:
-                return {"platform": "linkedin", "status": "error", "error": str(e)}
+                return self._finalize_publish_result({"platform": "linkedin", "status": "error", "error": str(e)}, mode="api")
 
-        return await browser_publish_form(
+        result = await browser_publish_form(
             browser_agent=self.browser_agent,
             service="linkedin",
             url="https://www.linkedin.com/feed/",
             form_data={"title": title, "text": text, "link": link},
             success_status="prepared",
         )
+        return self._finalize_publish_result(result, mode="browser")
 
     async def get_analytics(self) -> dict:
         if self._token and self._author:
-            return {"platform": "linkedin", "status": "ok", "note": "analytics endpoint pending"}
-        return await browser_extract_analytics(
+            return self._finalize_analytics_result({"platform": "linkedin", "status": "ok", "note": "analytics endpoint pending"}, source="api_limited")
+        result = await browser_extract_analytics(
             browser_agent=self.browser_agent,
             service="linkedin",
             url="https://www.linkedin.com/feed/",
         )
+        return self._finalize_analytics_result(result, source="browser_feed")
 
     async def health_check(self) -> bool:
         return await self.authenticate()

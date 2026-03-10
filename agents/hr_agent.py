@@ -5,6 +5,7 @@ from typing import Any, Optional
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from llm_router import TaskType
+from modules.governance_runtime import build_hr_runtime_profile
 
 logger = get_logger("hr_agent", agent="hr_agent")
 
@@ -81,7 +82,17 @@ class HRAgent(BaseAgent):
             score = (completed / total * 100) if total > 0 else 0
             ranking.append({"name": s["name"], "score": round(score, 1), "completed": completed, "failed": failed})
         ranking.sort(key=lambda x: x["score"], reverse=True)
-        return TaskResult(success=True, output=ranking, metadata={"skill_pack": self.get_skill_pack()})
+        return TaskResult(
+            success=True,
+            output=ranking,
+            metadata={
+                "hr_runtime_profile": build_hr_runtime_profile(
+                    weakest_agents=sorted(ranking, key=lambda x: x["score"])[:5],
+                    strongest_agents=ranking[:5],
+                ),
+                "skill_pack": self.get_skill_pack(),
+            },
+        )
 
     async def suggest_improvements(self) -> TaskResult:
         statuses = []
@@ -96,8 +107,32 @@ class HRAgent(BaseAgent):
                 estimated_tokens=1500,
             )
         if response:
-            return TaskResult(success=True, output={"review": response, "skill_pack": self.get_skill_pack()})
-        return TaskResult(success=True, output=self._local_improvements(statuses), metadata={"mode": "local_fallback", **self.get_skill_pack()})
+            local = self._local_improvements(statuses)
+            local["llm_review"] = response
+            return TaskResult(
+                success=True,
+                output=local,
+                metadata={
+                    "hr_runtime_profile": build_hr_runtime_profile(
+                        weakest_agents=local.get("top_risks"),
+                        strongest_agents=[],
+                    ),
+                    **self.get_skill_pack(),
+                },
+            )
+        local = self._local_improvements(statuses)
+        return TaskResult(
+            success=True,
+            output=local,
+            metadata={
+                "mode": "local_fallback",
+                "hr_runtime_profile": build_hr_runtime_profile(
+                    weakest_agents=local.get("top_risks"),
+                    strongest_agents=[],
+                ),
+                **self.get_skill_pack(),
+            },
+        )
 
     async def audit_knowledge_base(self) -> TaskResult:
         """Audit knowledge/skills coverage and suggest updates."""

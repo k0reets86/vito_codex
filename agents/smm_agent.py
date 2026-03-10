@@ -11,11 +11,12 @@ from typing import Any, Optional
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from llm_router import TaskType
+from modules.growth_runtime import build_smm_runtime_profile
 
 logger = get_logger("smm_agent", agent="smm_agent")
 SUPPORTED_PLATFORMS = ["twitter", "instagram", "linkedin", "tiktok"]
 
-SOCIAL_DIR = Path("/home/vito/vito-agent/output/social")
+SOCIAL_DIR = Path(__file__).resolve().parents[1] / "output" / "social"
 SOCIAL_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -163,6 +164,12 @@ class SMMAgent(BaseAgent):
                                     "If moderation blocks the post, switch to platform-safe value-first copy.",
                                 ],
                             },
+                            "smm_runtime_profile": build_smm_runtime_profile(
+                                platform=platform,
+                                text=post_text,
+                                hashtags=self._local_hashtags(content, platform),
+                                published=True,
+                            ),
                             **self.get_skill_pack(),
                             **publish_result,
                         },
@@ -189,11 +196,17 @@ class SMMAgent(BaseAgent):
                     "platform": platform,
                     "text": post_text,
                     "hashtags": self._local_hashtags(content, platform),
-                    "recovery_hints": [
-                        "Retry with a more native tone before escalating to direct promotion.",
-                        "Reuse the best-performing hook from prior experiments when available.",
-                    ],
-                },
+                        "recovery_hints": [
+                            "Retry with a more native tone before escalating to direct promotion.",
+                            "Reuse the best-performing hook from prior experiments when available.",
+                        ],
+                    },
+                "smm_runtime_profile": build_smm_runtime_profile(
+                    platform=platform,
+                    text=post_text,
+                    hashtags=self._local_hashtags(content, platform),
+                    published=False,
+                ),
                 **self.get_skill_pack(),
                 "note": f"No {platform} platform configured" if not platform_obj else "Posting failed",
             },
@@ -205,7 +218,19 @@ class SMMAgent(BaseAgent):
             return post_result
         entry = {"platform": platform, "content": post_result.output, "publish_at": publish_at, "status": "scheduled"}
         self._scheduled_posts.append(entry)
-        return TaskResult(success=True, output={"scheduled": True, "platform": platform, "publish_at": publish_at, "post": post_result.output})
+        return TaskResult(
+            success=True,
+            output={"scheduled": True, "platform": platform, "publish_at": publish_at, "post": post_result.output},
+            metadata={
+                "smm_runtime_profile": build_smm_runtime_profile(
+                    platform=platform,
+                    text=post_result.output if isinstance(post_result.output, str) else str(post_result.output),
+                    hashtags=self._local_hashtags(content, platform),
+                    published=False,
+                ),
+                **self.get_skill_pack(),
+            },
+        )
 
     async def suggest_hashtags(self, content: str, platform: str = "twitter") -> TaskResult:
         response = None
@@ -213,8 +238,24 @@ class SMMAgent(BaseAgent):
             response = await self._call_llm(task_type=TaskType.CONTENT, prompt=f"Подбери 15-20 хэштегов для {platform} по теме: {content[:500]}", estimated_tokens=500)
         if not response:
             response = self._local_hashtags(content, platform)
-            return TaskResult(success=True, output={"hashtags": response, "platform": platform, "recovery_hints": ["Prune weak or spammy tags before reusing the pack."]}, metadata={"mode": "local_fallback", **self.get_skill_pack()})
-        return TaskResult(success=True, output={"hashtags": response, "platform": platform, "recovery_hints": ["Prefer fewer, more native tags when moderation is strict."]}, cost_usd=0.003, metadata=self.get_skill_pack())
+            return TaskResult(
+                success=True,
+                output={"hashtags": response, "platform": platform, "recovery_hints": ["Prune weak or spammy tags before reusing the pack."]},
+                metadata={
+                    "mode": "local_fallback",
+                    "smm_runtime_profile": build_smm_runtime_profile(platform=platform, text=content, hashtags=response, published=False),
+                    **self.get_skill_pack(),
+                },
+            )
+        return TaskResult(
+            success=True,
+            output={"hashtags": response, "platform": platform, "recovery_hints": ["Prefer fewer, more native tags when moderation is strict."]},
+            cost_usd=0.003,
+            metadata={
+                "smm_runtime_profile": build_smm_runtime_profile(platform=platform, text=content, hashtags=response, published=False),
+                **self.get_skill_pack(),
+            },
+        )
 
     def _local_post(self, platform: str, content: str, style: str | None = None) -> str:
         topic = (content or "AI automation update").strip()

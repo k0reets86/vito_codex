@@ -47,7 +47,7 @@ class ShopifyPlatform(BasePlatform):
     async def publish(self, content: dict) -> dict:
         if content.get("dry_run"):
             title = str(content.get("title") or "Product")[:120]
-            return {"platform": "shopify", "status": "prepared", "dry_run": True, "title": title}
+            return self._finalize_publish_result({"platform": "shopify", "status": "prepared", "dry_run": True, "title": title}, mode="dry_run")
 
         if self._token and self._store_url:
             try:
@@ -97,18 +97,18 @@ class ShopifyPlatform(BasePlatform):
                             source="shopify.publish",
                             evidence_dict={"platform": "shopify", "product_id": product_id, "url": url},
                         )
-                        return {
+                        return self._finalize_publish_result({
                             "platform": "shopify",
                             "status": "published" if status == "ACTIVE" else "draft",
                             "product_id": product_id,
                             "url": url,
-                        }
-                    return {"platform": "shopify", "status": "error", "error": str(errors or data)[:500]}
+                        }, mode="api", artifact_flags={"product_id": bool(product_id), "url": bool(url)})
+                    return self._finalize_publish_result({"platform": "shopify", "status": "error", "error": str(errors or data)[:500]}, mode="api")
             except Exception as e:
-                return {"platform": "shopify", "status": "error", "error": str(e)}
+                return self._finalize_publish_result({"platform": "shopify", "status": "error", "error": str(e)}, mode="api")
 
         admin_url = f"{self._store_url}/admin/products/new" if self._store_url else "https://accounts.shopify.com/"
-        return await browser_publish_form(
+        result = await browser_publish_form(
             browser_agent=self.browser_agent,
             service="shopify",
             url=admin_url,
@@ -118,12 +118,14 @@ class ShopifyPlatform(BasePlatform):
             },
             success_status="prepared",
         )
+        return self._finalize_publish_result(result, mode="browser")
 
     async def get_analytics(self) -> dict:
         if self._token and self._store_url:
-            return {"platform": "shopify", "status": "ok", "note": "analytics endpoint pending"}
+            return self._finalize_analytics_result({"platform": "shopify", "status": "ok", "note": "analytics endpoint pending"}, source="api_limited")
         admin_url = f"{self._store_url}/admin" if self._store_url else "https://accounts.shopify.com/"
-        return await browser_extract_analytics(browser_agent=self.browser_agent, service="shopify", url=admin_url)
+        result = await browser_extract_analytics(browser_agent=self.browser_agent, service="shopify", url=admin_url)
+        return self._finalize_analytics_result(result, source="browser_admin")
 
     async def health_check(self) -> bool:
         return await self.authenticate()

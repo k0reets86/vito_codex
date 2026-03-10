@@ -61,6 +61,23 @@ from modules.comms_auth_flow import (
     start_service_auth_flow as _start_service_auth_flow_impl,
     verify_service_auth as _verify_service_auth_impl,
 )
+from modules.comms_views import help_catalog as _help_catalog_impl
+from modules.comms_views import help_inline_keyboard as _help_inline_keyboard_impl
+from modules.comms_views import render_auth_hub as _render_auth_hub_impl
+from modules.comms_views import render_help as _render_help_impl
+from modules.comms_views import render_more_menu as _render_more_menu_impl
+from modules.comms_status_lane import (
+    cancel_goal_queue as _cancel_goal_queue_impl,
+    cmd_balances as _cmd_balances_impl,
+    cmd_errors as _cmd_errors_impl,
+    cmd_health as _cmd_health_impl,
+    cmd_report as _cmd_report_impl,
+    cmd_task_cancel as _cmd_task_cancel_impl,
+    cmd_task_current as _cmd_task_current_impl,
+    cmd_task_done as _cmd_task_done_impl,
+    cmd_task_replace as _cmd_task_replace_impl,
+    cmd_tasks as _cmd_tasks_impl,
+)
 from modules.owner_preference_model import OwnerPreferenceModel
 from modules.owner_pref_metrics import OwnerPreferenceMetrics
 from modules.auth_broker import AuthBroker
@@ -2724,119 +2741,14 @@ class CommsAgent:
 
     @staticmethod
     def _help_catalog() -> dict[str, Any]:
-        return {
-            "daily": [
-                ("status", "Короткий статус VITO"),
-                ("goals", "Активные цели"),
-                ("goal <текст>", "Создать новую цель"),
-                ("report", "Сводка: цели + финансы"),
-                ("spend", "Лимит и траты за сегодня"),
-                ("approve", "Одобрить ожидающий запрос"),
-                ("reject", "Отклонить ожидающий запрос"),
-                ("task_current", "Показать текущую owner-задачу"),
-                ("task_done", "Отметить текущую задачу как выполненную"),
-                ("balances", "Проверить балансы сервисов"),
-            ],
-            "rare": [
-                ("tasks", "Задачи в выполнении"),
-                ("goals_all", "История целей"),
-                ("trends", "Сканер трендов"),
-                ("earnings", "Доходы за 7 дней"),
-                ("pubq", "Очередь публикаций"),
-                ("pubrun", "Принудительно прогнать очередь публикаций"),
-                ("workflow", "Состояние workflow"),
-                ("handoffs", "Трассировка handoff событий"),
-                ("prefs", "Предпочтения владельца"),
-                ("packs", "Capability packs"),
-                ("llm_mode free|prod|status", "Переключить профиль LLM"),
-            ],
-            "system": [
-                ("cancel", "Пауза/отмена текущих задач"),
-                ("resume", "Продолжить после паузы"),
-                ("stop yes", "Остановить Decision Loop (с подтверждением)"),
-                ("health", "Статистика SelfHealer/здоровья"),
-                ("errors", "Последние ошибки"),
-                ("logs", "Последние строки логов"),
-                ("backup", "Сделать бэкап кода"),
-                ("rollback", "Откатить последний апдейт"),
-                ("clear_goals yes", "Очистить все цели (опасно)"),
-                ("nettest", "Проверка сети и DNS"),
-            ],
-            "commands": {
-                "status": ("Текущий статус ядра, бюджета и задач.", "Когда нужно понять, жив ли контур."),
-                "goals": ("Показывает активные цели.", "Быстрый контроль очереди работ."),
-                "goal": ("Создаёт новую цель.", "Используй: /goal <что сделать>."),
-                "report": ("Сводный отчёт по системе.", "Когда нужен полный срез в одном сообщении."),
-                "spend": ("Дневной расход LLM.", "Контроль токенов и бюджета."),
-                "approve": ("Одобряет pending approval.", "Только если уверен в действии."),
-                "reject": ("Отклоняет pending approval.", "Безопасно отклонять сомнительные запросы."),
-                "cancel": ("Ставит выполнение на паузу.", "Когда нужно мгновенно остановить активность."),
-                "resume": ("Возобновляет выполнение.", "После /cancel."),
-                "health": ("Показывает состояние self-healing.", "Для диагностики стабильности."),
-                "logs": ("Выводит последние строки логов.", "Для быстрого поиска причины ошибки."),
-                "backup": ("Делает резервную копию.", "Перед рискованными изменениями."),
-                "rollback": ("Откат к последнему бэкапу.", "Если последняя доработка сломала поведение."),
-                "clear_goals": ("Удаляет все цели.", "Использовать только осознанно."),
-                "llm_mode": ("Меняет профиль маршрутизации LLM.", "free для тестов на Gemini, prod для боевого распределения."),
-            },
-        }
+        return _help_catalog_impl()
 
     def _render_help(self, topic: str | None = None) -> str:
-        topic_norm = str(topic or "").strip().lower()
-        catalog = self._help_catalog()
-
-        if topic_norm in {"daily", "day", "ежедневные", "daily_commands"}:
-            lines = ["Ежедневные команды (часто используемые):"]
-            lines.extend([f"/{cmd} — {desc}" for cmd, desc in catalog["daily"]])
-            return "\n".join(lines)
-        if topic_norm in {"rare", "редкие", "ops"}:
-            lines = ["Редкие команды (по ситуации):"]
-            lines.extend([f"/{cmd} — {desc}" for cmd, desc in catalog["rare"]])
-            return "\n".join(lines)
-        if topic_norm in {"system", "sys", "системные", "danger"}:
-            lines = ["Системные/осторожные команды:"]
-            lines.extend([f"/{cmd} — {desc}" for cmd, desc in catalog["system"]])
-            lines.append("Совет: для рискованных команд сначала делай /backup.")
-            return "\n".join(lines)
-
-        cmd_key = topic_norm.lstrip("/")
-        cmd_info = catalog["commands"].get(cmd_key)
-        if cmd_info:
-            what, when = cmd_info
-            return (
-                f"/{cmd_key}\n"
-                f"Что делает: {what}\n"
-                f"Когда использовать: {when}"
-            )
-
-        return (
-            "Справка по командам VITO\n\n"
-            "Разделы:\n"
-            "/help_daily — ежедневные команды\n"
-            "/help_rare — редкие команды\n"
-            "/help_system — системные/осторожные\n\n"
-            "Точечно по команде:\n"
-            "/help status\n"
-            "/help goal\n"
-            "/help backup\n\n"
-            "Быстрый старт:\n"
-            "1) /status\n"
-            "2) /goals\n"
-            "3) /goal <что сделать>\n"
-            "4) /approve или /reject"
-        )
+        return _render_help_impl(topic)
 
     @staticmethod
     def _help_inline_keyboard() -> InlineKeyboardMarkup:
-        return InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton("Ежедневные", callback_data="help_topic:daily"),
-                    InlineKeyboardButton("Редкие", callback_data="help_topic:rare"),
-                ],
-                [InlineKeyboardButton("Системные", callback_data="help_topic:system")],
-            ]
-        )
+        return _help_inline_keyboard_impl()
 
     async def _cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self._reject_stranger(update):
@@ -2881,25 +2793,11 @@ class CommsAgent:
 
     @staticmethod
     def _render_auth_hub() -> str:
-        return (
-            "Входы в сервисы\n"
-            "- Поддержка: Amazon KDP, Etsy, Gumroad, Printful\n"
-            "- Соцсети: X/Twitter, Reddit, Threads, Instagram, Facebook, TikTok, Pinterest, YouTube, LinkedIn\n"
-            "- Прочее: WordPress, Medium\n"
-            "- Любой сайт: 'зайди на https://site.com' или 'зайди на site.com'\n\n"
-            "После входа нажми «Я вошел» или напиши «готово»."
-        )
+        return _render_auth_hub_impl()
 
     @staticmethod
     def _render_more_menu() -> str:
-        return (
-            "Дополнительно\n"
-            "- /spend — расходы\n"
-            "- /help — справка\n"
-            "- /logs — логи\n"
-            "- /health — здоровье\n"
-            "- /balances — балансы"
-        )
+        return _render_more_menu_impl()
 
     def _render_unified_status(self, *, title: str = "VITO Status") -> str:
         snap = build_status_snapshot(
@@ -4492,26 +4390,9 @@ class CommsAgent:
     # ── Новые команды v0.3.0 ──
 
     async def _cmd_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Полный отчёт: финансы + цели."""
         if await self._reject_stranger(update):
             return
-        parts = ["VITO Report"]
-        if self._finance:
-            parts.append(self._finance.format_morning_finance())
-        if self._goal_engine:
-            gs = self._goal_engine.get_stats()
-            parts.append(
-                f"Цели: {gs['completed']} выполнено, {gs['executing']} в работе, "
-                f"{gs['pending']} ожидают\nУспешность: {gs['success_rate']:.0%}"
-            )
-        if self._owner_task_state:
-            try:
-                active = self._owner_task_state.get_active()
-                if active:
-                    parts.append(f"Текущая задача: {str(active.get('text', ''))[:200]}")
-            except Exception:
-                pass
-        await self._send_response(update, "\n\n".join(parts))
+        await _cmd_report_impl(self, update)
         logger.info("Команда /report выполнена", extra={"event": "cmd_report"})
 
     async def _cmd_stop(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -4557,33 +4438,7 @@ class CommsAgent:
         logger.info("Команда /cancel выполнена", extra={"event": "cmd_cancel"})
 
     def _cancel_goal_queue(self, reason: str = "owner_cancelled") -> int:
-        if not self._goal_engine:
-            return 0
-        try:
-            from goal_engine import GoalStatus
-            terminal = {GoalStatus.COMPLETED, GoalStatus.FAILED, GoalStatus.CANCELLED}
-            cancelled = 0
-            for goal in self._goal_engine.get_all_goals():
-                if goal.status in terminal:
-                    continue
-                goal.status = GoalStatus.CANCELLED
-                goal.completed_at = datetime.now(timezone.utc)
-                goal.results = {"cancel_reason": reason}
-                self._goal_engine._persist_goal(goal)
-                cancelled += 1
-                try:
-                    if self._decision_loop and getattr(self._decision_loop, "orchestrator", None):
-                        self._decision_loop.orchestrator.cancel_session(goal.goal_id, reason=reason)
-                except Exception:
-                    pass
-                try:
-                    if self._decision_loop and getattr(self._decision_loop, "interrupts", None):
-                        self._decision_loop.interrupts.resolve_pending_for_goal(goal.goal_id, resolution="cancelled")
-                except Exception:
-                    pass
-            return cancelled
-        except Exception:
-            return 0
+        return _cancel_goal_queue_impl(self, reason=reason)
 
     async def _cmd_resume(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Возобновить Decision Loop."""
@@ -4623,92 +4478,30 @@ class CommsAgent:
         logger.info("Команда /budget выполнена", extra={"event": "cmd_budget"})
 
     async def _cmd_tasks(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Активные задачи."""
         if await self._reject_stranger(update):
             return
-        if not self._goal_engine:
-            await update.message.reply_text("GoalEngine не подключён.", reply_markup=self._main_keyboard())
-            return
-        from goal_engine import GoalStatus
-        active_statuses = [GoalStatus.EXECUTING, GoalStatus.PENDING, GoalStatus.WAITING_APPROVAL, GoalStatus.PLANNING]
-        active = []
-        for status in active_statuses:
-            active.extend(self._goal_engine.get_all_goals(status=status))
-        if not active:
-            await update.message.reply_text("Нет активных задач.", reply_markup=self._main_keyboard())
-            return
-        icon = {
-            GoalStatus.EXECUTING: ">>",
-            GoalStatus.PENDING: "..",
-            GoalStatus.WAITING_APPROVAL: "??",
-            GoalStatus.PLANNING: "~~",
-        }
-        lines = ["Активные задачи (все статусы):"]
-        for g in active[:12]:
-            lines.append(f"  [{icon.get(g.status, g.status.value)} {g.goal_id}] {g.title} (${g.estimated_cost_usd:.2f})")
-        await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
+        await _cmd_tasks_impl(self, update)
         logger.info("Команда /tasks выполнена", extra={"event": "cmd_tasks"})
 
     async def _cmd_task_current(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Показывает текущую owner-задачу (persisted)."""
         if await self._reject_stranger(update):
             return
-        if not self._owner_task_state:
-            await update.message.reply_text("OwnerTaskState не подключён.", reply_markup=self._main_keyboard())
-            return
-        active = self._owner_task_state.get_active()
-        if not active:
-            await update.message.reply_text("Текущая задача не зафиксирована.", reply_markup=self._main_keyboard())
-            return
-        msg = (
-            "Текущая задача владельца:\n"
-            f"- {str(active.get('text', ''))[:800]}\n"
-            f"- intent: {active.get('intent', '')}\n"
-            f"- status: {active.get('status', 'active')}\n"
-            f"- service: {active.get('service_context', '') or 'n/a'}"
-        )
-        await update.message.reply_text(msg, reply_markup=self._main_keyboard())
+        await _cmd_task_current_impl(self, update)
 
     async def _cmd_task_done(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Явно закрывает текущую owner-задачу как completed."""
         if await self._reject_stranger(update):
             return
-        if not self._owner_task_state:
-            await update.message.reply_text("OwnerTaskState не подключён.", reply_markup=self._main_keyboard())
-            return
-        self._owner_task_state.complete(note="owner_marked_done")
-        await update.message.reply_text("Текущая задача отмечена как выполненная.", reply_markup=self._main_keyboard())
+        await _cmd_task_done_impl(self, update)
 
     async def _cmd_task_cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Явно отменяет текущую owner-задачу."""
         if await self._reject_stranger(update):
             return
-        if not self._owner_task_state:
-            await update.message.reply_text("OwnerTaskState не подключён.", reply_markup=self._main_keyboard())
-            return
-        self._owner_task_state.cancel(note="owner_task_cancel")
-        await update.message.reply_text("Текущая задача отменена.", reply_markup=self._main_keyboard())
+        await _cmd_task_cancel_impl(self, update)
 
     async def _cmd_task_replace(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Явно заменяет текущую owner-задачу новой формулировкой."""
         if await self._reject_stranger(update):
             return
-        if not self._owner_task_state:
-            await update.message.reply_text("OwnerTaskState не подключён.", reply_markup=self._main_keyboard())
-            return
-        raw = (update.message.text or "").strip()
-        new_task = raw.removeprefix("/task_replace").strip()
-        if not new_task:
-            await update.message.reply_text(
-                "Использование: /task_replace <новая задача>",
-                reply_markup=self._main_keyboard(),
-            )
-            return
-        metadata = {}
-        if self._has_fresh_service_context():
-            metadata["service_context"] = self._last_service_context
-        self._owner_task_state.set_active(new_task, source="telegram", intent="manual_replace", force=True, metadata=metadata)
-        await update.message.reply_text("Текущая задача заменена.", reply_markup=self._main_keyboard())
+        await _cmd_task_replace_impl(self, update)
 
     async def _cmd_trends(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Сканирование трендов."""
@@ -5352,74 +5145,21 @@ class CommsAgent:
         logger.info(f"Команда /rollback: {status}", extra={"event": "cmd_rollback"})
 
     async def _cmd_health(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Проверка здоровья системы."""
         if await self._reject_stranger(update):
             return
-        parts = ["VITO Health Check"]
-
-        if self._decision_loop:
-            st = self._decision_loop.get_status()
-            parts.append(f"Decision Loop: {'OK' if st['running'] else 'STOPPED'}")
-
-        if self._agent_registry:
-            try:
-                result = await self._agent_registry.dispatch("health_check")
-                parts.append(f"Health: {result.output if result and result.success else 'N/A'}")
-            except Exception:
-                parts.append("Health dispatch: N/A")
-
-        if self._llm_router:
-            parts.append(f"LLM spend today: ${self._llm_router.get_daily_spend():.2f}")
-            parts.append(f"Daily limit OK: {self._llm_router.check_daily_limit()}")
-
-        agents_count = len(self._agent_registry.get_all_statuses()) if self._agent_registry else 0
-        parts.append(f"Agents: {agents_count}")
-
-        await update.message.reply_text("\n".join(parts), reply_markup=self._main_keyboard())
+        await _cmd_health_impl(self, update)
         logger.info("Команда /health выполнена", extra={"event": "cmd_health"})
 
     async def _cmd_errors(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Последние нерешённые ошибки."""
         if await self._reject_stranger(update):
             return
-        if not self._self_healer:
-            await update.message.reply_text("SelfHealer не подключён.", reply_markup=self._main_keyboard())
-            return
-        stats = self._self_healer.get_error_stats()
-        recent = stats.get("recent", [])
-        unresolved = [e for e in recent if not e.get("resolved")][:10]
-        if not unresolved:
-            await update.message.reply_text("Нет нерешённых ошибок.", reply_markup=self._main_keyboard())
-            return
-        lines = ["Нерешённые ошибки:"]
-        for e in unresolved:
-            lines.append(f"  [{e.get('module', '?')}] {e.get('error_type', '?')}: {e.get('message', '?')[:80]}")
-        await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
+        await _cmd_errors_impl(self, update)
         logger.info("Команда /errors выполнена", extra={"event": "cmd_errors"})
 
     async def _cmd_balances(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Check balances across all external services."""
         if await self._reject_stranger(update):
             return
-        await update.message.reply_text("Проверяю балансы...", reply_markup=self._main_keyboard())
-        try:
-            from modules.balance_checker import BalanceChecker
-            text = (update.message.text or "").lower()
-            show_env_keys = any(x in text for x in ("env", "keys", "raw"))
-            checker = BalanceChecker()
-            balances = await checker.check_all(include_env_keys=show_env_keys)
-
-            # Add internal VITO spend data
-            internal = {}
-            if self._finance:
-                internal["daily_spent"] = self._finance.get_daily_spent()
-                internal["daily_earned"] = self._finance.get_daily_earned()
-                internal["daily_limit"] = settings.DAILY_LIMIT_USD
-
-            report = checker.format_report(balances, include_internal=internal, show_env_keys=show_env_keys)
-            await update.message.reply_text(report, reply_markup=self._main_keyboard())
-        except Exception as e:
-            await update.message.reply_text(f"Ошибка проверки балансов: {e}", reply_markup=self._main_keyboard())
+        await _cmd_balances_impl(self, update)
         logger.info("Команда /balances выполнена", extra={"event": "cmd_balances"})
 
     # ── Inline callback ──

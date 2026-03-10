@@ -30,6 +30,7 @@ class TestLegalAgent:
         assert result.success is True
         assert result.output["platform"] == "etsy"
         assert "policy_basis" in result.output
+        assert "legal_runtime_profile" in result.metadata
 
     @pytest.mark.asyncio
     async def test_check_copyright(self, agent):

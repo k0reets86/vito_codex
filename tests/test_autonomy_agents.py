@@ -61,3 +61,5 @@ async def test_self_evolver_builds_proposals(autonomy_env):
     out = await agent.weekly_improve_cycle()
     assert out["proposals"]
     assert len(out["proposals"]) >= 2
+    assert "runtime_profile" in out
+    assert "proposal_score" in out["proposals"][0]

@@ -1,7 +1,7 @@
 # VITO Delta Audit v4 Checklist
 
 Источник: `input/inbox/screenshots/VITO_DELTA_AUDIT_v4.docx`
-Основание для статусов: текущее состояние репозитория на commit `1cdd35b`.
+Основание для статусов: текущее состояние репозитория после пакетов до commit `1cdd35b` и последующих runtime/repeatability/uplift изменений по состоянию на `2026-03-10 11:35 UTC`.
 
 Статусы:
 - `done` — реализовано в коде и проверено.
@@ -64,6 +64,8 @@
   - platform target registry
   - owner text extraction / normalization
   - service auth verification / auth flow / KDP OTP lane
+  - help/views lane
+  - report/tasks/health/errors/balances status lane
   при этом сохранена backward-compatible обвязка для текущих тестов и маршрутов в [comms_agent.py](/home/vito/vito-agent/comms_agent.py).
 - Почему не закрыто: сам `comms_agent.py` все еще слишком большой и требует дальнейшего выноса routing/deferred execution/callback lanes в отдельные модули.
 
@@ -87,8 +89,8 @@
 
 13. `WordPress` working
 - Статус: `partial`
-- Что сделано: интеграция существует.
-- Почему не `done`: в этом цикле не было нового боевого revalidation пакета именно по WordPress.
+- Что сделано: интеграция существует, а publish/analytics path теперь завершаются через единый repeatability/evidence contract из [platform_repeatability.py](/home/vito/vito-agent/modules/platform_repeatability.py) и [base_platform.py](/home/vito/vito-agent/platforms/base_platform.py).
+- Почему не `done`: в этом цикле не было нового боевого owner-grade revalidation пакета именно по WordPress.
 
 14. `Twitter/X` working
 - Статус: `partial`
@@ -102,7 +104,7 @@
 
 16. `Medium` working
 - Статус: `partial`
-- Что сделано: интеграция есть.
+- Что сделано: интеграция есть, а publish/analytics path переведены на единый repeatability/evidence contract.
 - Почему не `done`: нет нового независимого live revalidation.
 
 17. `Reddit` new
@@ -112,7 +114,7 @@
 
 18. `Pinterest` browser
 - Статус: `partial`
-- Что сделано: browser flow, pin cleanup, один рабочий pin, human browser rollout.
+- Что сделано: browser flow, pin cleanup, один рабочий pin, human browser rollout, repeatability/evidence layer на browser path.
 - Почему не `done`: platform quality и repeatability еще не на уровне “железно всегда”.
 
 19. `Ko-fi` partial
@@ -142,6 +144,7 @@
   - draft-oriented publish path
   - analytics extract
   - structured recovery hints/evidence
+  - unified repeatability contract
 - Почему не закрыто: owner-grade repeatability и live revalidation в этом цикле не проводились.
 
 24. `Creative Fabrica`
@@ -151,6 +154,7 @@
   - draft-oriented publish path
   - analytics extract
   - structured recovery hints/evidence
+  - unified repeatability contract
 - Почему не закрыто: owner-grade repeatability и live боевой пакет еще не доказаны.
 
 25. `TikTok` stub
@@ -160,6 +164,7 @@
   - browser-aware fallback добавлен
   - auth/analytics browser probes есть
   - dry-run/evidence path сохранен
+  - repeatability contract встроен
 - Почему не закрыто: live production posting в этом цикле не подтвержден.
 
 26. `Instagram` stub
@@ -169,6 +174,7 @@
   - browser-first fallback
   - auth/analytics paths
   - evidence recording
+  - repeatability contract
 - Почему не закрыто: live production validation не проводилась; часть боевых flows зависит от business account setup.
 
 27. `LinkedIn` stub
@@ -178,6 +184,7 @@
   - browser-first fallback
   - auth/analytics paths
   - evidence recording
+  - repeatability contract
 - Почему не закрыто: owner-grade live validation не проводилась; часть боевых flows зависит от app/product access на стороне LinkedIn.
 
 28. `Shopify` stub
@@ -187,6 +194,7 @@
   - browser-first fallback
   - auth/analytics paths
   - evidence recording
+  - repeatability contract
 - Почему не закрыто: не доведен digital-delivery/product-media lane и нет live owner-grade validation.
 
 29. `Threads` stub
@@ -195,6 +203,7 @@
   - Graph API path сохранен
   - browser-aware fallback добавлен
   - auth/analytics browser probes есть
+  - repeatability contract встроен
 - Почему не закрыто: live production posting через этот путь в последнем цикле не подтверждался.
 
 ## Агентный блок из аудита
@@ -241,15 +250,15 @@
 
 39. `QualityJudge`
 - Статус: `partial`
-- Обоснование: агент усилен `recovery_plan/evidence`, но по свежей матрице все еще ниже целевого уровня (`7.11`) из-за слабого `data_usage/recovery`.
+- Обоснование: агент усилен `recovery_plan/evidence/domain_scorecard/handoff_plan`, но по свежей матрице все еще ниже целевого уровня (`7.11`) из-за слабого `data_usage/recovery`.
 
 40. `Analytics / SEO / SMM`
 - Статус: `partial`
-- Обоснование: `SEO/SMM` получили recovery/evidence uplift, но по свежей матрице все еще не дотягивают до owner-grade depth (`SEO 7.06`, `SMM 7.16`); `Analytics` сильнее, но семейство целиком еще не закрыто.
+- Обоснование: `SEO/SMM` получили recovery/evidence/runtime-profile uplift, но по свежей матрице все еще не дотягивают до owner-grade depth (`SEO 7.06`, `SMM 7.16`); `Analytics` сильнее (`7.55`), но семейство целиком еще не закрыто.
 
 41. `HR / Legal / Risk / Partnership`
 - Статус: `partial`
-- Обоснование: uplift проведен, но по свежей матрице `Risk` и `Partnership` еще ниже желаемого operational уровня, поэтому замечание остается частично актуальным.
+- Обоснование: uplift проведен, но по свежей матрице `HR 7.40`, `Risk 7.44`, `Partnership 7.25`, `Legal 7.93`; то есть семейство стало сильнее, но еще не вышло на owner-grade uniformity.
 
 ## Архитектурные / стратегические пункты
 
@@ -316,9 +325,9 @@
 ## Итоговая оценка по Delta Audit v4 checklist
 
 Сводка по количеству:
-- `done`: 28
-- `partial`: 12
-- `not_done`: 12
+- `done`: 29
+- `partial`: 23
+- `not_done`: 0
 - `disputed`: 0
 
 Главный вывод:
@@ -326,5 +335,5 @@
 - Самые ценные незакрытые зоны сейчас:
   1. `comms_agent` декомпозиция
   2. platform repeatability до уровня owner-grade certainty
-  3. weakest agent uplift второй волны (`quality_judge`, `seo_agent`, `smm_agent`, `devops_agent`, `security_agent`)
+  3. weakest agent uplift второй волны (`quality_judge`, `seo_agent`, `smm_agent`, `devops_agent`, `security_agent`, частично `analytics/hr/risk/partnership`)
   4. вторая волна platform/browser live validation на новом runtime
