@@ -29,6 +29,7 @@ from typing import Any, Optional
 
 from config.logger import get_logger
 from config.settings import settings
+from modules.owner_model import OwnerModel
 from modules.owner_preference_model import OwnerPreferenceModel
 from modules.conversation_memory import ConversationMemory
 from modules.cancel_state import CancelState
@@ -103,6 +104,7 @@ class ConversationEngine:
         self.conversation_memory = conversation_memory
         self.cancel_state = cancel_state
         self.owner_task_state = owner_task_state
+        self.owner_model = OwnerModel()
         self._session_id = "default"
         self._context: list[Turn] = []
         if self.conversation_memory:
@@ -120,6 +122,10 @@ class ConversationEngine:
         """Обрабатывает сообщение от владельца."""
         owner_task_preserved = False
         self._remember_owner_profile_fact(text)
+        try:
+            self.owner_model.update_from_interaction(str(text or ""))
+        except Exception:
+            pass
         if self.cancel_state and self.cancel_state.is_cancelled():
             return {
                 "intent": Intent.CONVERSATION.value,
@@ -200,6 +206,7 @@ class ConversationEngine:
                             selected_research_title=str(selected.get("title") or "")[:180],
                             selected_research_platform=",".join(routed.get("platforms") or []),
                         )
+                        self.owner_model.update_from_decision(selected, approved=True)
                     except Exception:
                         pass
                 try:
@@ -207,6 +214,7 @@ class ConversationEngine:
                     self._add_turn("user", text, Intent.SYSTEM_ACTION if routed.get("intent") == Intent.SYSTEM_ACTION.value else Intent.QUESTION)
                     if routed.get("response"):
                         self._add_turn("assistant", routed["response"])
+                        self.owner_model.update_from_interaction(text, routed["response"])
                 except Exception:
                     pass
                 routed["nlu_tones"] = self._detect_tone(text)
@@ -218,6 +226,7 @@ class ConversationEngine:
                 self._add_turn("user", text, Intent.SYSTEM_ACTION if deterministic.get("intent") == Intent.SYSTEM_ACTION.value else Intent.QUESTION)
                 if deterministic.get("response"):
                     self._add_turn("assistant", deterministic["response"])
+                    self.owner_model.update_from_interaction(text, deterministic["response"])
             except Exception:
                 pass
             deterministic["nlu_tones"] = self._detect_tone(text)
@@ -229,6 +238,7 @@ class ConversationEngine:
                 self._add_turn("user", text, Intent.SYSTEM_ACTION)
                 if research_continuation.get("response"):
                     self._add_turn("assistant", research_continuation["response"])
+                    self.owner_model.update_from_interaction(text, research_continuation["response"])
             except Exception:
                 pass
             research_continuation["nlu_tones"] = self._detect_tone(text)
@@ -2484,6 +2494,10 @@ class ConversationEngine:
                 selected_research_json=json.dumps(selected, ensure_ascii=False),
                 selected_research_title=str(selected.get("title") or "")[:180],
             )
+            try:
+                self.owner_model.update_from_decision(selected, approved=True)
+            except Exception:
+                pass
             if lower.isdigit() or "вариант" in lower:
                 return {
                     "intent": Intent.QUESTION.value,

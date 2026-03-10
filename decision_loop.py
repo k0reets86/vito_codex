@@ -48,12 +48,24 @@ from modules.runtime_remediation import (
     rank_safe_action_suggestions,
     record_safe_action_outcome,
 )
+from modules.reflector import VITOReflector
+from modules.skill_library import VITOSkillLibrary
 
 TICK_INTERVAL = 300  # 5 минут
 STEP_TIMEOUT = 120   # секунд на один шаг (LLM content needs time)
 STEP_MAX_RETRIES = 3 # попыток на один шаг
 
 logger = get_logger("decision_loop", agent="decision_loop")
+
+
+def _runtime_sqlite_path(goal_engine: GoalEngine | None) -> str:
+    try:
+        path = str(getattr(goal_engine, "_sqlite_path", "") or "").strip()
+        if path:
+            return path
+    except Exception:
+        pass
+    return settings.SQLITE_PATH
 
 
 class DecisionLoop:
@@ -91,6 +103,9 @@ class DecisionLoop:
         self._last_memory_weekly_report_tick = 0
         self._last_weekly_governance_tick = 0
         self._last_autonomous_improvement_tick = 0
+        self._last_opportunity_scout_tick = 0
+        self._last_curriculum_tick = 0
+        self._last_self_evolver_tick = 0
         self._kdp_watchdog_state: dict[str, Any] = self._load_kdp_watchdog_state()
         self._current_interrupt_id: int | None = None
         self._current_goal_id: str | None = None
@@ -212,6 +227,7 @@ class DecisionLoop:
         await self._maybe_run_platform_rules_sync()
         await self._maybe_run_weekly_governance_report()
         await self._maybe_run_autonomous_improvement()
+        await self._maybe_run_autonomy_v2()
         await self._maybe_run_kdp_session_watchdog()
         if self._is_cancelled():
             logger.info("Tick skipped: cancel-state active", extra={"event": "tick_cancelled_skip"})
@@ -1118,6 +1134,19 @@ class DecisionLoop:
                 f"[{goal.goal_id}] Найдено {len(skills)} релевантных навыков для планирования",
                 extra={"event": "skills_found_for_plan", "context": {"skills": [s['name'] for s in skills]}},
             )
+        try:
+            library_skills = VITOSkillLibrary(sqlite_path=_runtime_sqlite_path(self.goal_engine)).retrieve(
+                f"{goal.title} {goal.description}",
+                n=3,
+            )
+            if library_skills:
+                extra = "\n".join(
+                    f"- {s['name']}: {str(s.get('description') or '')[:150]} (category: {s.get('category') or 'general'})"
+                    for s in library_skills
+                )
+                skills_context += ("\n" if skills_context else "\nИмеющиеся навыки:\n") + extra
+        except Exception:
+            pass
 
         # Попробовать отдать планирование VITOCore (оркестратор)
         try:
@@ -1481,6 +1510,19 @@ class DecisionLoop:
             skills = self.memory.search_skills(f"{goal.title} {failed_step}", limit=2)
             if skills:
                 skills_ctx = "\nНавыки:\n" + "\n".join(f"- {s['name']}: {s['description'][:120]}" for s in skills)
+        except Exception:
+            pass
+        try:
+            library_skills = VITOSkillLibrary(sqlite_path=_runtime_sqlite_path(self.goal_engine)).retrieve(
+                f"{goal.title} {failed_step} {error}",
+                n=2,
+            )
+            if library_skills:
+                extra = "\n".join(
+                    f"- {s['name']}: {str(s.get('description') or '')[:120]}"
+                    for s in library_skills
+                )
+                skills_ctx += ("\n" if skills_ctx else "\nНавыки:\n") + extra
         except Exception:
             pass
         extra_desc = (
@@ -2528,6 +2570,11 @@ class DecisionLoop:
             all_completed = results.get("steps_completed", 0) == results.get("steps_total", 0)
 
         skill_name = f"goal_{goal.title[:50]}"
+        runtime_sqlite = _runtime_sqlite_path(self.goal_engine)
+        skill_lib = VITOSkillLibrary(sqlite_path=runtime_sqlite, memory=self.memory)
+        reflector = VITOReflector(sqlite_path=runtime_sqlite)
+        category = self._reflection_category_for_goal(goal)
+        first_agent = ""
 
         if all_completed:
             lesson = f"Цель '{goal.title}' выполнена. План из {len(goal.plan)} шагов сработал."
@@ -2553,10 +2600,11 @@ class DecisionLoop:
                 results.get(f"step_{i + 1}", {}).get("agent", "llm_fallback")
                 for i in range(len(goal.plan))
             ]
+            first_agent = successful_agents[0] if successful_agents else ""
             self.memory.save_skill(
                 name=skill_name,
                 description=f"Успешно: {', '.join(goal.plan[:3])}",
-                agent=successful_agents[0] if successful_agents else "",
+                agent=first_agent,
                 task_type=self._classify_step(goal.plan[0]).value if goal.plan else "routine",
                 method={
                     "plan": goal.plan,
@@ -2567,6 +2615,24 @@ class DecisionLoop:
             )
             try:
                 self.memory.update_skill_last_result(skill_name, str(results)[:500])
+            except Exception:
+                pass
+            try:
+                skill_lib.add_skill(
+                    name=skill_name,
+                    description=f"Goal-derived reusable pattern: {goal.title}. Steps: {' | '.join(goal.plan[:5])}",
+                    category=category,
+                    source_agent=first_agent or "decision_loop",
+                    trigger_hint=f"{goal.title} {' '.join(goal.plan[:5])}",
+                    code_ref=self._detect_target_file(" ".join(goal.plan[:3]), goal.title),
+                    tags=[goal.source, category],
+                    metadata={
+                        "goal_id": goal.goal_id,
+                        "goal_title": goal.title,
+                        "steps": goal.plan[:5],
+                    },
+                )
+                skill_lib.record_use(skill_name, success=True)
             except Exception:
                 pass
             logger.info(
@@ -2605,6 +2671,25 @@ class DecisionLoop:
                 # но ON CONFLICT делает +1 к success — нужно скорректировать
                 # Записываем провал
                 self.memory.update_skill_success(skill_name, success=False)
+            try:
+                skill_lib.add_skill(
+                    name=skill_name,
+                    description=f"Failed pattern to avoid/rework: {goal.title}. Steps: {' | '.join(goal.plan[:5])}",
+                    category=category,
+                    source_agent="decision_loop",
+                    trigger_hint=f"{goal.title} {' '.join(goal.plan[:5])}",
+                    code_ref=self._detect_target_file(" ".join(goal.plan[:3]), goal.title),
+                    tags=[goal.source, category, "failed"],
+                    metadata={
+                        "goal_id": goal.goal_id,
+                        "goal_title": goal.title,
+                        "steps": goal.plan[:5],
+                        "failure_reason": reason,
+                    },
+                )
+                skill_lib.record_use(skill_name, success=False)
+            except Exception:
+                pass
             logger.info(
                 f"[{goal.goal_id}] Навык '{skill_name}' — провал",
                 extra={"event": "skill_failure_updated"},
@@ -2645,6 +2730,41 @@ class DecisionLoop:
                 f"Не удалось сохранить эпизод: {e}",
                 extra={"event": "episode_store_failed"},
             )
+        try:
+            await reflector.reflect(
+                category=category,
+                action_type="goal_execution",
+                input_summary=f"{goal.title}. {goal.description}"[:500],
+                outcome_summary=str(results)[:1000],
+                success=bool(all_completed),
+                task_root_id=goal.goal_id,
+                context={
+                    "platform": self._infer_goal_platform(goal),
+                    "source": goal.source,
+                    "factors": goal.plan[:5],
+                    "reason": "" if all_completed else results.get("error") or results.get("last_error") or "",
+                },
+            )
+        except Exception:
+            pass
+
+    @staticmethod
+    def _infer_goal_platform(goal: Goal) -> str:
+        combined = f"{goal.title} {goal.description}".lower()
+        for name in ("gumroad", "etsy", "amazon", "kdp", "printful", "ko-fi", "kofi", "pinterest", "twitter", "reddit"):
+            if name in combined:
+                return "kofi" if name == "ko-fi" else name
+        return ""
+
+    def _reflection_category_for_goal(self, goal: Goal) -> str:
+        text = f"{goal.title} {goal.description}".lower()
+        if any(x in text for x in ("gumroad", "etsy", "amazon", "kdp", "printful", "ko-fi", "kofi")):
+            return "ecommerce"
+        if any(x in text for x in ("research", "trend", "niche")):
+            return "strategy"
+        if any(x in text for x in ("bug", "fix", "runtime", "browser", "auth", "code")):
+            return "technical"
+        return "general"
 
     # ── Idle: нет задач — исследуем ──
 
@@ -2689,6 +2809,11 @@ class DecisionLoop:
 
         # 2. Daily fallback — once per 10 min (2 ticks), only if no calendar
         if self._consecutive_idle < 2 or self._consecutive_idle % 6 != 0:
+            return
+
+        # Autonomy v2: let curriculum/opportunity systems propose before fallback templates.
+        proposed = await self._maybe_create_autonomy_goal()
+        if proposed:
             return
 
         import hashlib
@@ -2759,6 +2884,74 @@ class DecisionLoop:
             estimated_cost_usd=0.05,
             estimated_roi=5.0,
         )
+
+    async def _maybe_run_autonomy_v2(self) -> None:
+        """Periodic proactive loops for autonomy v2 subsystems."""
+        try:
+            if not getattr(settings, "PROACTIVE_ENABLED", False):
+                return
+            if not self.agent_registry:
+                return
+            await self._maybe_run_opportunity_scout()
+            await self._maybe_run_curriculum_review()
+            await self._maybe_run_self_evolver_weekly()
+        except Exception:
+            pass
+
+    async def _maybe_run_opportunity_scout(self) -> None:
+        interval = max(12, int(getattr(settings, "AUTONOMY_SCOUT_INTERVAL_TICKS", 72) or 72))
+        if self._tick_count - int(self._last_opportunity_scout_tick or 0) < interval:
+            return
+        result = await self.agent_registry.dispatch("scan_opportunities")
+        if result and result.success and self.memory:
+            self.memory.store_knowledge(
+                doc_id=f"opportunity_scout_{self._tick_count}",
+                text=str(result.output)[:3000],
+                metadata={"type": "opportunity_proposals", "tick": self._tick_count},
+            )
+        self._last_opportunity_scout_tick = self._tick_count
+
+    async def _maybe_run_curriculum_review(self) -> None:
+        interval = max(12, int(getattr(settings, "AUTONOMY_CURRICULUM_INTERVAL_TICKS", 72) or 72))
+        if self._tick_count - int(self._last_curriculum_tick or 0) < interval:
+            return
+        result = await self.agent_registry.dispatch("generate_goals")
+        if result and result.success and self.memory:
+            self.memory.store_knowledge(
+                doc_id=f"curriculum_goals_{self._tick_count}",
+                text=str(result.output)[:3000],
+                metadata={"type": "curriculum_goals", "tick": self._tick_count},
+            )
+        self._last_curriculum_tick = self._tick_count
+
+    async def _maybe_run_self_evolver_weekly(self) -> None:
+        interval = max(288, int(getattr(settings, "AUTONOMY_SELF_EVOLVER_INTERVAL_TICKS", 2016) or 2016))
+        if self._tick_count - int(self._last_self_evolver_tick or 0) < interval:
+            return
+        await self.agent_registry.dispatch("weekly_improve_cycle")
+        self._last_self_evolver_tick = self._tick_count
+
+    async def _maybe_create_autonomy_goal(self) -> bool:
+        if not self.agent_registry:
+            return False
+        try:
+            result = await self.agent_registry.dispatch("generate_goals")
+            payload = getattr(result, "output", {}) if result and result.success else {}
+            goals = list(payload.get("goals") or []) if isinstance(payload, dict) else []
+            if not goals:
+                return False
+            top = goals[0]
+            self.goal_engine.create_goal(
+                title=str(top.get("title") or "Autonomy opportunity")[:180],
+                description=str(top.get("rationale") or "")[:1000],
+                priority=GoalPriority.HIGH if float(top.get("confidence") or 0) >= 0.75 else GoalPriority.MEDIUM,
+                source="curriculum_agent",
+                estimated_cost_usd=0.05,
+                estimated_roi=float(top.get("expected_revenue") or 0),
+            )
+            return True
+        except Exception:
+            return False
 
     def _get_today_calendar_task(self) -> dict | None:
         """Read today's task from weekly_calendar table in SQLite (no LLM)."""

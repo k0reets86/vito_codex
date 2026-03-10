@@ -110,6 +110,9 @@ from agents.partnership_agent import PartnershipAgent
 from agents.hr_agent import HRAgent
 from agents.document_agent import DocumentAgent
 from agents.platform_onboarding_agent import PlatformOnboardingAgent
+from agents.curriculum_agent import CurriculumAgent
+from agents.opportunity_scout import OpportunityScout
+from agents.self_evolver import SelfEvolver
 
 from platforms.gumroad import GumroadPlatform
 from platforms.etsy import EtsyPlatform
@@ -139,6 +142,7 @@ from modules.platform_registry import PlatformRegistry
 from modules.platform_smoke import PlatformSmoke
 from modules.playbook_registry import PlaybookRegistry
 from modules.publisher_queue import PublisherQueue
+from modules.skill_library import seed_initial_skills
 from modules.conversation_memory import ConversationMemory
 from modules.cancel_state import CancelState
 from modules.owner_task_state import OwnerTaskState
@@ -183,6 +187,10 @@ class VITO:
             pass
         try:
             self.skill_registry.register_from_capability_packs()
+        except Exception:
+            pass
+        try:
+            seed_initial_skills()
         except Exception:
             pass
         self.schedule_manager = ScheduleManager()
@@ -370,6 +378,9 @@ class VITO:
             PublisherAgent(quality_judge=quality_judge, platforms=platforms_publish, **deps),  # 22
             quality_judge,                                                     # Quality Judge
             PlatformOnboardingAgent(browser_agent=browser, platform_registry=self.platform_registry, **deps),
+            CurriculumAgent(goal_engine=self.goal_engine, **deps),
+            OpportunityScout(**deps),
+            SelfEvolver(**deps),
         ]
 
         for agent in agents:
