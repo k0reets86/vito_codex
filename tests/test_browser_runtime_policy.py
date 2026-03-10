@@ -5,6 +5,7 @@ from modules.browser_runtime_policy import (
     get_profile_completion_runbook,
     storage_state_path_for_service,
 )
+from modules.browser_recovery_runtime import build_browser_recovery
 
 
 def test_browser_capability_map_contains_core_services():
@@ -45,3 +46,10 @@ def test_profile_completion_runbook_contains_route():
     runbook = get_profile_completion_runbook("pinterest")
     assert runbook["requires_profile_completion"] is True
     assert "settings/profile" in runbook["route"]
+
+
+def test_browser_recovery_is_service_specific():
+    recovery = build_browser_recovery("etsy", "form_fill", "selector_mapping_required")
+    assert "capture_page_form_schema" in recovery["next_actions"]
+    assert "retry_save_as_draft" in recovery["next_actions"]
+    assert "challenge_detected" in recovery["block_conditions"]

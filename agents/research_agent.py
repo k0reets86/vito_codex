@@ -81,9 +81,10 @@ class ResearchAgent(BaseAgent):
 
     # ── Real data gathering (free, $0) ──
 
-    async def _gather_real_data(self, topic: str) -> dict[str, str]:
+    async def _gather_real_data(self, topic: str) -> dict[str, Any]:
         """Collect real data from multiple free sources before LLM synthesis."""
         data: dict[str, str] = {}
+        failures: dict[str, str] = {}
 
         # Extract keywords from topic for filtering
         keywords = [w.lower() for w in topic.split() if len(w) > 3]
@@ -92,22 +93,28 @@ class ResearchAgent(BaseAgent):
         reddit = await self._scan_reddit_for_topic(keywords)
         if reddit:
             data["reddit"] = reddit
+        else:
+            failures["reddit"] = "no_relevant_results_or_feed_unavailable"
 
         # 2. Google Trends via pytrends
         trends = await self._scan_pytrends(topic, keywords[:5])
         if trends:
             data["google_trends"] = trends
+        else:
+            failures["google_trends"] = "no_trend_signal_or_pytrends_unavailable"
 
         # 3. Product Hunt + HN RSS
         ph_hn = await self._scan_rss_for_topic(keywords)
         if ph_hn:
             data["product_hunt"] = ph_hn
+        else:
+            failures["product_hunt"] = "no_relevant_rss_results"
 
         logger.info(
             f"Real data gathered: {list(data.keys())}",
             extra={"event": "real_data_gathered", "context": {"sources": list(data.keys()), "topic": topic[:80]}},
         )
-        return data
+        return {"sources": data, "failures": failures}
 
     async def _scan_reddit_for_topic(self, keywords: list[str]) -> str:
         """Parse Reddit RSS feeds, filter entries by topic keywords."""
@@ -240,7 +247,9 @@ class ResearchAgent(BaseAgent):
     async def deep_research(self, topic: str, *, task_root_id: str = "") -> TaskResult:
         """Hybrid research: gather evidence, synthesize report, then judge quality."""
         if not self.llm_router:
-            real_data = await self._gather_real_data(topic)
+            gathered = await self._gather_real_data(topic)
+            real_data = dict(gathered.get("sources") or {})
+            source_failures = dict(gathered.get("failures") or {})
             if not real_data:
                 return TaskResult(success=False, error="LLM Router not available")
             fallback = self._build_local_research_fallback(topic, real_data)
@@ -250,15 +259,26 @@ class ResearchAgent(BaseAgent):
                 metadata={
                     "executive_summary": fallback[:500],
                     "data_sources": list(real_data.keys()),
+                    "source_failures": source_failures,
                     "overall_score": 45,
                     "recommended_product": {},
                     "top_ideas": [],
                     "structured_research": {"topic": topic, "overall_score": 45, "top_ideas": []},
+                    "research_runtime_profile": build_research_runtime_profile(
+                        topic=topic,
+                        data_sources=list(real_data.keys()),
+                        judge_payload={"decision": "fallback_only", "score": 45, "gaps": []},
+                        report_path="",
+                        source_failures=source_failures,
+                        fallback_reason="llm_router_unavailable",
+                    ),
                     **self.get_skill_pack(),
                 },
             )
 
-        real_data = await self._gather_real_data(topic)
+        gathered = await self._gather_real_data(topic)
+        real_data = dict(gathered.get("sources") or {})
+        source_failures = dict(gathered.get("failures") or {})
         research_route_plan = self.llm_router.get_research_route_plan() if hasattr(self.llm_router, "get_research_route_plan") else {}
         raw_payload = await self._run_raw_research_pass(topic, real_data)
         synthesis = await self._run_synthesis_pass(topic, raw_payload, real_data)
@@ -317,6 +337,8 @@ class ResearchAgent(BaseAgent):
             data_sources=list(real_data.keys()),
             judge_payload=judge_payload,
             report_path=report_path,
+            source_failures=source_failures,
+            fallback_reason="no_reliable_external_data" if not real_data else "",
         )
 
         return TaskResult(
@@ -326,6 +348,7 @@ class ResearchAgent(BaseAgent):
             metadata={
                 "executive_summary": executive_summary,
                 "data_sources": list(real_data.keys()),
+                "source_failures": source_failures,
                 "report_path": report_path,
                 "task_root_id": task_root_id,
                 "overall_score": structured.get("overall_score", 0),
@@ -534,7 +557,8 @@ class ResearchAgent(BaseAgent):
             return TaskResult(success=False, error="LLM Router not available")
 
         # Gather real data
-        real_data = await self._gather_real_data(niche)
+        gathered = await self._gather_real_data(niche)
+        real_data = dict(gathered.get("sources") or {})
 
         data_context = ""
         for key, val in real_data.items():
@@ -599,7 +623,8 @@ class ResearchAgent(BaseAgent):
             return TaskResult(success=False, error="LLM Router not available")
 
         # Gather real data
-        real_data = await self._gather_real_data(product_type)
+        gathered = await self._gather_real_data(product_type)
+        real_data = dict(gathered.get("sources") or {})
 
         data_context = ""
         for key, val in real_data.items():

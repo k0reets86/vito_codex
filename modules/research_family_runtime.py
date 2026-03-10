@@ -11,23 +11,35 @@ def build_research_runtime_profile(
     data_sources: list[str] | None,
     judge_payload: dict[str, Any] | None,
     report_path: str | None,
+    source_failures: dict[str, str] | None = None,
+    fallback_reason: str | None = None,
 ) -> dict[str, Any]:
     sources = [str(s).strip() for s in (data_sources or []) if str(s).strip()]
     judge = dict(judge_payload or {})
     gaps = list(judge.get("gaps") or [])
+    failures = {str(k).strip(): str(v).strip() for k, v in dict(source_failures or {}).items() if str(k).strip()}
+    fallback = str(fallback_reason or "").strip()
+    recovery_hints: list[str] = []
+    if failures:
+        recovery_hints.append("retry_failed_sources")
+    if gaps:
+        recovery_hints.extend(["collect_additional_sources", "rerun_synthesis", "rerun_judge"])
+    if fallback:
+        recovery_hints.append("compare_fallback_vs_primary_sources")
+    if not recovery_hints:
+        recovery_hints.extend(["promote_report_to_runbook", "pass_to_marketing_or_ecommerce"])
     return {
         "topic": str(topic or "").strip(),
         "source_count": len(sources),
         "sources": sources,
+        "source_failures": failures,
         "judge_decision": judge.get("decision"),
         "judge_score": judge.get("score"),
         "gap_count": len(gaps),
-        "recovery_mode": "gap_repair" if gaps else "ready",
-        "next_actions": (
-            ["collect_additional_sources", "rerun_synthesis", "rerun_judge"]
-            if gaps
-            else ["promote_report_to_runbook", "pass_to_marketing_or_ecommerce"]
-        ),
+        "fallback_reason": fallback,
+        "evidence_strength": "multi_source" if len(sources) >= 2 and not failures else ("fallback_only" if fallback else "partial"),
+        "recovery_mode": "source_repair" if failures else ("gap_repair" if gaps else ("fallback_review" if fallback else "ready")),
+        "next_actions": recovery_hints,
         "report_path": str(report_path or "").strip(),
     }
 
@@ -91,4 +103,3 @@ def build_document_runtime_profile(path: str, capability: str) -> dict[str, Any]
             else ["parse_document", "store_extract", "handoff_to_research_agent"]
         ),
     }
-

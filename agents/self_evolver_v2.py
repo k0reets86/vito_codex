@@ -9,6 +9,7 @@ from modules.autonomy_runtime import build_self_evolve_runtime_profile
 from modules.evolution_archive import EvolutionArchive
 from modules.evolution_events import EvolutionEventStore
 from modules.module_discovery import ModuleDiscovery
+from modules.owner_model import OwnerModel
 from modules.sandbox_manager import SandboxManager
 from modules.skill_library import VITOSkillLibrary
 from modules.vito_benchmarks import VITOBenchmarks
@@ -30,6 +31,7 @@ class SelfEvolverV2(BaseAgent):
         self.archive = archive or EvolutionArchive()
         self.skill_lib = VITOSkillLibrary()
         self.event_store = event_store or EvolutionEventStore()
+        self.owner_model = OwnerModel()
 
     @property
     def capabilities(self) -> list[str]:
@@ -59,6 +61,8 @@ class SelfEvolverV2(BaseAgent):
     async def propose_and_benchmark(self, candidates: list[dict[str, Any]], baseline_score: float) -> dict[str, Any]:
         result = self.benchmarks.evaluate(candidates, baseline_score=baseline_score)
         used_skills = [str(item.get("name") or "").strip() for item in self.skill_lib.retrieve("self healing benchmarks runtime", n=4)]
+        owner_profile = self.owner_model.get_preferences() if hasattr(self.owner_model, "get_preferences") else {}
+        issue_analysis = self._build_issue_analysis()
         for skill_name in used_skills[:4]:
             try:
                 self.skill_lib.record_use(skill_name, success=bool(result.get("approved")))
@@ -96,9 +100,16 @@ class SelfEvolverV2(BaseAgent):
         result["used_skills"] = used_skills[:4]
         result["runtime_profile"] = build_self_evolve_runtime_profile(
             proposal_count=len(candidates or []),
-            issue_buckets={},
-            owner_alignment=False,
+            issue_buckets=issue_analysis.get("issue_buckets") or {},
+            owner_alignment=bool(owner_profile),
         )
+        result["issue_analysis"] = issue_analysis
+        result["benchmark_summary"] = {
+            "baseline_score": float(baseline_score or 0.0),
+            "candidate_count": len(candidates or []),
+            "approved": bool(result.get("approved")),
+            "owner_alignment": bool(owner_profile),
+        }
         result["archive_ref"] = "self_evolve_v2:benchmark_proposals"
         return result
 
@@ -123,6 +134,8 @@ class SelfEvolverV2(BaseAgent):
             "proposals": list((result or {}).get("candidates") or candidates)[:4] if isinstance(result, dict) else candidates[:4],
             "used_skills": list((result or {}).get("used_skills") or []),
             "runtime_profile": dict((result or {}).get("runtime_profile") or {}),
+            "issue_analysis": dict((result or {}).get("issue_analysis") or {}),
+            "benchmark_summary": dict((result or {}).get("benchmark_summary") or {}),
             "archive_ref": "self_evolve_cycle:weekly_evolve_cycle",
         }
         self.archive.record(
@@ -140,3 +153,31 @@ class SelfEvolverV2(BaseAgent):
             payload={"query_count": len(search_terms), "candidate_count": len(candidates), "approved": bool(result.get("approved"))},
         )
         return payload
+
+    def _build_issue_analysis(self) -> dict[str, Any]:
+        recent: list[str] = []
+        if self.reflector and hasattr(self.reflector, "get_recent"):
+            try:
+                recent = [str(x) for x in self.reflector.get_recent(n=12, category="technical")]
+            except Exception:
+                recent = []
+        buckets: dict[str, int] = {"browser": 0, "platform": 0, "auth": 0, "memory": 0, "general": 0}
+        for issue in recent:
+            low = issue.lower()
+            if any(tok in low for tok in ["browser", "selector", "captcha", "upload"]):
+                buckets["browser"] += 1
+            elif any(tok in low for tok in ["etsy", "gumroad", "kdp", "printful", "platform"]):
+                buckets["platform"] += 1
+            elif any(tok in low for tok in ["auth", "login", "otp", "token"]):
+                buckets["auth"] += 1
+            elif any(tok in low for tok in ["memory", "skill", "retriev"]):
+                buckets["memory"] += 1
+            else:
+                buckets["general"] += 1
+        buckets = {k: v for k, v in buckets.items() if v > 0}
+        dominant = max(buckets.items(), key=lambda item: item[1])[0] if buckets else "general"
+        return {
+            "issue_count": len(recent),
+            "issue_buckets": buckets,
+            "dominant_issue_bucket": dominant,
+        }

@@ -19,6 +19,8 @@ def test_autonomy_benchmark_matrix_scores_all_agents():
             "runtime_profile": {"proposal_count": 1},
             "archive_ref": "self_evolve_v2:benchmark_proposals",
             "used_skills": ["z"],
+            "issue_analysis": {"issue_count": 3, "dominant_issue_bucket": "browser"},
+            "benchmark_summary": {"candidate_count": 1},
         },
     )
     assert result["all_agents_scored"] is True

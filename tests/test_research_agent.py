@@ -49,6 +49,7 @@ class TestResearchAgent:
         assert result.metadata["top_ideas"][0]["platform"] == "gumroad"
         assert result.metadata["judge_payload"]["decision"] == "accept"
         assert result.metadata["research_runtime_profile"]["source_count"] >= 0
+        assert "source_failures" in result.metadata["research_runtime_profile"]
         assert "next_actions" in result.metadata
 
     @pytest.mark.asyncio

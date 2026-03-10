@@ -29,6 +29,9 @@ def test_self_evolver_v2_benchmark(tmp_path):
     ], baseline_score=0.7))
     assert result['approved'] is True
     assert result['best_score']['name'] == 'proposal'
+    assert "issue_analysis" in result
+    assert "benchmark_summary" in result
+    assert "runtime_profile" in result
 
 
 def test_self_evolver_v2_weekly_cycle(tmp_path):
@@ -46,3 +49,5 @@ def test_self_evolver_v2_weekly_cycle(tmp_path):
     result = asyncio.run(evolver.weekly_evolve_cycle(["python runtime agents"], baseline_score=0.0))
     assert result["candidate_count"] >= 0
     assert "result" in result
+    assert "issue_analysis" in result
+    assert "benchmark_summary" in result

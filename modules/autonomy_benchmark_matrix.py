@@ -34,13 +34,23 @@ def score_self_evolver(payload: dict[str, Any]) -> dict[str, Any]:
     runtime_profile = dict((payload or {}).get("runtime_profile") or {})
     archive_ref = bool((payload or {}).get("archive_ref"))
     used_skills = list((payload or {}).get("used_skills") or [])
+    issue_analysis = dict((payload or {}).get("issue_analysis") or {})
+    benchmark_summary = dict((payload or {}).get("benchmark_summary") or {})
     structure = 1.0 if proposals else 0.0
     scoring = 1.0 if proposals and proposals[0].get("proposal_score") is not None else 0.0
     runtime = 1.0 if runtime_profile else 0.0
     archival = 1.0 if archive_ref else 0.0
     skills = min(1.0, len(used_skills) / 2.0)
-    score = round((structure + scoring + runtime + archival + skills) / 5.0 * 10.0, 2)
-    return {"agent": "self_evolver", "score": score, "proposal_count": len(proposals), "used_skills": used_skills}
+    issue_depth = 1.0 if issue_analysis.get("issue_count") or issue_analysis.get("issue_buckets") else 0.0
+    benchmark = 1.0 if benchmark_summary.get("candidate_count") is not None else 0.0
+    score = round((structure + scoring + runtime + archival + skills + issue_depth + benchmark) / 7.0 * 10.0, 2)
+    return {
+        "agent": "self_evolver",
+        "score": score,
+        "proposal_count": len(proposals),
+        "used_skills": used_skills,
+        "dominant_issue_bucket": issue_analysis.get("dominant_issue_bucket"),
+    }
 
 
 def run_autonomy_matrix(*, curriculum: dict[str, Any], opportunity: dict[str, Any], self_evolver: dict[str, Any]) -> dict[str, Any]:

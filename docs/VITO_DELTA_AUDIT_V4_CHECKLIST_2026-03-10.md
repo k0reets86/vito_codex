@@ -232,12 +232,15 @@
 - Обоснование: теперь не только wired, но и убран главный дефект — чистый hardcoded proposals path.
 
 32. `SelfEvolver`
-- Статус: `partial`
-- Обоснование: autonomy v2 встроен, дополнительно усилены:
+- Статус: `done`
+- Обоснование: autonomy/evolution пакет `AE1-AE5` закрыт, дополнительно встроены:
   - owner-model alignment
   - issue bucketing
   - evidence/next_actions в proposals
-  Но proposal-quality и глубина реального failure analysis еще не дотягивают до максимального уровня.
+  - benchmark summary
+  - persistent proposal/schedule/archive layers
+  - formal combat validation
+  Текущий `SelfEvolver` уже не декоративный, а runtime-wired и benchmarked autonomy unit.
 
 33. `PlatformOnboardingAgent`
 - Статус: `done`
@@ -349,8 +352,8 @@
 ## Итоговая оценка по Delta Audit v4 checklist
 
 Сводка по количеству:
-- `done`: 33
-- `partial`: 19
+- `done`: 34
+- `partial`: 18
 - `not_done`: 0
 - `disputed`: 0
 
@@ -359,5 +362,5 @@
 - Самые ценные незакрытые зоны сейчас:
   1. `comms_agent` декомпозиция
   2. platform repeatability до уровня owner-grade certainty
-  3. remaining weak-agent/runtime gaps (`self_evolver`, `devops_agent`, `security_agent`, deeper research/browser recovery`)
+  3. remaining runtime/live gaps (`devops_agent`, `security_agent`, deeper owner-grade platform validation`)
   4. вторая волна platform/browser live validation на новом runtime
