@@ -36,6 +36,7 @@ from modules.workflow_state_machine import WorkflowStateMachine
 from modules.workflow_threads import WorkflowThreads
 from modules.workflow_interrupts import WorkflowInterrupts
 from modules.orchestration_manager import OrchestrationManager
+from modules.parallel_orchestration_runtime import ParallelNode, ParallelOrchestrationRuntime
 from modules.data_lake import DataLake
 from modules.step_contract import validate_step_output, validate_step_result
 from modules.tooling_registry import ToolingRegistry
@@ -121,6 +122,7 @@ class DecisionLoop:
         self._current_goal_id: str | None = None
         self._current_thread_id: str | None = None
         self.orchestrator = OrchestrationManager()
+        self.parallel_runtime = ParallelOrchestrationRuntime(sqlite_path=_runtime_sqlite_path(goal_engine))
         logger.info("DecisionLoop инициализирован", extra={"event": "init"})
 
     def set_self_healer(self, self_healer) -> None:
@@ -278,30 +280,37 @@ class DecisionLoop:
         self._log_tick_done(tick_start, idle=False)
 
     async def _run_background_maintenance(self) -> None:
-        tasks = [
-            ("memory_retention", self._maybe_run_memory_retention),
-            ("memory_consolidation", self._maybe_run_memory_consolidation),
-            ("memory_weekly_report", self._maybe_run_memory_weekly_report),
-            ("self_learning_optimization", self._maybe_run_self_learning_optimization),
-            ("self_learning_test_jobs", self._maybe_run_self_learning_test_jobs),
-            ("self_learning_maintenance", self._maybe_run_self_learning_maintenance),
-            ("tooling_discovery_intake", self._maybe_run_tooling_discovery_intake),
-            ("tooling_governance_check", self._maybe_run_tooling_governance_check),
-            ("platform_rules_sync", self._maybe_run_platform_rules_sync),
-            ("weekly_governance_report", self._maybe_run_weekly_governance_report),
-            ("autonomous_improvement", self._maybe_run_autonomous_improvement),
-            ("autonomy_v2", self._maybe_run_autonomy_v2),
-            ("evolution_discovery", self._maybe_run_evolution_discovery),
-            ("autonomy_overseer", self._maybe_run_autonomy_overseer),
-            ("kdp_session_watchdog", self._maybe_run_kdp_session_watchdog),
+        task_specs = [
+            ("memory_retention", self._maybe_run_memory_retention, []),
+            ("memory_consolidation", self._maybe_run_memory_consolidation, ["memory_retention"]),
+            ("memory_weekly_report", self._maybe_run_memory_weekly_report, ["memory_consolidation"]),
+            ("self_learning_optimization", self._maybe_run_self_learning_optimization, []),
+            ("self_learning_test_jobs", self._maybe_run_self_learning_test_jobs, []),
+            ("self_learning_maintenance", self._maybe_run_self_learning_maintenance, ["self_learning_optimization", "self_learning_test_jobs"]),
+            ("tooling_discovery_intake", self._maybe_run_tooling_discovery_intake, []),
+            ("tooling_governance_check", self._maybe_run_tooling_governance_check, ["tooling_discovery_intake"]),
+            ("platform_rules_sync", self._maybe_run_platform_rules_sync, []),
+            ("weekly_governance_report", self._maybe_run_weekly_governance_report, ["tooling_governance_check", "platform_rules_sync"]),
+            ("autonomous_improvement", self._maybe_run_autonomous_improvement, []),
+            ("autonomy_v2", self._maybe_run_autonomy_v2, ["autonomous_improvement"]),
+            ("evolution_discovery", self._maybe_run_evolution_discovery, ["autonomy_v2"]),
+            ("autonomy_overseer", self._maybe_run_autonomy_overseer, ["evolution_discovery"]),
+            ("kdp_session_watchdog", self._maybe_run_kdp_session_watchdog, []),
         ]
-        results = await asyncio.gather(*(func() for _, func in tasks), return_exceptions=True)
-        for (name, _func), result in zip(tasks, results):
-            if isinstance(result, Exception):
-                logger.warning(
-                    f"Background maintenance task failed: {name}: {result}",
-                    extra={"event": "background_maintenance_error", "context": {"task": name}},
-                )
+        nodes = [
+            ParallelNode(name=name, handler=func, deps=deps, description=f"background:{name}")
+            for name, func, deps in task_specs
+        ]
+        report = await self.parallel_runtime.run(
+            "decision_loop_background_maintenance",
+            nodes,
+            run_id=f"decision_loop_background_{self._tick_count}",
+        )
+        for name, detail in (report.get("failed") or {}).items():
+            logger.warning(
+                f"Background maintenance task failed: {name}: {detail}",
+                extra={"event": "background_maintenance_error", "context": {"task": name}},
+            )
 
     async def _maybe_auto_resume_waiting_goals(self) -> None:
         """Auto-resume waiting goals when interrupts are resolved."""

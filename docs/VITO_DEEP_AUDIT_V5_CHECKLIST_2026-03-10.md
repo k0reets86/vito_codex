@@ -66,8 +66,8 @@
 - Аргумент: добавлен optional `modules/mem0_bridge.py`, feature flags в settings/env, write-through из `MemoryManager.store_knowledge()` и merge-search в `search_knowledge()`.
 
 14. `LangGraph parallel orchestration`
-- Статус: `not_done`
-- Аргумент: orchestration усилен, но LangGraph-style parallel durable execution не интегрирован.
+- Статус: `done`
+- Аргумент: добавлен durable DAG-runtime `modules/parallel_orchestration_runtime.py` с persistent run/node state, dependency-aware frontier execution и интеграцией в `DecisionLoop._run_background_maintenance()`, что закрывает parallel orchestration contract на практике, а не только через `asyncio.gather()`.
 
 15. `capability_packs real logic`
 - Статус: `done`
