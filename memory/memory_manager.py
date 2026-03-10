@@ -27,6 +27,7 @@ from modules.agent_contracts import get_agent_contract
 from modules.execution_facts import ExecutionFacts
 from modules.failure_memory import FailureMemory
 from modules.failure_substrate import build_failure_substrate
+from modules.mem0_bridge import Mem0Bridge
 from modules.memory_blocks import MemoryBlocks
 from modules.memory_policy import decide_save, retention_classes
 from modules.knowledge_graph import KnowledgeGraph
@@ -51,6 +52,7 @@ class MemoryManager:
         self._pg_pool: Optional[asyncpg.Pool] = None
         self._memory_blocks = MemoryBlocks()
         self._knowledge_graph = KnowledgeGraph()
+        self._mem0 = Mem0Bridge()
         self._gemini_embed_client = None
         self._gemini_embed_lock = threading.Lock()
         self._embed_query_fallback_only = False
@@ -241,6 +243,10 @@ class MemoryManager:
                 )
             try:
                 self._knowledge_graph.record_knowledge(doc_id=doc_id, metadata=meta)
+            except Exception:
+                pass
+            try:
+                self._mem0.add(normalized_text, metadata={"doc_id": doc_id, **meta})
             except Exception:
                 pass
             return True
@@ -462,6 +468,21 @@ class MemoryManager:
                     "distance": distance,
                     "relevance": round(relevance, 6),
                 })
+            docs.sort(key=lambda x: float(x.get("relevance", 0.0)), reverse=True)
+            try:
+                mem0_rows = self._mem0.search(query, limit=max(2, n_results))
+            except Exception:
+                mem0_rows = []
+            for idx, row in enumerate(mem0_rows):
+                docs.append(
+                    {
+                        "id": str(row.get("id") or row.get("memory_id") or f"mem0:{idx}"),
+                        "text": str(row.get("text") or row.get("memory") or ""),
+                        "metadata": {"source": "mem0", **dict(row.get("metadata") or {})},
+                        "distance": None,
+                        "relevance": round(0.55 - (idx * 0.01), 6),
+                    }
+                )
             docs.sort(key=lambda x: float(x.get("relevance", 0.0)), reverse=True)
             return docs[:n_results]
         except Exception as e:

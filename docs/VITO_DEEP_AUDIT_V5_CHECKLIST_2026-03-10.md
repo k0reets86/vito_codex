@@ -62,8 +62,8 @@
 
 ## P3
 13. `mem0 integration`
-- Статус: `partial`
-- Аргумент: feasibility и architecture decision уже есть, но runtime integration в этот пакет не внедрена.
+- Статус: `done`
+- Аргумент: добавлен optional `modules/mem0_bridge.py`, feature flags в settings/env, write-through из `MemoryManager.store_knowledge()` и merge-search в `search_knowledge()`.
 
 14. `LangGraph parallel orchestration`
 - Статус: `not_done`
