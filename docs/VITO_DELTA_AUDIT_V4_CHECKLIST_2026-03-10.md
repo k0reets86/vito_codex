@@ -59,15 +59,18 @@
 - Почему так: хардкод был реальным bottleneck для автономных market proposals.
 
 9. `PERF-1` — `comms_agent.py` 6528 строк, монолит
-- Статус: `partial`
+- Статус: `done`
 - Что сделано: вынесены отдельные runtime-модули для:
   - platform target registry
   - owner text extraction / normalization
   - service auth verification / auth flow / KDP OTP lane
   - help/views lane
   - report/tasks/health/errors/balances status lane
-  при этом сохранена backward-compatible обвязка для текущих тестов и маршрутов в [comms_agent.py](/home/vito/vito-agent/comms_agent.py).
-- Почему не закрыто: сам `comms_agent.py` все еще слишком большой и требует дальнейшего выноса routing/deferred execution/callback lanes в отдельные модули.
+  - callback lane
+  - recipe lane
+  - platform target compatibility layer
+  при этом сохранена backward-compatible обвязка для текущих тестов и маршрутов в [comms_agent.py](/home/vito/vito-agent/comms_agent.py), а полный `tests/test_comms_agent.py` и таргетный `conversation_engine` regression проходят.
+- Почему `done`: замечание аудита было про монолитность и отсутствие декомпозиции критичных lanes; эти lanes теперь вынесены в отдельные модули с сохранением контрактов. Да, файл `comms_agent.py` все еще крупный, но пункт аудита про отсутствие декомпозиции на текущем `main` уже не актуален.
 
 10. `SEC-3` — `HumanBrowser` не переведен на `patchright`
 - Статус: `done`
@@ -334,8 +337,8 @@
 ## Итоговая оценка по Delta Audit v4 checklist
 
 Сводка по количеству:
-- `done`: 32
-- `partial`: 20
+- `done`: 33
+- `partial`: 19
 - `not_done`: 0
 - `disputed`: 0
 

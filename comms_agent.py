@@ -36,7 +36,6 @@ from telegram import (
     ReplyKeyboardMarkup,
     Update,
 )
-from telegram.error import BadRequest as TgBadRequest
 from telegram.error import Conflict as TgConflict
 from telegram.ext import (
     Application,
@@ -54,7 +53,6 @@ from modules.comms_text_utils import (
     extract_custom_login_target as _extract_custom_login_target_text,
     extract_loose_site_target as _extract_loose_site_target_text,
     extract_otp_code as _extract_otp_code_text,
-    extract_topic_from_request as _extract_topic_from_request,
 )
 from modules.comms_auth_flow import (
     handle_kdp_login_flow as _handle_kdp_login_flow_impl,
@@ -78,116 +76,42 @@ from modules.comms_status_lane import (
     cmd_task_replace as _cmd_task_replace_impl,
     cmd_tasks as _cmd_tasks_impl,
 )
+from modules.comms_platform_targets import (
+    is_target_protected as _is_target_protected,
+    platform_working_target as _platform_working_target,
+    remember_platform_working_target as _remember_platform_working_target_impl,
+    working_target_matches_task as _working_target_matches_task,
+)
+from modules.platform_target_registry import (
+    load_working_platform_targets as _load_working_platform_targets,
+    save_working_platform_targets as _save_working_platform_targets,
+)
+from modules.comms_callback_lane import handle_callback as _handle_callback_lane_impl, safe_edit_callback_message as _safe_edit_callback_message_impl
+from modules.comms_recipe_lane import build_recipe_payload as _build_recipe_payload_impl, run_recipe_direct as _run_recipe_direct_impl
 from modules.owner_preference_model import OwnerPreferenceModel
 from modules.owner_pref_metrics import OwnerPreferenceMetrics
 from modules.auth_broker import AuthBroker
 from modules.browser_runtime_policy import get_browser_runtime_profile, get_profile_completion_runbook, storage_state_path_for_service
 from modules.data_lake import DataLake
-from modules.platform_target_registry import (
-    is_target_protected as _is_target_protected,
-    platform_working_target as _platform_working_target,
-    protect_platform_target as _protect_platform_target,
-    remember_platform_working_target as _remember_platform_working_target,
-    target_identity as _target_identity,
-    working_target_matches_task as _working_target_matches_task,
-)
 from modules.status_snapshot import build_status_snapshot, render_status_snapshot
-from modules.task_lineage import ensure_task_lineage
 from modules.telegram_nlu_router import route_owner_dialogue
+from modules.task_lineage import ensure_task_lineage
 
 logger = get_logger("comms_agent", agent="comms_agent")
 
 _TELEGRAM_TRACE_DEFAULT = root_path("runtime/telegram_trace.jsonl")
 
 
-def _load_working_platform_targets() -> dict[str, dict[str, Any]]:
-    from modules.platform_target_registry import load_working_platform_targets
-
-    return load_working_platform_targets()
-
-
-def _save_working_platform_targets(data: dict[str, dict[str, Any]]) -> None:
-    from modules.platform_target_registry import save_working_platform_targets
-
-    save_working_platform_targets(data)
-
-
-def _load_protected_platform_targets() -> dict[str, list[dict[str, Any]]]:
-    from modules.platform_target_registry import load_protected_platform_targets
-
-    return load_protected_platform_targets()
-
-
-def _save_protected_platform_targets(data: dict[str, list[dict[str, Any]]]) -> None:
-    from modules.platform_target_registry import save_protected_platform_targets
-
-    save_protected_platform_targets(data)
-
-
-def _platform_working_target(platform: str) -> dict[str, Any]:
-    p = str(platform or "").strip().lower()
-    out = dict((_load_working_platform_targets().get(p) or {}))
-    if out:
-        out.setdefault("platform", p)
-    return out
-
-
-def _target_identity(current: dict[str, Any]) -> dict[str, str]:
-    from modules.platform_target_registry import target_identity
-
-    return target_identity(current)
-
-
-def _is_target_protected(platform: str, current: dict[str, Any]) -> bool:
-    p = str(platform or "").strip().lower()
-    if not p or not isinstance(current, dict) or not current:
-        return False
-    cur = _target_identity(current)
-    if not cur:
-        return False
-    protected = _load_protected_platform_targets().get(p) or []
-    for item in protected:
-        if not isinstance(item, dict):
-            continue
-        ref = _target_identity(item)
-        if not ref:
-            continue
-        for key in ("id", "target_slug", "target_listing_id", "target_document_id", "target_product_id", "url"):
-            if cur.get(key) and ref.get(key) and cur.get(key) == ref.get(key):
-                return True
-    return False
-
-
-def _protect_platform_target(platform: str, current: dict[str, Any], *, reason: str = "manual_protect") -> None:
-    from modules.platform_target_registry import protect_platform_target
-
-    protect_platform_target(platform, current, reason=reason)
-
-
-def _working_target_matches_task(current: dict[str, Any], task_root_id: str) -> bool:
-    if not isinstance(current, dict) or not current:
-        return False
-    current_task_root = str(current.get("task_root_id") or "").strip()
-    target_id = str(
-        current.get("id")
-        or current.get("target_slug")
-        or current.get("target_listing_id")
-        or current.get("target_document_id")
-        or current.get("target_product_id")
-        or ""
-    ).strip()
-    if not target_id or not bool(current.get("mutable", True)) or not current_task_root:
-        return False
-    if _is_target_protected(str(current.get("platform") or current.get("_platform") or ""), current):
-        return False
-    return bool(task_root_id) and current_task_root == str(task_root_id).strip()
-
-
 def _remember_platform_working_target(platform: str, result: dict[str, Any]) -> None:
+    """Compatibility wrapper around platform target persistence for tests and legacy hooks."""
     p = str(platform or "").strip().lower()
     if not p or not isinstance(result, dict):
         return
     targets = _load_working_platform_targets()
+    if targets is None:
+        targets = {}
+    if not isinstance(targets, dict):
+        targets = {}
     current = dict(targets.get(p) or {})
     rid = str(
         result.get("listing_id")
@@ -203,10 +127,6 @@ def _remember_platform_working_target(platform: str, result: dict[str, Any]) -> 
     url = str(result.get("url") or "").strip()
     if p == "gumroad":
         slug = str(result.get("slug") or "").strip()
-        if not slug and url:
-            m = re.search(r"gumroad\\.com/l/([A-Za-z0-9_-]+)", url)
-            if m:
-                slug = m.group(1)
         if slug:
             current["target_slug"] = slug
     elif p == "etsy" and rid:
@@ -223,8 +143,11 @@ def _remember_platform_working_target(platform: str, result: dict[str, Any]) -> 
         "target_document_id": current.get("target_document_id"),
         "target_product_id": current.get("target_product_id"),
     }
-    if _is_target_protected(p, current) and _target_identity(current) != _target_identity(incoming_target):
-        return
+    if _is_target_protected(p, current) and current and incoming_target:
+        current_identity = {k: str(v or "").strip() for k, v in current.items() if k in incoming_target}
+        incoming_identity = {k: str(v or "").strip() for k, v in incoming_target.items() if str(v or "").strip()}
+        if current_identity != incoming_identity:
+            return
     if rid:
         current["id"] = rid
     if url:
@@ -247,7 +170,6 @@ def _remember_platform_working_target(platform: str, result: dict[str, Any]) -> 
     current["locked"] = bool(is_published)
     if is_published:
         current["locked_reason"] = "published_requires_explicit_target"
-        _protect_platform_target(p, current, reason="published_requires_explicit_target")
     current["status"] = status or current.get("status", "")
     current["updated_at"] = datetime.now(timezone.utc).isoformat()
     targets[p] = current
@@ -462,6 +384,7 @@ class CommsAgent:
             )
         )
         _install_reply_text_trace_patch(self._telegram_trace_path)
+        self._logger = logger
 
         # Обратные ссылки на модули — устанавливаются через set_modules()
         self._goal_engine = None
@@ -3253,160 +3176,10 @@ class CommsAgent:
             )
 
     def _build_recipe_payload(self, recipe_name: str, *, live: bool, request_text: str = "") -> tuple[str, dict[str, Any]]:
-        from modules.workflow_recipes import get_workflow_recipe
-        from modules.platform_artifact_pack import build_platform_bundle
-
-        rec = get_workflow_recipe(recipe_name)
-        if not rec:
-            raise ValueError(f"recipe_not_found:{recipe_name}")
-        platform = str(rec.get("platform") or "").strip().lower()
-        run_tag = datetime.now(timezone.utc).strftime("%m%d-%H%M%S")
-        working_target = _platform_working_target(platform)
-        active_owner_task = self._owner_task_state.get_active() if self._owner_task_state else None
-        task_root_id, artifact_ids = ensure_task_lineage(active_owner_task, request_text or recipe_name)
-        if self._owner_task_state and active_owner_task and not str(active_owner_task.get("task_root_id") or "").strip():
-            try:
-                self._owner_task_state.enrich_active(task_root_id=task_root_id, **artifact_ids)
-            except Exception:
-                pass
-        topic = _extract_topic_from_request(request_text, "Digital Product Kit")
-        base_title = topic if len(topic) >= 8 else f"Working Draft {run_tag}: Digital Product Kit"
-
-        payload: dict[str, Any] = {
-            "dry_run": not live,
-            "fresh_artifacts_only": True,
-            "run_tag": run_tag,
-            "task_root_id": task_root_id,
-            "project_id": artifact_ids.get("project_id", ""),
-            "listing_work_id": artifact_ids.get("listing_id", ""),
-            "research_work_id": artifact_ids.get("research_id", ""),
-            "content_work_id": artifact_ids.get("content_id", ""),
-            "seo_work_id": artifact_ids.get("seo_id", ""),
-            "publish_work_id": artifact_ids.get("publish_id", ""),
-            "metadata_work_id": artifact_ids.get("metadata_id", ""),
-            "title": base_title[:140],
-            "name": base_title[:140],
-            "content": "Structured product content with clear value, searchable keywords, and a concise CTA.",
-            "text": f"{base_title}: SEO-ready digital product workflow with proof checks.",
-            "description": (
-                "SEO-ready test listing generated by VITO. Includes structured benefits, target audience, "
-                "delivery format, usage steps, and optimization notes for marketplace conversion."
-            ),
-            "summary": "SEO-ready AI digital product test listing.",
-            "price": 5,
-            "category": "Digital",
-            "tags": ["ai", "automation", "digital product", "templates", "productivity"],
-            "seo_title": "Digital Product Kit for Creators",
-            "seo_description": "SEO-optimized listing prepared for marketplace conversion and workflow validation.",
-            "url": "https://example.com/vito-test",
-            "hashtags": ["#DigitalProduct", "#CreatorBusiness", "#OnlineSales"],
-            "author": "Editorial Team",
-            "subtitle": "Practical workflow kit for creators",
-            "materials": ["pdf", "digital download", "instant download", "planner pages"],
-            "preview_paths": [],
-        }
-
-        if platform == "reddit":
-            uname = str(getattr(settings, "REDDIT_USERNAME", "") or "").strip()
-            payload["subreddit"] = str(os.getenv("REDDIT_TEST_SUBREDDIT", f"u_{uname}" if uname else "test"))
-            payload["text"] = (
-                f"{base_title}. Research -> listing -> publish pipeline. "
-                "Details: https://example.com/vito-test #Research #DigitalProduct"
-            )
-            payload["url"] = ""
-            payload["image_url"] = ""
-        if platform == "gumroad":
-            target_slug = str(working_target.get("target_slug") or "").strip()
-            reuse_existing = bool(target_slug) and _working_target_matches_task(working_target, task_root_id)
-            payload.update(
-                {
-                    "allow_existing_update": reuse_existing,
-                    "owner_edit_confirmed": reuse_existing,
-                    "target_slug": target_slug if reuse_existing else "",
-                    "operation": "update" if reuse_existing else "create",
-                    "keep_unpublished": True,
-                }
-            )
-        if platform == "etsy":
-            target_listing_id = str(working_target.get("target_listing_id") or "").strip()
-            if target_listing_id and _working_target_matches_task(working_target, task_root_id):
-                payload.update(
-                    {
-                        "allow_existing_update": True,
-                        "owner_edit_confirmed": True,
-                        "target_listing_id": target_listing_id,
-                        "operation": "update",
-                    }
-                )
-            payload["draft_only"] = True
-            if not payload.get("operation"):
-                payload["operation"] = "create"
-        if platform == "amazon_kdp":
-            target_document_id = str(working_target.get("target_document_id") or "").strip()
-            if not _working_target_matches_task(working_target, task_root_id):
-                target_document_id = ""
-            payload["operation"] = "update" if target_document_id else "create_or_update_draft"
-            if target_document_id:
-                payload.update(
-                    {
-                        "allow_existing_update": True,
-                        "owner_edit_confirmed": True,
-                        "target_document_id": target_document_id,
-                    }
-                )
-        if platform == "twitter":
-            payload["text"] = (
-                f"{base_title} https://example.com/vito-test "
-                "#DigitalProducts #CreatorBusiness #OnlineSales"
-            )[:280]
-        if platform == "kofi":
-            target_product_id = str(working_target.get("target_product_id") or "").strip()
-            if target_product_id and _working_target_matches_task(working_target, task_root_id):
-                payload.update(
-                    {
-                        "allow_existing_update": True,
-                        "owner_edit_confirmed": True,
-                        "target_product_id": target_product_id,
-                        "operation": "update",
-                    }
-                )
-        if platform == "printful":
-            target_product_id = str(working_target.get("target_product_id") or "").strip()
-            if not _working_target_matches_task(working_target, task_root_id):
-                target_product_id = ""
-            payload.update(
-                {
-                    "sync_product": {"name": base_title[:100]},
-                    "sync_variants": [],
-                    "operation": "update" if target_product_id else "create_or_update",
-                }
-            )
-            if target_product_id:
-                payload["target_product_id"] = target_product_id
-        return platform, build_platform_bundle(platform, payload)
+        return _build_recipe_payload_impl(self, recipe_name, live=live, request_text=request_text)
 
     async def _run_recipe_direct(self, recipe_name: str, *, live: bool, request_text: str = "") -> dict[str, Any]:
-        from modules.workflow_recipe_executor import WorkflowRecipeExecutor
-
-        platform, payload = self._build_recipe_payload(recipe_name, live=live, request_text=request_text)
-        exe = WorkflowRecipeExecutor(self._publisher_queue)
-        out = await exe.run_once(recipe_name, payload, trace_id=f"tg_recipe_{recipe_name}")
-        res = out.get("result") if isinstance(out.get("result"), dict) else {}
-        sticky_id = str(
-            res.get("listing_id")
-            or res.get("product_id")
-            or res.get("target_product_id")
-            or res.get("document_id")
-            or res.get("target_document_id")
-            or res.get("post_id")
-            or res.get("id")
-            or ""
-        ).strip()
-        sticky_slug = str(res.get("slug") or "").strip()
-        sticky_url = str(res.get("url") or "").strip()
-        if str(out.get("status") or "").lower() == "accepted" or sticky_id or sticky_slug or sticky_url:
-            _remember_platform_working_target(platform, res)
-        return out
+        return await _run_recipe_direct_impl(self, recipe_name, live=live, request_text=request_text)
 
     async def _cmd_workflow(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Показать здоровье workflow и последние события по цели."""
@@ -5165,131 +4938,10 @@ class CommsAgent:
     # ── Inline callback ──
 
     async def _handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Обработка нажатий inline-кнопок одобрения."""
-        query = update.callback_query
-        if not query or not query.data:
-            return
-
-        # Проверка владельца
-        if query.from_user.id != self._owner_id:
-            await query.answer("Доступ запрещён", show_alert=True)
-            return
-
-        parts = query.data.split(":", 1)
-        if len(parts) != 2:
-            await query.answer("Неизвестная команда")
-            return
-
-        action, request_id = parts
-
-        if action == "help_topic":
-            topic = str(request_id or "").strip().lower()
-            await query.answer("Открываю")
-            text = self._render_help(topic if topic in {"daily", "rare", "system"} else None)
-            await self._safe_edit_callback_message(query, text)
-            return
-
-        if action == "auth_cancel":
-            self._pending_service_auth.pop(request_id, None)
-            await query.answer("Отменено")
-            await self._safe_edit_callback_message(query, f"{query.message.text}\n\n— Отменено")
-            return
-
-        if action == "auth_done":
-            service = str(request_id or "").strip().lower()
-            pending = self._pending_service_auth.pop(service, None) or {}
-            self._touch_service_context(service)
-            try:
-                ok, detail = await self._verify_service_auth(service)
-            except Exception as e:
-                ok, detail = False, f"Ошибка проверки авторизации: {e}"
-            title, _ = self._service_auth_meta(service)
-            if ok:
-                stamp = datetime.now(timezone.utc).isoformat()
-                self._service_auth_confirmed[service] = stamp
-                self._save_auth_state()
-                label = f"Вход подтверждён: {title}"
-                await query.answer("Вход подтверждён")
-                await self._safe_edit_callback_message(query, f"{query.message.text}\n\n— {label}")
-                logger.info(
-                    f"Inline auth_done: {service}",
-                    extra={"event": "inline_auth_done", "context": {"service": service, "mode": "verified"}},
-                )
-                await self.send_message(label, level="result")
-                return
-            # Fallback: for browser/manual flows keep owner's explicit confirmation,
-            # but clearly mark that technical probe failed.
-            if self._requires_strict_auth_verification(service):
-                since = str(pending.get("requested_at") or "")
-                has_storage, storage_detail = self._has_cookie_storage_state(service, since_iso=since)
-                if bool(pending.get("mode") == "remote") and has_storage:
-                    stamp = datetime.now(timezone.utc).isoformat()
-                    self._service_auth_confirmed[service] = stamp
-                    self._save_auth_state()
-                    label = f"Вход подтверждён: {title} (server storage захвачен)"
-                    await query.answer("Вход подтверждён")
-                    await self._safe_edit_callback_message(query, f"{query.message.text}\n\n— {label}\n({storage_detail})")
-                    await self.send_message(label, level="result")
-                    return
-                self._clear_service_auth_confirmed(service)
-                extra = f" {self._manual_capture_hint(service)}" if self._is_challenge_detail(detail) else ""
-                await query.answer("Нужно обновить сессию", show_alert=False)
-                await self._safe_edit_callback_message(query, f"{query.message.text}\n\n— Нужно обновить сессию.\n{detail}{extra}")
-                await self.send_message(self._service_needs_session_refresh_text(service, title, detail) + extra, level="warning")
-                return
-            if self._is_manual_auth_service(service):
-                stamp = datetime.now(timezone.utc).isoformat()
-                self._service_auth_confirmed[service] = stamp
-                self._save_auth_state()
-                label = f"Вход зафиксирован вручную: {title}"
-                await query.answer("Принято")
-                await self._safe_edit_callback_message(query, f"{query.message.text}\n\n— {label}\n(Проверка: {detail})")
-                logger.info(
-                    f"Inline auth_done: {service}",
-                    extra={"event": "inline_auth_done", "context": {"service": service, "mode": "manual_fallback", "detail": detail[:200]}},
-                )
-                await self.send_message(f"{label}. Можно продолжать работу.", level="result")
-                return
-            await query.answer("Не подтверждено", show_alert=True)
-            await self._safe_edit_callback_message(query, f"{query.message.text}\n\n— Вход не подтверждён.\n{detail}")
-            await self.send_message(f"Не удалось подтвердить вход: {title}. Деталь: {detail}", level="warning")
-            return
-
-        future = self._pending_approvals.pop(request_id, None)
-        if future is None:
-            await query.answer("Запрос уже обработан или не найден")
-            await query.edit_message_reply_markup(reply_markup=None)
-            return
-
-        approved = action == "approve"
-        if not future.done():
-            future.set_result(approved)
-
-        label = "Одобрено" if approved else "Отклонено"
-        await query.answer(label)
-        await self._safe_edit_callback_message(query, f"{query.message.text}\n\n— {label}")
-
-        logger.info(
-            f"Inline {label.lower()}: {request_id}",
-            extra={"event": f"inline_{'approved' if approved else 'rejected'}",
-                   "context": {"request_id": request_id}},
-        )
+        await _handle_callback_lane_impl(self, update, context)
 
     async def _safe_edit_callback_message(self, query, text: str) -> None:
-        """Best-effort callback message edit; do not interrupt flow if edit is rejected."""
-        try:
-            await query.edit_message_text(text=text)
-        except TgBadRequest:
-            logger.info(
-                "Callback message edit skipped (non-editable or unchanged).",
-                extra={"event": "callback_edit_skipped"},
-            )
-        except Exception:
-            logger.warning(
-                "Callback message edit failed unexpectedly.",
-                extra={"event": "callback_edit_failed"},
-                exc_info=True,
-            )
+        await _safe_edit_callback_message_impl(self, query, text)
 
     # ── API для других модулей ──
 
