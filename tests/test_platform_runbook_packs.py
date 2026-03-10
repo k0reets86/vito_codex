@@ -20,6 +20,9 @@ def test_build_service_runbook_pack_includes_requirements_and_lessons():
     assert "file_attached" in pack["evidence_keys_seen"]
     assert "Reuse one working draft." in pack["recommended_steps"]
     assert "Do not publish during tests." in pack["avoid_patterns"]
+    assert isinstance(pack["policy_pack"], dict)
+    assert "policy_notes" in pack
+    assert "rules_updates" in pack
 
 
 def test_build_runbook_packs_for_services_dedupes_aliases():
@@ -27,3 +30,11 @@ def test_build_runbook_packs_for_services_dedupes_aliases():
     services = [p["service"] for p in packs]
     assert services.count("amazon_kdp") == 1
     assert "etsy" in services
+
+
+def test_build_service_runbook_pack_includes_policy_pack():
+    pack = build_service_runbook_pack("gumroad")
+    assert pack["policy_pack"]["service"] == "gumroad"
+    assert "has_policy_knowledge" in pack["policy_pack"]
+    assert isinstance(pack["policy_notes"], list)
+    assert isinstance(pack["rules_updates"], list)

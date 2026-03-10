@@ -1306,6 +1306,11 @@ class MemoryManager:
             importance_builder=lambda row: 0.82,
             limit=limit,
         )
+        platform_policy_packs = [
+            dict(pack.get("policy_pack") or {})
+            for pack in runbook_packs
+            if isinstance(pack.get("policy_pack"), dict) and pack.get("policy_pack")
+        ]
 
         memory_layers = self._build_memory_layers_map(
             agent=agent,
@@ -1318,6 +1323,7 @@ class MemoryManager:
             blocks=blocks[:limit],
             platform_memory=platform_memory[:limit],
             runbook_packs=runbook_packs[:limit],
+            platform_policy_packs=platform_policy_packs[:limit],
             failure_substrate=failure_substrate,
         )
 
@@ -1333,6 +1339,7 @@ class MemoryManager:
             "memory_blocks": blocks[:limit],
             "platform_memory": platform_memory[:limit],
             "runbook_packs": runbook_packs[:limit],
+            "platform_policy_packs": platform_policy_packs[:limit],
             "memory_layers": memory_layers,
         }
 
@@ -1420,6 +1427,7 @@ class MemoryManager:
         blocks: list[dict[str, Any]],
         platform_memory: list[dict[str, Any]],
         runbook_packs: list[dict[str, Any]],
+        platform_policy_packs: list[dict[str, Any]],
         failure_substrate: dict[str, Any],
     ) -> dict[str, Any]:
         owner_blocks = [x for x in blocks if str(x.get("block_type") or "").strip().lower() == "owner_preference"]
@@ -1439,7 +1447,8 @@ class MemoryManager:
             "platform_runbooks": {
                 "knowledge_entries": len(platform_memory),
                 "runbook_packs": len(runbook_packs),
-                "active": bool(platform_memory or runbook_packs),
+                "policy_packs": len(platform_policy_packs),
+                "active": bool(platform_memory or runbook_packs or platform_policy_packs),
             },
             "anti_pattern_memory": {
                 "recent_failures": len(failures),

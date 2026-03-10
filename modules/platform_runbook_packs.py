@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from modules.platform_knowledge import get_service_knowledge
+from modules.platform_policy_packs import build_service_policy_pack
 
 
 RUNBOOK_REQUIREMENTS: dict[str, dict[str, Any]] = {
@@ -97,6 +98,7 @@ def build_service_runbook_pack(service: str) -> dict[str, Any]:
         if isinstance(evidence, dict):
             evidence_keys.extend([str(k) for k in evidence.keys()])
 
+    policy_pack = build_service_policy_pack(svc)
     return {
         "service": svc,
         "required_artifacts": list(base.get("required_artifacts") or []),
@@ -109,6 +111,9 @@ def build_service_runbook_pack(service: str) -> dict[str, Any]:
         "recent_success_count": len(success_rows),
         "recent_failure_count": len(failure_rows),
         "updated_at": str(knowledge.get("updated_at") or ""),
+        "policy_pack": policy_pack,
+        "policy_notes": list(policy_pack.get("policy_notes") or [])[:20],
+        "rules_updates": list(policy_pack.get("rules_updates") or [])[:5],
     }
 
 

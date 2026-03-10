@@ -116,4 +116,4 @@
 
 26. `cross-layer knowledge / memory consolidation runtime`
 - Статус: `done`
-- Аргумент: добавлен `modules/knowledge_consolidator.py` и `MemoryManager.build_runtime_knowledge_pack(...)`, который сводит semantic knowledge, reflections, platform knowledge, evolution archive и knowledge graph в единый runtime pack для owner/runtime use.
+- Аргумент: добавлен `modules/knowledge_consolidator.py` и `MemoryManager.build_runtime_knowledge_pack(...)`, который сводит semantic knowledge, reflections, platform knowledge, evolution archive и knowledge graph в единый runtime pack для owner/runtime use; дополнительно platform-specific runbooks теперь несут machine-readable `policy_pack`/`rules_updates` из `platform_knowledge.md` и `platform_rules_updates.md`, а `MemoryManager.get_agent_memory_context(...)` прокидывает их в `platform_policy_packs` и учитывает в `memory_layers.platform_runbooks`.

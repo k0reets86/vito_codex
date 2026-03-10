@@ -384,6 +384,21 @@ def test_agent_memory_context_contains_layers_and_failure_substrate(memory, tmp_
     assert any("listing_create" in str(x.get("avoid_action") or "") for x in substrate["entries"])
 
 
+def test_agent_memory_context_includes_platform_policy_packs(memory, tmp_path):
+    db = str(tmp_path / "test.db")
+    with patch("memory.memory_manager.settings") as s:
+        s.CHROMA_PATH = str(tmp_path / "chroma")
+        s.SQLITE_PATH = db
+        memory._sqlite_path = db
+        ctx = memory.get_agent_memory_context("ecommerce_agent", task_type="gumroad listing update", limit=5)
+
+    assert "platform_policy_packs" in ctx
+    packs = ctx["platform_policy_packs"]
+    assert any(str(pack.get("service") or "") == "gumroad" for pack in packs)
+    layers = ctx["memory_layers"]["platform_runbooks"]
+    assert layers["policy_packs"] >= 1
+
+
 # ── PostgreSQL (моки) ──
 
 @pytest.mark.asyncio
