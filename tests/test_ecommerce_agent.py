@@ -51,6 +51,7 @@ class TestECommerceAgent:
         pdf.write_text("dummy", encoding="utf-8")
         result = await agent.create_listing("gumroad", {"title": "Test Product", "price": 9.99, "pdf_path": str(pdf)})
         assert result.success is True
+        assert result.metadata["listing_runtime_profile"]["verification_ok"] is True
 
     @pytest.mark.asyncio
     async def test_create_listing_unknown_platform(self, agent):
@@ -161,6 +162,7 @@ class TestECommerceAgent:
         )
         assert result.success is False
         assert "publish_quality_gate_failed:etsy_missing_screenshot" in str(result.error)
+        assert result.metadata["listing_runtime_profile"]["verification_ok"] is False
 
     @pytest.mark.asyncio
     async def test_create_listing_etsy_draft_with_screenshot_passes_gate(self, mock_llm_router, mock_memory, mock_finance, mock_comms, tmp_path):

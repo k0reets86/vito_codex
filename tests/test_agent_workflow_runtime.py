@@ -15,6 +15,17 @@ class GenericAgent(BaseAgent):
         return self._caps
 
     async def execute_task(self, task_type: str, **kwargs):
+        if task_type == "quality_review":
+            return TaskResult(
+                success=True,
+                output={
+                    "handled_by": self.name,
+                    "approved": True,
+                    "score": 8.7,
+                    "feedback": "looks good",
+                },
+                metadata={"collaboration_contract": {"collaborates_with": ["content_creator", "ecommerce_agent"]}},
+            )
         return TaskResult(success=True, output={"handled_by": self.name, "task_type": task_type})
 
 
@@ -24,12 +35,15 @@ class EcommerceWorkflowAgent(GenericAgent):
             return TaskResult(
                 success=True,
                 output={
-                    "status": "draft",
+                    "handled_by": self.name,
+                    "status": "created",
                     "platform": "gumroad",
                     "id": "wf_demo_1",
                     "url": "https://example.test/listing/wf_demo_1",
+                    "artifact_manifest": {"main_file": True, "cover": True},
                     "evidence": {"id": "wf_demo_1", "url": "https://example.test/listing/wf_demo_1"},
                 },
+                metadata={"collaboration_contract": {"collaborates_with": ["quality_judge", "seo_agent", "smm_agent"]}},
             )
         return await super().execute_task(task_type, **kwargs)
 
@@ -65,6 +79,7 @@ async def test_w01_runtime_produces_handoff_events():
     events = out["events"]
     assert any(e["event"] == "dispatch_start" for e in events)
     assert any(e["event"] == "dispatch_complete" for e in events)
+    assert out["collaboration_assertions"]["degraded"] is False
 
 
 @pytest.mark.asyncio
@@ -145,3 +160,24 @@ async def test_unknown_workflow_is_rejected():
     out = await runtime.run("W99_unknown")
     assert out["success"] is False
     assert out["error"] == "workflow_not_found"
+
+
+@pytest.mark.asyncio
+async def test_workflow_marks_degraded_when_required_agent_missing():
+    reg = _reg(
+        GenericAgent("trend_scout", ["trend_scan"]),
+        GenericAgent("research_agent", ["research"]),
+        GenericAgent("economics_agent", ["pricing_strategy"]),
+        GenericAgent("legal_agent", ["legal"]),
+        GenericAgent("content_creator", ["content_creation"]),
+        GenericAgent("seo_agent", ["listing_seo_pack"]),
+        GenericAgent("translation_agent", ["translate"]),
+        EcommerceWorkflowAgent("ecommerce_agent", ["listing_create"]),
+        GenericAgent("smm_agent", ["campaign_plan"]),
+        GenericAgent("analytics_agent", ["analytics"]),
+    )
+    runtime = AgentWorkflowRuntime(reg)
+    out = await runtime.run("W01_digital_product_sales")
+    assert out["success"] is False
+    assert out["collaboration_assertions"]["degraded"] is True
+    assert "quality_judge" in out["collaboration_assertions"]["missing_agents"]

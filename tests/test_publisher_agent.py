@@ -44,6 +44,7 @@ class TestPublisherAgent:
     async def test_publish_wordpress(self, agent):
         result = await agent.publish_wordpress("Test Post", "Content here", tags=["test"])
         assert result.success is True
+        assert result.metadata["publisher_runtime_profile"]["approved"] is True
 
     @pytest.mark.asyncio
     async def test_publish_rejected_by_quality(self, agent):

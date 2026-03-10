@@ -5,7 +5,7 @@
 - `in_progress`
 - `done`
 
-Общий прогресс: `72%`
+Общий прогресс: `84%`
 
 Текущий baseline:
 - previous benchmark matrix: `6.89 / 10`
@@ -34,15 +34,15 @@
 - Status: `in_progress`
 
 ## Package 3 — Outcome-Changing Collaboration
-- [ ] workflow collaboration assertions
-- [ ] degraded outcome when required support/verify is missing
-- [ ] cross-agent benchmark tasks for collaboration impact
-- Status: `not_started`
+- [x] workflow collaboration assertions
+- [x] degraded outcome when required support/verify is missing
+- [x] cross-agent benchmark tasks for collaboration impact
+- Status: `done`
 
 ## Package 4 — Commerce Execution Hardening
 - [x] `browser_agent` recovery packs deepen runtime behavior
 - [x] `account_manager` auth remediation packs deepen runtime behavior
-- [ ] `ecommerce_agent` deeper platform rule/runbook execution
+- [x] `ecommerce_agent` deeper platform rule/runbook execution
 - [ ] `publisher_agent` richer evidence + retry/escalation behavior
 - [ ] family score `commerce_execution >= 8.0`
 - Status: `in_progress`
@@ -54,7 +54,7 @@
 - Status: `in_progress`
 
 ## Current verified deltas
-- overall benchmark: `6.89 -> 7.30 -> 7.41 -> 7.52`
+- overall benchmark: `6.89 -> 7.30 -> 7.41 -> 7.52 -> 7.52`
 - `intelligence_research`: `6.92 -> 7.56`
 - `research_agent`: `7.16 -> 7.58`
 - `trend_scout`: `6.87 -> 7.45`
@@ -64,6 +64,8 @@
 - `risk_agent`: `6.86 -> 7.44`
 - `email_agent`: `6.96 -> 7.54`
 - `partnership_agent`: `6.53 -> 7.25`
+- `commerce_execution`: `6.75 -> 7.88 -> 7.88`
+- Package 3 collaboration assertions: `done`
 
 ## Current kill-list (< 7.0)
 - none

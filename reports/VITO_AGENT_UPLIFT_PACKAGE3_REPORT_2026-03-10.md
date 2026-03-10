@@ -2,66 +2,80 @@
 
 ## Scope
 
-Priority kill-list agents below `7.0`:
-- `marketing_agent`
-- `risk_agent`
-- `email_agent`
-- `partnership_agent`
+Priority packages:
+- `Package 3 — Outcome-Changing Collaboration`
+- partial `Package 4 — Commerce Execution Hardening`
+
+Covered runtime areas:
+- workflow collaboration assertions
+- degraded outcome on missing required support/verify agents
+- ecommerce/publisher runtime profiles
+- collaboration-aware benchmark rerun
 
 ## What changed
 
-### New runtime module
-- [growth_runtime.py](/home/vito/vito-agent/modules/growth_runtime.py)
+### Runtime workflow layer
+- [agent_workflow_runtime.py](/home/vito/vito-agent/modules/agent_workflow_runtime.py)
+  - added `WORKFLOW_COLLAB_ASSERTIONS` for `W01-W08`
+  - runtime now computes:
+    - `required_agents`
+    - `required_verify_agents`
+    - `observed_agents`
+    - `missing_agents`
+    - `missing_verify_agents`
+    - `degraded`
+  - workflow `success` now hard-fails on degraded collaboration
+  - added safe attribution fallback `capability -> single registered agent` so collaboration traces do not disappear after downstream verify-fail
+
+### Commerce runtime layer
+- [commerce_runtime.py](/home/vito/vito-agent/modules/commerce_runtime.py)
+  - listing runtime profile
+  - publisher runtime profile
 
 ### Agent behavior changes
-- `marketing_agent`
-  - budget-aware runtime profile
-  - next actions for lean / test-and-scale / growth modes
-- `risk_agent`
-  - explicit block recommendation runtime
-  - actionable next steps for high-risk and anti-abuse scenarios
-- `email_agent`
-  - runtime send/sequence profile
-  - subscriber management now emits operational metadata
-- `partnership_agent`
-  - candidate scoring
-  - top-candidate shortlist
-  - partnership runtime profile for outreach sequencing
+- [ecommerce_agent.py](/home/vito/vito-agent/agents/ecommerce_agent.py)
+  - emits `listing_runtime_profile`
+  - returns structured collaboration/evidence metadata on both success and verifier-gated failure
+- [publisher_agent.py](/home/vito/vito-agent/agents/publisher_agent.py)
+  - emits `publisher_runtime_profile`
+  - success outputs consistently carry `handled_by`
 
-### Contract/skill changes
-- richer packs and contracts for:
-  - `marketing_agent`
-  - `risk_agent`
-  - `email_agent`
-  - `partnership_agent`
+### Tests adjusted to real contracts
+- [test_agent_workflow_runtime.py](/home/vito/vito-agent/tests/test_agent_workflow_runtime.py)
+  - workflow doubles upgraded to satisfy current fail-closed runtime contracts
+- [test_ecommerce_agent.py](/home/vito/vito-agent/tests/test_ecommerce_agent.py)
+- [test_publisher_agent.py](/home/vito/vito-agent/tests/test_publisher_agent.py)
 
 ## Validation
 
 Targeted tests:
-- `22 passed`
+- `30 passed`
 
-Benchmark rerun:
-- source: [VITO_AGENT_BENCHMARK_MATRIX_2026-03-10_0013UTC.json](/home/vito/vito-agent/reports/VITO_AGENT_BENCHMARK_MATRIX_2026-03-10_0013UTC.json)
+Full reruns:
+- megatest: [VITO_AGENT_MEGATEST_2026-03-10_0022UTC.json](/home/vito/vito-agent/reports/VITO_AGENT_MEGATEST_2026-03-10_0022UTC.json)
+- benchmark: [VITO_AGENT_BENCHMARK_MATRIX_2026-03-10_0023UTC.json](/home/vito/vito-agent/reports/VITO_AGENT_BENCHMARK_MATRIX_2026-03-10_0023UTC.json)
 
-## Score changes
+## Result
 
-- overall: `7.41 -> 7.52`
-- `marketing_agent`: `6.86 -> 7.44`
-- `risk_agent`: `6.86 -> 7.44`
-- `email_agent`: `6.96 -> 7.54`
-- `partnership_agent`: `6.53 -> 7.25`
+What improved:
+- collaboration discipline is now runtime-enforced, not descriptive
+- missing support/verify agents can degrade workflow success deterministically
+- ecommerce/publisher outputs are more operationally inspectable
 
-## Family changes
+What did not improve yet:
+- overall benchmark remained `7.52`
+- `commerce_execution` remained `7.88`, still below target `8.0`
 
-- `content_growth`: `7.24 -> 7.47`
-- `governance_resilience`: `7.25 -> 7.40`
+Why score did not move:
+- the package mostly hardened orchestration truthfulness and collaboration enforcement
+- benchmark bottleneck is now concentrated in:
+  - `publisher_agent` recovery depth
+  - `vito_core` recovery/collaboration depth
+  - `ecommerce_agent` recovery depth
 
-## Kill-list result
+## Next priority
 
-- agents below `7.0`: `none`
-
-## Remaining weak points
-
-- `commerce_execution` still below target `8.0`
-- `core_control` unchanged at `7.26`
-- `Outcome-Changing Collaboration` package not started yet
+1. deepen `publisher_agent` recovery/runtime evidence
+2. deepen `ecommerce_agent` recovery paths beyond verifier output shaping
+3. improve `vito_core` responsibility/recovery behavior
+4. rerun benchmark until `commerce_execution >= 8.0`

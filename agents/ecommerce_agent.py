@@ -13,6 +13,7 @@ from modules.platform_artifact_pack import build_platform_bundle
 from modules.platform_rules_sync import configured_services, sync_platform_rules
 from modules.platform_knowledge import get_service_knowledge
 from modules.platform_runbook_packs import build_service_runbook_pack
+from modules.commerce_runtime import build_listing_runtime_profile
 from modules.workflow_recipes import platform_recipe
 from modules.workflow_recipe_executor import WorkflowRecipeExecutor
 
@@ -87,6 +88,7 @@ class ECommerceAgent(BaseAgent):
             "contributors": [],
             "notes": [],
             "skill_pack": self.get_skill_pack(),
+            "handled_by": "ecommerce_agent",
         }
         topic = str(seed.get("title") or seed.get("name") or "VITO Digital Product").strip()
         price = int(seed.get("price", 9) or 9)
@@ -279,13 +281,39 @@ class ECommerceAgent(BaseAgent):
                     f"Листинг НЕ принят по финальному verifier на {platform}",
                     extra={"event": "listing_contract_failed", "context": {"platform": platform, "errors": verification.errors, "status": status}},
                 )
-                return TaskResult(success=False, error=err, output=normalized)
+                return TaskResult(
+                    success=False,
+                    error=err,
+                    output=normalized,
+                    metadata={
+                        "listing_runtime_profile": build_listing_runtime_profile(
+                            platform=platform,
+                            status=str(status or ""),
+                            verification={"ok": False, "errors": verification.errors},
+                            contributors=list(data.get("_publish_contributors") or []),
+                        ),
+                        **self.get_skill_pack(),
+                    },
+                )
             if recipe and not recipe_ok:
                 logger.warning(
                     f"Листинг НЕ принят по recipe gate на {platform}",
                     extra={"event": "listing_recipe_failed", "context": {"platform": platform, "reason": recipe_reason, "status": status}},
                 )
-                return TaskResult(success=False, error=recipe_reason or "publish_recipe_gate_failed", output=result)
+                return TaskResult(
+                    success=False,
+                    error=recipe_reason or "publish_recipe_gate_failed",
+                    output=result,
+                    metadata={
+                        "listing_runtime_profile": build_listing_runtime_profile(
+                            platform=platform,
+                            status=str(status or ""),
+                            verification={"ok": False, "errors": [recipe_reason or "publish_recipe_gate_failed"]},
+                            contributors=list(data.get("_publish_contributors") or []),
+                        ),
+                        **self.get_skill_pack(),
+                    },
+                )
             logger.info(
                 f"Листинг создан на {platform}",
                 extra={"event": "listing_created", "context": {"platform": platform}},
@@ -299,7 +327,20 @@ class ECommerceAgent(BaseAgent):
                 }
             if isinstance(result, dict):
                 result["agent_skill_pack"] = self.get_skill_pack()
-            return TaskResult(success=True, output=result)
+                result["handled_by"] = "ecommerce_agent"
+            return TaskResult(
+                success=True,
+                output=result,
+                metadata={
+                    "listing_runtime_profile": build_listing_runtime_profile(
+                        platform=platform,
+                        status=str(status or ""),
+                        verification={"ok": True, "errors": []},
+                        contributors=list(data.get("_publish_contributors") or []),
+                    ),
+                    **self.get_skill_pack(),
+                },
+            )
         except Exception as e:
             return TaskResult(success=False, error=f"Ошибка создания листинга на {platform}: {e}")
 

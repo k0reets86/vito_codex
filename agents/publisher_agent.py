@@ -5,6 +5,7 @@ from typing import Any, Optional
 from pathlib import Path
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
+from modules.commerce_runtime import build_publisher_runtime_profile
 
 logger = get_logger("publisher_agent", agent="publisher_agent")
 
@@ -88,10 +89,19 @@ class PublisherAgent(BaseAgent):
             return TaskResult(
                 success=True,
                 output={
+                    "handled_by": "publisher_agent",
                     "platform": "wordpress",
                     "publish_result": result,
                     "quality_score": (quality.output or {}).get("score") if quality.success else None,
                     "skill_pack": self.get_skill_pack(),
+                },
+                metadata={
+                    "publisher_runtime_profile": build_publisher_runtime_profile(
+                        platform="wordpress",
+                        quality_score=(quality.output or {}).get("score") if quality.success else None,
+                        approved=bool((quality.output or {}).get("approved", True)) if quality.success else True,
+                    ),
+                    **self.get_skill_pack(),
                 },
             )
         except Exception as e:
@@ -135,10 +145,19 @@ class PublisherAgent(BaseAgent):
             return TaskResult(
                 success=True,
                 output={
+                    "handled_by": "publisher_agent",
                     "platform": "medium",
                     "publish_result": result,
                     "quality_score": (quality.output or {}).get("score") if quality.success else None,
                     "skill_pack": self.get_skill_pack(),
+                },
+                metadata={
+                    "publisher_runtime_profile": build_publisher_runtime_profile(
+                        platform="medium",
+                        quality_score=(quality.output or {}).get("score") if quality.success else None,
+                        approved=bool((quality.output or {}).get("approved", True)) if quality.success else True,
+                    ),
+                    **self.get_skill_pack(),
                 },
             )
         except Exception as e:
