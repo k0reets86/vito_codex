@@ -203,8 +203,15 @@ class DevOpsAgent(BaseAgent):
         checks["sqlite"] = {"path": settings.SQLITE_PATH, "ok": os.path.exists(settings.SQLITE_PATH)}
         # Overall
         all_ok = all(c.get("ok", True) for c in checks.values())
+        issues = [name for name, payload in checks.items() if not bool(payload.get("ok", True))]
         logger.info(f"Health check: {'OK' if all_ok else 'ISSUES'}", extra={"event": "health_check", "context": checks})
-        return TaskResult(success=True, output={"health": "ok" if all_ok else "degraded", "checks": checks, "skill_pack": self.get_skill_pack()})
+        return TaskResult(success=True, output={
+            "health": "ok" if all_ok else "degraded",
+            "checks": checks,
+            "issues": issues,
+            "recovery_hints": self._recovery_hints_for_issues(issues),
+            "skill_pack": self.get_skill_pack(),
+        })
 
     # ── Backup ──
 
@@ -220,7 +227,13 @@ class DevOpsAgent(BaseAgent):
                 shutil.copy2(src, dst)
                 backed_up.append(src)
         logger.info(f"Backup: {len(backed_up)} файлов", extra={"event": "backup_done", "context": {"dir": backup_dir}})
-        return TaskResult(success=True, output={"backup_dir": backup_dir, "files": backed_up, "skill_pack": self.get_skill_pack()})
+        return TaskResult(success=True, output={
+            "backup_dir": backup_dir,
+            "files": backed_up,
+            "manifest": {"file_count": len(backed_up), "timestamp": ts},
+            "recovery_hints": ["Verify backup readability before deleting old snapshots."],
+            "skill_pack": self.get_skill_pack(),
+        })
 
     # ── Self-heal (теперь использует execute_shell) ──
 
@@ -248,4 +261,20 @@ class DevOpsAgent(BaseAgent):
         if not actions_taken:
             actions_taken.append({"action": "none", "result": f"Проблема '{issue}' зафиксирована, требуется ручной анализ"})
 
-        return TaskResult(success=True, output={"issue": issue, "actions": actions_taken, "skill_pack": self.get_skill_pack()})
+        return TaskResult(success=True, output={
+            "issue": issue,
+            "actions": actions_taken,
+            "recovery_hints": self._recovery_hints_for_issues([issue]),
+            "skill_pack": self.get_skill_pack(),
+        })
+
+    def _recovery_hints_for_issues(self, issues: list[str]) -> list[str]:
+        hints: list[str] = []
+        hay = " ".join(str(x or "").lower() for x in issues)
+        if any(x in hay for x in ("memory", "ram", "oom")):
+            hints.append("Reduce concurrent heavy jobs and inspect recent memory spikes before retry.")
+        if any(x in hay for x in ("disk", "space")):
+            hints.append("Clear old artifacts and backups before re-running storage-heavy workflows.")
+        if any(x in hay for x in ("database", "sqlite")):
+            hints.append("Run integrity check and create a fresh backup before attempting recovery.")
+        return hints or ["Escalate to manual ops review if automatic diagnostics stay inconclusive."]

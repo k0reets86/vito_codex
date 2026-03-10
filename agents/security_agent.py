@@ -65,12 +65,25 @@ class SecurityAgent(BaseAgent):
                 report["missing"].append(var)
         report["total"] = len(SENSITIVE_ENV_VARS)
         report["configured_count"] = len(report["configured"])
+        report["risk_score"] = max(0, min(10, 10 - len(report["missing"]) - len(report["weak"])))
+        report["recovery_hints"] = [
+            "Fill missing critical secrets before enabling live automation on affected platforms.",
+            "Rotate weak or short credentials and re-check runtime secret health.",
+        ]
         logger.info(f"Аудит ключей: {report['configured_count']}/{report['total']} настроено", extra={"event": "key_audit"})
         return TaskResult(success=True, output=report)
 
     async def rotate_key(self, service: str) -> TaskResult:
         logger.warning(f"Запрос ротации ключа: {service}", extra={"event": "key_rotation_request"})
-        return TaskResult(success=True, output={"service": service, "status": "rotation_requested", "note": "Manual rotation required"})
+        return TaskResult(success=True, output={
+            "service": service,
+            "status": "rotation_requested",
+            "note": "Manual rotation required",
+            "recovery_hints": [
+                "Create new secret, update runtime env, then revoke the old credential.",
+                "Verify dependent platform logins after rotation completes.",
+            ],
+        })
 
     async def encrypt_backup(self, path: str) -> TaskResult:
         return TaskResult(success=True, output={"path": path, "status": "encryption_not_implemented"})
@@ -93,6 +106,10 @@ class SecurityAgent(BaseAgent):
             },
         }
         if not self.llm_router:
+            local["analysis"]["recovery_hints"] = [
+                "Confirm secrets are not tracked in git history.",
+                "Close missing env gaps before re-running live integrations.",
+            ]
             return TaskResult(success=True, output=local, metadata={"mode": "local_fallback"})
         response = await self._call_llm(
             task_type=TaskType.ROUTINE,
@@ -101,4 +118,8 @@ class SecurityAgent(BaseAgent):
         )
         if response:
             local["analysis"]["llm_notes"] = response
+        local["analysis"]["recovery_hints"] = [
+            "Fix warnings in priority order: secrets exposure, missing envs, then policy drift.",
+            "Re-run security scan after each remediation batch.",
+        ]
         return TaskResult(success=True, output=local)

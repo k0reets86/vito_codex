@@ -77,13 +77,24 @@ class QualityJudge(BaseAgent):
         score = data.get("score", 5)
         threshold = max(1, min(10, int(getattr(settings, "QUALITY_JUDGE_APPROVAL_THRESHOLD", APPROVAL_THRESHOLD) or APPROVAL_THRESHOLD)))
         approved = score >= threshold
-        result_output = {"score": score, "feedback": data.get("feedback", ""), "approved": approved, "issues": data.get("issues", [])}
+        result_output = {
+            "score": score,
+            "feedback": data.get("feedback", ""),
+            "approved": approved,
+            "issues": data.get("issues", []),
+        }
         result_output["domain_scorecard"] = self._normalize_domain_scorecard(
             data.get("domain_scorecard"),
             content=str(content or ""),
             content_type=str(content_type or "article"),
         )
         result_output["threshold"] = threshold
+        result_output["recovery_plan"] = self._build_recovery_plan(
+            issues=result_output["issues"],
+            scorecard=result_output["domain_scorecard"],
+            approved=approved,
+        )
+        result_output["evidence"] = self._build_evidence(content=str(content or ""), content_type=str(content_type or "article"))
         logger.info(f"Quality review: score={score}, approved={approved}, threshold={threshold}", extra={"event": "quality_review", "context": result_output})
         return TaskResult(success=True, output=result_output, cost_usd=0.005, duration_ms=duration_ms)
 
@@ -108,6 +119,8 @@ class QualityJudge(BaseAgent):
             "issues": issues,
             "domain_scorecard": self._normalize_domain_scorecard(None, content=text, content_type=content_type),
             "threshold": threshold,
+            "recovery_plan": self._build_recovery_plan(issues=issues, scorecard=self._normalize_domain_scorecard(None, content=text, content_type=content_type), approved=score >= threshold),
+            "evidence": self._build_evidence(content=text, content_type=content_type),
         }
 
     def _normalize_domain_scorecard(self, raw: Any, *, content: str, content_type: str) -> dict[str, int]:
@@ -140,3 +153,30 @@ class QualityJudge(BaseAgent):
                 value = int(fallback)
             out[key] = max(1, min(10, value))
         return out
+
+    def _build_evidence(self, *, content: str, content_type: str) -> dict[str, Any]:
+        text = str(content or "")
+        return {
+            "content_type": str(content_type or "article"),
+            "content_length": len(text),
+            "has_url": ("http://" in text or "https://" in text),
+            "has_bullets": ("- " in text or "•" in text),
+            "has_numbers": any(ch.isdigit() for ch in text),
+        }
+
+    def _build_recovery_plan(self, *, issues: list[Any], scorecard: dict[str, int], approved: bool) -> list[str]:
+        if approved:
+            return []
+        steps: list[str] = []
+        issue_set = {str(x or "").strip().lower() for x in issues}
+        if "content_too_short" in issue_set or int(scorecard.get("completeness", 0)) < 7:
+            steps.append("Expand the draft with concrete sections, examples, and completion of missing fields.")
+        if "placeholder_content" in issue_set:
+            steps.append("Replace placeholders with final copy and remove TODO/lorem ipsum fragments.")
+        if int(scorecard.get("evidence", 0)) < 7:
+            steps.append("Add evidence artifacts: links, file names, screenshots, or platform proof.")
+        if int(scorecard.get("compliance", 0)) < 7:
+            steps.append("Re-check platform policy, disclosure, and publishing constraints before release.")
+        if int(scorecard.get("readiness", 0)) < 7:
+            steps.append("Run one more editor reload verification before treating the object as done.")
+        return steps or ["Revise the asset pack and rerun final verification."]

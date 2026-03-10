@@ -158,6 +158,10 @@ class SMMAgent(BaseAgent):
                                 "platform": platform,
                                 "text": post_text,
                                 "hashtags": self._local_hashtags(content, platform),
+                                "recovery_hints": [
+                                    "If engagement is weak, rerun with a stronger hook or native community framing.",
+                                    "If moderation blocks the post, switch to platform-safe value-first copy.",
+                                ],
                             },
                             **self.get_skill_pack(),
                             **publish_result,
@@ -185,6 +189,10 @@ class SMMAgent(BaseAgent):
                     "platform": platform,
                     "text": post_text,
                     "hashtags": self._local_hashtags(content, platform),
+                    "recovery_hints": [
+                        "Retry with a more native tone before escalating to direct promotion.",
+                        "Reuse the best-performing hook from prior experiments when available.",
+                    ],
                 },
                 **self.get_skill_pack(),
                 "note": f"No {platform} platform configured" if not platform_obj else "Posting failed",
@@ -205,8 +213,8 @@ class SMMAgent(BaseAgent):
             response = await self._call_llm(task_type=TaskType.CONTENT, prompt=f"Подбери 15-20 хэштегов для {platform} по теме: {content[:500]}", estimated_tokens=500)
         if not response:
             response = self._local_hashtags(content, platform)
-            return TaskResult(success=True, output=response, metadata={"mode": "local_fallback", **self.get_skill_pack()})
-        return TaskResult(success=True, output=response, cost_usd=0.003, metadata=self.get_skill_pack())
+            return TaskResult(success=True, output={"hashtags": response, "platform": platform, "recovery_hints": ["Prune weak or spammy tags before reusing the pack."]}, metadata={"mode": "local_fallback", **self.get_skill_pack()})
+        return TaskResult(success=True, output={"hashtags": response, "platform": platform, "recovery_hints": ["Prefer fewer, more native tags when moderation is strict."]}, cost_usd=0.003, metadata=self.get_skill_pack())
 
     def _local_post(self, platform: str, content: str, style: str | None = None) -> str:
         topic = (content or "AI automation update").strip()

@@ -79,6 +79,15 @@ class SEOAgent(BaseAgent):
             cost = 0.01
             self._record_expense(cost, f"Keyword research: {topic[:50]}")
             output["llm_notes"] = str(response)
+        output["recovery_hints"] = [
+            "If keyword set feels too generic, rerun with narrower audience or platform-specific modifier.",
+            "Prefer long-tail terms when direct commercial terms are too competitive.",
+        ]
+        output["evidence"] = {
+            "primary_count": len(output.get("primary_keywords", []) or []),
+            "long_tail_count": len(output.get("long_tail_keywords", []) or []),
+            "lsi_count": len(output.get("lsi_keywords", []) or []),
+        }
         self._cache[key] = json.dumps(output, ensure_ascii=False)
         return TaskResult(success=True, output=output, cost_usd=cost)
 
@@ -95,6 +104,10 @@ class SEOAgent(BaseAgent):
             return TaskResult(success=True, output=local)
         self._record_expense(0.01, "SEO optimize content")
         local["llm_rewrite"] = response
+        local["recovery_hints"] = [
+            "Re-check title/H1 keyword placement if readiness stays below target.",
+            "Shorten meta text if SERP snippets exceed length budgets.",
+        ]
         return TaskResult(success=True, output=local, cost_usd=0.01)
 
     async def analyze_rankings(self, url: str) -> TaskResult:
@@ -162,6 +175,11 @@ class SEOAgent(BaseAgent):
                 "tag_count": len(payload.get("tags") or []),
                 "keyword_count": len(payload.get("keywords") or []),
             },
+            "recovery_hints": [
+                "Trim title if platform truncates the main value proposition.",
+                "If tags are blocked, retry with shorter long-tail phrases.",
+                "If category is weak, rerun listing optimizer with platform-specific intent.",
+            ],
         }
         return TaskResult(success=True, output=pack)
 
