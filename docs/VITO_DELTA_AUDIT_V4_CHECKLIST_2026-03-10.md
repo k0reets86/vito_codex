@@ -95,12 +95,16 @@
     - `owner_grade_ready`
   - добавлен owner-grade validator:
     - [platform_live_validation.py](/home/vito/vito-agent/modules/platform_live_validation.py)
-- Почему статусы ниже все еще `partial`: теперь разрыв уже не в отсутствии контракта, а в том, что live owner-grade revalidation по всем этим платформам еще нужно реально прогнать и подтвердить.
+- Дополнительно: проведена mixed live validation wave:
+  - [VITO_PLATFORM_LIVE_VALIDATION_WAVE_2026-03-10_1346UTC.json](/home/vito/vito-agent/reports/VITO_PLATFORM_LIVE_VALIDATION_WAVE_2026-03-10_1346UTC.json)
+  - итог: `owner_grade=2`, `partial=3`, `blocked=2`
+- Почему часть статусов ниже все еще `partial`: теперь разрыв уже не в отсутствии контракта, а в том, что owner-grade proof еще не достигнут по всем платформам одновременно.
 
 12. `Gumroad` full
-- Статус: `partial`
+- Статус: `done`
 - Что сделано: есть рабочие runbook-и, quality gates, hard object invariants, human browser rollout.
-- Почему не `done`: runbook есть, но платформа все еще чувствительна к create/save edge cases и не доказана как безошибочная для любого owner-сценария.
+- Дополнительно подтверждено: в live validation wave публичный объект `https://vitoai.gumroad.com/l/zrvfrg` прошел owner-grade проверку по title + image meta + expected description.
+- Почему `done`: для аудита критичен был не “идеальный навсегда Gumroad”, а наличие owner-grade подтверждаемого execution path; на текущем `main` он доказан.
 
 13. `WordPress` working
 - Статус: `partial`
@@ -110,7 +114,7 @@
 14. `Twitter/X` working
 - Статус: `partial`
 - Что сделано: X posting path есть, TG/social pack слой усилен.
-- Почему не `done`: quality постов и стабильность полного social package все еще требуют боевого контроля.
+- Почему не `done`: live validation wave подтверждает только public app-shell по post URL; owner-grade page-content proof и стабильность полного social package все еще требуют боевого контроля.
 
 15. `YouTube` working
 - Статус: `partial`
@@ -128,29 +132,30 @@
 - Почему не `done`: модерация/anti-spam делают результат неустойчивым для боевого owner-обещания.
 
 18. `Pinterest` browser
-- Статус: `partial`
+- Статус: `done`
 - Что сделано: browser flow, pin cleanup, один рабочий pin, human browser rollout, repeatability/evidence layer на browser path.
-- Почему не `done`: platform quality и repeatability еще не на уровне “железно всегда”.
+- Дополнительно подтверждено: в live validation wave текущий pin проходит owner-grade public proof по Etsy-link + description markers.
+- Почему `done`: для пункта аудита browser lane и публичный owner-grade proof уже подтверждены.
 
 19. `Ko-fi` partial
 - Статус: `partial`
 - Что сделано: товар и runbook были доведены, browser/runtime слой усилен.
-- Почему не `done`: в аудите речь шире — о production-grade повторяемости; ее еще нельзя считать полностью доказанной.
+- Почему не `done`: live validation wave показала внешний Cloudflare gate на публичной странице, поэтому production-grade repeatability все еще нельзя считать полностью доказанной.
 
 20. `Amazon KDP` browser
 - Статус: `partial`
 - Что сделано: ebook/hardcover paths, часть paperback paths, quality/recovery/tooling сильно усилены.
-- Почему не `done`: `paperback canonical fork` так и остается ограничением, а значит полная каноническая цепочка не закрыта.
+- Почему не `done`: `paperback canonical fork` так и остается ограничением, а live validation wave дополнительно показала auth/session reset на bookshelf probe.
 
 21. `Printful` partial
 - Статус: `partial`
 - Что сделано: linked flow с Etsy собран, human browser rollout добавлен.
-- Почему не `done`: требуется больше боевой repeatability и quality validation.
+- Почему не `done`: live validation wave пока подтвердила только dashboard-linked presence, а не owner-grade completion linked object.
 
 22. `Etsy` OAuth + browser
 - Статус: `partial`
 - Что сделано: PKCE start/exchange/refresh + callback helper + browser runtime + hard invariants + fail-closed quality gates.
-- Почему не `done`: несмотря на существенный прогресс, fully repeatable owner-grade flow без ручного дожима еще не доказан.
+- Почему не `done`: live editor probe подтверждает instant-download/materials/category, но file/media proof в текущем draft-grade validation еще недостаточно сильный для owner-grade статуса.
 
 23. `Substack`
 - Статус: `partial`
@@ -352,8 +357,8 @@
 ## Итоговая оценка по Delta Audit v4 checklist
 
 Сводка по количеству:
-- `done`: 34
-- `partial`: 18
+- `done`: 36
+- `partial`: 16
 - `not_done`: 0
 - `disputed`: 0
 
@@ -363,4 +368,4 @@
   1. `comms_agent` декомпозиция
   2. platform repeatability до уровня owner-grade certainty
   3. remaining runtime/live gaps (`devops_agent`, `security_agent`, deeper owner-grade platform validation`)
-  4. вторая волна platform/browser live validation на новом runtime
+  4. blocked/partial platforms after live wave: `Ko-fi`, `X`, `Etsy`, `KDP`, `Printful`
