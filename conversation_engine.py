@@ -35,6 +35,7 @@ from modules.conversation_memory import ConversationMemory
 from modules.cancel_state import CancelState
 from modules.owner_task_state import OwnerTaskState
 from modules.autonomy_proposals import AutonomyProposalStore
+from modules.conversation_owner_lane import handle_owner_preroute
 from modules.status_snapshot import build_status_snapshot, render_status_snapshot
 from modules.telegram_command_compiler import compile_owner_message, parse_owner_message_structured
 from llm_router import LLMRouter, TaskType, MODEL_REGISTRY
@@ -109,6 +110,7 @@ class ConversationEngine:
         self.autonomy_proposals = AutonomyProposalStore()
         self._session_id = "default"
         self._defer_owner_actions = False
+        self.Intent = Intent
         self._context: list[Turn] = []
         if self.conversation_memory:
             self._load_context_from_memory()
@@ -183,84 +185,9 @@ class ConversationEngine:
                     return {"response": response, "intent": Intent.QUESTION.value}
             except Exception:
                 pass
-        autonomy_continuation = self._maybe_continue_from_autonomy_proposals(text)
-        if autonomy_continuation is not None:
-            try:
-                self._ensure_owner_task_state(text, autonomy_continuation.get("intent"))
-                self._add_turn("user", text, Intent.SYSTEM_ACTION if autonomy_continuation.get("intent") == Intent.SYSTEM_ACTION.value else Intent.QUESTION)
-                if autonomy_continuation.get("response"):
-                    self._add_turn("assistant", autonomy_continuation["response"])
-                    self.owner_model.update_from_interaction(text, autonomy_continuation["response"])
-            except Exception:
-                pass
-            autonomy_continuation["nlu_tones"] = self._detect_tone(text)
-            return autonomy_continuation
-        if self.owner_task_state:
-            try:
-                active = self.owner_task_state.get_active() or {}
-            except Exception:
-                active = {}
-            routed = await compile_owner_message(text, active, self.llm_router)
-            if routed is not None:
-                try:
-                    self._ensure_owner_task_state(text, routed.get("intent"))
-                except Exception:
-                    pass
-                if routed.get("actions") and not routed.get("needs_confirmation") and not self._defer_owner_actions:
-                    try:
-                        action_out = await self._execute_actions(routed.get("actions") or [])
-                        if action_out:
-                            base = str(routed.get("response") or "").strip()
-                            routed["response"] = f"{base}\n{action_out}".strip()
-                    except Exception:
-                        pass
-                selected = routed.get("selected")
-                selected_idx = int(routed.get("selected_idx") or 0)
-                if selected_idx and isinstance(selected, dict):
-                    try:
-                        self.owner_task_state.enrich_active(
-                            selected_research_option=selected_idx,
-                            selected_research_json=json.dumps(selected, ensure_ascii=False),
-                            selected_research_title=str(selected.get("title") or "")[:180],
-                            selected_research_platform=",".join(routed.get("platforms") or []),
-                        )
-                        self.owner_model.update_from_decision(selected, approved=True)
-                    except Exception:
-                        pass
-                try:
-                    self._ensure_owner_task_state(text, routed.get("intent"))
-                    self._add_turn("user", text, Intent.SYSTEM_ACTION if routed.get("intent") == Intent.SYSTEM_ACTION.value else Intent.QUESTION)
-                    if routed.get("response"):
-                        self._add_turn("assistant", routed["response"])
-                        self.owner_model.update_from_interaction(text, routed["response"])
-                except Exception:
-                    pass
-                routed["nlu_tones"] = self._detect_tone(text)
-                return routed
-        deterministic = await self._deterministic_owner_route(text)
-        if deterministic is not None:
-            try:
-                self._ensure_owner_task_state(text, deterministic.get("intent"))
-                self._add_turn("user", text, Intent.SYSTEM_ACTION if deterministic.get("intent") == Intent.SYSTEM_ACTION.value else Intent.QUESTION)
-                if deterministic.get("response"):
-                    self._add_turn("assistant", deterministic["response"])
-                    self.owner_model.update_from_interaction(text, deterministic["response"])
-            except Exception:
-                pass
-            deterministic["nlu_tones"] = self._detect_tone(text)
-            return deterministic
-        research_continuation = self._maybe_continue_from_research_state(text)
-        if research_continuation is not None:
-            try:
-                self._ensure_owner_task_state(text, research_continuation.get("intent"))
-                self._add_turn("user", text, Intent.SYSTEM_ACTION)
-                if research_continuation.get("response"):
-                    self._add_turn("assistant", research_continuation["response"])
-                    self.owner_model.update_from_interaction(text, research_continuation["response"])
-            except Exception:
-                pass
-            research_continuation["nlu_tones"] = self._detect_tone(text)
-            return research_continuation
+        preroute = await handle_owner_preroute(self, text)
+        if preroute is not None:
+            return preroute
         # 1. Detect intent + tone
         tones = self._detect_tone(text)
         intent = self._detect_intent_rules(text)

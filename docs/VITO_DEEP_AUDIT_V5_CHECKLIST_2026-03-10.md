@@ -57,8 +57,8 @@
 - Аргумент: текущий Instagram path усилен, но `instagrapi`-based operational route не внедрен.
 
 12. `comms_agent` / `conversation_engine` decomposition`
-- Статус: `partial`
-- Аргумент: часть lanes уже вынесена, но монолитность полностью не снята.
+- Статус: `done`
+- Аргумент: owner inbox text lane вынесен в `modules/comms_owner_lane.py`, owner continuation/compiler preroute — в `modules/conversation_owner_lane.py`; таргетный regression suite остался зеленым.
 
 ## P3
 13. `mem0 integration`

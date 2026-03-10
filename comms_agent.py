@@ -90,6 +90,7 @@ from modules.platform_target_registry import (
     save_working_platform_targets as _save_working_platform_targets,
 )
 from modules.comms_callback_lane import handle_callback as _handle_callback_lane_impl, safe_edit_callback_message as _safe_edit_callback_message_impl
+from modules.comms_owner_lane import handle_owner_text as _handle_owner_text_impl
 from modules.comms_recipe_lane import build_recipe_payload as _build_recipe_payload_impl, run_recipe_direct as _run_recipe_direct_impl
 from modules.owner_preference_model import OwnerPreferenceModel
 from modules.owner_pref_metrics import OwnerPreferenceMetrics
@@ -1969,186 +1970,11 @@ class CommsAgent:
                 pass
 
     async def _handle_owner_text(self, text: str, source: str = "owner_inbox") -> None:
-        """Process owner text without Telegram Update (offline inbox)."""
-        text = (text or "").strip()
-        if not text:
-            return
-        self._log_owner_request(text, source=source)
+        await _handle_owner_text_impl(self, text, source=source)
 
-        async def _owner_reply(msg: str, markup=None) -> None:
-            # owner_inbox path does not support inline markup; send plain text
-            await self.send_message(msg)
-
-        # Login/auth intent must win over generic status/inventory routing
-        # to avoid accidental fallback into planning/research branches.
-        login_svc = self._detect_service_login_request(text)
-        if login_svc and self._is_inventory_prompt(text):
-            self._touch_service_context(login_svc)
-            if self._service_auth_confirmed.get(login_svc):
-                await self.send_message(await self._format_service_inventory_snapshot(login_svc), level="result")
-                return
-        if await self._handle_kdp_login_flow(text, _owner_reply, with_button=False):
-            self._touch_service_context("amazon_kdp")
-            return
-        svc = login_svc
-        if svc and svc != "amazon_kdp":
-            if await self._start_service_auth_flow(svc, _owner_reply, with_button=False):
-                return
-
-        lower = text.lower()
-        if self._pending_service_auth and self._is_auth_done_text(lower):
-            service = next(reversed(self._pending_service_auth))
-            pending = self._pending_service_auth.pop(service, None) or {}
-            ok, detail = await self._verify_service_auth(service)
-            title, _ = self._service_auth_meta(service)
-            self._touch_service_context(service)
-            if ok:
-                self._mark_service_auth_confirmed(service)
-                await self.send_message(f"Вход подтверждён: {title}.")
-            else:
-                if self._requires_strict_auth_verification(service):
-                    since = str(pending.get("requested_at") or "")
-                    has_storage, storage_detail = self._has_cookie_storage_state(service, since_iso=since)
-                    if bool(pending.get("mode") == "remote") and has_storage:
-                        self._mark_service_auth_confirmed(service)
-                        await self.send_message(f"Вход подтверждён: {title} (server storage захвачен, detail={storage_detail}).")
-                        return
-                    self._clear_service_auth_confirmed(service)
-                    extra = f" {self._manual_capture_hint(service)}" if self._is_challenge_detail(detail) else ""
-                    await self.send_message(self._service_needs_session_refresh_text(service, title, detail) + extra)
-                elif self._is_manual_auth_service(service):
-                    self._mark_service_auth_confirmed(service)
-                    await self.send_message(f"Вход зафиксирован вручную: {title}. Проверка: {detail}")
-                else:
-                    await self.send_message(f"Не удалось подтвердить вход: {detail}")
-            return
-
-        service_inventory = self._detect_contextual_service_inventory_request(text)
-        if service_inventory:
-            await self.send_message(await self._format_service_inventory_snapshot(service_inventory), level="result")
-            return
-        service_status = self._detect_contextual_service_status_request(text)
-        if service_status:
-            await self.send_message(await self._format_service_auth_status_live(service_status), level="result")
-            return
-        if self._is_auth_issue_prompt(text):
-            svc = self._last_service_context if self._has_fresh_service_context() else ""
-            if svc:
-                await self.send_message(await self._format_service_auth_status_live(svc), level="result")
-                return
-
-        # Accept secrets/key updates via text
-        if self._try_set_env_from_text(text):
-            await self.send_message("Ключ принят и сохранён. Если нужен перезапуск сервиса — скажи 'перезапусти'.")
-            return
-        # Explicit preference update (opt-in)
-        if self._try_deactivate_preference_from_text(text):
-            await self.send_message("Предпочтение деактивировано.")
-            return
-        if self._try_set_preference_from_text(text):
-            await self.send_message("Предпочтение сохранено. Могу учитывать в будущих задачах.")
-            return
-
-        lower = text.lower()
-        if self._pending_service_auth and self._is_auth_done_text(lower):
-            service = next(reversed(self._pending_service_auth))
-            pending = self._pending_service_auth.pop(service, None) or {}
-            ok, detail = await self._verify_service_auth(service)
-            title, _ = self._service_auth_meta(service)
-            self._touch_service_context(service)
-            if ok:
-                self._mark_service_auth_confirmed(service)
-                await self.send_message(f"Вход подтверждён: {title}.")
-                logger.info("Inline auth_done via text", extra={"event": "inline_auth_done", "context": {"service": service, "mode": "text"}})
-            else:
-                if self._requires_strict_auth_verification(service):
-                    since = str(pending.get("requested_at") or "")
-                    has_storage, storage_detail = self._has_cookie_storage_state(service, since_iso=since)
-                    if bool(pending.get("mode") == "remote") and has_storage:
-                        self._mark_service_auth_confirmed(service)
-                        await self.send_message(
-                            f"Вход подтверждён: {title} (server storage захвачен, detail={storage_detail})."
-                        )
-                        return
-                    self._clear_service_auth_confirmed(service)
-                    extra = f" {self._manual_capture_hint(service)}" if self._is_challenge_detail(detail) else ""
-                    await self.send_message(self._service_needs_session_refresh_text(service, title, detail) + extra)
-                elif self._is_manual_auth_service(service):
-                    self._mark_service_auth_confirmed(service)
-                    await self.send_message(f"Вход зафиксирован вручную: {title}. Проверка: {detail}")
-                    logger.info("Inline auth_done via text", extra={"event": "inline_auth_done", "context": {"service": service, "mode": "text_manual"}})
-                else:
-                    await self.send_message(f"Не удалось подтвердить вход: {detail}")
-            return
-        if self._pending_owner_confirmation and (self._is_yes_token(lower) or self._is_no_token(lower)):
-            payload = self._pending_owner_confirmation or {}
-            self._pending_owner_confirmation = None
-            kind = str(payload.get("kind") or "")
-            if self._is_yes_token(lower):
-                if kind == "clear_goals" and self._goal_engine:
-                    removed = int(self._goal_engine.clear_all_goals() or 0)
-                    await self.send_message(f"Готово. Очередь целей очищена ({removed}).", level="result")
-                elif kind == "rollback" and self._self_updater:
-                    backup_path = str(payload.get("backup_path") or "")
-                    if not backup_path:
-                        await self.send_message("Нет пути к бэкапу для отката.", level="result")
-                    else:
-                        success = self._self_updater.rollback(backup_path)
-                        status = "Откат выполнен" if success else "Ошибка отката"
-                        await self.send_message(f"{status}: {backup_path}", level="result")
-                else:
-                    await self.send_message("Принял. Выполняю.", level="result")
-            else:
-                await self.send_message("Ок, отменил.", level="result")
-            return
+    async def _maybe_handle_owner_shortcuts(self, text: str) -> bool:
+        lower = str(text or "").lower()
         strict_cmds = bool(getattr(settings, "TELEGRAM_STRICT_COMMANDS", True)) and not self._autonomy_max_enabled()
-        if self._pending_system_action:
-            pending_kind = str((self._pending_system_action or {}).get("kind") or "").strip().lower()
-            allow_numeric_choice = text.isdigit() and (
-                (not strict_cmds) or pending_kind == "research_options"
-            )
-            if allow_numeric_choice:
-                idx = int(text)
-                picked = self._select_pending_research_option(idx)
-                if picked is not None:
-                    await self.send_message(f"Принял вариант {idx}. Запускаю.", level="result")
-                    await self._execute_pending_system_action()
-                    return
-                actions = list((self._pending_system_action or {}).get("actions") or [])
-                if 1 <= idx <= len(actions):
-                    self._pending_system_action = {"actions": [actions[idx - 1]], "origin_text": f"choice:{idx}"}
-                    await self.send_message(f"Принял вариант {idx}. Запускаю.", level="result")
-                    await self._execute_pending_system_action()
-                    return
-            if self._is_yes_token(lower):
-                payload = self._pending_system_action or {}
-                if str(payload.get("kind") or "").strip().lower() == "research_options":
-                    rec_idx = int(payload.get("recommended_index") or 1)
-                    self._select_pending_research_option(rec_idx)
-                await self._execute_pending_system_action()
-                return
-            if self._is_no_token(lower):
-                self._pending_system_action = None
-                await self.send_message("Ок, системное действие отменено.", level="result")
-                return
-        # Approvals
-        if self._pending_approvals:
-            if self._is_yes_token(lower):
-                # approve first pending
-                request_id = next(iter(self._pending_approvals))
-                future = self._pending_approvals.pop(request_id)
-                if not future.done():
-                    future.set_result(True)
-                await self.send_message("Одобрено.", level="approval")
-                return
-            if self._is_no_token(lower):
-                request_id = next(iter(self._pending_approvals))
-                future = self._pending_approvals.pop(request_id)
-                if not future.done():
-                    future.set_result(False)
-                await self.send_message("Отклонено.", level="approval")
-                return
-
         if text.isdigit() and self._prime_research_pending_actions_from_owner_state(text):
             idx = int(text)
             picked = self._select_pending_research_option(idx)
@@ -2156,14 +1982,10 @@ class CommsAgent:
                 title = str(picked.get("title") or "").strip()
                 score = int(picked.get("score", 0) or 0)
                 await self.send_message(
-                    (
-                        f"Зафиксировал вариант {idx}: {title} ({score}/100). "
-                        "Если запускать сразу, напиши: «создавай» или укажи платформу."
-                    ),
+                    f"Зафиксировал вариант {idx}: {title} ({score}/100). Если запускать сразу, напиши: «создавай» или укажи платформу.",
                     level="result",
                 )
-                return
-
+                return True
         if (not strict_cmds) and any(x in lower for x in ("llm_mode ", "режим llm", "режим lmm", "llm режим")):
             mode = "status"
             if any(x in lower for x in (" free", " тест", " gemini", " flash")):
@@ -2172,93 +1994,96 @@ class CommsAgent:
                 mode = "prod"
             ok, msg = self._apply_llm_mode(mode)
             await self.send_message(msg if ok else "Используй: /llm_mode free|prod|status", level="result")
-            return
+            return True
+        return False
 
+    async def _maybe_handle_owner_service_commands(self, text: str) -> bool:
         service_status = self._detect_contextual_service_status_request(text)
         if service_status:
             await self.send_message(await self._format_service_auth_status_live(service_status), level="result")
-            return
+            return True
         service_inventory = self._detect_contextual_service_inventory_request(text)
         if service_inventory:
             await self.send_message(await self._format_service_inventory_snapshot(service_inventory), level="result")
             self._record_context_learning(
                 skill_name="contextual_service_inventory_resolution",
                 description=(
-                    "Если активен контекст платформы, запросы вида 'проверь товары/листинги' "
-                    "выполняются как проверка аккаунта этой платформы, а не как market research."
+                    "Если активен контекст платформы, запросы вида 'проверь товары/листинги' выполняются как проверка аккаунта этой платформы, а не как market research."
                 ),
                 anti_pattern=(
                     "Плохо: отправлять владельца в analyze_niche, когда он просит проверить товары в текущем аккаунте."
                 ),
                 method={"service": service_inventory, "source_text": text[:120]},
             )
-            return
+            return True
+        return False
 
+    async def _maybe_handle_owner_menu_commands(self, text: str) -> bool:
+        lower = str(text or "").lower().strip()
+        strict_cmds = bool(getattr(settings, "TELEGRAM_STRICT_COMMANDS", True)) and not self._autonomy_max_enabled()
         if not strict_cmds:
             text = self._expand_short_choice(text)
-            lower = text.lower()
-
-        # Simple shortcuts
-        if lower.strip() in ("/help", "help"):
+            lower = text.lower().strip()
+        if lower in ("/help", "help"):
             await self.send_message(self._render_help())
-            return
-        if lower.strip() in ("/help_daily", "help_daily", "/help daily", "help daily", "/help daily_commands"):
+            return True
+        if lower in ("/help_daily", "help_daily", "/help daily", "help daily", "/help daily_commands"):
             await self.send_message(self._render_help("daily"))
-            return
-        if lower.strip() in ("/help_rare", "help_rare", "/help rare", "help rare"):
+            return True
+        if lower in ("/help_rare", "help_rare", "/help rare", "help rare"):
             await self.send_message(self._render_help("rare"))
-            return
-        if lower.strip() in ("/help_system", "help_system", "/help system", "help system"):
+            return True
+        if lower in ("/help_system", "help_system", "/help system", "help system"):
             await self.send_message(self._render_help("system"))
-            return
-        if (not strict_cmds and any(kw in lower for kw in ["статус", "/status"])) or lower.strip() in ("/status", "status"):
+            return True
+        if (not strict_cmds and any(kw in lower for kw in ["статус", "/status"])) or lower in ("/status", "status"):
             await self.send_message(self._render_unified_status())
-            return
-        if lower.strip() in ("/workflow", "workflow"):
+            return True
+        if lower in ("/workflow", "workflow"):
             try:
                 from modules.workflow_state_machine import WorkflowStateMachine
                 h = WorkflowStateMachine().health()
-                await self.send_message(
-                    f"Workflow\nВсего: {h.get('workflows_total',0)}\nОбновлён: {h.get('last_update','-')}"
-                )
-                return
+                await self.send_message(f"Workflow\nВсего: {h.get('workflows_total',0)}\nОбновлён: {h.get('last_update','-')}")
+                return True
             except Exception:
-                pass
-        if lower.strip() in ("/handoffs", "handoffs"):
+                return False
+        if lower in ("/handoffs", "handoffs"):
             try:
                 from modules.data_lake import DataLake
                 rows = DataLake().handoff_summary(days=7)[:5]
                 if not rows:
                     await self.send_message("Handoffs: нет событий за 7 дней")
-                    return
+                    return True
                 lines = ["Handoffs (7d):"]
                 for r in rows:
-                    lines.append(
-                        f"- {r.get('from','?')} -> {r.get('to','?')}: ok={r.get('ok',0)} fail={r.get('fail',0)} total={r.get('total',0)}"
-                    )
+                    lines.append(f"- {r.get('from','?')} -> {r.get('to','?')}: ok={r.get('ok',0)} fail={r.get('fail',0)} total={r.get('total',0)}")
                 await self.send_message("\n".join(lines))
-                return
+                return True
             except Exception:
-                pass
-        if lower.strip() in ("/prefs", "prefs", "предпочтения"):
+                return False
+        if lower in ("/prefs", "prefs", "предпочтения"):
             try:
                 await self._send_prefs()
-                return
+                return True
             except Exception:
-                pass
-        if lower.strip() in ("/prefs_metrics", "prefs_metrics"):
+                return False
+        if lower in ("/prefs_metrics", "prefs_metrics"):
             try:
                 await self._send_prefs_metrics()
-                return
+                return True
             except Exception:
-                pass
-        if lower.strip() in ("/packs", "packs"):
+                return False
+        if lower in ("/packs", "packs"):
             try:
                 await self._send_packs()
-                return
+                return True
             except Exception:
-                pass
-        if lower.strip() in ("/task_current", "task_current"):
+                return False
+        return False
+
+    async def _maybe_handle_owner_task_commands(self, text: str) -> bool:
+        lower = str(text or "").lower().strip()
+        if lower in ("/task_current", "task_current"):
             if self._owner_task_state:
                 active = self._owner_task_state.get_active()
                 if active:
@@ -2272,18 +2097,18 @@ class CommsAgent:
                     )
                 else:
                     await self.send_message("Текущая задача не зафиксирована.", level="result")
-                return
-        if lower.strip() in ("/task_done", "task_done"):
+                return True
+        if lower in ("/task_done", "task_done"):
             if self._owner_task_state:
                 self._owner_task_state.complete(note="owner_marked_done")
                 await self.send_message("Текущая задача отмечена как выполненная.", level="result")
-                return
-        if lower.strip() in ("/task_cancel", "task_cancel"):
+                return True
+        if lower in ("/task_cancel", "task_cancel"):
             if self._owner_task_state:
                 self._owner_task_state.cancel(note="owner_task_cancel")
                 await self.send_message("Текущая задача отменена.", level="result")
-                return
-        if lower.strip().startswith("/task_replace ") or lower.strip().startswith("task_replace "):
+                return True
+        if lower.startswith("/task_replace ") or lower.startswith("task_replace "):
             if self._owner_task_state:
                 parts = text.split(maxsplit=1)
                 if len(parts) >= 2 and parts[1].strip():
@@ -2291,109 +2116,60 @@ class CommsAgent:
                     await self.send_message("Текущая задача заменена.", level="result")
                 else:
                     await self.send_message("Использование: /task_replace <новая задача>", level="result")
-                return
-        if lower.strip() in ("/pubq", "pubq"):
+                return True
+        return False
+
+    async def _maybe_handle_owner_publish_commands(self, text: str) -> bool:
+        lower = str(text or "").lower().strip()
+        if lower in ("/pubq", "pubq"):
             try:
                 if not self._publisher_queue:
                     await self.send_message("PublisherQueue не подключён.")
-                    return
+                    return True
                 st = self._publisher_queue.stats()
                 await self.send_message(
                     f"Publish Queue\nqueued={st.get('queued',0)} running={st.get('running',0)} done={st.get('done',0)} failed={st.get('failed',0)} total={st.get('total',0)}"
                 )
-                return
+                return True
             except Exception:
-                pass
-        if lower.strip().startswith("/pubrun") or lower.strip() == "pubrun":
+                return False
+        if lower.startswith("/pubrun") or lower == "pubrun":
             try:
                 if not self._publisher_queue:
                     await self.send_message("PublisherQueue не подключён.")
-                    return
+                    return True
                 lim = 5
                 parts = lower.split()
                 if len(parts) >= 2 and parts[1].isdigit():
                     lim = max(1, min(20, int(parts[1])))
                 rows = await self._publisher_queue.process_all(limit=lim)
                 await self.send_message(f"Publish run: processed={len(rows)}")
-                return
+                return True
             except Exception:
-                pass
-        if lower.strip().startswith("/webop") or lower.strip().startswith("webop"):
+                return False
+        return False
+
+    async def _maybe_handle_owner_webop_commands(self, text: str) -> bool:
+        lower = str(text or "").lower().strip()
+        if lower.startswith("/webop") or lower.startswith("webop"):
             try:
                 if not self._agent_registry:
                     await self.send_message("AgentRegistry не подключён.")
-                    return
+                    return True
                 from modules.web_operator_pack import WebOperatorPack
                 pack = WebOperatorPack(self._agent_registry)
                 parts = lower.split()
                 if len(parts) == 1 or parts[1] in {"list", "ls"}:
                     items = pack.list_scenarios()
                     await self.send_message("WebOp scenarios:\n" + ("\n".join(f"- {x}" for x in items) if items else "- empty"))
-                    return
+                    return True
                 if len(parts) >= 3 and parts[1] == "run":
                     res = await pack.run(parts[2], overrides={})
                     await self.send_message(f"WebOp run: {parts[2]}\nstatus={res.get('status')}\nerror={res.get('error','')}")
-                    return
+                    return True
             except Exception:
-                pass
-
-        # Conversation engine
-        if self._conversation_engine:
-            try:
-                if hasattr(self._conversation_engine, "set_session"):
-                    self._conversation_engine.set_session("owner_inbox")
-                if hasattr(self._conversation_engine, "set_defer_owner_actions"):
-                    self._conversation_engine.set_defer_owner_actions(True)
-                result = await self._conversation_engine.process_message(text)
-                if result.get("create_goal") and self._goal_engine:
-                    from goal_engine import GoalPriority, GoalStatus
-                    priority_map = {"CRITICAL": GoalPriority.CRITICAL, "HIGH": GoalPriority.HIGH,
-                                    "MEDIUM": GoalPriority.MEDIUM, "LOW": GoalPriority.LOW}
-                    goal = self._goal_engine.create_goal(
-                        title=result.get("goal_title", text[:100]),
-                        description=result.get("goal_description", text),
-                        priority=priority_map.get(result.get("goal_priority", "HIGH"), GoalPriority.HIGH),
-                        source="owner",
-                        estimated_cost_usd=result.get("estimated_cost_usd", 0.05),
-                    )
-                    if result.get("needs_approval", False):
-                        goal.status = GoalStatus.WAITING_APPROVAL
-                        self._goal_engine._persist_goal(goal)
-                    response = result.get("response", f"Цель создана: {goal.title}")
-                    response = self._owner_goal_response_override(text, response, goal.title)
-                    if result.get("needs_approval"):
-                        response += "\n\nПодтверди запуск: да/нет."
-                    response = self._decorate_with_numeric_hint(response, result.get("actions", []))
-                    response = self._normalize_owner_control_reply(text, response)
-                    self._remember_choice_context(response)
-                    await self.send_message(response, level="result")
-                elif result.get("response"):
-                    response = self._decorate_with_numeric_hint(result["response"], result.get("actions", []))
-                    response = self._normalize_owner_control_reply(text, response)
-                    self._remember_choice_context(response)
-                    await self.send_message(response, level="result")
-                    self._prime_research_pending_actions_from_owner_state(text)
-                    if result.get("actions") and result.get("needs_confirmation"):
-                        if self._autonomy_max_enabled() and self._conversation_engine:
-                            out = await self._conversation_engine._execute_actions(result.get("actions", []))
-                            await self.send_message(out or "Действие выполнено.", level="result")
-                        else:
-                            self._pending_system_action = {
-                                "actions": result.get("actions", []),
-                                "origin_text": text,
-                            }
-                    elif result.get("actions"):
-                        self._schedule_system_actions_background(
-                            result.get("actions", []),
-                            origin_text=text,
-                        )
-                else:
-                    await self.send_message("Понял. Чем могу помочь?")
-                return
-            except Exception as e:
-                logger.warning(f"ConversationEngine error: {e}", extra={"event": "conversation_error"})
-
-        await self.send_message("Не понял: это вопрос или задача? Напиши одним предложением, что нужно сделать.")
+                return False
+        return False
 
     async def _execute_pending_system_action(self, update: Update | None = None) -> None:
         payload = self._pending_system_action or {}
