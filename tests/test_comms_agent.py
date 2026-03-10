@@ -874,6 +874,26 @@ async def test_owner_shortcut_resume_resumes_loop(comms):
 
 
 @pytest.mark.asyncio
+async def test_owner_shortcut_do_not_touch_old_through_on_message(comms, mock_update):
+    mock_update.message.text = "не трогай старое"
+    seen = {"called": False}
+    original = comms._maybe_handle_owner_shortcuts
+
+    async def _wrapped(text: str):
+        seen["called"] = True
+        return await original(text)
+
+    comms._maybe_handle_owner_shortcuts = _wrapped
+
+    await comms._on_message(mock_update, MagicMock(args=[]))
+
+    assert seen["called"] is True
+    sent = comms._bot.send_message.call_args.kwargs["text"]
+    assert ("не трогаю" in sent.lower()) or ("не трогаются" in sent.lower())
+    assert "стар" in sent.lower()
+
+
+@pytest.mark.asyncio
 async def test_cmd_task_current_and_done(comms, mock_update, tmp_path):
     owner_task_state = OwnerTaskState(path=tmp_path / "owner_task_state.json")
     owner_task_state.set_active("подготовить публикацию", intent="goal_request")

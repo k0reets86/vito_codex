@@ -1990,6 +1990,32 @@ class CommsAgent:
     async def _maybe_handle_owner_shortcuts(self, text: str) -> bool:
         lower = str(text or "").lower()
         strict_cmds = bool(getattr(settings, "TELEGRAM_STRICT_COMMANDS", True)) and not self._autonomy_max_enabled()
+        if self._is_what_do_you_need_prompt(text):
+            await self.send_message(
+                "Сейчас от тебя ничего не нужно. Если захочешь продолжить работу или поставить новую цель, напиши это одной фразой.",
+                level="result",
+            )
+            return True
+        if self._is_do_not_touch_old_prompt(text):
+            await self.send_message(
+                "Правило зафиксировано: старые и опубликованные объекты не трогаются без явного указания и target id.",
+                level="result",
+            )
+            return True
+        if self._is_create_new_prompt(text):
+            await self.send_message(
+                "Уточни, что именно создать и на какой платформе: например «создай новый товар на etsy» или «создай новую книгу на amazon kdp».",
+                level="result",
+            )
+            return True
+        if self._is_postpone_prompt(text):
+            await self.send_message("Ок, отложил. Можем вернуться к этому позже.", level="result")
+            return True
+        if self._is_nevermind_prompt(text):
+            self._pending_system_action = None
+            self._pending_owner_confirmation = None
+            await self.send_message("Ок, отменил текущий запрос.", level="result")
+            return True
         if self._is_resume_prompt(text):
             if self._cancel_state:
                 try:
@@ -2082,6 +2108,35 @@ class CommsAgent:
         cancel_tokens = ("отмени", "отмена", "сними", "убери", "очисти", "stop all", "cancel all")
         all_tokens = ("все", "всё", "all")
         return any(tok in s for tok in cancel_tokens) and any(tok in s for tok in all_tokens) and any(tok in s for tok in task_tokens)
+
+    @staticmethod
+    def _is_what_do_you_need_prompt(text: str) -> bool:
+        s = str(text or "").strip().lower().replace("ё", "е")
+        return s in {"что от меня нужно", "что от меня надо", "что нужно от меня", "что тебе нужно", "что от меня требуется"}
+
+    @staticmethod
+    def _is_do_not_touch_old_prompt(text: str) -> bool:
+        s = str(text or "").strip().lower().replace("ё", "е")
+        return ("не трогай" in s and any(tok in s for tok in ("стар", "опублик", "прошл"))) or s in {
+            "старое не трогай",
+            "не трогай старое",
+            "не трогай опубликованное",
+        }
+
+    @staticmethod
+    def _is_create_new_prompt(text: str) -> bool:
+        s = str(text or "").strip().lower().replace("ё", "е")
+        return s in {"создай новое", "создай новый", "сделай новое", "новое создай"}
+
+    @staticmethod
+    def _is_postpone_prompt(text: str) -> bool:
+        s = str(text or "").strip().lower().replace("ё", "е")
+        return s in {"ладно потом", "потом", "позже", "давай потом", "отложи пока"}
+
+    @staticmethod
+    def _is_nevermind_prompt(text: str) -> bool:
+        s = str(text or "").strip().lower().replace("ё", "е")
+        return s in {"не надо", "не нужно", "отмена", "забей", "отбой"}
 
     def _render_owner_brief_status(self) -> str:
         running = False
@@ -5077,13 +5132,37 @@ class CommsAgent:
 
     def _guard_outgoing(self, text: str) -> str:
         """Prevent unverified completion claims in outbound messages."""
+        lower = str(text or "").lower()
+        safe_owner_controls = (
+            "правило зафиксировано",
+            "старые и опубликованные объекты не трогаются",
+            "все текущие задачи снял",
+            "остановил текущую работу",
+            "продолжаю работу",
+            "сейчас от тебя ничего не нужно",
+            "ок, отменил текущий запрос",
+            "ок, отложил",
+        )
+        if any(tok in lower for tok in safe_owner_controls):
+            return str(text or "")
         try:
             from modules.fact_gate import gate_outgoing_claim
             decision = gate_outgoing_claim(text, evidence_hours=24)
             if not decision.allowed:
                 return decision.text
         except Exception:
-            return "Это было предложение/план, а не подтверждённый факт выполнения. Нужна команда на запуск?"
+            risky = (
+                "опублик",
+                "загрузил",
+                "загружен",
+                "создан",
+                "готов и",
+                "is live",
+                "published",
+            )
+            if any(tok in lower for tok in risky):
+                return "Это было предложение/план, а не подтверждённый факт выполнения. Нужна команда на запуск?"
+            return str(text or "")
         return text
 
     async def send_message(self, text: str, level: str = "info") -> bool:

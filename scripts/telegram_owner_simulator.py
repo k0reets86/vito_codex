@@ -260,6 +260,21 @@ def _builtin(name: str) -> list[Step]:
             Step("BD09", "поехали", ["продолжаю работу"], ["traceback", "exception"]),
             Step("BD10", "че по задач", ["сейчас", "decision loop"], ["traceback", "exception"]),
         ]
+    if key == "phase_owner_everyday_dialogue":
+        return [
+            Step("ED01", "как дела", ["decision loop", "цели"], ["traceback", "exception"]),
+            Step("ED02", "что сейчас делаешь", ["сейчас", "работ"], ["traceback", "exception"]),
+            Step("ED03", "что по задачам", ["decision loop", "цели"], ["traceback", "exception"]),
+            Step("ED04", "стоп", ["остановил", "продолжения"], ["traceback", "exception"]),
+            Step("ED05", "продолжай", ["продолжаю работу"], ["traceback", "exception"]),
+            Step("ED06", "отмени все задачи", ["все текущие задачи снял"], ["traceback", "exception"]),
+            Step("ED07", "что от меня нужно", ["ничего", "если"], ["traceback", "exception"]),
+            Step("ED08", "что уже готово", ["готов", "платформ", "задач"], ["traceback", "exception"]),
+            Step("ED09", "не трогай старое", ["не трога", "стар"], ["traceback", "exception"]),
+            Step("ED10", "создай новое", ["уточни", "что именно", "платформ"], ["traceback", "exception"]),
+            Step("ED11", "ладно потом", ["отлож", "потом", "ок"], ["traceback", "exception"]),
+            Step("ED12", "не надо", ["отмен", "ок"], ["traceback", "exception"]),
+        ]
     if key == "phase_platform_live_verify_safe":
         return [
             Step("PLV01", "зайди на амазон", ["amazon", "вход", "логин", "kdp"], ["traceback", "exception"]),
