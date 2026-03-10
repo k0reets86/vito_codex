@@ -9,6 +9,7 @@ from typing import Any
 
 from config.paths import PROJECT_ROOT
 from modules.service_session_registry import load_service_sessions
+from modules.browser_runtime_policy import get_browser_runtime_profile
 from modules.platform_validation_registry import load_platform_validation_registry
 
 RUNTIME = PROJECT_ROOT / "runtime"
@@ -25,6 +26,9 @@ class PlatformReadiness:
     can_validate_now: bool
     blocker: str
     recommended_action: str
+    reauth_command: str
+    storage_state_path: str
+    persistent_profile_dir: str
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -61,6 +65,24 @@ def _wave_state_map() -> dict[str, str]:
                 state_map[svc] = state
     return state_map
 
+
+
+
+def _reauth_command_for_service(service: str) -> str:
+    svc = str(service or '').strip().lower()
+    if svc in {'etsy', 'printful', 'twitter'}:
+        return f"python3 scripts/browser_auth_capture.py {svc}"
+    if svc == 'amazon_kdp':
+        return "python3 scripts/kdp_login_stabilizer.py"
+    if svc == 'gumroad':
+        return "python3 scripts/gumroad_cookie_capture.py"
+    if svc == 'kofi':
+        return "python3 scripts/kofi_auth_helper.py browser-capture"
+    if svc == 'reddit':
+        return "python3 scripts/reddit_auth_helper.py browser-capture"
+    if svc == 'pinterest':
+        return "python3 scripts/pinterest_auth_helper.py browser-capture"
+    return ""
 
 def _probe_exists(service: str) -> bool:
     mapping = {
@@ -118,6 +140,7 @@ def assess_platform_readiness(services: list[str] | None = None) -> list[dict[st
             recommended_action = f"owner_grade_validate:{service}"
         elif owner_grade_state != "owner_grade":
             recommended_action = f"owner_grade_validate:{service}"
+        profile = get_browser_runtime_profile(service)
         results.append(
             PlatformReadiness(
                 service=service,
@@ -128,6 +151,9 @@ def assess_platform_readiness(services: list[str] | None = None) -> list[dict[st
                 can_validate_now=can_validate_now,
                 blocker=blocker,
                 recommended_action=recommended_action,
+                reauth_command=_reauth_command_for_service(service) if blocker == 'missing_session' else '',
+                storage_state_path=str(profile.get('storage_state_path') or ''),
+                persistent_profile_dir=str(profile.get('persistent_profile_dir') or ''),
             ).to_dict()
         )
     return results

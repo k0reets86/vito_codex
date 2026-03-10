@@ -55,3 +55,16 @@ def test_reauth_action_returns_capture_command() -> None:
     assert payload['reauth_command'].startswith('python3 scripts/browser_auth_capture.py twitter')
     assert 'twitter_storage_state.json' in str(payload['storage_state_path'])
     assert 'browser_profiles' in str(payload['persistent_profile_dir'])
+
+
+
+def test_assess_platform_readiness_includes_reauth_command(monkeypatch):
+    from modules import platform_readiness as pr
+    monkeypatch.setattr(pr, 'load_service_sessions', lambda: {})
+    monkeypatch.setattr(pr, '_wave_state_map', lambda: {})
+    monkeypatch.setattr(pr, 'load_platform_validation_registry', lambda: {})
+    monkeypatch.setattr(pr, '_probe_exists', lambda service: False)
+    row = next(x for x in pr.assess_platform_readiness(['twitter']) if x['service'] == 'twitter')
+    assert row['blocker'] == 'missing_session'
+    assert row['reauth_command'].startswith('python3 scripts/browser_auth_capture.py twitter')
+    assert 'twitter_storage_state.json' in row['storage_state_path']

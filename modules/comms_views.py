@@ -179,9 +179,12 @@ def render_platform_readiness_summary(items: list[dict[str, Any]]) -> str:
         state = str(item.get("owner_grade_state") or "unknown")
         blocker = str(item.get("blocker") or "")
         action = str(item.get("recommended_action") or "")
+        cmd = str(item.get("reauth_command") or "")
         suffix = f" | blocker={blocker}" if blocker else ""
         if action:
             suffix += f" | next={action}"
+        if cmd:
+            suffix += f" | cmd={cmd}"
         lines.append(f"  - {svc}: {state}{suffix}")
     pending_auth = PlatformAuthInterrupts().list_interrupts(status="pending", limit=10)
     if pending_auth:
