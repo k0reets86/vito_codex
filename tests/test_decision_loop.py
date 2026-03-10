@@ -58,6 +58,7 @@ def test_get_status(dl):
     assert "tick_count" in status
     assert "daily_spend" in status
     assert "goal_stats" in status
+    assert "platform_readiness" in status
 
 
 @pytest.mark.asyncio
@@ -171,6 +172,7 @@ async def test_background_maintenance_runs_all_tasks(dl):
     dl._maybe_run_evolution_discovery = lambda: _mark("evolution_discovery")
     dl._maybe_run_autonomy_overseer = lambda: _mark("autonomy_overseer")
     dl._maybe_run_kdp_session_watchdog = lambda: _mark("kdp_session_watchdog")
+    dl._maybe_run_platform_readiness_monitor = lambda: _mark("platform_readiness_monitor")
 
     await dl._run_background_maintenance()
 
@@ -190,7 +192,41 @@ async def test_background_maintenance_runs_all_tasks(dl):
         "evolution_discovery",
         "autonomy_overseer",
         "kdp_session_watchdog",
+        "platform_readiness_monitor",
     }
+
+
+@pytest.mark.asyncio
+async def test_platform_readiness_monitor_sends_alert_on_new_blockers(dl, monkeypatch):
+    class DummyComms:
+        def __init__(self):
+            self.messages = []
+
+        async def send_message(self, text, level="info"):
+            self.messages.append((text, level))
+            return True
+
+    dl._comms = DummyComms()
+    dl._tick_count = 10
+
+    monkeypatch.setattr(
+        "decision_loop.assess_platform_readiness",
+        lambda: [
+            {
+                "service": "etsy",
+                "owner_grade_state": "blocked",
+                "blocker": "missing_session",
+                "recommended_action": "reauth:etsy",
+                "can_validate_now": False,
+            }
+        ],
+    )
+
+    await dl._maybe_run_platform_readiness_monitor()
+    status = dl.get_status()
+    assert status["platform_readiness"]["blocked"] == 1
+    assert dl._comms.messages
+    assert "reauth:etsy" in dl._comms.messages[0][0]
 
 
 # ── Idle action ──

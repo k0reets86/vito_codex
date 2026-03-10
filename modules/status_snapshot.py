@@ -27,6 +27,13 @@ def build_status_snapshot(
         "finance_spend": 0.0,
         "pending_approvals": int(pending_approvals_count or 0),
         "owner_task_text": "",
+        "platform_readiness": {
+            "total": 0,
+            "owner_grade": 0,
+            "can_validate_now": 0,
+            "blocked": 0,
+            "next_steps": [],
+        },
     }
 
     if decision_loop:
@@ -35,6 +42,15 @@ def build_status_snapshot(
             snap["running"] = bool(st.get("running", False))
             snap["tick_count"] = int(st.get("tick_count", 0) or 0)
             snap["daily_spend"] = float(st.get("daily_spend", 0.0) or 0.0)
+            pr = dict(st.get("platform_readiness") or {})
+            if pr:
+                snap["platform_readiness"] = {
+                    "total": int(pr.get("total", 0) or 0),
+                    "owner_grade": int(pr.get("owner_grade", 0) or 0),
+                    "can_validate_now": int(pr.get("can_validate_now", 0) or 0),
+                    "blocked": int(pr.get("blocked", 0) or 0),
+                    "next_steps": list(pr.get("next_steps") or [])[:5],
+                }
         except Exception:
             pass
 
@@ -96,6 +112,7 @@ def render_status_snapshot(snapshot: dict[str, Any], *, title: str = "VITO Statu
     finance_spend = float(snap.get("finance_spend", 0.0) or 0.0)
     pending_approvals = int(snap.get("pending_approvals", 0) or 0)
     owner_task_text = str(snap.get("owner_task_text", "") or "").strip()
+    platform_readiness = dict(snap.get("platform_readiness") or {})
 
     parts = [
         title,
@@ -117,5 +134,18 @@ def render_status_snapshot(snapshot: dict[str, Any], *, title: str = "VITO Statu
         parts.append(f"Ожидают одобрения: {pending_approvals}")
     if owner_task_text:
         parts.append(f"Текущая задача: {owner_task_text}")
+    if any(platform_readiness.values()):
+        total = int(platform_readiness.get("total", 0) or 0)
+        owner_grade = int(platform_readiness.get("owner_grade", 0) or 0)
+        ready_now = int(platform_readiness.get("can_validate_now", 0) or 0)
+        blocked = int(platform_readiness.get("blocked", 0) or 0)
+        next_steps = list(platform_readiness.get("next_steps") or [])[:3]
+        line = (
+            f"Платформы: {total} всего; owner-grade {owner_grade}; "
+            f"готовы к валидации {ready_now}; блокеры {blocked}"
+        )
+        if next_steps:
+            line += f"\nСледующее: {', '.join(next_steps)}"
+        parts.append(line)
 
     return "\n\n".join(parts)

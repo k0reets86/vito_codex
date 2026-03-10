@@ -3,6 +3,7 @@ from pathlib import Path
 from config.paths import PROJECT_ROOT
 from modules.platform_readiness import assess_platform_readiness
 from modules.comms_views import render_platform_readiness_summary
+from modules.status_snapshot import build_status_snapshot, render_status_snapshot
 from modules.service_session_registry import save_service_sessions
 
 
@@ -48,3 +49,25 @@ def test_render_platform_readiness_summary_includes_counts():
     assert "owner-grade=1" in text
     assert "можно валидировать сейчас=1" in text
     assert "printful: partial | blocker=missing_session | next=reauth:printful" in text
+
+
+def test_status_snapshot_renders_platform_readiness():
+    class DummyLoop:
+        def get_status(self):
+            return {
+                "running": True,
+                "tick_count": 7,
+                "daily_spend": 1.5,
+                "platform_readiness": {
+                    "total": 3,
+                    "owner_grade": 1,
+                    "can_validate_now": 1,
+                    "blocked": 2,
+                    "next_steps": ["reauth:etsy", "run_probe:printful"],
+                },
+            }
+
+    snap = build_status_snapshot(decision_loop=DummyLoop())
+    text = render_status_snapshot(snap)
+    assert "Платформы: 3 всего; owner-grade 1; готовы к валидации 1; блокеры 2" in text
+    assert "reauth:etsy" in text

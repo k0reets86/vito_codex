@@ -45,6 +45,7 @@ from modules.memory_skill_reports import MemorySkillReporter
 from modules.memory_consolidation import MemoryConsolidationEngine
 from modules.governance_reporter import GovernanceReporter
 from modules.autonomous_improvement import AutonomousImprovementEngine
+from modules.platform_readiness import assess_platform_readiness
 from modules.runtime_remediation import (
     SAFE_ACTIONS,
     apply_safe_action,
@@ -115,6 +116,9 @@ class DecisionLoop:
         self._last_self_evolver_tick = 0
         self._last_module_discovery_tick = 0
         self._last_overseer_tick = 0
+        self._last_platform_readiness_tick = 0
+        self._platform_readiness_cache: list[dict[str, Any]] = []
+        self._last_platform_readiness_signature = ""
         self.autonomy_proposals = AutonomyProposalStore(sqlite_path=_runtime_sqlite_path(goal_engine))
         self.autonomy_schedule = AutonomyScheduleState(sqlite_path=_runtime_sqlite_path(goal_engine))
         self._kdp_watchdog_state: dict[str, Any] = self._load_kdp_watchdog_state()
@@ -296,6 +300,7 @@ class DecisionLoop:
             ("evolution_discovery", self._maybe_run_evolution_discovery, ["autonomy_v2"]),
             ("autonomy_overseer", self._maybe_run_autonomy_overseer, ["evolution_discovery"]),
             ("kdp_session_watchdog", self._maybe_run_kdp_session_watchdog, []),
+            ("platform_readiness_monitor", self._maybe_run_platform_readiness_monitor, []),
         ]
         nodes = [
             ParallelNode(name=name, handler=func, deps=deps, description=f"background:{name}")
@@ -1038,6 +1043,57 @@ class DecisionLoop:
                         level="warning",
                     )
             self._save_kdp_watchdog_state()
+        except Exception:
+            pass
+
+    @staticmethod
+    def _platform_readiness_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
+        owner_grade = sum(1 for x in items if str(x.get("owner_grade_state") or "") == "owner_grade")
+        ready_now = sum(1 for x in items if bool(x.get("can_validate_now")))
+        blocked = sum(1 for x in items if str(x.get("blocker") or "").strip())
+        next_steps = [
+            str(x.get("recommended_action") or "").strip()
+            for x in items
+            if str(x.get("recommended_action") or "").strip()
+        ]
+        return {
+            "total": len(items),
+            "owner_grade": owner_grade,
+            "can_validate_now": ready_now,
+            "blocked": blocked,
+            "next_steps": next_steps[:5],
+        }
+
+    async def _maybe_run_platform_readiness_monitor(self) -> None:
+        try:
+            interval = max(1, int(getattr(settings, "PLATFORM_READINESS_MONITOR_INTERVAL_TICKS", 3) or 3))
+            if self._tick_count - int(self._last_platform_readiness_tick or 0) < interval:
+                return
+            items = assess_platform_readiness()
+            self._platform_readiness_cache = list(items or [])
+            self._last_platform_readiness_tick = self._tick_count
+
+            blockers = []
+            actionable = []
+            for item in self._platform_readiness_cache:
+                blocker = str(item.get("blocker") or "").strip()
+                action = str(item.get("recommended_action") or "").strip()
+                service = str(item.get("service") or "").strip()
+                if blocker:
+                    blockers.append(f"{service}:{blocker}")
+                if action:
+                    actionable.append(action)
+            signature = "|".join(sorted(blockers + actionable))
+            if not signature or signature == self._last_platform_readiness_signature:
+                return
+            self._last_platform_readiness_signature = signature
+            if hasattr(self, "_comms") and self._comms and blockers:
+                msg = (
+                    "Platform readiness alert:\n"
+                    f"- blockers: {', '.join(blockers[:5])}\n"
+                    f"- next: {', '.join(actionable[:5]) or 'n/a'}"
+                )
+                await self._comms.send_message(msg, level="warning")
         except Exception:
             pass
 
@@ -3406,6 +3462,7 @@ class DecisionLoop:
                 pending = int(self._comms.pending_approvals_count())
         except Exception:
             pending = 0
+        readiness = self._platform_readiness_summary(list(self._platform_readiness_cache or []))
         return {
             "running": self.running,
             "tick_count": self._tick_count,
@@ -3413,6 +3470,7 @@ class DecisionLoop:
             "daily_spend": self.llm_router.get_daily_spend(),
             "goal_stats": self.goal_engine.get_stats(),
             "pending_approvals": pending,
+            "platform_readiness": readiness,
             "kdp_watchdog": {
                 "status": str(self._kdp_watchdog_state.get("status", "unknown")),
                 "paused": bool(self._kdp_watchdog_state.get("paused", False)),
