@@ -4,6 +4,7 @@ import os
 from typing import Any, Awaitable, Callable
 
 from config.logger import get_logger
+from config.paths import root_path
 
 logger = get_logger("platform_registrar", agent="platform_registrar")
 
@@ -86,7 +87,7 @@ class PlatformRegistrar:
     async def _save_credentials(self, platform_id: str, result: dict) -> None:
         if not platform_id:
             return
-        path = ".env.platforms"
+        path = root_path(".env.platforms")
         lines = []
         if os.path.exists(path):
             with open(path, encoding="utf-8") as fh:

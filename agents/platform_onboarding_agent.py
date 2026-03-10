@@ -6,6 +6,7 @@ from typing import Any
 from agents.base_agent import BaseAgent, TaskResult
 from config.logger import get_logger
 from modules.integration_detector import IntegrationDetector
+from modules.platform_onboarding_records import PlatformOnboardingRecords
 from modules.platform_registrar import PlatformRegistrar
 from modules.platform_registry import PlatformRegistry
 from modules.platform_researcher import PlatformResearcher
@@ -28,6 +29,7 @@ class PlatformOnboardingAgent(BaseAgent):
         )
         self._browser = browser_agent
         self._platform_registry = platform_registry or PlatformRegistry()
+        self._records = PlatformOnboardingRecords()
 
     @property
     def capabilities(self) -> list[str]:
@@ -87,6 +89,7 @@ class PlatformOnboardingAgent(BaseAgent):
         platform_id = await self._phase7_register(profile)
         results["platform_id"] = platform_id
         results["status"] = "active"
+        self._records.write_result(platform_id, {"profile": profile, "results": results})
         await self._send_final_report(profile, results)
         return results
 
@@ -116,11 +119,24 @@ class PlatformOnboardingAgent(BaseAgent):
         )
         reply = await self._notify_wait(report, timeout=30)
         r = str(reply or "").lower()
+        decision = "skip"
         if "авторег" in r or "1" in r:
-            return "auto_register"
-        if "дам" in r or "2" in r:
-            return "owner_handles_auth"
-        return "skip"
+            decision = "auto_register"
+        elif "дам" in r or "2" in r:
+            decision = "owner_handles_auth"
+        self._records.write_report(
+            str(profile.get("id") or profile.get("name") or "platform"),
+            {
+                "platform_id": profile.get("id"),
+                "platform_name": profile.get("name"),
+                "report": report,
+                "overview": overview,
+                "integration": integration,
+                "owner_reply": str(reply or ""),
+                "decision": decision,
+            },
+        )
+        return decision
 
     async def _phase4_account(self, profile: dict) -> dict:
         registrar = PlatformRegistrar(browser=self._browser, llm_caller=self._llm_call, notify_owner_fn=self._notify_wait)

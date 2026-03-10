@@ -5,6 +5,7 @@ import pytest
 from agents.platform_onboarding_agent import PlatformOnboardingAgent
 from agents.base_agent import TaskResult
 from modules import platform_registry as pr
+from modules.platform_onboarding_records import PlatformOnboardingRecords
 
 
 class _FakeRegistry:
@@ -60,3 +61,31 @@ async def test_platform_onboarding_agent_research_platform_task(tmp_path, monkey
     assert result.success is True
     assert result.output["id"] == "substack"
 
+
+@pytest.mark.asyncio
+async def test_platform_onboarding_agent_persists_report_and_result(tmp_path, monkeypatch):
+    monkeypatch.setattr(pr, "PROJECT_ROOT", tmp_path)
+    reg = pr.PlatformRegistry(sqlite_path=str(tmp_path / "vito.db"))
+    agent = PlatformOnboardingAgent(platform_registry=reg)
+    agent.registry = _FakeRegistry()
+    agent._records = PlatformOnboardingRecords(base_dir=tmp_path / "records")
+    agent._phase1_research = AsyncMock(
+        return_value={
+            "id": "patreon",
+            "name": "Patreon",
+            "url": "https://www.patreon.com",
+            "status": "researching",
+            "overview": {"category": "subscription", "commission_percent": 8},
+            "integration": {"browser": {"login_url": "https://www.patreon.com/login"}},
+            "account": {},
+            "products": {},
+        }
+    )
+    agent._phase2_detect = AsyncMock(return_value={"method": "api", "auth_type": "oauth2"})
+    agent._phase4_account = AsyncMock(return_value={"success": True, "email_used": "owner@example.com", "username": "owner"})
+    agent._notify_wait = AsyncMock(return_value="2")
+
+    result = await agent.onboard("Patreon", "https://www.patreon.com")
+    assert result["status"] == "active"
+    assert (tmp_path / "records" / "patreon_report.json").exists()
+    assert (tmp_path / "records" / "patreon_result.json").exists()
