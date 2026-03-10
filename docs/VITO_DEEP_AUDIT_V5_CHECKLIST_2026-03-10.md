@@ -85,6 +85,7 @@
 18. `MemoryBlocks on-demand consolidation`
 - Статус: `done`
 - Аргумент: в `MemoryManager` добавлены `preview_memory_consolidation(...)` и `consolidate_memory_on_demand(...)`, использующие `MemoryBlocks.get_blocks(...)`; on-demand path покрыт таргетными тестами.
+- Дополнение: `KnowledgeConsolidator` теперь отдает actionable runtime-pack (`confidence`, `blockers`, `next_actions`, `proof_contract`, `readiness`) и `MemoryManager.build_runtime_knowledge_pack(...)` пишет его в persistent `knowledge_runtime_registry`, чтобы planning и owner-summary опирались на один и тот же consolidated truth source.
 
 19. `automatic knowledge write from successful agent tasks`
 - Статус: `done`

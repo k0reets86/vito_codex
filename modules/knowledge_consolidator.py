@@ -4,6 +4,7 @@ from typing import Any
 
 from modules.platform_knowledge import search_entries as search_platform_knowledge
 from modules.platform_runtime_registry import get_runtime_entry
+from modules.platform_readiness import assess_platform_readiness
 
 
 class KnowledgeConsolidator:
@@ -30,12 +31,27 @@ class KnowledgeConsolidator:
         archive_hits = self._archive_hits(task_root_id=task_root_id, limit=max(2, int(limit or 5)))
         graph_neighbors = self._graph_neighbors(knowledge_hits, task_root_id=task_root_id, limit=max(2, int(limit or 5)))
 
+        readiness = self._readiness_hits(svc_list)
+        proof_contract = self._proof_contract(platform_hits)
+        blockers = self._blockers(readiness, platform_hits)
+        next_actions = self._next_actions(readiness, platform_hits)
+        confidence = self._confidence(
+            semantic_hits=len(knowledge_hits),
+            reflection_hits=len(reflection_hits),
+            platform_hits=len(platform_hits),
+            archive_hits=len(archive_hits),
+            graph_hits=len(graph_neighbors),
+            services=svc_list,
+            blockers=blockers,
+        )
         signals = {
             "semantic_knowledge": len(knowledge_hits),
             "reflections": len(reflection_hits),
             "platform_knowledge": len(platform_hits),
             "evolution_archive": len(archive_hits),
             "knowledge_graph": len(graph_neighbors),
+            "readiness": len(readiness),
+            "blockers": len(blockers),
         }
         summary = self._summary(query_text, services=svc_list, signals=signals)
 
@@ -45,6 +61,11 @@ class KnowledgeConsolidator:
             "task_root_id": str(task_root_id or ""),
             "summary": summary,
             "signals": signals,
+            "confidence": confidence,
+            "blockers": blockers,
+            "next_actions": next_actions,
+            "proof_contract": proof_contract,
+            "readiness": readiness,
             "knowledge_hits": knowledge_hits,
             "reflection_hits": reflection_hits,
             "platform_hits": platform_hits,
@@ -59,6 +80,94 @@ class KnowledgeConsolidator:
             return list(self.reflector.top_relevant(query, n=max(1, limit)) or [])
         except Exception:
             return []
+
+    def _readiness_hits(self, services: list[str]) -> list[dict[str, Any]]:
+        if not services:
+            return []
+        try:
+            rows = assess_platform_readiness(services)
+            return [dict(x) for x in (rows or []) if isinstance(x, dict)]
+        except Exception:
+            return []
+
+    @staticmethod
+    def _proof_contract(platform_hits: list[dict[str, Any]]) -> dict[str, Any]:
+        required_artifacts: list[str] = []
+        verify_points: list[str] = []
+        services: list[str] = []
+        for hit in platform_hits or []:
+            entry = hit.get('runtime_entry') if isinstance(hit, dict) else {}
+            if not isinstance(entry, dict):
+                continue
+            services.append(str(hit.get('service') or entry.get('service') or ''))
+            required_artifacts.extend([str(x) for x in (entry.get('required_artifacts') or [])])
+            verify_points.extend([str(x) for x in (entry.get('verify_points') or [])])
+        def _dedupe(vals: list[str]) -> list[str]:
+            out=[]; seen=set()
+            for v in vals:
+                k=str(v or '').strip().lower()
+                if not k or k in seen:
+                    continue
+                seen.add(k); out.append(str(v).strip())
+            return out
+        return {
+            'services': _dedupe(services),
+            'required_artifacts': _dedupe(required_artifacts)[:30],
+            'verify_points': _dedupe(verify_points)[:30],
+        }
+
+    @staticmethod
+    def _blockers(readiness: list[dict[str, Any]], platform_hits: list[dict[str, Any]]) -> list[dict[str, str]]:
+        blockers: list[dict[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for row in readiness or []:
+            service = str(row.get('service') or '').strip().lower()
+            blocker = str(row.get('blocker') or '').strip().lower()
+            if service and blocker and (service, blocker) not in seen:
+                seen.add((service, blocker))
+                blockers.append({'service': service, 'blocker': blocker})
+        for hit in platform_hits or []:
+            service = str(hit.get('service') or '').strip().lower()
+            entry = hit.get('runtime_entry') if isinstance(hit, dict) else {}
+            for note in list((entry or {}).get('avoid_patterns') or [])[:10]:
+                low = str(note or '').strip().lower()
+                if any(token in low for token in ('do not', 'avoid', 'blocked', 'ban', 'captcha', 'missing')):
+                    key = (service, low[:120])
+                    if service and key not in seen:
+                        seen.add(key)
+                        blockers.append({'service': service, 'blocker': str(note).strip()[:160]})
+        return blockers[:20]
+
+    @staticmethod
+    def _next_actions(readiness: list[dict[str, Any]], platform_hits: list[dict[str, Any]]) -> list[str]:
+        actions: list[str] = []
+        seen: set[str] = set()
+        for row in readiness or []:
+            action = str(row.get('recommended_action') or '').strip()
+            if action and action not in seen:
+                seen.add(action)
+                actions.append(action)
+        for hit in platform_hits or []:
+            entry = hit.get('runtime_entry') if isinstance(hit, dict) else {}
+            for action in list((entry or {}).get('recommended_steps') or [])[:8]:
+                a = str(action or '').strip()
+                if a and a not in seen:
+                    seen.add(a)
+                    actions.append(a)
+        return actions[:20]
+
+    @staticmethod
+    def _confidence(*, semantic_hits: int, reflection_hits: int, platform_hits: int, archive_hits: int, graph_hits: int, services: list[str], blockers: list[dict[str, str]]) -> float:
+        score = 0.0
+        score += min(0.35, semantic_hits * 0.08)
+        score += min(0.15, reflection_hits * 0.05)
+        score += min(0.20, platform_hits * 0.08)
+        score += min(0.10, archive_hits * 0.04)
+        score += min(0.10, graph_hits * 0.03)
+        if services:
+            score += min(0.10, len(services) * 0.03)
+        score -= min(0.25, len(blockers) * 0.06)
+        return round(max(0.0, min(1.0, score)), 4)
 
     def _platform_hits(self, query: str, services: list[str], *, limit: int) -> list[dict[str, Any]]:
         hits: list[dict[str, Any]] = []

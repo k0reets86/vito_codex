@@ -30,6 +30,7 @@ from modules.failure_substrate import build_failure_substrate
 from modules.mem0_bridge import Mem0Bridge
 from modules.memory_blocks import MemoryBlocks
 from modules.knowledge_consolidator import KnowledgeConsolidator
+from modules.knowledge_runtime_registry import record_knowledge_runtime_pack
 from modules.memory_policy import decide_save, retention_classes
 from modules.knowledge_graph import KnowledgeGraph
 from modules.platform_knowledge import search_entries as search_platform_knowledge
@@ -580,12 +581,23 @@ class MemoryManager:
             reflector=reflector,
             evolution_archive=evolution_archive,
         )
-        return consolidator.consolidate(
+        pack = consolidator.consolidate(
             query=query,
             services=services or [],
             task_root_id=task_root_id,
             limit=limit,
         )
+        try:
+            key = record_knowledge_runtime_pack(
+                query=query,
+                services=services or [],
+                task_root_id=task_root_id,
+                pack=pack,
+            )
+            pack["runtime_registry_key"] = key
+        except Exception:
+            pass
+        return pack
 
     def _promote_memory_blocks(self, blocks: list[dict[str, Any]], *, source: str) -> int:
         promoted = 0

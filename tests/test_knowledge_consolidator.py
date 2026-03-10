@@ -56,6 +56,10 @@ def test_knowledge_consolidator_builds_cross_layer_pack(tmp_path):
     assert pack["signals"]["evolution_archive"] >= 1
     assert pack["signals"]["knowledge_graph"] >= 1
     assert "knowledge_pack" in pack["summary"]
+    assert isinstance(pack["confidence"], float)
+    assert "proof_contract" in pack
+    assert "next_actions" in pack
+    assert "runtime_registry_key" in pack
 
 
 def test_platform_knowledge_paths_are_project_relative():
