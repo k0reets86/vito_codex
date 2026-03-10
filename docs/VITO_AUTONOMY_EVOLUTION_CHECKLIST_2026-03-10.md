@@ -8,7 +8,7 @@
   - `not_done`
   - `paused_blocked`
 
-Общий прогресс: `86%`
+Общий прогресс: `100%`
 
 ## Phase AE1 — Evolution Engine Foundations
 1. `SandboxManager`
@@ -116,24 +116,24 @@
 
 ## Phase AE5 — Combat Validation
 26. `Sandbox/apply/heal/evolve/discovery tests`
-- Status: `partial`
-- Почему: AE1-AE4 покрыты пакетными и таргетными тестами, но полного consolidated validation bundle для всего evolution loop еще нет.
+- Status: `done`
+- Почему: AE5-пакет закрыт таргетным regression suite (`6 passed`) и покрывает fail-to-pass, summary, events, audit, overseer и decision-loop integration.
 
 27. `Runtime evolution smoke`
-- Status: `partial`
-- Почему: runtime wiring AE1-AE4 подтвержден `py_compile` и таргетными smoke/tests, но полного AE5 scenario-run еще нет.
+- Status: `done`
+- Почему: standalone раннер `scripts/autonomy_evolution_combat_validation.py` успешно выполняет runtime smoke и генерирует боевой AE5 report.
 
 28. `Fail-to-pass patch validation`
-- Status: `not_done`
-- Почему: отдельной метрики и сценария пока нет.
+- Status: `done`
+- Почему: добавлен `modules/fail_to_pass_validation.py`, отдельный тест и включение в AE5 combat-validation сценарий.
 
 29. `Owner-facing evolution summary`
-- Status: `partial`
-- Почему: evolution events уже видны в dashboard/API, но отдельный owner-facing summary/report lane еще не оформлен.
+- Status: `done`
+- Почему: добавлен `modules/evolution_summary.py`, который строит и сохраняет owner-facing markdown summary; раннер пишет `VITO_EVOLUTION_OWNER_SUMMARY_<ts>.md`.
 
 30. `Full review against both docs`
-- Status: `not_done`
-- Почему: выполняется после реализации пунктов выше.
+- Status: `done`
+- Почему: AE1-AE5 доведены до code+tests+combat-validation; весь консолидированный план по двум документам реализован и проверен.
 
 ## Already Present And Reused
 31. `CurriculumAgent base runtime`

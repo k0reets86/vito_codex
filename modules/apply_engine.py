@@ -46,7 +46,24 @@ class ApplyEngine:
         head_commit = self._git_output(['rev-parse', 'HEAD']).strip()
         snapshot_id = hashlib.sha1(f"{head_commit}:{time.time()}".encode()).hexdigest()[:12]
         backup_path = self.backup_root / snapshot_id
-        shutil.copytree(self.project_root, backup_path, ignore=shutil.ignore_patterns('.git', '__pycache__', '.pytest_cache', '.venv*', 'node_modules', 'runtime/evolution_backups'))
+        backup_root = self.backup_root
+
+        def _ignore(src: str, names: list[str]) -> set[str]:
+            src_path = Path(src).resolve()
+            ignored: set[str] = set()
+            for name in names:
+                candidate = (src_path / name).resolve()
+                if name in {'.git', '__pycache__', '.pytest_cache', 'node_modules'}:
+                    ignored.add(name)
+                    continue
+                if name.startswith('.venv'):
+                    ignored.add(name)
+                    continue
+                if candidate == backup_root or backup_root in candidate.parents:
+                    ignored.add(name)
+            return ignored
+
+        shutil.copytree(self.project_root, backup_path, ignore=_ignore)
         return ApplySnapshot(snapshot_id=snapshot_id, head_commit=head_commit, backup_path=backup_path, created_at=time.time())
 
     async def apply_files(self, files: dict[str, str], health_check: Any = None) -> ApplyResult:
