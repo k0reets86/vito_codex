@@ -1631,7 +1631,7 @@ class MemoryManager:
             return row["id"]
 
     async def search_episodes(self, query: str, limit: int = 10) -> list[dict]:
-        """Поиск в эпизодической памяти по тексту (полнотекстовый, без embedding пока)."""
+        """Поиск в эпизодической памяти по тексту с relevance reranking."""
         pool = await self._get_pg()
         async with pool.acquire() as conn:
             rows = await conn.fetch(
@@ -1640,9 +1640,31 @@ class MemoryManager:
                    WHERE summary ILIKE $1
                    ORDER BY created_at DESC
                    LIMIT $2""",
-                f"%{query}%", limit,
+                f"%{query}%", max(limit * 5, 20),
             )
-            return [dict(r) for r in rows]
+            query_terms = {t for t in str(query or "").lower().split() if t}
+            ranked: list[dict] = []
+            for row in rows:
+                item = dict(row)
+                summary = str(item.get("summary") or "")
+                summary_terms = {t for t in summary.lower().split() if t}
+                overlap = (
+                    len(query_terms & summary_terms) / max(1, len(query_terms))
+                    if query_terms else 0.0
+                )
+                created_at = item.get("created_at") or datetime.now(timezone.utc)
+                if getattr(created_at, "tzinfo", None) is None:
+                    created_at = created_at.replace(tzinfo=timezone.utc)
+                item["_relevance"] = self.calculate_relevance(
+                    semantic_similarity=float(overlap),
+                    created_at=created_at,
+                    importance=float(item.get("importance") or 0.5),
+                )
+                ranked.append(item)
+            ranked.sort(key=lambda x: float(x.get("_relevance") or 0.0), reverse=True)
+            for item in ranked:
+                item.pop("_relevance", None)
+            return ranked[:limit]
 
     # ── Формула релевантности ──
 

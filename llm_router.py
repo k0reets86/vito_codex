@@ -105,8 +105,8 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
     # -- Strategy brainstorm --
     "gpt-5": ModelConfig(
         provider="openai",
-        model_id="gpt-5",
-        display_name="ChatGPT 5.2",
+        model_id="gpt-4o",
+        display_name="GPT-4o Strategic Alias",
         cost_per_1k_input=0.0025,
         cost_per_1k_output=0.010,
         max_tokens=4096,

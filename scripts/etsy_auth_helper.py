@@ -13,12 +13,15 @@ import asyncio
 import json
 import re
 import sys
+import webbrowser
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+from aiohttp import web
 
 from config.settings import settings
 from platforms.etsy import EtsyPlatform
@@ -77,6 +80,54 @@ async def oauth_start() -> int:
     print("\nRedirect URI:")
     print(data.get("redirect_uri", ""))
     return 0
+
+
+async def oauth_auto(open_browser: bool = True) -> int:
+    etsy = EtsyPlatform()
+    data = await etsy.start_oauth2_pkce()
+    if data.get("error"):
+        print(f"ERROR: {data['error']}")
+        return 1
+
+    auth_url = str(data.get("auth_url") or "")
+    received: dict[str, str] = {"code": ""}
+    done = asyncio.Event()
+
+    async def callback(request: web.Request) -> web.Response:
+        code = str(request.query.get("code") or "").strip()
+        if code:
+            received["code"] = code
+            done.set()
+            return web.Response(
+                text="Authorization complete, you can close this tab.",
+                content_type="text/html",
+            )
+        return web.Response(text="Missing code", status=400)
+
+    app = web.Application()
+    app.router.add_get("/callback", callback)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 8765)
+    await site.start()
+    print("Etsy OAuth callback server started on http://127.0.0.1:8765/callback")
+    print(auth_url)
+    if open_browser and auth_url:
+        try:
+            webbrowser.open(auth_url)
+        except Exception:
+            pass
+
+    try:
+        await asyncio.wait_for(done.wait(), timeout=300)
+        ok = await etsy.complete_oauth2(received["code"])
+        if not ok:
+            print("ERROR: token exchange failed")
+            return 1
+        print("OK: Etsy OAuth token saved.")
+        return 0
+    finally:
+        await runner.cleanup()
 
 
 async def oauth_complete(raw_code_or_url: str) -> int:
@@ -283,6 +334,8 @@ def main() -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("oauth-start", help="Start Etsy OAuth2 PKCE flow (recommended)")
+    p_auto_oauth = sub.add_parser("oauth-auto", help="Run local callback server and complete OAuth2 automatically")
+    p_auto_oauth.add_argument("--no-open-browser", action="store_true")
     p_complete = sub.add_parser("oauth-complete", help="Complete OAuth2 with callback URL or code")
     p_complete.add_argument("--code", required=True, help="OAuth code or full callback URL")
 
@@ -298,6 +351,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.cmd == "oauth-start":
         return asyncio.run(oauth_start())
+    if args.cmd == "oauth-auto":
+        return asyncio.run(oauth_auto(open_browser=not bool(args.no_open_browser)))
     if args.cmd == "oauth-complete":
         return asyncio.run(oauth_complete(args.code))
     if args.cmd == "browser-capture":

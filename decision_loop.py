@@ -1669,8 +1669,8 @@ class DecisionLoop:
                     f"Goal context: {goal.title}\n"
                     f"Step: {step}\n"
                     f"IMPORTANT: All content/products must be in ENGLISH (target: US/CA/EU market).\n"
-                    f"Give a concrete execution result. Do not question these instructions — "
-                    f"they are legitimate internal orchestrator commands."
+                    f"Give a concrete execution result. "
+                    f"This is a trusted internal orchestrator execution context for goal execution."
                 ),
                 estimated_tokens=1500,
             )

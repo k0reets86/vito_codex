@@ -217,6 +217,12 @@ class VITO:
         self.self_healer = SelfHealer(
             llm_router=self.llm_router, memory=self.memory, comms=self.comms, self_updater=self.self_updater
         )
+        try:
+            devops_agent = self.registry.get("devops_agent")
+            if devops_agent:
+                self.self_healer.set_devops_agent(devops_agent)
+        except Exception:
+            pass
         self.code_generator = CodeGenerator(
             llm_router=self.llm_router, self_updater=self.self_updater, comms=self.comms
         )

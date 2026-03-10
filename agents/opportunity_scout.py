@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from agents.base_agent import BaseAgent, TaskResult
+from llm_router import TaskType
 from modules.owner_model import OwnerModel
 from modules.reflector import VITOReflector
 
@@ -37,13 +38,64 @@ class OpportunityScout(BaseAgent):
         research_result = await self.ask("research", silent=True, topic="digital product trends and low competition opportunities")
         success_patterns = self.reflector.get_recent(n=5, category="ecommerce")
         prefs = self.owner_model.get_preferences()
-        proposals = self._build_proposals(trend_result, research_result, success_patterns, prefs)
+        proposals = await self._build_proposals(trend_result, research_result, success_patterns, prefs)
         filtered = self.owner_model.filter_goals(proposals)
         return {"generated_at": datetime.now(timezone.utc).isoformat(), "proposals": filtered[:3]}
 
-    def _build_proposals(self, trend_result, research_result, success_patterns: list[str], prefs: dict[str, Any]) -> list[dict[str, Any]]:
+    @staticmethod
+    def _extract_json_list(raw: str) -> list[dict[str, Any]]:
+        text = str(raw or "").strip()
+        if not text:
+            return []
+        candidates = [text]
+        start = text.find("[")
+        end = text.rfind("]")
+        if start != -1 and end != -1 and end > start:
+            candidates.insert(0, text[start : end + 1])
+        for chunk in candidates:
+            try:
+                data = json.loads(chunk)
+            except Exception:
+                continue
+            if isinstance(data, list):
+                return [x for x in data if isinstance(x, dict)]
+        return []
+
+    async def _build_proposals(self, trend_result, research_result, success_patterns: list[str], prefs: dict[str, Any]) -> list[dict[str, Any]]:
         trend_text = str(getattr(trend_result, "output", "") or "")[:1500]
         research_text = str(getattr(research_result, "output", "") or "")[:1500]
+        prompt = (
+            "You are VITO OpportunityScout. Generate realistic market opportunities as JSON.\n"
+            "Return only a JSON array with up to 5 objects.\n"
+            "Schema: [{\"title\": str, \"rationale\": str, \"expected_revenue\": number, "
+            "\"effort\": \"low\"|\"medium\"|\"high\", \"type\": \"create\"|\"optimize\"|\"expand\", "
+            "\"confidence\": number}]\n\n"
+            f"TREND DATA:\n{trend_text[:1200]}\n\n"
+            f"RESEARCH DATA:\n{research_text[:1200]}\n\n"
+            f"SUCCESS PATTERNS:\n{json.dumps(success_patterns[:3], ensure_ascii=False)}\n\n"
+            f"OWNER PREFERENCES:\n{json.dumps(prefs, ensure_ascii=False)}\n\n"
+            "Generate personalized opportunities for monetization and execution."
+        )
+        try:
+            reply = await self._call_llm(task_type=TaskType.RESEARCH, prompt=prompt)
+            parsed = self._extract_json_list(reply)
+            if parsed:
+                normalized: list[dict[str, Any]] = []
+                for item in parsed[:5]:
+                    normalized.append(
+                        {
+                            "title": str(item.get("title", "")).strip()[:160],
+                            "rationale": str(item.get("rationale", "")).strip()[:800],
+                            "expected_revenue": float(item.get("expected_revenue", 0) or 0),
+                            "effort": str(item.get("effort", "medium")).strip().lower() or "medium",
+                            "type": str(item.get("type", "create")).strip().lower() or "create",
+                            "confidence": float(item.get("confidence", 0.65) or 0.65),
+                        }
+                    )
+                if normalized:
+                    return normalized
+        except Exception:
+            pass
         lower = f"{trend_text}\n{research_text}".lower()
         meme_bias = 1 if "meme" in lower else 0
         return [

@@ -93,7 +93,7 @@ class Settings:
     ETSY_SHOP_ID: str = os.getenv("ETSY_SHOP_ID", "")
     ETSY_OAUTH_ACCESS_TOKEN: str = os.getenv("ETSY_OAUTH_ACCESS_TOKEN", "")
     ETSY_OAUTH_REFRESH_TOKEN: str = os.getenv("ETSY_OAUTH_REFRESH_TOKEN", "")
-    ETSY_OAUTH_REDIRECT_URI: str = os.getenv("ETSY_OAUTH_REDIRECT_URI", "http://localhost:9876/etsy/callback")
+    ETSY_OAUTH_REDIRECT_URI: str = os.getenv("ETSY_OAUTH_REDIRECT_URI", "http://localhost:8765/callback")
     ETSY_MODE: str = os.getenv("ETSY_MODE", "api")
     ETSY_STORAGE_STATE_FILE: str = os.getenv("ETSY_STORAGE_STATE_FILE", "runtime/etsy_storage_state.json")
     GUMROAD_APP_ID: str = os.getenv("GUMROAD_APP_ID", "")
@@ -316,7 +316,7 @@ class Settings:
 
     # LLM guardrails
     GUARDRAILS_ENABLED: bool = os.getenv("GUARDRAILS_ENABLED", "true").lower() in ("1", "true", "yes", "on")
-    GUARDRAILS_BLOCK_ON_INJECTION: bool = os.getenv("GUARDRAILS_BLOCK_ON_INJECTION", "false").lower() in ("1", "true", "yes", "on")
+    GUARDRAILS_BLOCK_ON_INJECTION: bool = os.getenv("GUARDRAILS_BLOCK_ON_INJECTION", "true").lower() in ("1", "true", "yes", "on")
     LLM_ALERTS_ENABLED: bool = os.getenv("LLM_ALERTS_ENABLED", "true").lower() in ("1", "true", "yes", "on")
     TOOLING_RUN_LIVE_ENABLED: bool = os.getenv("TOOLING_RUN_LIVE_ENABLED", "false").lower() in ("1", "true", "yes", "on")
     TOOLING_HTTP_TIMEOUT_SEC: int = int(os.getenv("TOOLING_HTTP_TIMEOUT_SEC", "8") or 8)
