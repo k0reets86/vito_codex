@@ -108,6 +108,7 @@ class ConversationMemory:
         with self._connect() as conn:
             for row in rows:
                 payload = dict(row)
+                compact_payload = self._compact_payload(payload)
                 sid = self._normalize_session(payload.get("session_id"))
                 role = str(payload.get("role") or "").strip() or "user"
                 text = str(payload.get("text") or "")
@@ -125,7 +126,7 @@ class ConversationMemory:
                         text,
                         intent,
                         timestamp,
-                        json.dumps(payload, ensure_ascii=False),
+                        json.dumps(compact_payload, ensure_ascii=False),
                     ),
                 )
             conn.commit()
@@ -234,6 +235,7 @@ class ConversationMemory:
         payload = dict(entry or {})
         sid = self._normalize_session(session_id or payload.get("session_id"))
         payload["session_id"] = sid
+        compact_payload = self._compact_payload(payload)
         role = str(payload.get("role") or "").strip() or "user"
         text = str(payload.get("text") or "")
         intent = str(payload.get("intent") or "")
@@ -251,7 +253,7 @@ class ConversationMemory:
                     text,
                     intent,
                     timestamp,
-                    json.dumps(payload, ensure_ascii=False),
+                    json.dumps(compact_payload, ensure_ascii=False),
                 ),
             )
             conn.commit()

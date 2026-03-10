@@ -25,6 +25,7 @@ if str(ROOT) not in sys.path:
 
 from config.paths import root_path
 from config.settings import settings
+from modules.runtime_hygiene import cleanup_simulator_artifacts
 
 
 def _utc_now() -> str:
@@ -456,6 +457,7 @@ async def _amain() -> int:
     ap.add_argument("--step-timeout", type=float, default=35.0, help="Max seconds per step")
     ap.add_argument("--stub-owner-flow", action="store_true", help="Stub research/quality/product pipeline for cheap owner-flow regression")
     args = ap.parse_args()
+    cleanup_simulator_artifacts(keep_latest=20, apply=True)
 
     steps = _builtin(args.scenario)
     os.environ.setdefault("VITO_ALLOW_MULTI", "1")
