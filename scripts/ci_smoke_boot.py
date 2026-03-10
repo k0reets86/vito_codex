@@ -20,10 +20,33 @@ def main() -> int:
 
     try:
         from main import VITO
+        from goal_engine import GoalEngine
+        from llm_router import LLMRouter
+        from memory.memory_manager import MemoryManager
+        from comms_agent import CommsAgent
+        from agents.agent_registry import AgentRegistry
+        from conversation_engine import ConversationEngine
+        from decision_loop import DecisionLoop
 
         print("VITO import smoke ok")
-        _ = VITO()
-        print("VITO init smoke ok")
+        goal_engine = GoalEngine()
+        llm_router = LLMRouter()
+        memory = MemoryManager()
+        comms = CommsAgent()
+        registry = AgentRegistry()
+        _ = ConversationEngine(
+            llm_router=llm_router,
+            memory=memory,
+            goal_engine=goal_engine,
+        )
+        _ = DecisionLoop(
+            goal_engine=goal_engine,
+            llm_router=llm_router,
+            memory=memory,
+            agent_registry=registry,
+        )
+        _ = VITO
+        print("VITO core module smoke ok")
         return 0
     except Exception:
         traceback.print_exc()
