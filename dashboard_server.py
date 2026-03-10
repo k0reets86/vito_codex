@@ -95,6 +95,17 @@ class DashboardServer:
                         payload["goals"] = parent.goal_engine.get_stats()
                     self._json(payload)
                     return
+                if parsed.path in {"/health", "/api/health"}:
+                    payload = {
+                        "ok": True,
+                        "service": "vito",
+                        "evolution_enabled": bool(getattr(settings, "VITO_EVOLUTION_ENABLED", False)),
+                        "decision_loop": bool(parent.decision_loop),
+                        "registry": bool(parent.registry),
+                        "publisher_queue": bool(parent.publisher_queue),
+                    }
+                    self._json(payload)
+                    return
                 if parsed.path == "/api/network":
                     try:
                         from modules.network_utils import basic_net_report

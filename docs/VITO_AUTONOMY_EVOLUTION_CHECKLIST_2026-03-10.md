@@ -8,53 +8,53 @@
   - `not_done`
   - `paused_blocked`
 
-Общий прогресс: `18%`
+Общий прогресс: `38%`
 
 ## Phase AE1 — Evolution Engine Foundations
 1. `SandboxManager`
-- Status: `not_done`
-- Почему: отдельного production-ready модуля пока нет.
+- Status: `done`
+- Почему: реализован модуль `modules/sandbox_manager.py`, поддерживает git worktree create/run/destroy и покрыт тестом.
 
 2. `ApplyEngine`
-- Status: `not_done`
-- Почему: отдельного safe apply/rollback engine пока нет.
+- Status: `done`
+- Почему: реализован модуль `modules/apply_engine.py` со snapshot/health/rollback и тестами.
 
 3. `VITOBenchmarks`
-- Status: `not_done`
-- Почему: существующая agent matrix не закрывает модульный self-improvement benchmark.
+- Status: `done`
+- Почему: реализован модуль `modules/vito_benchmarks.py` со структурированным benchmark delta scoring.
 
 4. `ModuleDiscovery`
-- Status: `not_done`
-- Почему: runtime-discovery pipeline отсутствует.
+- Status: `done`
+- Почему: реализован модуль `modules/module_discovery.py` с discovery для PyPI/GitHub и ранжированием кандидатов.
 
 5. `VITO_EVOLUTION_ENABLED`
-- Status: `not_done`
-- Почему: отдельного флага в settings/.env.example нет.
+- Status: `done`
+- Почему: добавлен в `config/settings.py` и `.env.example`.
 
 6. `/health endpoint`
-- Status: `not_done`
-- Почему: dashboard не отдает отдельный `/health`.
+- Status: `done`
+- Почему: `dashboard_server.py` отдает `/health` и `/api/health`.
 
 7. `Baseline tests for evolution foundations`
-- Status: `not_done`
-- Почему: тестового пакета для этих модулей еще нет.
+- Status: `done`
+- Почему: добавлены и пройдены тесты для sandbox/apply/benchmarks/discovery/v2 agents/dashboard health.
 
 ## Phase AE2 — Self-Healer V2 / Self-Evolver V2
 8. `SelfHealerV2`
-- Status: `not_done`
-- Почему: есть сильный `SelfHealer`, но не v2-контур с sandbox/apply flow.
+- Status: `done`
+- Почему: реализован `agents/self_healer_v2.py` с sandbox-first heal path и тестом.
 
 9. `SelfEvolverV2`
-- Status: `not_done`
-- Почему: есть autonomy self_evolver, но нет benchmark/apply successor.
+- Status: `done`
+- Почему: реализован `agents/self_evolver_v2.py` с benchmark-driven proposal path и тестом.
 
 10. `Compatibility layer with current runtime`
-- Status: `not_done`
-- Почему: main/decision_loop пока не умеют работать с v2 execution layer.
+- Status: `done`
+- Почему: `main.py` создает AE1 foundation и прокладывает `self_healer_v2/self_evolver_v2` в runtime/decision loop.
 
 11. `Healing wrapper in decision/execution lanes`
 - Status: `partial`
-- Почему: старый self-healer уже привязан, но не через v2 sandbox lifecycle.
+- Почему: v2 wiring в runtime есть, но decision loop еще не перенаправляет критические healing lanes на v2 как primary engine.
 
 12. `Reflection/archive hooks for improvement cycles`
 - Status: `partial`

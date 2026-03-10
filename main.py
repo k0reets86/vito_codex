@@ -113,6 +113,8 @@ from agents.platform_onboarding_agent import PlatformOnboardingAgent
 from agents.curriculum_agent import CurriculumAgent
 from agents.opportunity_scout import OpportunityScout
 from agents.self_evolver import SelfEvolver
+from agents.self_healer_v2 import SelfHealerV2
+from agents.self_evolver_v2 import SelfEvolverV2
 
 from platforms.gumroad import GumroadPlatform
 from platforms.etsy import EtsyPlatform
@@ -142,7 +144,12 @@ from modules.platform_registry import PlatformRegistry
 from modules.platform_smoke import PlatformSmoke
 from modules.playbook_registry import PlaybookRegistry
 from modules.publisher_queue import PublisherQueue
+from modules.reflector import VITOReflector
 from modules.skill_library import seed_initial_skills
+from modules.sandbox_manager import SandboxManager
+from modules.apply_engine import ApplyEngine
+from modules.vito_benchmarks import VITOBenchmarks
+from modules.module_discovery import ModuleDiscovery
 from modules.conversation_memory import ConversationMemory
 from modules.cancel_state import CancelState
 from modules.owner_task_state import OwnerTaskState
@@ -217,6 +224,34 @@ class VITO:
         self.self_healer = SelfHealer(
             llm_router=self.llm_router, memory=self.memory, comms=self.comms, self_updater=self.self_updater
         )
+        self.sandbox_manager = None
+        self.apply_engine = None
+        self.vito_benchmarks = None
+        self.module_discovery = None
+        self.self_healer_v2 = None
+        self.self_evolver_v2 = None
+        if getattr(settings, "VITO_EVOLUTION_ENABLED", False):
+            try:
+                self.sandbox_manager = SandboxManager()
+                self.apply_engine = ApplyEngine()
+                self.vito_benchmarks = VITOBenchmarks()
+                self.module_discovery = ModuleDiscovery()
+                self.self_healer_v2 = SelfHealerV2(
+                    sandbox_manager=self.sandbox_manager,
+                    apply_engine=self.apply_engine,
+                    reflector=VITOReflector(),
+                    **dict(llm_router=self.llm_router, memory=self.memory, finance=self.finance, comms=self.comms),
+                )
+                self.self_evolver_v2 = SelfEvolverV2(
+                    sandbox_manager=self.sandbox_manager,
+                    apply_engine=self.apply_engine,
+                    benchmarks=self.vito_benchmarks,
+                    discovery=self.module_discovery,
+                    reflector=VITOReflector(),
+                    **dict(llm_router=self.llm_router, memory=self.memory, finance=self.finance, comms=self.comms),
+                )
+            except Exception:
+                logger.exception("Evolution engine foundation init failed", extra={"event": "evolution_init_failed"})
         try:
             devops_agent = self.registry.get("devops_agent")
             if devops_agent:
@@ -278,6 +313,10 @@ class VITO:
         )
         self.decision_loop.set_cancel_state(self.cancel_state)
         self.decision_loop.set_self_healer(self.self_healer)
+        if self.self_healer_v2:
+            self.decision_loop._self_healer_v2 = self.self_healer_v2
+        if self.self_evolver_v2:
+            self.decision_loop._self_evolver_v2 = self.self_evolver_v2
         self.decision_loop._code_generator = self.code_generator
         # Smart routing: give decision_loop access to platforms
         self.decision_loop._platforms = self._platforms_commerce

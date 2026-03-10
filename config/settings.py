@@ -156,6 +156,7 @@ class Settings:
     # Autonomy toggles
     PROACTIVE_ENABLED: bool = os.getenv("PROACTIVE_ENABLED", "false").lower() in ("1", "true", "yes", "on")
     BRAINSTORM_WEEKLY: bool = os.getenv("BRAINSTORM_WEEKLY", "true").lower() in ("1", "true", "yes", "on")
+    VITO_EVOLUTION_ENABLED: bool = os.getenv("VITO_EVOLUTION_ENABLED", "true").lower() in ("1", "true", "yes", "on")
 
     # LLM cache
     LLM_CACHE_TTL_HOURS: int = int(os.getenv("LLM_CACHE_TTL_HOURS", "24"))
