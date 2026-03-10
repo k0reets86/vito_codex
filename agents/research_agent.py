@@ -16,6 +16,7 @@ from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from config.settings import settings
 from llm_router import TaskType
+from modules.research_family_runtime import build_research_runtime_profile
 from modules.research_report_store import save_full_report
 
 logger = get_logger("research_agent", agent="research_agent")
@@ -311,6 +312,13 @@ class ResearchAgent(BaseAgent):
                         "sources": list(real_data.keys())},
             )
 
+        runtime_profile = build_research_runtime_profile(
+            topic=topic,
+            data_sources=list(real_data.keys()),
+            judge_payload=judge_payload,
+            report_path=report_path,
+        )
+
         return TaskResult(
             success=True,
             output=response,
@@ -327,6 +335,8 @@ class ResearchAgent(BaseAgent):
                 "research_route_plan": research_route_plan,
                 "judge_review": judge_review,
                 "judge_payload": judge_payload,
+                "research_runtime_profile": runtime_profile,
+                "next_actions": runtime_profile.get("next_actions") or [],
                 **self.get_skill_pack(),
             },
         )

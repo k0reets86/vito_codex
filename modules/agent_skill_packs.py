@@ -16,6 +16,21 @@ _PACKS: dict[str, dict[str, Any]] = {
         "evidence": ["report_path", "data_sources", "overall_score", "recommended_product"],
         "preferred_workflows": ["W01", "W08"],
     },
+    "trend_scout": {
+        "skills": ["multi_source_trend_scan", "fallback_trend_collection", "trend_signal_ranking", "niche_seed_generation"],
+        "evidence": ["trend_runtime_profile", "source_count", "fallback_reason", "next_actions"],
+        "preferred_workflows": ["W01", "W08"],
+    },
+    "analytics_agent": {
+        "skills": ["dashboard_snapshot", "anomaly_triage", "forecast_packaging", "agent_performance_review"],
+        "evidence": ["analytics_runtime_profile", "metrics", "anomalies", "forecast_confidence"],
+        "preferred_workflows": ["W03", "W06"],
+    },
+    "document_agent": {
+        "skills": ["document_ingest", "recovery_aware_parse", "ocr_extract", "knowledge_capture"],
+        "evidence": ["document_runtime_profile", "path", "next_actions", "source_status"],
+        "preferred_workflows": ["W01", "W08"],
+    },
     "browser_agent": {
         "skills": ["screenshot_first_execution", "auth_interrupt_detection", "challenge_detection", "form_upload_navigation", "selector_mapping_preflight", "browser_recovery_decisions"],
         "evidence": ["url", "screenshot_path", "browser_runtime_profile", "browser_recovery"],

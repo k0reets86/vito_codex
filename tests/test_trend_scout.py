@@ -60,6 +60,7 @@ class TestTrendScout:
 
         result = await agent.scan_google_trends(["AI", "crypto"])
         assert result.success is True
+        assert result.metadata["trend_runtime_profile"]["mode"] == "pytrends_primary"
 
     @pytest.mark.asyncio
     async def test_scan_reddit(self, agent, monkeypatch):
@@ -151,3 +152,14 @@ class TestTrendScout:
 
         await agent.scan_google_trends(["test"])
         agent.memory.store_knowledge.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_trend_fallback_metadata(self, agent, monkeypatch):
+        monkeypatch.setattr("agents.trend_scout.network_available", lambda *args, **kwargs: True)
+        async def fake_scan(feeds):
+            return TaskResult(success=True, output="rss context")
+        agent.scan_rss_feeds = fake_scan
+        agent.llm_router.call_llm = AsyncMock(return_value="fallback report")
+        result = await agent._trend_fallback_report(["memes"], "US", "pytrends_error")
+        assert result.success is True
+        assert result.metadata["trend_runtime_profile"]["recovery_mode"] == "fallback_active"

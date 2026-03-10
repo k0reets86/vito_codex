@@ -12,6 +12,7 @@ from typing import Any, Optional
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from llm_router import TaskType
+from modules.research_family_runtime import build_document_runtime_profile
 
 logger = get_logger("document_agent", agent="document_agent")
 
@@ -60,19 +61,24 @@ class DocumentAgent(BaseAgent):
     async def parse_document(self, path: str) -> TaskResult:
         file_path = Path(path).expanduser()
         if not file_path.exists():
-            return TaskResult(success=False, error=f"Файл не найден: {file_path}")
+            runtime_profile = build_document_runtime_profile(str(file_path), "document_parse")
+            return TaskResult(
+                success=True,
+                output={"status": "source_missing", "path": str(file_path), "next_actions": runtime_profile["next_actions"]},
+                metadata={"document_runtime_profile": runtime_profile, **self.get_skill_pack()},
+            )
         suffix = file_path.suffix.lower()
         try:
             if suffix in {".txt", ".md", ".log"}:
-                return TaskResult(success=True, output={"text": file_path.read_text(errors="ignore")})
+                return TaskResult(success=True, output={"text": file_path.read_text(errors="ignore")}, metadata={"document_runtime_profile": build_document_runtime_profile(str(file_path), "document_parse"), **self.get_skill_pack()})
             if suffix == ".json":
                 data = json.loads(file_path.read_text(errors="ignore"))
-                return TaskResult(success=True, output={"json": data})
+                return TaskResult(success=True, output={"json": data}, metadata={"document_runtime_profile": build_document_runtime_profile(str(file_path), "document_parse"), **self.get_skill_pack()})
             if suffix == ".csv":
                 with file_path.open(newline="", encoding="utf-8", errors="ignore") as f:
                     reader = csv.reader(f)
                     rows = [row for row in reader][:1000]
-                return TaskResult(success=True, output={"rows": rows})
+                return TaskResult(success=True, output={"rows": rows}, metadata={"document_runtime_profile": build_document_runtime_profile(str(file_path), "document_parse"), **self.get_skill_pack()})
             if suffix == ".docx":
                 try:
                     import docx  # python-docx
@@ -80,7 +86,7 @@ class DocumentAgent(BaseAgent):
                     return TaskResult(success=False, error="python-docx не установлен")
                 doc = docx.Document(str(file_path))
                 text = "\n".join(p.text for p in doc.paragraphs)
-                return TaskResult(success=True, output={"text": text})
+                return TaskResult(success=True, output={"text": text}, metadata={"document_runtime_profile": build_document_runtime_profile(str(file_path), "document_parse"), **self.get_skill_pack()})
             if suffix == ".pdf":
                 try:
                     from pypdf import PdfReader
@@ -90,7 +96,7 @@ class DocumentAgent(BaseAgent):
                 pages = []
                 for page in reader.pages[:50]:
                     pages.append(page.extract_text() or "")
-                return TaskResult(success=True, output={"text": "\n".join(pages)})
+                return TaskResult(success=True, output={"text": "\n".join(pages)}, metadata={"document_runtime_profile": build_document_runtime_profile(str(file_path), "document_parse"), **self.get_skill_pack()})
             if suffix in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff"}:
                 return await self.ocr_image(str(file_path))
             if suffix in {".mp4", ".mov", ".avi", ".mkv", ".webm"}:
@@ -102,7 +108,12 @@ class DocumentAgent(BaseAgent):
     async def ocr_image(self, path: str) -> TaskResult:
         file_path = Path(path).expanduser()
         if not file_path.exists():
-            return TaskResult(success=False, error=f"Файл не найден: {file_path}")
+            runtime_profile = build_document_runtime_profile(str(file_path), "image_ocr")
+            return TaskResult(
+                success=True,
+                output={"status": "source_missing", "path": str(file_path), "next_actions": runtime_profile["next_actions"]},
+                metadata={"document_runtime_profile": runtime_profile, **self.get_skill_pack()},
+            )
         try:
             from PIL import Image
         except Exception:
@@ -114,7 +125,7 @@ class DocumentAgent(BaseAgent):
                 import pytesseract
 
                 text = pytesseract.image_to_string(img)
-                return TaskResult(success=True, output={"text": text})
+                return TaskResult(success=True, output={"text": text}, metadata={"document_runtime_profile": build_document_runtime_profile(str(file_path), "image_ocr"), **self.get_skill_pack()})
             except Exception:
                 try:
                     from tesserocr import PyTessBaseAPI
@@ -122,7 +133,7 @@ class DocumentAgent(BaseAgent):
                     with PyTessBaseAPI() as api:
                         api.SetImage(img)
                         text = api.GetUTF8Text()
-                    return TaskResult(success=True, output={"text": text})
+                    return TaskResult(success=True, output={"text": text}, metadata={"document_runtime_profile": build_document_runtime_profile(str(file_path), "image_ocr"), **self.get_skill_pack()})
                 except Exception:
                     return TaskResult(success=False, error="OCR недоступен (нет pytesseract или tesserocr)")
         except Exception as e:
@@ -131,7 +142,12 @@ class DocumentAgent(BaseAgent):
     async def extract_video_text(self, path: str) -> TaskResult:
         file_path = Path(path).expanduser()
         if not file_path.exists():
-            return TaskResult(success=False, error=f"Файл не найден: {file_path}")
+            runtime_profile = build_document_runtime_profile(str(file_path), "video_extract")
+            return TaskResult(
+                success=True,
+                output={"status": "source_missing", "path": str(file_path), "next_actions": runtime_profile["next_actions"]},
+                metadata={"document_runtime_profile": runtime_profile, **self.get_skill_pack()},
+            )
         if not shutil.which("ffmpeg"):
             return TaskResult(success=False, error="ffmpeg не установлен")
         try:
@@ -159,7 +175,7 @@ class DocumentAgent(BaseAgent):
                     txt = res.output.get("text", "")
                     if txt.strip():
                         texts.append(txt.strip())
-            return TaskResult(success=True, output={"text": "\n".join(texts)})
+            return TaskResult(success=True, output={"text": "\n".join(texts)}, metadata={"document_runtime_profile": build_document_runtime_profile(str(file_path), "video_extract"), **self.get_skill_pack()})
         except Exception as e:
             return TaskResult(success=False, error=str(e))
         finally:

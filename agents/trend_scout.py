@@ -15,6 +15,7 @@ from config.logger import get_logger
 from config.settings import settings
 from llm_router import TaskType
 from modules.network_utils import network_available
+from modules.research_family_runtime import build_trend_runtime_profile
 
 logger = get_logger("trend_scout", agent="trend_scout")
 
@@ -140,7 +141,18 @@ class TrendScout(BaseAgent):
                     text=f"Google Trends {geo}: {output[:800]}",
                     metadata={"type": "trend", "geo": geo},
                 )
-            return TaskResult(success=True, output=output, cost_usd=0.0)
+            return TaskResult(
+                success=True,
+                output=output,
+                cost_usd=0.0,
+                metadata={
+                    "trend_runtime_profile": build_trend_runtime_profile(
+                        mode="pytrends_primary",
+                        source_urls=search_terms,
+                    ),
+                    **self.get_skill_pack(),
+                },
+            )
         except Exception as e:
             logger.warning(f"pytrends error: {e}", extra={"event": "pytrends_error"})
             return await self._trend_fallback_report(
@@ -193,7 +205,19 @@ class TrendScout(BaseAgent):
                     },
                     ensure_ascii=False,
                 )
-                return TaskResult(success=True, output=payload, cost_usd=0.0)
+                return TaskResult(
+                    success=True,
+                    output=payload,
+                    cost_usd=0.0,
+                    metadata={
+                        "trend_runtime_profile": build_trend_runtime_profile(
+                            mode="fallback_llm",
+                            source_urls=feeds,
+                            fallback_reason=reason,
+                        ),
+                        **self.get_skill_pack(),
+                    },
+                )
 
         # Последний fallback без LLM — хотя бы возвращаем RSS-данные
         if rss_context:
@@ -207,7 +231,19 @@ class TrendScout(BaseAgent):
                 },
                 ensure_ascii=False,
             )
-            return TaskResult(success=True, output=payload, cost_usd=0.0)
+            return TaskResult(
+                success=True,
+                output=payload,
+                cost_usd=0.0,
+                metadata={
+                    "trend_runtime_profile": build_trend_runtime_profile(
+                        mode="fallback_raw",
+                        source_urls=feeds,
+                        fallback_reason=reason,
+                    ),
+                    **self.get_skill_pack(),
+                },
+            )
 
         return TaskResult(success=False, error=f"trend_fallback_failed:{reason}")
 

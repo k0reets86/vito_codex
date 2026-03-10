@@ -6,6 +6,7 @@ from typing import Any
 from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from llm_router import TaskType
+from modules.research_family_runtime import build_analytics_runtime_profile
 
 logger = get_logger("analytics_agent", agent="analytics_agent")
 
@@ -70,7 +71,18 @@ class AnalyticsAgent(BaseAgent):
             "roi_percent": round((profit / spend) * 100, 2) if spend > 0 else None,
             "health": "ok" if profit >= 0 else "watch",
         }
-        return TaskResult(success=True, output=data)
+        return TaskResult(
+            success=True,
+            output=data,
+            metadata={
+                "analytics_runtime_profile": build_analytics_runtime_profile(
+                    anomalies=[],
+                    health=data.get("health"),
+                    forecast_confidence=None,
+                ),
+                **self.get_skill_pack(),
+            },
+        )
 
     async def detect_anomalies(self) -> TaskResult:
         local = await self._local_anomaly_snapshot()
@@ -83,7 +95,18 @@ class AnalyticsAgent(BaseAgent):
         )
         if response:
             local["llm_notes"] = response
-        return TaskResult(success=True, output=local)
+        return TaskResult(
+            success=True,
+            output=local,
+            metadata={
+                "analytics_runtime_profile": build_analytics_runtime_profile(
+                    anomalies=local.get("anomalies"),
+                    health=local.get("status"),
+                    forecast_confidence=None,
+                ),
+                **self.get_skill_pack(),
+            },
+        )
 
     async def forecast_revenue(self, days: int = 30) -> TaskResult:
         local = await self._local_forecast(days)
@@ -97,7 +120,19 @@ class AnalyticsAgent(BaseAgent):
         if response:
             self._record_expense(0.01, f"Forecast {days}d")
             local["llm_notes"] = response
-        return TaskResult(success=True, output=local, cost_usd=0.01 if response else 0.0)
+        return TaskResult(
+            success=True,
+            output=local,
+            cost_usd=0.01 if response else 0.0,
+            metadata={
+                "analytics_runtime_profile": build_analytics_runtime_profile(
+                    anomalies=[],
+                    health="forecast",
+                    forecast_confidence=local.get("confidence"),
+                ),
+                **self.get_skill_pack(),
+            },
+        )
 
     async def agent_performance(self) -> TaskResult:
         registry = self.registry or self._registry
@@ -114,7 +149,18 @@ class AnalyticsAgent(BaseAgent):
             }
             for s in statuses
         ]
-        return TaskResult(success=True, output={"agents": summary, "agent_count": len(summary)})
+        return TaskResult(
+            success=True,
+            output={"agents": summary, "agent_count": len(summary)},
+            metadata={
+                "analytics_runtime_profile": build_analytics_runtime_profile(
+                    anomalies=[],
+                    health="agent_performance",
+                    forecast_confidence=None,
+                ),
+                **self.get_skill_pack(),
+            },
+        )
 
     async def _local_anomaly_snapshot(self) -> dict[str, Any]:
         dashboard = await self.daily_dashboard()

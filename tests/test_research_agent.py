@@ -48,6 +48,8 @@ class TestResearchAgent:
         assert result.metadata["recommended_product"]["title"] == "AI Prompt Pack"
         assert result.metadata["top_ideas"][0]["platform"] == "gumroad"
         assert result.metadata["judge_payload"]["decision"] == "accept"
+        assert result.metadata["research_runtime_profile"]["source_count"] >= 0
+        assert "next_actions" in result.metadata
 
     @pytest.mark.asyncio
     async def test_competitor_analysis(self, agent):

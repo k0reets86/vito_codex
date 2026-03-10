@@ -45,3 +45,10 @@ class TestDocumentAgent:
         agent.llm_router.call_llm = AsyncMock(return_value="document content")
         result = await agent.execute_task("documentation", title="Test", content_type="report")
         assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_parse_document_missing_file_returns_recovery(self, agent):
+        result = await agent.parse_document("/tmp/definitely_missing_vito_doc.txt")
+        assert result.success is True
+        assert result.output["status"] == "source_missing"
+        assert result.metadata["document_runtime_profile"]["recovery_mode"] == "needs_source_file"
