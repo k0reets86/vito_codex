@@ -10,6 +10,7 @@ from typing import Any
 from config.paths import PROJECT_ROOT
 from config.settings import settings
 from modules.account_auth_remediation import build_auth_remediation
+from modules.platform_auth_interrupts import PlatformAuthInterrupts
 from modules.platform_validation_registry import load_platform_validation_registry
 
 
@@ -73,11 +74,12 @@ def execute_platform_readiness_action(
         return {'status': 'failed', 'error': 'invalid_platform_readiness_action', 'agent': 'platform_readiness'}
 
     if act.startswith('reauth:'):
+        interrupt_id = PlatformAuthInterrupts().raise_interrupt(svc, block or 'missing_session', detail=act)
         remediation = build_auth_remediation(svc, error=block or 'missing_session', configured=True)
         return {
             'status': 'waiting_approval',
             'error': f'Нужна повторная авторизация для {svc}',
-            'output': remediation,
+            'output': {**remediation, 'platform_auth_interrupt_id': interrupt_id},
             'agent': 'platform_readiness',
         }
 
@@ -86,6 +88,8 @@ def execute_platform_readiness_action(
         report = _read_json(_latest_wave_report()) if _latest_wave_report() else {}
         check = _find_service_check(report, svc)
         state = str(check.get('state') or '').strip().lower()
+        if ok and state in {'partial', 'owner_grade'}:
+            PlatformAuthInterrupts().resolve_interrupt(svc)
         if ok and check:
             return {
                 'status': 'completed',
@@ -105,6 +109,8 @@ def execute_platform_readiness_action(
         registry_after = dict(load_platform_validation_registry().get(svc) or {})
         state = str(registry_after.get('state') or registry_before.get('state') or '').strip().lower()
         owner_grade_ok = bool(registry_after.get('owner_grade_ok'))
+        if ok and owner_grade_ok:
+            PlatformAuthInterrupts().resolve_interrupt(svc)
         if ok and state in {'owner_grade', 'partial', 'blocked'}:
             return {
                 'status': 'completed',

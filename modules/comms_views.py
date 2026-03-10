@@ -183,6 +183,13 @@ def render_platform_readiness_summary(items: list[dict[str, Any]]) -> str:
         if action:
             suffix += f" | next={action}"
         lines.append(f"  - {svc}: {state}{suffix}")
+    pending_auth = PlatformAuthInterrupts().list_interrupts(status="pending", limit=10)
+    if pending_auth:
+        lines.append(f"- Требуется повторная авторизация: {len(pending_auth)}")
+        for item in pending_auth[:5]:
+            svc = str(item.get("service") or "?")
+            blocker = str(item.get("blocker") or "missing_session")
+            lines.append(f"  - {svc}: {blocker}")
     return "\n".join(lines)
 
 
@@ -194,3 +201,4 @@ def render_platforms_hub() -> str:
         "- Соцсети: X, Pinterest, Reddit\n"
         "- Для онбординга новой платформы: «изучи сервис <название>»"
     )
+from modules.platform_auth_interrupts import PlatformAuthInterrupts

@@ -20,6 +20,7 @@ def test_reauth_action_returns_waiting_approval() -> None:
     assert out['status'] == 'waiting_approval'
     assert out['agent'] == 'platform_readiness'
     assert 'etsy' in str(out['output']).lower()
+    assert int(out['output']['platform_auth_interrupt_id']) > 0
 
 
 def test_probe_action_uses_runner(monkeypatch) -> None:
