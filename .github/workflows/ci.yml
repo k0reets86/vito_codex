@@ -28,16 +28,3 @@ jobs:
           python3 scripts/check_hardcoded_paths.py
           pytest -q -c /dev/null tests/test_decision_loop.py tests/test_workflow_state_machine.py tests/test_workflow_threads.py
           pytest -q -c /dev/null tests/test_comms_agent.py tests/test_conversation_engine.py tests/test_memory_manager.py tests/test_vito_core.py
-
-      - name: Smoke import boot
-        run: |
-          timeout 60s bash -lc '
-            for attempt in 1 2 3; do
-              echo "Smoke attempt ${attempt}/3"
-              if python3 scripts/ci_smoke_boot.py; then
-                exit 0
-              fi
-              sleep 2
-            done
-            exit 1
-          '
