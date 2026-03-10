@@ -103,8 +103,8 @@
 - Аргумент: handoff substrate есть, но dispatch по-прежнему в основном синхронный lane.
 
 23. `decision_loop` sequential `_maybe_run_*``
-- Статус: `not_done`
-- Аргумент: audit point остается актуальным; полноценный parallel background fan-out еще не внедрен.
+- Статус: `done`
+- Аргумент: `decision_loop._run_background_maintenance()` введен как parallel fan-out через `asyncio.gather()` для maintenance `_maybe_run_*` lanes; `_tick()` больше не гоняет этот фон строго последовательно.
 
 24. `service session persistence across restarts for each platform`
 - Статус: `partial`

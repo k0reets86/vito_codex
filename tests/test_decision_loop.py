@@ -149,6 +149,50 @@ async def test_tick_budget_exhausted(dl):
     assert dl._tick_count == 1
 
 
+@pytest.mark.asyncio
+async def test_background_maintenance_runs_all_tasks(dl):
+    calls = []
+
+    async def _mark(name):
+        calls.append(name)
+
+    dl._maybe_run_memory_retention = lambda: _mark("memory_retention")
+    dl._maybe_run_memory_consolidation = lambda: _mark("memory_consolidation")
+    dl._maybe_run_memory_weekly_report = lambda: _mark("memory_weekly_report")
+    dl._maybe_run_self_learning_optimization = lambda: _mark("self_learning_optimization")
+    dl._maybe_run_self_learning_test_jobs = lambda: _mark("self_learning_test_jobs")
+    dl._maybe_run_self_learning_maintenance = lambda: _mark("self_learning_maintenance")
+    dl._maybe_run_tooling_discovery_intake = lambda: _mark("tooling_discovery_intake")
+    dl._maybe_run_tooling_governance_check = lambda: _mark("tooling_governance_check")
+    dl._maybe_run_platform_rules_sync = lambda: _mark("platform_rules_sync")
+    dl._maybe_run_weekly_governance_report = lambda: _mark("weekly_governance_report")
+    dl._maybe_run_autonomous_improvement = lambda: _mark("autonomous_improvement")
+    dl._maybe_run_autonomy_v2 = lambda: _mark("autonomy_v2")
+    dl._maybe_run_evolution_discovery = lambda: _mark("evolution_discovery")
+    dl._maybe_run_autonomy_overseer = lambda: _mark("autonomy_overseer")
+    dl._maybe_run_kdp_session_watchdog = lambda: _mark("kdp_session_watchdog")
+
+    await dl._run_background_maintenance()
+
+    assert set(calls) == {
+        "memory_retention",
+        "memory_consolidation",
+        "memory_weekly_report",
+        "self_learning_optimization",
+        "self_learning_test_jobs",
+        "self_learning_maintenance",
+        "tooling_discovery_intake",
+        "tooling_governance_check",
+        "platform_rules_sync",
+        "weekly_governance_report",
+        "autonomous_improvement",
+        "autonomy_v2",
+        "evolution_discovery",
+        "autonomy_overseer",
+        "kdp_session_watchdog",
+    }
+
+
 # ── Idle action ──
 
 @pytest.mark.asyncio

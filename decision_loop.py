@@ -251,21 +251,7 @@ class DecisionLoop:
 
         # 1.5. LLM risk monitoring (cost anomaly / fail-rate)
         await self._maybe_send_llm_risk_alert()
-        await self._maybe_run_memory_retention()
-        await self._maybe_run_memory_consolidation()
-        await self._maybe_run_memory_weekly_report()
-        await self._maybe_run_self_learning_optimization()
-        await self._maybe_run_self_learning_test_jobs()
-        await self._maybe_run_self_learning_maintenance()
-        await self._maybe_run_tooling_discovery_intake()
-        await self._maybe_run_tooling_governance_check()
-        await self._maybe_run_platform_rules_sync()
-        await self._maybe_run_weekly_governance_report()
-        await self._maybe_run_autonomous_improvement()
-        await self._maybe_run_autonomy_v2()
-        await self._maybe_run_evolution_discovery()
-        await self._maybe_run_autonomy_overseer()
-        await self._maybe_run_kdp_session_watchdog()
+        await self._run_background_maintenance()
         if self._is_cancelled():
             logger.info("Tick skipped: cancel-state active", extra={"event": "tick_cancelled_skip"})
             self._log_tick_done(tick_start, idle=True)
@@ -290,6 +276,32 @@ class DecisionLoop:
         # 3. Полный цикл Goal → Plan → Execute → Learn
         await self._process_goal(goal)
         self._log_tick_done(tick_start, idle=False)
+
+    async def _run_background_maintenance(self) -> None:
+        tasks = [
+            ("memory_retention", self._maybe_run_memory_retention),
+            ("memory_consolidation", self._maybe_run_memory_consolidation),
+            ("memory_weekly_report", self._maybe_run_memory_weekly_report),
+            ("self_learning_optimization", self._maybe_run_self_learning_optimization),
+            ("self_learning_test_jobs", self._maybe_run_self_learning_test_jobs),
+            ("self_learning_maintenance", self._maybe_run_self_learning_maintenance),
+            ("tooling_discovery_intake", self._maybe_run_tooling_discovery_intake),
+            ("tooling_governance_check", self._maybe_run_tooling_governance_check),
+            ("platform_rules_sync", self._maybe_run_platform_rules_sync),
+            ("weekly_governance_report", self._maybe_run_weekly_governance_report),
+            ("autonomous_improvement", self._maybe_run_autonomous_improvement),
+            ("autonomy_v2", self._maybe_run_autonomy_v2),
+            ("evolution_discovery", self._maybe_run_evolution_discovery),
+            ("autonomy_overseer", self._maybe_run_autonomy_overseer),
+            ("kdp_session_watchdog", self._maybe_run_kdp_session_watchdog),
+        ]
+        results = await asyncio.gather(*(func() for _, func in tasks), return_exceptions=True)
+        for (name, _func), result in zip(tasks, results):
+            if isinstance(result, Exception):
+                logger.warning(
+                    f"Background maintenance task failed: {name}: {result}",
+                    extra={"event": "background_maintenance_error", "context": {"task": name}},
+                )
 
     async def _maybe_auto_resume_waiting_goals(self) -> None:
         """Auto-resume waiting goals when interrupts are resolved."""
