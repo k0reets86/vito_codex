@@ -1,0 +1,106 @@
+{
+  "id": "gumroad",
+  "name": "Gumroad",
+  "url": "https://gumroad.com",
+  "status": "active",
+  "created_at": null,
+  "activated_at": null,
+  "overview": {
+    "description": "Marketplace for digital products and creator commerce.",
+    "category": "marketplace",
+    "target_audience": "Creators, educators, indie makers",
+    "revenue_model": "commission",
+    "commission_percent": 10,
+    "payout_schedule": "weekly",
+    "payout_methods": [
+      "paypal",
+      "bank"
+    ],
+    "geo_restrictions": [],
+    "supported_currencies": [
+      "USD",
+      "EUR"
+    ],
+    "language": [
+      "en"
+    ],
+    "maturity_rating": "all",
+    "seller_count_estimate": null,
+    "popularity_score": 7.8
+  },
+  "rules": {
+    "allowed_content": [
+      "digital downloads",
+      "templates",
+      "ebooks"
+    ],
+    "forbidden_content": [],
+    "listing_guidelines_url": "https://gumroad.com/help",
+    "ip_policy": "DMCA",
+    "refund_policy": null,
+    "key_violations_to_avoid": [
+      "Do not publish incomplete listings",
+      "Do not create duplicate products during retries"
+    ]
+  },
+  "integration": {
+    "method": "api",
+    "api": {
+      "available": true,
+      "docs_url": "https://gumroad.com/api",
+      "auth_type": "api_key",
+      "rate_limit": null,
+      "base_url": "https://api.gumroad.com/v2",
+      "key_endpoints": {
+        "create_product": "POST /products",
+        "list_sales": "GET /sales",
+        "list_products": "GET /products"
+      },
+      "sandbox_available": false
+    },
+    "browser": {
+      "required_for": [
+        "listing_creation",
+        "media_upload",
+        "share_settings"
+      ],
+      "login_url": "https://gumroad.com/login",
+      "antibot_level": "medium"
+    }
+  },
+  "account": {
+    "registered": true,
+    "email_used": null,
+    "username": null,
+    "profile_complete": null,
+    "payment_connected": null,
+    "verification_status": "pending",
+    "store_url": null,
+    "api_key": null,
+    "oauth_token": null,
+    "credentials_env_key": "GUMROAD_API_KEY"
+  },
+  "products": {
+    "first_listing_id": null,
+    "first_listing_url": null,
+    "total_listings": 0,
+    "total_revenue": 0.0
+  },
+  "agent_config": {
+    "ecommerce_agent": true,
+    "publisher_agent": false,
+    "analytics_agent": true,
+    "check_interval_hours": 6,
+    "priority": 1
+  },
+  "research": {
+    "sources_consulted": [
+      "known_platform_seed"
+    ],
+    "user_reviews_summary": "",
+    "pros": [],
+    "cons": [],
+    "tips": [],
+    "last_updated": null
+  }
+}

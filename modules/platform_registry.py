@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import sqlite3
+import json
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 from config.logger import get_logger
 from config.settings import settings
+from config.paths import PROJECT_ROOT
 
 logger = get_logger("platform_registry", agent="platform_registry")
 
@@ -39,7 +43,10 @@ PLATFORM_CATALOG = [
 class PlatformRegistry:
     def __init__(self, sqlite_path: Optional[str] = None):
         self.sqlite_path = sqlite_path or settings.SQLITE_PATH
+        self._profiles_dir = PROJECT_ROOT / "data" / "platform_profiles"
+        self._profiles: dict[str, dict] = {}
         self._init_db()
+        self._load_all_profiles()
 
     def _get_conn(self):
         conn = sqlite3.connect(self.sqlite_path)
@@ -94,6 +101,82 @@ class PlatformRegistry:
             return count
         except Exception:
             return 0
+
+    def _load_all_profiles(self) -> None:
+        self._profiles = {}
+        try:
+            self._profiles_dir.mkdir(parents=True, exist_ok=True)
+            for path in sorted(self._profiles_dir.glob("*.json")):
+                if path.name == "template.json":
+                    continue
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                    pid = str(data.get("id") or path.stem).strip().lower()
+                    if pid:
+                        self._profiles[pid] = data
+                except Exception as e:
+                    logger.warning(f"Platform profile load failed for {path.name}: {e}", extra={"event": "platform_profile_load_failed"})
+        except Exception as e:
+            logger.warning(f"Platform profile directory load failed: {e}", extra={"event": "platform_profile_dir_load_failed"})
+
+    def register_profile(self, profile: dict) -> str:
+        platform_id = str(profile.get("id") or profile.get("name") or "").strip().lower()
+        if not platform_id:
+            raise ValueError("platform_profile_requires_id")
+        if not profile.get("created_at"):
+            profile["created_at"] = datetime.now(timezone.utc).isoformat()
+        self._profiles[platform_id] = profile
+        self._save_profile(platform_id, profile)
+        return platform_id
+
+    def activate_profile(self, platform_id: str) -> None:
+        pid = str(platform_id or "").strip().lower()
+        if pid not in self._profiles:
+            raise KeyError(pid)
+        self._profiles[pid]["status"] = "active"
+        self._profiles[pid]["activated_at"] = datetime.now(timezone.utc).isoformat()
+        self._save_profile(pid, self._profiles[pid])
+
+    def get_profile(self, platform_id: str) -> dict | None:
+        return self._profiles.get(str(platform_id or "").strip().lower())
+
+    def list_profiles(self, status: str | None = None, category: str | None = None) -> list[dict]:
+        rows = list(self._profiles.values())
+        if status:
+            rows = [r for r in rows if str(r.get("status") or "").strip().lower() == str(status).strip().lower()]
+        if category:
+            rows = [r for r in rows if str(((r.get("overview") or {}).get("category") or "")).strip().lower() == str(category).strip().lower()]
+        rows.sort(key=lambda x: str(x.get("id") or x.get("name") or ""))
+        return rows
+
+    def get_active_platforms(self, category: str | None = None) -> list[dict]:
+        return self.list_profiles(status="active", category=category)
+
+    def update_profile_field(self, platform_id: str, path: str, value) -> None:
+        pid = str(platform_id or "").strip().lower()
+        profile = self._profiles.get(pid)
+        if not profile:
+            raise KeyError(pid)
+        target = profile
+        parts = [p.strip() for p in str(path or "").split(".") if p.strip()]
+        if not parts:
+            return
+        for key in parts[:-1]:
+            cur = target.get(key)
+            if not isinstance(cur, dict):
+                cur = {}
+                target[key] = cur
+            target = cur
+        target[parts[-1]] = value
+        self._save_profile(pid, profile)
+
+    def all_ids(self) -> list[str]:
+        return sorted(self._profiles.keys())
+
+    def _save_profile(self, platform_id: str, profile: dict) -> None:
+        self._profiles_dir.mkdir(parents=True, exist_ok=True)
+        path = self._profiles_dir / f"{platform_id}.json"
+        path.write_text(json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def list_platforms(self, limit: int = 200) -> list[dict]:
         conn = self._get_conn()

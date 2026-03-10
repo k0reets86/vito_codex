@@ -505,6 +505,19 @@ class VITOCore(BaseAgent):
             return TaskResult(success=False, error="Пустое имя сервиса")
         if not self.registry:
             return TaskResult(success=False, error="Registry недоступен")
+        onboarding = self.registry.get("platform_onboarding_agent")
+        if onboarding:
+            try:
+                delegated = await self.registry.dispatch(
+                    "research_platform",
+                    service=service_name,
+                    platform_name=service_name,
+                    __requested_by=self.name,
+                )
+                if delegated:
+                    return delegated
+            except Exception:
+                pass
         try:
             research_task = (
                 "Find official docs, GitHub repos, and community pitfalls for service/platform: "

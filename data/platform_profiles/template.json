@@ -1,0 +1,81 @@
+{
+  "id": "platform_name",
+  "name": "Platform Display Name",
+  "url": "https://platform.com",
+  "status": "researching",
+  "created_at": null,
+  "activated_at": null,
+  "overview": {
+    "description": null,
+    "category": null,
+    "target_audience": null,
+    "revenue_model": null,
+    "commission_percent": null,
+    "payout_schedule": null,
+    "payout_methods": [],
+    "geo_restrictions": [],
+    "supported_currencies": [],
+    "language": [],
+    "maturity_rating": null,
+    "seller_count_estimate": null,
+    "popularity_score": null
+  },
+  "rules": {
+    "allowed_content": [],
+    "forbidden_content": [],
+    "listing_guidelines_url": null,
+    "ip_policy": null,
+    "refund_policy": null,
+    "key_violations_to_avoid": []
+  },
+  "integration": {
+    "method": null,
+    "api": {
+      "available": false,
+      "docs_url": null,
+      "auth_type": null,
+      "rate_limit": null,
+      "base_url": null,
+      "key_endpoints": {},
+      "sandbox_available": false
+    },
+    "browser": {
+      "required_for": [],
+      "login_url": null,
+      "antibot_level": null
+    }
+  },
+  "account": {
+    "registered": false,
+    "email_used": null,
+    "username": null,
+    "profile_complete": false,
+    "payment_connected": false,
+    "verification_status": "none",
+    "store_url": null,
+    "api_key": null,
+    "oauth_token": null,
+    "credentials_env_key": null
+  },
+  "products": {
+    "first_listing_id": null,
+    "first_listing_url": null,
+    "total_listings": 0,
+    "total_revenue": 0.0
+  },
+  "agent_config": {
+    "ecommerce_agent": true,
+    "publisher_agent": true,
+    "analytics_agent": true,
+    "check_interval_hours": 6,
+    "priority": 1
+  },
+  "research": {
+    "sources_consulted": [],
+    "user_reviews_summary": "",
+    "pros": [],
+    "cons": [],
+    "tips": [],
+    "last_updated": null
+  }
+}

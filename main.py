@@ -109,6 +109,7 @@ from agents.account_manager import AccountManager
 from agents.partnership_agent import PartnershipAgent
 from agents.hr_agent import HRAgent
 from agents.document_agent import DocumentAgent
+from agents.platform_onboarding_agent import PlatformOnboardingAgent
 
 from platforms.gumroad import GumroadPlatform
 from platforms.etsy import EtsyPlatform
@@ -368,6 +369,7 @@ class VITO:
             browser,                                                           # 21
             PublisherAgent(quality_judge=quality_judge, platforms=platforms_publish, **deps),  # 22
             quality_judge,                                                     # Quality Judge
+            PlatformOnboardingAgent(browser_agent=browser, platform_registry=self.platform_registry, **deps),
         ]
 
         for agent in agents:

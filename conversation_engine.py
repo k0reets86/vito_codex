@@ -1011,6 +1011,27 @@ class ConversationEngine:
                 "actions": actions,
                 "needs_confirmation": False,
             }
+        if any(kw in lower for kw in ["подключи платформ", "добавь платформ", "зарегистрируй платформ", "онбординг платформ"]):
+            platform_name = (
+                text.replace("подключи", "")
+                .replace("зарегистрируй", "")
+                .replace("добавь", "")
+                .replace("платформу", "")
+                .replace("платформы", "")
+                .replace("онбординг", "")
+                .strip()
+            )
+            require_confirm = not bool(getattr(settings, "AUTONOMY_MAX_MODE", False))
+            return {
+                "intent": Intent.SYSTEM_ACTION.value,
+                "response": (
+                    f"Запускаю онбординг платформы '{platform_name or 'unknown'}'."
+                    if not require_confirm
+                    else f"Подтверждаешь онбординг платформы '{platform_name or 'unknown'}'? Ответь: да/нет."
+                ),
+                "actions": [{"action": "onboard_platform", "params": {"platform_name": platform_name}}],
+                "needs_confirmation": require_confirm,
+            }
         if any(kw in lower for kw in ["изучи сервис", "изучи платформ", "добавь знания", "найди требования"]):
             # crude extraction of service name from text
             service = text.replace("изучи", "").replace("платформу", "").replace("сервис", "").strip()
@@ -1478,10 +1499,33 @@ class ConversationEngine:
             service = params.get("service", "") or params.get("name", "")
             if not service:
                 return "Нужен параметр: service"
-            result = await self.agent_registry.dispatch("learn_service", service=service)
+            result = await self.agent_registry.dispatch(
+                "research_platform",
+                service=service,
+                platform_name=service,
+                platform_url=params.get("platform_url") or params.get("url"),
+            )
             if result and result.success:
                 return f"Знания по сервису {service} обновлены"
             return f"Не удалось изучить сервис: {getattr(result, 'error', 'unknown')}"
+
+        if action == "onboard_platform" and self.agent_registry:
+            platform_name = params.get("platform_name", "") or params.get("service", "") or params.get("name", "")
+            platform_url = params.get("platform_url") or params.get("url")
+            if not platform_name:
+                return "Нужен параметр: platform_name"
+            result = await self.agent_registry.dispatch(
+                "onboard_platform",
+                platform_name=platform_name,
+                platform_url=platform_url,
+            )
+            if result and result.success:
+                output = result.output if isinstance(result.output, dict) else {}
+                return (
+                    f"Онбординг платформы {platform_name} завершён. "
+                    f"Статус: {output.get('status', 'active')}, platform_id={output.get('platform_id', '?')}"
+                )
+            return f"Не удалось подключить платформу: {getattr(result, 'error', 'unknown')}"
 
         if action == "run_deep_research" and self.agent_registry:
             topic = str(params.get("topic") or "digital products").strip()
@@ -1805,6 +1849,8 @@ class ConversationEngine:
             actions.append("scan_trends() — сканировать тренды")
             actions.append("scan_reddit() — сканировать Reddit")
             actions.append("register_account(url, form, submit_selector, code_selector, ...) — регистрация с email-кодом")
+            actions.append("learn_service(service) — изучить платформу/сервис и собрать профиль")
+            actions.append("onboard_platform(platform_name) — провести онбординг платформы до регистрации в VITO")
         if self.goal_engine:
             actions.append("cancel_goal(goal_id) — отменить цель")
             actions.append("change_priority(goal_id, priority) — сменить приоритет (CRITICAL/HIGH/MEDIUM/LOW)")
@@ -1855,6 +1901,7 @@ class ConversationEngine:
         if self.agent_registry:
             allowed.add("self_improve")
             allowed.add("learn_service")
+            allowed.add("onboard_platform")
             allowed.add("register_account")
             allowed.add("run_deep_research")
             allowed.add("run_product_pipeline")
