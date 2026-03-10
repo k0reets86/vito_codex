@@ -410,6 +410,7 @@ class CommsAgent:
         self._button_map: dict[str, str] = {
             "Главная": "start",
             "Статус": "status",
+            "Задачи": "tasks",
             "В работе": "tasks",
             "Исследовать": "research_hub",
             "Создать": "create_hub",
@@ -1754,10 +1755,9 @@ class CommsAgent:
         """Компактная persistent-клавиатура owner-сценариев."""
         return ReplyKeyboardMarkup(
             [
-                [KeyboardButton("Статус"), KeyboardButton("В работе")],
-                [KeyboardButton("Исследовать"), KeyboardButton("Создать")],
-                [KeyboardButton("Платформы"), KeyboardButton("Входы")],
-                [KeyboardButton("Сводка"), KeyboardButton("Ещё")],
+                [KeyboardButton("Статус"), KeyboardButton("Задачи")],
+                [KeyboardButton("Создать"), KeyboardButton("Входы")],
+                [KeyboardButton("Отчёт"), KeyboardButton("Еще")],
             ],
             resize_keyboard=True,
             is_persistent=True,
@@ -2695,6 +2695,12 @@ class CommsAgent:
             "- Создать\n"
             "- Платформы\n"
             "- Входы\n\n"
+            "Быстрый старт:\n"
+            "/status\n"
+            "/goals\n"
+            "/goal <текст>\n"
+            "/tasks\n"
+            "/report\n\n"
             "Если нужен каталог команд:\n"
             "/help — обзор\n"
             "/help_daily — ежедневные\n"

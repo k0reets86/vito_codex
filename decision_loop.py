@@ -3066,8 +3066,16 @@ class DecisionLoop:
             result = await evolver_v2.execute_task("weekly_evolve_cycle", baseline_score=0.7)
         else:
             result = await self.agent_registry.dispatch("weekly_improve_cycle")
-        if result and result.success:
-            payload = dict(result.output or {}) if isinstance(result.output, dict) else {}
+        success = False
+        payload = {}
+        if isinstance(result, dict):
+            success = bool(result.get("success", result.get("ok", False)))
+            payload = dict(result.get("output") or result) if isinstance(result, dict) else {}
+        elif result:
+            success = bool(getattr(result, "success", False))
+            output = getattr(result, "output", {})
+            payload = dict(output or {}) if isinstance(output, dict) else {}
+        if success:
             proposals = list(payload.get("proposals") or [])
             stored = self.autonomy_proposals.upsert_batch("self_evolver", "improvement", proposals)
             if stored and self.memory:
