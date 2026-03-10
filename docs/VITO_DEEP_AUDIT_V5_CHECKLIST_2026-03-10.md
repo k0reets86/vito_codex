@@ -79,8 +79,8 @@
 - Аргумент: `modules/reflector.py` теперь сохраняет reflection entries в semantic knowledge layer и в `top_relevant()` смешивает SQLite reflections с semantic hints через memory-backed reranking.
 
 17. `ConversationMemory` flat JSON limits
-- Статус: `partial`
-- Аргумент: owner/task memory layers усилены, но сам flat session-memory слой не переработан полностью.
+- Статус: `done`
+- Аргумент: `modules/conversation_memory.py` переведен на versioned session-map storage (`{\"version\": 2, \"sessions\": ...}`) с обратной совместимостью по старому list-формату; формат и старые conversation-memory кейсы покрыты тестами.
 
 18. `MemoryBlocks on-demand consolidation`
 - Статус: `done`

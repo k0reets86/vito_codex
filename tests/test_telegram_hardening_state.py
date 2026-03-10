@@ -1,5 +1,6 @@
 from modules.cancel_state import CancelState
 from modules.conversation_memory import ConversationMemory
+import json
 
 
 def test_cancel_state_persists_between_instances(tmp_path):
@@ -46,3 +47,16 @@ def test_conversation_memory_isolated_by_session(tmp_path):
 
     assert [r["text"] for r in rows_a] == ["owner-a1", "owner-a2"]
     assert [r["text"] for r in rows_b] == ["owner-b1", "owner-b2"]
+
+
+def test_conversation_memory_persists_session_map_format(tmp_path):
+    path = tmp_path / "conversation_history.json"
+    cm = ConversationMemory(path=path, limit=2)
+    cm.append({"role": "user", "text": "owner-a1"}, session_id="owner_a")
+    cm.append({"role": "assistant", "text": "owner-b1"}, session_id="owner_b")
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["version"] == 2
+    assert "sessions" in payload
+    assert payload["sessions"]["owner_a"][0]["text"] == "owner-a1"
+    assert payload["sessions"]["owner_b"][0]["text"] == "owner-b1"

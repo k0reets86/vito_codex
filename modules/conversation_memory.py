@@ -12,16 +12,41 @@ class ConversationMemory:
         self.limit = limit
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if not self.path.exists():
-            self.path.write_text("[]", encoding="utf-8")
+            self.path.write_text(json.dumps({"version": 2, "sessions": {}}, ensure_ascii=False), encoding="utf-8")
 
     def _load_all(self) -> list[dict]:
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
             if isinstance(data, list):
                 return data
+            if isinstance(data, dict):
+                rows: list[dict] = []
+                sessions = data.get("sessions") or {}
+                if isinstance(sessions, dict):
+                    for session_id, items in sessions.items():
+                        if not isinstance(items, list):
+                            continue
+                        for row in items:
+                            if isinstance(row, dict):
+                                payload = dict(row)
+                                payload["session_id"] = self._normalize_session(payload.get("session_id") or session_id)
+                                rows.append(payload)
+                return rows
         except Exception:
             pass
         return []
+
+    def _dump_all(self, rows: list[dict]) -> None:
+        sessions: dict[str, list[dict]] = {}
+        for row in rows:
+            payload = dict(row)
+            sid = self._normalize_session(payload.get("session_id"))
+            payload["session_id"] = sid
+            sessions.setdefault(sid, []).append(payload)
+        self.path.write_text(
+            json.dumps({"version": 2, "sessions": sessions}, ensure_ascii=False),
+            encoding="utf-8",
+        )
 
     @staticmethod
     def _normalize_session(session_id: str | None) -> str:
@@ -60,15 +85,15 @@ class ConversationMemory:
                 counters[row_sid] = cnt + 1
                 kept.append(row)
             data = list(reversed(kept))
-        self.path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        self._dump_all(data)
 
     def clear(self, session_id: str | None = None) -> None:
         if session_id is None:
-            self.path.write_text("[]", encoding="utf-8")
+            self._dump_all([])
             return
         sid = self._normalize_session(session_id)
         data = [
             row for row in self._load_all()
             if self._normalize_session(row.get("session_id")) != sid
         ]
-        self.path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        self._dump_all(data)
