@@ -20,6 +20,7 @@ from config.paths import PROJECT_ROOT
 from config.settings import settings
 from modules.display_bootstrap import ensure_display
 from modules.execution_facts import ExecutionFacts
+from modules.human_browser import HumanBrowser
 from modules.listing_optimizer import optimize_listing_payload
 from modules.platform_knowledge import record_platform_lesson
 from modules.xvfb_session import XvfbSession
@@ -47,7 +48,25 @@ class EtsyPlatform(BasePlatform):
         self._code_verifier: str = ""
         self._session: aiohttp.ClientSession | None = None
         self._state_path = PROJECT_ROOT / "runtime" / "etsy_oauth_state.json"
+        self._human_browser = HumanBrowser(logger=logger)
         self._load_oauth_state()
+
+    def _browser_context_kwargs(self) -> dict[str, Any]:
+        runtime_profile = {
+            "service": "etsy",
+            "storage_state_path": str(self._storage_state_path),
+            "persistent_profile_dir": str(PROJECT_ROOT / "runtime" / "browser_profiles" / "etsy"),
+            "screenshot_first_default": True,
+            "anti_bot_humanize": True,
+            "headless_preferred": True,
+            "llm_navigation_allowed": True,
+        }
+        return self._human_browser.context_kwargs(
+            runtime_profile,
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
+            locale=str(getattr(settings, "BROWSER_LOCALE", "en-US") or "en-US"),
+            timezone_id=str(getattr(settings, "BROWSER_TIMEZONE_ID", "America/New_York") or "America/New_York"),
+        )
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -229,11 +248,7 @@ class EtsyPlatform(BasePlatform):
                     )
                 except Exception:
                     browser = await p.chromium.launch(headless=True, args=launch_args)
-                context = await browser.new_context(
-                    storage_state=str(self._storage_state_path),
-                    viewport={"width": 1366, "height": 900},
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
-                )
+                context = await browser.new_context(**self._browser_context_kwargs())
                 page = await context.new_page()
                 async def _editor_debug() -> dict[str, Any]:
                     try:

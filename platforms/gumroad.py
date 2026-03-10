@@ -27,6 +27,7 @@ from platforms.gumroad_selector_bank import (
 )
 from modules.network_utils import network_available, network_status
 from modules.execution_facts import ExecutionFacts
+from modules.human_browser import HumanBrowser
 from modules.listing_optimizer import optimize_listing_payload
 
 logger = get_logger("gumroad", agent="gumroad")
@@ -107,6 +108,7 @@ class GumroadPlatform(BasePlatform):
             or getattr(settings, "GUMROAD_APP_SECRET", "")
         )
         self._session: aiohttp.ClientSession | None = None
+        self._human_browser = HumanBrowser(logger=logger)
 
     @staticmethod
     def _storage_state_path() -> Path:
@@ -114,6 +116,24 @@ class GumroadPlatform(BasePlatform):
         if not p.is_absolute():
             p = PROJECT_ROOT / p
         return p
+
+    def _browser_context_kwargs(self, *, include_storage: bool = True) -> dict[str, Any]:
+        storage_state = self._storage_state_path()
+        runtime_profile = {
+            "service": "gumroad",
+            "storage_state_path": str(storage_state if include_storage else ""),
+            "persistent_profile_dir": str(PROJECT_ROOT / "runtime" / "browser_profiles" / "gumroad"),
+            "screenshot_first_default": True,
+            "anti_bot_humanize": True,
+            "headless_preferred": True,
+            "llm_navigation_allowed": True,
+        }
+        return self._human_browser.context_kwargs(
+            runtime_profile,
+            user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+            locale=str(getattr(settings, "BROWSER_LOCALE", "en-US") or "en-US"),
+            timezone_id=str(getattr(settings, "BROWSER_TIMEZONE_ID", "America/New_York") or "America/New_York"),
+        )
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -458,10 +478,7 @@ class GumroadPlatform(BasePlatform):
         try:
             async with async_playwright() as p:
                 br = await _launch_gumroad_publish_browser(p)
-                ctx = await br.new_context(
-                    viewport={"width": 1280, "height": 1400},
-                    user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-                )
+                ctx = await br.new_context(**self._browser_context_kwargs(include_storage=False))
                 page = await ctx.new_page()
                 page.set_default_timeout(20000)
                 await page.goto("https://gumroad.com/login", wait_until="networkidle")
@@ -602,16 +619,9 @@ class GumroadPlatform(BasePlatform):
                 # can break /products/new React flow and bounce to affiliated page).
                 br = await _launch_gumroad_publish_browser(p)
                 if has_storage:
-                    ctx = await br.new_context(
-                        storage_state=str(storage_state),
-                        viewport={"width": 1280, "height": 1400},
-                        user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-                    )
+                    ctx = await br.new_context(**self._browser_context_kwargs(include_storage=True))
                 else:
-                    ctx = await br.new_context(
-                        viewport={"width": 1280, "height": 1400},
-                        user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-                    )
+                    ctx = await br.new_context(**self._browser_context_kwargs(include_storage=False))
                 # Avoid overriding valid storage-state session with possibly stale cookie.
                 if cookie and not has_storage:
                     await ctx.add_cookies([{

@@ -200,6 +200,26 @@
 Критерий завершения:
 - VITO проходит не только симуляции понимания, но и реальные execution scenarios.
 
+## Post-Plan Mandatory Rollout — Human Browser Runtime
+Цель: довести новый browser runtime слой до реального platform execution path, а не оставлять его только внутри `browser_agent`.
+
+Сделать:
+1. Протянуть `HumanBrowser` в platform adapters с максимальным ROI:
+   - Etsy
+   - Gumroad
+   - Printful
+2. Выровнять service-aware context policy:
+   - `storage_state`
+   - persistent profile dirs
+   - screenshot-first hooks
+   - humanized pacing
+3. Убрать локальные разрозненные browser defaults там, где их может заменить единый runtime.
+4. Прогнать targeted browser regressions на новом runtime слое.
+
+Критерий завершения:
+- новый browser runtime участвует не только в `browser_agent`, но и в боевых adapter-path;
+- platform execution path использует единый service-aware browser policy.
+
 ## 4. Что берем из предложенных материалов на 100%
 
 Из `VITO_COMBAT_AUDIT_2026.docx`:

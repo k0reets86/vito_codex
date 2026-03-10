@@ -90,3 +90,11 @@
 - [x] 23-agent benchmark audit rerun
 - Status: `done`
 - Weight: `10%`
+
+## Post-Plan Mandatory Rollout — Human Browser Runtime
+- [ ] `HumanBrowser` протянут в Etsy adapter
+- [ ] `HumanBrowser` протянут в Gumroad adapter
+- [ ] `HumanBrowser` протянут в Printful adapter
+- [ ] Service-aware browser policy выровнена в adapter-path
+- [ ] Targeted browser regressions на новом runtime слое
+- Status: `in_progress`

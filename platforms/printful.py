@@ -11,6 +11,7 @@ from config.logger import get_logger
 from config.paths import PROJECT_ROOT
 from config.settings import settings
 from modules.platform_knowledge import record_platform_lesson
+from modules.human_browser import HumanBrowser
 from platforms.base_platform import BasePlatform
 from modules.execution_facts import ExecutionFacts
 
@@ -31,6 +32,24 @@ class PrintfulPlatform(BasePlatform):
             self._storage_state_path = PROJECT_ROOT / self._storage_state_path
         self._store_type: str = ""
         self._session: aiohttp.ClientSession | None = None
+        self._human_browser = HumanBrowser(logger=logger)
+
+    def _browser_context_kwargs(self) -> dict[str, Any]:
+        runtime_profile = {
+            "service": "printful",
+            "storage_state_path": str(self._storage_state_path),
+            "persistent_profile_dir": str(PROJECT_ROOT / "runtime" / "browser_profiles" / "printful"),
+            "screenshot_first_default": True,
+            "anti_bot_humanize": True,
+            "headless_preferred": True,
+            "llm_navigation_allowed": True,
+        }
+        return self._human_browser.context_kwargs(
+            runtime_profile,
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
+            locale=str(getattr(settings, "BROWSER_LOCALE", "en-US") or "en-US"),
+            timezone_id=str(getattr(settings, "BROWSER_TIMEZONE_ID", "America/New_York") or "America/New_York"),
+        )
 
     async def _publish_via_browser(self, content: dict) -> dict:
         if not self._storage_state_path.exists():
@@ -56,10 +75,7 @@ class PrintfulPlatform(BasePlatform):
                     headless=os.getenv("VITO_BROWSER_HEADLESS", "1").lower() not in {"0", "false", "no"},
                     args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
                 )
-                context = await browser.new_context(
-                    storage_state=str(self._storage_state_path),
-                    viewport={"width": 1366, "height": 900},
-                )
+                context = await browser.new_context(**self._browser_context_kwargs())
                 page = await context.new_page()
                 await page.goto("https://www.printful.com/dashboard/store", wait_until="domcontentloaded", timeout=90000)
                 await page.wait_for_timeout(3500)
