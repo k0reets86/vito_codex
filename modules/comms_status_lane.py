@@ -3,8 +3,15 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any
 
 from config.settings import settings
+from modules.comms_views import (
+    render_platform_readiness_summary as _render_platform_readiness_summary,
+    render_platforms_hub as _render_platforms_hub_impl,
+)
+from modules.platform_readiness import assess_platform_readiness
+from modules.status_snapshot import build_status_snapshot, render_status_snapshot
 
 
 async def cmd_report(agent, update) -> None:
@@ -32,6 +39,7 @@ async def cmd_tasks(agent, update) -> None:
         await update.message.reply_text("GoalEngine не подключён.", reply_markup=agent._main_keyboard())
         return
     from goal_engine import GoalStatus
+
     active_statuses = [GoalStatus.EXECUTING, GoalStatus.PENDING, GoalStatus.WAITING_APPROVAL, GoalStatus.PLANNING]
     active = []
     for status in active_statuses:
@@ -143,6 +151,7 @@ async def cmd_balances(agent, update) -> None:
     await update.message.reply_text("Проверяю балансы...", reply_markup=agent._main_keyboard())
     try:
         from modules.balance_checker import BalanceChecker
+
         text = (update.message.text or "").lower()
         show_env_keys = any(x in text for x in ("env", "keys", "raw"))
         checker = BalanceChecker()
@@ -163,6 +172,7 @@ def cancel_goal_queue(agent, reason: str = "owner_cancelled") -> int:
         return 0
     try:
         from goal_engine import GoalStatus
+
         terminal = {GoalStatus.COMPLETED, GoalStatus.FAILED, GoalStatus.CANCELLED}
         cancelled = 0
         for goal in agent._goal_engine.get_all_goals():
@@ -186,3 +196,33 @@ def cancel_goal_queue(agent, reason: str = "owner_cancelled") -> int:
         return cancelled
     except Exception:
         return 0
+
+
+def render_platforms_hub_with_readiness() -> str:
+    base = _render_platforms_hub_impl()
+    try:
+        readiness = assess_platform_readiness()
+    except Exception:
+        readiness = []
+    return f"{base}\n\n{_render_platform_readiness_summary(readiness)}"
+
+
+def render_unified_status(
+    *,
+    title: str = "VITO Status",
+    decision_loop=None,
+    goal_engine=None,
+    llm_router=None,
+    finance=None,
+    owner_task_state=None,
+    pending_approvals_count: int = 0,
+) -> str:
+    snap = build_status_snapshot(
+        decision_loop=decision_loop,
+        goal_engine=goal_engine,
+        llm_router=llm_router,
+        finance=finance,
+        owner_task_state=owner_task_state,
+        pending_approvals_count=pending_approvals_count,
+    )
+    return render_status_snapshot(snap, title=title)

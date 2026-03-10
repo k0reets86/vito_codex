@@ -140,13 +140,13 @@ def assess_platform_readiness(services: list[str] | None = None) -> list[dict[st
         owner_grade_state = state_map.get(service) or str(registry_row.get("state") or "unknown")
         blocker = ""
         registry_blocker = str(registry_row.get("blocker") or "").strip().lower()
-        if registry_blocker == "missing_session" and not runtime_available:
+        if registry_blocker == "missing_session":
             blocker = "missing_session"
         elif not runtime_available and service in {"etsy", "printful", "twitter", "amazon_kdp"}:
             blocker = "missing_session"
         elif not probe_present:
             blocker = "missing_probe"
-        can_validate_now = runtime_available and probe_present
+        can_validate_now = runtime_available and probe_present and blocker != "missing_session"
         if not blocker and owner_grade_state == "blocked":
             blocker = "last_validation_blocked"
         recommended_action = ""
