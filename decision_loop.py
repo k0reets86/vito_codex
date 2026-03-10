@@ -119,6 +119,15 @@ class DecisionLoop:
         """Устанавливает SelfHealer для самолечения."""
         self.self_healer = self_healer
 
+    async def _handle_runtime_error(self, agent: str, error: Exception, context: dict[str, Any] | None = None) -> None:
+        healer = getattr(self, "_self_healer_v2", None) or self.self_healer
+        if not healer:
+            return
+        try:
+            await healer.handle_error(agent, error, context or {})
+        except Exception:
+            pass
+
     def set_cancel_state(self, cancel_state) -> None:
         """Устанавливает shared cancel-state для блокировки retry/auto-resume."""
         self.cancel_state = cancel_state
@@ -170,13 +179,7 @@ class DecisionLoop:
                     extra={"event": "tick_error"},
                     exc_info=True,
                 )
-                if self.self_healer:
-                    try:
-                        await self.self_healer.handle_error(
-                            "decision_loop", e, {"tick": self._tick_count}
-                        )
-                    except Exception:
-                        pass
+                await self._handle_runtime_error("decision_loop", e, {"tick": self._tick_count})
                 self.memory.log_error(
                     module="decision_loop",
                     error_type=type(e).__name__,
@@ -1756,11 +1759,7 @@ class DecisionLoop:
             return result
 
         except Exception as e:
-            if self.self_healer:
-                try:
-                    await self.self_healer.handle_error("decision_loop", e, {"step": step, "goal": goal.title})
-                except Exception:
-                    pass
+            await self._handle_runtime_error("decision_loop", e, {"step": step, "goal": goal.title})
             return {"status": "failed", "error": str(e)}
 
     def _policy_precheck(self, step: str) -> dict[str, Any] | None:
@@ -2951,7 +2950,11 @@ class DecisionLoop:
         interval = max(288, int(getattr(settings, "AUTONOMY_SELF_EVOLVER_INTERVAL_TICKS", 2016) or 2016))
         if self._tick_count - int(self._last_self_evolver_tick or 0) < interval:
             return
-        await self.agent_registry.dispatch("weekly_improve_cycle")
+        evolver_v2 = getattr(self, "_self_evolver_v2", None)
+        if evolver_v2 is not None:
+            await evolver_v2.execute_task("weekly_evolve_cycle", baseline_score=0.7)
+        else:
+            await self.agent_registry.dispatch("weekly_improve_cycle")
         self._last_self_evolver_tick = self._tick_count
 
     async def _maybe_create_autonomy_goal(self) -> bool:

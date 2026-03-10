@@ -60,6 +60,40 @@ def test_get_status(dl):
     assert "goal_stats" in status
 
 
+@pytest.mark.asyncio
+async def test_runtime_error_prefers_v2_healer(dl):
+    class DummyHealerV2:
+        def __init__(self):
+            self.calls = []
+
+        async def handle_error(self, agent, error, context=None):
+            self.calls.append((agent, type(error).__name__, dict(context or {})))
+            return {"resolved": False}
+
+    healer = DummyHealerV2()
+    dl._self_healer_v2 = healer
+    await dl._handle_runtime_error("decision_loop", RuntimeError("boom"), {"tick": 1})
+    assert healer.calls
+
+
+@pytest.mark.asyncio
+async def test_self_evolver_weekly_prefers_v2(dl):
+    class DummyEvolverV2:
+        def __init__(self):
+            self.calls = []
+
+        async def execute_task(self, task_type, **kwargs):
+            self.calls.append((task_type, kwargs))
+            return {"ok": True}
+
+    dl._tick_count = 9999
+    dl._last_self_evolver_tick = 0
+    dl._self_evolver_v2 = DummyEvolverV2()
+    await dl._maybe_run_self_evolver_weekly()
+    assert dl._self_evolver_v2.calls
+    assert dl._self_evolver_v2.calls[0][0] == "weekly_evolve_cycle"
+
+
 # ── Classify step ──
 
 def test_classify_research():

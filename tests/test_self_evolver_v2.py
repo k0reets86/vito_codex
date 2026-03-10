@@ -29,3 +29,20 @@ def test_self_evolver_v2_benchmark(tmp_path):
     ], baseline_score=0.7))
     assert result['approved'] is True
     assert result['best_score']['name'] == 'proposal'
+
+
+def test_self_evolver_v2_weekly_cycle(tmp_path):
+    evolver = SelfEvolverV2(
+        llm_router=None,
+        memory=None,
+        finance=None,
+        comms=None,
+        sandbox_manager=SandboxManager(base_path=tmp_path, sandbox_root=tmp_path / 'sandboxes'),
+        apply_engine=ApplyEngine(project_root=tmp_path, backup_root=tmp_path / 'backups'),
+        benchmarks=VITOBenchmarks(threshold_delta=0.05),
+        discovery=ModuleDiscovery(),
+        reflector=DummyReflector(),
+    )
+    result = asyncio.run(evolver.weekly_evolve_cycle(["python runtime agents"], baseline_score=0.0))
+    assert result["candidate_count"] >= 0
+    assert "result" in result

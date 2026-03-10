@@ -8,7 +8,7 @@
   - `not_done`
   - `paused_blocked`
 
-Общий прогресс: `38%`
+Общий прогресс: `46%`
 
 ## Phase AE1 — Evolution Engine Foundations
 1. `SandboxManager`
@@ -53,12 +53,12 @@
 - Почему: `main.py` создает AE1 foundation и прокладывает `self_healer_v2/self_evolver_v2` в runtime/decision loop.
 
 11. `Healing wrapper in decision/execution lanes`
-- Status: `partial`
-- Почему: v2 wiring в runtime есть, но decision loop еще не перенаправляет критические healing lanes на v2 как primary engine.
+- Status: `done`
+- Почему: `decision_loop` теперь использует `self_healer_v2` как primary safe path через `_handle_runtime_error()`, а legacy healer остается controlled fallback внутри `SelfHealerV2`.
 
 12. `Reflection/archive hooks for improvement cycles`
-- Status: `partial`
-- Почему: reflections есть, но improvement archive formalized не закрыт.
+- Status: `done`
+- Почему: добавлен формальный `EvolutionArchive`, в который `SelfHealerV2` и `SelfEvolverV2` пишут healing/evolution outcomes; reflections сохраняются параллельно.
 
 ## Phase AE3 — Autonomy Runtime Completion
 13. `CurriculumAgent formal benchmark coverage`

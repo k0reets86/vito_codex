@@ -6,6 +6,7 @@ from typing import Any
 
 from agents.base_agent import BaseAgent, TaskResult
 from modules.apply_engine import ApplyEngine
+from modules.evolution_archive import EvolutionArchive
 from modules.sandbox_manager import SandboxManager
 
 
@@ -15,11 +16,13 @@ class SelfHealerV2(BaseAgent):
         '*': ['reflector'],
     }
 
-    def __init__(self, *, sandbox_manager: SandboxManager, apply_engine: ApplyEngine, reflector=None, **kwargs):
+    def __init__(self, *, sandbox_manager: SandboxManager, apply_engine: ApplyEngine, reflector=None, archive: EvolutionArchive | None = None, legacy_healer=None, **kwargs):
         super().__init__(name='self_healer_v2', description='Sandbox-first self-healing engine', **kwargs)
         self.sandbox_manager = sandbox_manager
         self.apply_engine = apply_engine
         self.reflector = reflector
+        self.archive = archive or EvolutionArchive()
+        self.legacy_healer = legacy_healer
 
     @property
     def capabilities(self) -> list[str]:
@@ -33,6 +36,44 @@ class SelfHealerV2(BaseAgent):
             return TaskResult(success=bool(result.get('success')), output=result, error='' if result.get('success') else str(result.get('error') or 'heal-failed'))
         except Exception as exc:
             return TaskResult(success=False, error=str(exc))
+
+    async def handle_error(self, agent: str, error: Exception, context: dict[str, Any] | None = None) -> dict[str, Any]:
+        ctx = dict(context or {})
+        patch_files = dict(ctx.get("patch_files") or {})
+        task_root_id = str(ctx.get("task_root_id") or "")[:120]
+        if patch_files:
+            result = await self.heal(error, ctx, patch_files)
+            self.archive.record(
+                archive_type="self_heal_v2",
+                title=f"{agent}:{type(error).__name__}",
+                payload={"agent": agent, "result": result, "context": ctx},
+                success=bool(result.get("success")),
+                task_root_id=task_root_id,
+            )
+            return result
+        if self.legacy_healer is not None:
+            legacy = await self.legacy_healer.handle_error(agent, error, ctx)
+            self.archive.record(
+                archive_type="self_heal_legacy_bridge",
+                title=f"{agent}:{type(error).__name__}",
+                payload={"agent": agent, "result": legacy, "context": ctx},
+                success=bool(legacy.get("resolved")),
+                task_root_id=task_root_id,
+            )
+            return legacy
+        result = {
+            "resolved": False,
+            "method": "no_patch_no_legacy",
+            "description": "v2 self-healer has no patch_files and no legacy healer fallback",
+        }
+        self.archive.record(
+            archive_type="self_heal_v2",
+            title=f"{agent}:{type(error).__name__}",
+            payload={"agent": agent, "result": result, "context": ctx},
+            success=False,
+            task_root_id=task_root_id,
+        )
+        return result
 
     async def heal(self, error: Any, context: dict[str, Any], patch_files: dict[str, str]) -> dict[str, Any]:
         tb = traceback.format_exc()
@@ -67,13 +108,23 @@ class SelfHealerV2(BaseAgent):
                 try:
                     maybe = self.reflector.reflect(
                         category='technical',
-                        title='self_healer_v2',
-                        content=str(payload),
+                        action_type='self_healer_v2',
+                        input_summary=str(context)[:500],
+                        outcome_summary=str(payload)[:1000],
+                        success=bool(payload.get("success")),
+                        context={"source": "self_healer_v2", "factors": ["sandbox", "apply_engine"]},
                     )
                     if hasattr(maybe, '__await__'):
                         await maybe
                 except Exception:
                     pass
+            self.archive.record(
+                archive_type="self_heal_v2",
+                title=str(type(error).__name__ if error else "unknown_error"),
+                payload={"context": context, "result": payload},
+                success=bool(payload.get("success")),
+                task_root_id=str(context.get("task_root_id") or "")[:120],
+            )
             return payload
         finally:
             await self.sandbox_manager.destroy(sandbox_path)

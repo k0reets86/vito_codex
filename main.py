@@ -145,6 +145,7 @@ from modules.platform_smoke import PlatformSmoke
 from modules.playbook_registry import PlaybookRegistry
 from modules.publisher_queue import PublisherQueue
 from modules.reflector import VITOReflector
+from modules.evolution_archive import EvolutionArchive
 from modules.skill_library import seed_initial_skills
 from modules.sandbox_manager import SandboxManager
 from modules.apply_engine import ApplyEngine
@@ -224,6 +225,7 @@ class VITO:
         self.self_healer = SelfHealer(
             llm_router=self.llm_router, memory=self.memory, comms=self.comms, self_updater=self.self_updater
         )
+        self.evolution_archive = None
         self.sandbox_manager = None
         self.apply_engine = None
         self.vito_benchmarks = None
@@ -236,10 +238,13 @@ class VITO:
                 self.apply_engine = ApplyEngine()
                 self.vito_benchmarks = VITOBenchmarks()
                 self.module_discovery = ModuleDiscovery()
+                self.evolution_archive = EvolutionArchive()
                 self.self_healer_v2 = SelfHealerV2(
                     sandbox_manager=self.sandbox_manager,
                     apply_engine=self.apply_engine,
                     reflector=VITOReflector(),
+                    archive=self.evolution_archive,
+                    legacy_healer=self.self_healer,
                     **dict(llm_router=self.llm_router, memory=self.memory, finance=self.finance, comms=self.comms),
                 )
                 self.self_evolver_v2 = SelfEvolverV2(
@@ -248,6 +253,7 @@ class VITO:
                     benchmarks=self.vito_benchmarks,
                     discovery=self.module_discovery,
                     reflector=VITOReflector(),
+                    archive=self.evolution_archive,
                     **dict(llm_router=self.llm_router, memory=self.memory, finance=self.finance, comms=self.comms),
                 )
             except Exception:
