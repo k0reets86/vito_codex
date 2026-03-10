@@ -65,8 +65,8 @@ from modules.comms_views import render_auth_hub as _render_auth_hub_impl
 from modules.comms_views import render_help as _render_help_impl
 from modules.comms_views import render_more_menu as _render_more_menu_impl
 from modules.comms_views import render_create_hub as _render_create_hub_impl
-from modules.comms_views import render_platforms_hub as _render_platforms_hub_impl
 from modules.comms_views import render_platform_readiness_summary as _render_platform_readiness_summary
+from modules.comms_status_lane import render_platforms_hub_with_readiness, render_unified_status
 from modules.comms_views import render_research_hub as _render_research_hub_impl
 from modules.comms_status_lane import (
     cancel_goal_queue as _cancel_goal_queue_impl,
@@ -99,7 +99,6 @@ from modules.auth_broker import AuthBroker
 from modules.browser_runtime_policy import get_browser_runtime_profile, get_profile_completion_runbook, storage_state_path_for_service
 from modules.service_session_registry import capture_session_snapshot, clear_service_session
 from modules.data_lake import DataLake
-from modules.status_snapshot import build_status_snapshot, render_status_snapshot
 from modules.telegram_nlu_router import route_owner_dialogue
 from modules.task_lineage import ensure_task_lineage
 
@@ -2545,15 +2544,11 @@ class CommsAgent:
 
     @staticmethod
     def _render_platforms_hub() -> str:
-        base = _render_platforms_hub_impl()
-        try:
-            readiness = assess_platform_readiness()
-        except Exception:
-            readiness = []
-        return f"{base}\n\n{_render_platform_readiness_summary(readiness)}"
+        return render_platforms_hub_with_readiness()
 
     def _render_unified_status(self, *, title: str = "VITO Status") -> str:
-        snap = build_status_snapshot(
+        return render_unified_status(
+            title=title,
             decision_loop=self._decision_loop,
             goal_engine=self._goal_engine,
             llm_router=self._llm_router,
@@ -2561,7 +2556,6 @@ class CommsAgent:
             owner_task_state=self._owner_task_state,
             pending_approvals_count=len(self._pending_approvals or {}),
         )
-        return render_status_snapshot(snap, title=title)
 
     async def _cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self._reject_stranger(update):
