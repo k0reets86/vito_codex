@@ -83,8 +83,8 @@
 - Аргумент: owner/task memory layers усилены, но сам flat session-memory слой не переработан полностью.
 
 18. `MemoryBlocks on-demand consolidation`
-- Статус: `partial`
-- Аргумент: consolidation engine есть, но явного on-demand path из аудита еще нет.
+- Статус: `done`
+- Аргумент: в `MemoryManager` добавлены `preview_memory_consolidation(...)` и `consolidate_memory_on_demand(...)`, использующие `MemoryBlocks.get_blocks(...)`; on-demand path покрыт таргетными тестами.
 
 19. `automatic knowledge write from successful agent tasks`
 - Статус: `done`

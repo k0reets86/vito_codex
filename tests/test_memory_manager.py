@@ -260,6 +260,51 @@ def test_forget_knowledge_records_audit(memory, tmp_path):
     assert any(r["doc_id"] == "doc_forget" and r["action"] == "forget" for r in audit)
 
 
+def test_preview_memory_consolidation(memory, tmp_path):
+    with patch("memory.memory_manager.settings") as s:
+        s.CHROMA_PATH = str(tmp_path / "chroma")
+        s.SQLITE_PATH = str(tmp_path / "test.db")
+        memory.memory_blocks.record_block(
+            doc_id="block_1",
+            block_type="owner_preference",
+            summary="owner prefers shorter updates",
+            metadata={"retention_class": "working_short"},
+            retention_class="working_short",
+            stage="short",
+            importance=0.7,
+        )
+    preview = memory.preview_memory_consolidation(["block_1", "missing_1"])
+    assert preview["requested"] == 2
+    assert preview["selected"] == 1
+    assert preview["missing"] == ["missing_1"]
+    assert preview["items"][0]["doc_id"] == "block_1"
+    assert preview["items"][0]["target_retention_class"] == "strategic_long"
+
+
+def test_consolidate_memory_on_demand_promotes_blocks(memory, tmp_path):
+    with patch("memory.memory_manager.settings") as s:
+        s.CHROMA_PATH = str(tmp_path / "chroma")
+        s.SQLITE_PATH = str(tmp_path / "test.db")
+        memory.memory_blocks.record_block(
+            doc_id="block_2",
+            block_type="lesson",
+            summary="successful Etsy draft workflow",
+            metadata={"retention_class": "project_mid"},
+            retention_class="project_mid",
+            stage="short",
+            importance=0.8,
+        )
+    result = memory.consolidate_memory_on_demand(["block_2"])
+    assert result["requested"] == 1
+    assert result["found"] == 1
+    assert result["promoted"] == 1
+    block = memory.memory_blocks.get_block("block_2")
+    assert block is not None
+    assert block["stage"] == "mid"
+    rows = memory.search_knowledge("Etsy draft workflow", n_results=3)
+    assert any(r["id"] == "block_2" for r in rows)
+
+
 # ── Формула релевантности ──
 
 def test_relevance_recent_important():

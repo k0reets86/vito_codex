@@ -508,15 +508,77 @@ class MemoryManager:
     def consolidate_short_term_memory(self, min_age_days: int = 5, limit: int = 25) -> int:
         """Периодически переводит short-тренировочные блоки в long-term."""
         candidates = self._memory_blocks.candidates_for_consolidation(min_age_days=min_age_days, stage="short", limit=limit)
-        promoted = 0
-        for block in candidates:
-            doc_id = str(block.get("doc_id") or "").strip()
+        promoted = self._promote_memory_blocks(candidates, source="scheduled")
+        if promoted:
+            logger.info(
+                f"Консолидация памяти: {promoted} блоков переведено в long-term",
+                extra={"event": "memory_consolidation", "promoted": promoted},
+            )
+        return promoted
+
+    def preview_memory_consolidation(self, doc_ids: list[str]) -> dict[str, Any]:
+        items = [str(x).strip() for x in (doc_ids or []) if str(x).strip()]
+        blocks = self._memory_blocks.get_blocks(items)
+        by_id = {str(b.get("doc_id") or ""): b for b in blocks}
+        selected: list[dict[str, Any]] = []
+        missing: list[str] = []
+        for doc_id in items:
+            block = by_id.get(doc_id)
+            if not block:
+                missing.append(doc_id)
+                continue
             metadata = self._safe_parse_metadata(block.get("metadata_json", "{}"))
-            metadata["retention_class"] = "strategic_long" if block.get("block_type") == "owner_preference" else "project_mid"
-            metadata["importance_score"] = max(0.6, float(metadata.get("importance_score", block.get("importance", 0.5))))
-            text = str(block.get("summary") or "consolidated memory").strip()
-            if not text:
-                text = "consolidated memory"
+            retention_class = (
+                "strategic_long"
+                if block.get("block_type") == "owner_preference"
+                else str(metadata.get("retention_class") or "project_mid")
+            )
+            selected.append(
+                {
+                    "doc_id": doc_id,
+                    "block_type": str(block.get("block_type") or ""),
+                    "stage": str(block.get("stage") or ""),
+                    "current_retention_class": str(metadata.get("retention_class") or ""),
+                    "target_retention_class": retention_class,
+                    "summary": str(block.get("summary") or "")[:240],
+                    "importance": float(metadata.get("importance_score", block.get("importance", 0.5)) or 0.5),
+                }
+            )
+        return {
+            "requested": len(items),
+            "selected": len(selected),
+            "missing": missing,
+            "items": selected,
+        }
+
+    def consolidate_memory_on_demand(self, doc_ids: list[str]) -> dict[str, Any]:
+        items = [str(x).strip() for x in (doc_ids or []) if str(x).strip()]
+        blocks = self._memory_blocks.get_blocks(items)
+        by_id = {str(b.get("doc_id") or ""): b for b in blocks}
+        selected = [by_id[doc_id] for doc_id in items if doc_id in by_id]
+        promoted = self._promote_memory_blocks(selected, source="on_demand")
+        return {
+            "requested": len(items),
+            "found": len(selected),
+            "promoted": promoted,
+            "missing": [doc_id for doc_id in items if doc_id not in by_id],
+        }
+
+    def _promote_memory_blocks(self, blocks: list[dict[str, Any]], *, source: str) -> int:
+        promoted = 0
+        for block in blocks:
+            doc_id = str(block.get("doc_id") or "").strip()
+            if not doc_id:
+                continue
+            metadata = self._safe_parse_metadata(block.get("metadata_json", "{}"))
+            metadata["retention_class"] = (
+                "strategic_long"
+                if block.get("block_type") == "owner_preference"
+                else str(metadata.get("retention_class") or "project_mid")
+            )
+            metadata["importance_score"] = max(0.6, float(metadata.get("importance_score", block.get("importance", 0.5)) or 0.5))
+            metadata["memory_promotion_source"] = source
+            text = str(block.get("summary") or "consolidated memory").strip() or "consolidated memory"
             try:
                 self.store_knowledge(doc_id=doc_id, text=text, metadata=metadata, skip_block_tracking=True)
                 stage = "long" if metadata["retention_class"] in {"owner_long", "strategic_long"} else "mid"
@@ -525,13 +587,11 @@ class MemoryManager:
             except Exception as exc:
                 logger.warning(
                     f"Не удалось консолидировать память {doc_id}: {exc}",
-                    extra={"event": "memory_consolidation_failed", "context": {"doc_id": doc_id}},
+                    extra={
+                        "event": "memory_consolidation_failed",
+                        "context": {"doc_id": doc_id, "source": source},
+                    },
                 )
-        if promoted:
-            logger.info(
-                f"Консолидация памяти: {promoted} блоков переведено в long-term",
-                extra={"event": "memory_consolidation", "promoted": promoted},
-            )
         return promoted
 
 

@@ -156,6 +156,20 @@ class MemoryBlocks:
         finally:
             conn.close()
 
+    def get_blocks(self, doc_ids: Iterable[str]) -> list[dict[str, Any]]:
+        items = [str(x).strip() for x in (doc_ids or []) if str(x).strip()]
+        if not items:
+            return []
+        conn = self._get_conn()
+        try:
+            rows = conn.execute(
+                f"SELECT * FROM {self.TABLE} WHERE doc_id IN ({','.join('?' for _ in items)})",
+                tuple(items),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
     def archive_block(self, doc_id: str, status: str = "archived") -> None:
         conn = self._get_conn()
         now = datetime.now(timezone.utc).isoformat()
