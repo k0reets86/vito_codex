@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from modules.owner_policy_packs import build_owner_policy_pack
+
 
 def build_status_snapshot(
     *,
@@ -27,6 +29,7 @@ def build_status_snapshot(
         "finance_spend": 0.0,
         "pending_approvals": int(pending_approvals_count or 0),
         "owner_task_text": "",
+        "owner_policy": {"active_rules": 0, "reminders": []},
         "platform_readiness": {
             "total": 0,
             "owner_grade": 0,
@@ -87,6 +90,15 @@ def build_status_snapshot(
         except Exception:
             pass
 
+    try:
+        owner_policy = build_owner_policy_pack(refresh=False)
+        snap["owner_policy"] = {
+            "active_rules": int(owner_policy.get("active_rule_count", 0) or 0),
+            "reminders": list(owner_policy.get("reminders") or [])[:3],
+        }
+    except Exception:
+        pass
+
     if owner_task_state:
         try:
             active = owner_task_state.get_active()
@@ -113,6 +125,7 @@ def render_status_snapshot(snapshot: dict[str, Any], *, title: str = "VITO Statu
     pending_approvals = int(snap.get("pending_approvals", 0) or 0)
     owner_task_text = str(snap.get("owner_task_text", "") or "").strip()
     platform_readiness = dict(snap.get("platform_readiness") or {})
+    owner_policy = dict(snap.get("owner_policy") or {})
 
     parts = [
         title,
@@ -134,6 +147,14 @@ def render_status_snapshot(snapshot: dict[str, Any], *, title: str = "VITO Statu
         parts.append(f"Ожидают одобрения: {pending_approvals}")
     if owner_task_text:
         parts.append(f"Текущая задача: {owner_task_text}")
+    if any(owner_policy.values()):
+        active_rules = int(owner_policy.get("active_rules", 0) or 0)
+        reminders = list(owner_policy.get("reminders") or [])[:2]
+        if active_rules:
+            line = f"Owner policy: активных правил {active_rules}"
+            if reminders:
+                line += "\nКлючевые: " + "; ".join(reminders)
+            parts.append(line)
     if any(platform_readiness.values()):
         total = int(platform_readiness.get("total", 0) or 0)
         owner_grade = int(platform_readiness.get("owner_grade", 0) or 0)

@@ -5,6 +5,7 @@ from typing import Any
 from modules.platform_knowledge import search_entries as search_platform_knowledge
 from modules.platform_runtime_registry import get_runtime_entry
 from modules.platform_readiness import assess_platform_readiness
+from modules.owner_policy_packs import build_owner_policy_pack
 
 
 class KnowledgeConsolidator:
@@ -53,6 +54,8 @@ class KnowledgeConsolidator:
             "readiness": len(readiness),
             "blockers": len(blockers),
         }
+        owner_policy = build_owner_policy_pack(refresh=False)
+        signals['owner_policy_rules'] = int(owner_policy.get('active_rule_count') or 0)
         summary = self._summary(query_text, services=svc_list, signals=signals)
 
         return {
@@ -71,6 +74,7 @@ class KnowledgeConsolidator:
             "platform_hits": platform_hits,
             "archive_hits": archive_hits,
             "graph_neighbors": graph_neighbors,
+            "owner_policy": owner_policy,
         }
 
     def _reflection_hits(self, query: str, *, limit: int) -> list[dict[str, Any]]:
