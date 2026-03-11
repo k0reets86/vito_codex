@@ -72,7 +72,7 @@ from modules.conversation_parse_lane import (
     is_time_query as _is_time_query_impl,
     looks_like_imperative_request as _looks_like_imperative_request_impl,
 )
-from modules.conversation_question_lane import handle_question as _handle_question_impl
+from modules.conversation_question_lane import handle_question as _handle_question_impl, quick_gumroad_analytics as _quick_gumroad_analytics_impl
 from modules.conversation_legacy_action_lane import dispatch_action_legacy as _dispatch_action_legacy_impl
 from modules.conversation_autonomy_lane import (
     allowed_actions as _allowed_actions_impl,
@@ -277,29 +277,7 @@ class ConversationEngine:
         return _extract_owner_name_impl(text)
 
     async def _quick_gumroad_analytics(self) -> str:
-        if not self.agent_registry:
-            return ""
-        try:
-            result = await self.agent_registry.dispatch("sales_check", platform="gumroad")
-        except Exception:
-            return ""
-        if not result or not getattr(result, "success", False):
-            return ""
-        data = getattr(result, "output", {}) or {}
-        gm = data.get("gumroad", data)
-        if not isinstance(gm, dict):
-            return ""
-        if gm.get("error"):
-            return f"Gumroad: доступ есть, но аналитика вернула ошибку: {gm.get('error')}"
-        sales = int(gm.get("sales", 0) or 0)
-        revenue = float(gm.get("revenue", 0.0) or 0.0)
-        products = int(gm.get("products_count", 0) or 0)
-        return (
-            "Gumroad (live):\n"
-            f"- Продажи: {sales}\n"
-            f"- Выручка: ${revenue:.2f}\n"
-            f"- Продуктов: {products}"
-        )
+        return await _quick_gumroad_analytics_impl(self)
 
     async def _handle_system_action(self, text: str) -> dict[str, Any]:
         """Выполняет системное действие по запросу владельца."""

@@ -5,6 +5,32 @@ from modules.owner_preference_model import OwnerPreferenceModel
 from modules.prompt_guard import wrap_untrusted_text
 
 
+async def quick_gumroad_analytics(engine) -> str:
+    if not engine.agent_registry:
+        return ""
+    try:
+        result = await engine.agent_registry.dispatch("sales_check", platform="gumroad")
+    except Exception:
+        return ""
+    if not result or not getattr(result, "success", False):
+        return ""
+    data = getattr(result, "output", {}) or {}
+    gm = data.get("gumroad", data)
+    if not isinstance(gm, dict):
+        return ""
+    if gm.get("error"):
+        return f"Gumroad: доступ есть, но аналитика вернула ошибку: {gm.get('error')}"
+    sales = int(gm.get("sales", 0) or 0)
+    revenue = float(gm.get("revenue", 0.0) or 0.0)
+    products = int(gm.get("products_count", 0) or 0)
+    return (
+        "Gumroad (live):\n"
+        f"- Продажи: {sales}\n"
+        f"- Выручка: ${revenue:.2f}\n"
+        f"- Продуктов: {products}"
+    )
+
+
 async def handle_question(engine, text: str) -> dict:
     lower = text.strip().lower()
     normalized = engine._normalize_for_nlu(text)
