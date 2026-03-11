@@ -141,6 +141,12 @@ def test_chroma_search_empty(memory, tmp_path):
     assert results == []
 
 
+def test_memory_manager_falls_back_when_chroma_path_is_magicmock_repr(memory):
+    memory._chroma_path = "<MagicMock name='settings.CHROMA_PATH'>"
+    path = memory._resolve_chroma_path()
+    assert path.endswith("memory/chroma_db")
+
+
 def test_store_knowledge_policy_forget_short_noise(memory, tmp_path):
     with patch("memory.memory_manager.settings") as s:
         s.CHROMA_PATH = str(tmp_path / "chroma")

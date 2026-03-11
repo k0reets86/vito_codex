@@ -43,6 +43,7 @@ logger = get_logger("memory_manager", agent="memory_manager")
 from config.paths import PROJECT_ROOT
 
 _PROTECTED_TARGETS_PATH = PROJECT_ROOT / "runtime" / "protected_platform_targets.json"
+_DEFAULT_CHROMA_PATH = PROJECT_ROOT / "memory" / "chroma_db"
 
 
 class MemoryManager:
@@ -69,9 +70,10 @@ class MemoryManager:
     def _get_chroma(self):
         if self._chroma_client is None:
             import os
-            os.makedirs(settings.CHROMA_PATH, exist_ok=True)
+            chroma_path = self._resolve_chroma_path()
+            os.makedirs(chroma_path, exist_ok=True)
             try:
-                self._chroma_client = chromadb.PersistentClient(path=settings.CHROMA_PATH)
+                self._chroma_client = chromadb.PersistentClient(path=chroma_path)
             except Exception:
                 # Fallback to in-memory client (useful for tests / restricted FS)
                 self._chroma_client = chromadb.Client()
@@ -84,10 +86,22 @@ class MemoryManager:
             except Exception:
                 self._chroma_doc_count = 0
             logger.info(
-                f"ChromaDB подключён: {settings.CHROMA_PATH}",
+                f"ChromaDB подключён: {chroma_path}",
                 extra={"event": "chroma_connected"},
             )
         return self._chroma_collection
+
+    def _resolve_chroma_path(self) -> str:
+        raw = getattr(self, "_chroma_path", None) or getattr(settings, "CHROMA_PATH", "")
+        try:
+            candidate = str(raw)
+        except Exception:
+            return str(_DEFAULT_CHROMA_PATH)
+        # Some tests accidentally leave CHROMA_PATH as MagicMock, which would create
+        # directories like "<MagicMock ...>" in project root. Fall back to default.
+        if not candidate or "MagicMock" in candidate or candidate.startswith("<"):
+            return str(_DEFAULT_CHROMA_PATH)
+        return candidate
 
     def _get_gemini_embed_client(self):
         if not bool(getattr(settings, "GEMINI_EMBEDDINGS_ENABLED", True)):
