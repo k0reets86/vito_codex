@@ -92,6 +92,14 @@ from modules.platform_target_registry import (
 )
 from modules.comms_callback_lane import handle_callback as _handle_callback_lane_impl, safe_edit_callback_message as _safe_edit_callback_message_impl
 from modules.comms_owner_lane import handle_owner_text as _handle_owner_text_impl
+from modules.comms_owner_control_lane import (
+    cancel_all_owner_work as _cancel_all_owner_work_impl,
+    maybe_handle_owner_menu_commands as _maybe_handle_owner_menu_commands_impl,
+    maybe_handle_owner_service_commands as _maybe_handle_owner_service_commands_impl,
+    maybe_handle_owner_shortcuts as _maybe_handle_owner_shortcuts_impl,
+    maybe_handle_owner_task_commands as _maybe_handle_owner_task_commands_impl,
+    render_owner_brief_status as _render_owner_brief_status_impl,
+)
 from modules.comms_recipe_lane import build_recipe_payload as _build_recipe_payload_impl, run_recipe_direct as _run_recipe_direct_impl
 from modules.owner_preference_model import OwnerPreferenceModel
 from modules.owner_pref_metrics import OwnerPreferenceMetrics
