@@ -8,6 +8,8 @@ from config.paths import PROJECT_ROOT
 
 
 RUNTIME_SIMULATOR_ROOT = PROJECT_ROOT / "runtime" / "simulator"
+REPORTS_ROOT = PROJECT_ROOT / "reports"
+RUNTIME_ROOT = PROJECT_ROOT / "runtime"
 PROJECT_TRASH_DIR_NAMES = {
     "__pycache__",
     ".pytest_cache",
@@ -15,6 +17,11 @@ PROJECT_TRASH_DIR_NAMES = {
     ".ruff_cache",
     ".learnings",
 }
+PERMANENT_RUNTIME_DB_NAMES = {
+    "knowledge_graph.db",
+    "platform_auth_interrupts.db",
+}
+REPORT_RETENTION_SUFFIXES = {".json", ".txt", ".md"}
 
 
 @dataclass(frozen=True)
@@ -28,6 +35,20 @@ class ProjectCleanupResult:
 class RuntimeCleanupResult:
     removed_dirs: list[str]
     kept_dirs: list[str]
+    root: str
+
+
+@dataclass(frozen=True)
+class ReportCleanupResult:
+    removed_files: list[str]
+    kept_files: list[str]
+    root: str
+
+
+@dataclass(frozen=True)
+class RuntimeDbCleanupResult:
+    removed_files: list[str]
+    kept_files: list[str]
     root: str
 
 
@@ -56,13 +77,76 @@ def cleanup_simulator_artifacts(*, keep_latest: int = 20, apply: bool = True) ->
     )
 
 
+def cleanup_reports_artifacts(*, keep_latest: int = 120, apply: bool = True) -> ReportCleanupResult:
+    root = REPORTS_ROOT
+    if not root.exists():
+        return ReportCleanupResult([], [], str(root))
+    files = [
+        p for p in root.iterdir()
+        if p.is_file() and p.suffix in REPORT_RETENTION_SUFFIXES
+    ]
+    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    keep = files[: max(0, int(keep_latest))]
+    purge = files[max(0, int(keep_latest)) :]
+    removed: list[str] = []
+    for path in purge:
+        if apply:
+            path.unlink(missing_ok=True)
+        removed.append(path.name)
+    return ReportCleanupResult(
+        removed_files=removed,
+        kept_files=[p.name for p in keep],
+        root=str(root),
+    )
+
+
+def cleanup_runtime_db_artifacts(*, apply: bool = True) -> RuntimeDbCleanupResult:
+    root = RUNTIME_ROOT
+    if not root.exists():
+        return RuntimeDbCleanupResult([], [], str(root))
+    removed: list[str] = []
+    kept: list[str] = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        if path.suffix not in {".db", ".sqlite3"}:
+            continue
+        try:
+            rel = str(path.relative_to(PROJECT_ROOT))
+        except ValueError:
+            rel = str(path.relative_to(root.parent))
+        # simulator dbs are retained via directory-level cleanup; don't double-delete here
+        if path.is_relative_to(RUNTIME_SIMULATOR_ROOT):
+            kept.append(rel)
+            continue
+        if path.name in PERMANENT_RUNTIME_DB_NAMES:
+            kept.append(rel)
+            continue
+        if apply:
+            path.unlink(missing_ok=True)
+        removed.append(rel)
+    return RuntimeDbCleanupResult(
+        removed_files=removed,
+        kept_files=kept,
+        root=str(root),
+    )
+
+
 def runtime_hygiene_summary() -> dict[str, Any]:
     root = RUNTIME_SIMULATOR_ROOT
     dirs = [p for p in root.iterdir() if p.is_dir()] if root.exists() else []
+    report_files = [p for p in REPORTS_ROOT.iterdir() if p.is_file()] if REPORTS_ROOT.exists() else []
+    runtime_dbs = [
+        str(p.relative_to(PROJECT_ROOT))
+        for p in RUNTIME_ROOT.rglob("*")
+        if p.is_file() and p.suffix in {".db", ".sqlite3"}
+    ] if RUNTIME_ROOT.exists() else []
     return {
         "simulator_root": str(root),
         "simulator_dir_count": len(dirs),
         "latest_dirs": [p.name for p in sorted(dirs, key=lambda p: p.stat().st_mtime, reverse=True)[:10]],
+        "report_file_count": len(report_files),
+        "runtime_db_count": len(runtime_dbs),
     }
 
 
