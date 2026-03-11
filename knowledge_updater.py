@@ -10,6 +10,7 @@ import time
 from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 
+from config.paths import PROJECT_ROOT
 from config.logger import get_logger
 from llm_router import LLMRouter, TaskType, MODEL_REGISTRY
 
@@ -140,8 +141,7 @@ class KnowledgeUpdater:
     def load_platform_registry(self) -> bool:
         """Load platform registry from docs into memory."""
         try:
-            from pathlib import Path
-            path = Path("/home/vito/vito-agent/docs/platform_registry.md")
+            path = PROJECT_ROOT / "docs" / "platform_registry.md"
             if path.exists() and self.memory:
                 text = path.read_text(encoding="utf-8")
                 self.memory.store_knowledge(
@@ -157,8 +157,7 @@ class KnowledgeUpdater:
     def load_platform_knowledge(self) -> bool:
         """Load platform knowledge from docs into memory."""
         try:
-            from pathlib import Path
-            path = Path("/home/vito/vito-agent/docs/platform_knowledge.md")
+            path = PROJECT_ROOT / "docs" / "platform_knowledge.md"
             if path.exists() and self.memory:
                 text = path.read_text(encoding="utf-8")
                 self.memory.store_knowledge(
@@ -174,8 +173,7 @@ class KnowledgeUpdater:
     def load_ai_models_knowledge(self) -> bool:
         """Load AI models knowledge from docs into memory."""
         try:
-            from pathlib import Path
-            path = Path("/home/vito/vito-agent/docs/ai_models_knowledge.md")
+            path = PROJECT_ROOT / "docs" / "ai_models_knowledge.md"
             if path.exists() and self.memory:
                 text = path.read_text(encoding="utf-8")
                 self.memory.store_knowledge(

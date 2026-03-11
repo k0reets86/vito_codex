@@ -14,12 +14,14 @@ from config.paths import PROJECT_ROOT
 logger = get_logger("platform_knowledge", agent="platform_knowledge")
 
 KB_PATH = PROJECT_ROOT / "docs" / "platform_knowledge.md"
+RUNTIME_KB_PATH = PROJECT_ROOT / "runtime" / "platform_knowledge.md"
 JSON_DB_PATH = PROJECT_ROOT / "runtime" / "platform_knowledge.json"
 
 
-def _ensure_header() -> None:
-    if not KB_PATH.exists():
-        KB_PATH.write_text(
+def _ensure_header(path: Path) -> None:
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
             "# Platform Knowledge Base (VITO)\n\n"
             "Updated: N/A\n\n",
             encoding="utf-8",
@@ -28,16 +30,16 @@ def _ensure_header() -> None:
 
 def append_entry(service: str, content: str) -> None:
     """Append a new service entry with timestamp."""
-    _ensure_header()
+    _ensure_header(RUNTIME_KB_PATH)
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     entry = f"\n## {service}\n\n{content.strip()}\n"
-    text = KB_PATH.read_text(encoding="utf-8")
+    text = RUNTIME_KB_PATH.read_text(encoding="utf-8")
     if text.startswith("Updated: "):
         lines = text.splitlines()
         if len(lines) >= 2 and lines[1].startswith("Updated:"):
             lines[1] = f"Updated: {ts}"
             text = "\n".join(lines) + "\n"
-    KB_PATH.write_text(text + entry, encoding="utf-8")
+    RUNTIME_KB_PATH.write_text(text + entry, encoding="utf-8")
     logger.info(
         "Platform knowledge appended",
         extra={"event": "platform_kb_append", "context": {"service": service}},
@@ -134,8 +136,10 @@ def record_platform_lesson(
 
 
 def search_entries(query: str, limit: int = 5) -> list[dict]:
-    _ensure_header()
-    text = KB_PATH.read_text(encoding="utf-8")
+    _ensure_header(KB_PATH)
+    base_text = KB_PATH.read_text(encoding="utf-8")
+    runtime_text = RUNTIME_KB_PATH.read_text(encoding="utf-8") if RUNTIME_KB_PATH.exists() else ""
+    text = "\n".join(part for part in [base_text, runtime_text] if part.strip())
     sections = re.split(r"\n## ", text)
     results: list[dict] = []
     q = str(query or "").strip().lower()

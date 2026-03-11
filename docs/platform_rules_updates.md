@@ -1,5 +1,9 @@
 # Platform Rules Updates
 
+This file is the curated baseline for consolidated platform rule changes.
+Raw runtime sync output must go to `runtime/platform_rules_updates.md`, not here.
+Only durable, reviewed rule updates should remain in this tracked document.
+
 ## 2026-03-06 10:11 UTC — pinterest
 
 - Source: https://developers.pinterest.com/docs/
@@ -321,4 +325,3 @@
 - Old hash: `d685156cfd07`
 - New hash: `5f92e3295b1e`
 - Excerpt: Pinterest Developers {"otaData":{"deltas":{}},"inContextTranslation":false,"initialReduxState":null,"isAppShell":null,"apps":[],"isDev":false,"isMobile":false,"user":{"unauth_id":"f46e98bfe2aa4bc0b88acaeb009381d1","ip_country":"DE","ip_region":"BY"},"enableChatbot":false,"allEndpointDetails":{"pins/create":{"path":"/pins","method":"post","operationId":"pins/create","summary":"Create Pin","description":" create a pin on a board or board section owned by the operation user_account note if the curr
-

@@ -1714,9 +1714,10 @@ class CommsAgent:
         try:
             from datetime import datetime, timezone
             ts = datetime.now(timezone.utc).isoformat()
-            log_path = PROJECT_ROOT / "docs" / "OWNER_REQUIREMENTS_LOG.md"
+            log_path = PROJECT_ROOT / "runtime" / "owner_requirements_log.md"
             entry = f"- [{ts}] ({source}) {text.strip()}\n"
             if not log_path.exists():
+                log_path.parent.mkdir(parents=True, exist_ok=True)
                 log_path.write_text("# Owner Requests & Requirements Log\n\n", encoding="utf-8")
             with log_path.open("a", encoding="utf-8") as f:
                 f.write(entry)

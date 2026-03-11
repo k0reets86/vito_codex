@@ -20,7 +20,7 @@ from modules.platform_runtime_registry import get_runtime_entry
 logger = get_logger("platform_rules_sync", agent="platform_rules_sync")
 
 STATE_PATH = PROJECT_ROOT / "runtime" / "platform_rules_state.json"
-REPORT_PATH = PROJECT_ROOT / "docs" / "platform_rules_updates.md"
+REPORT_PATH = PROJECT_ROOT / "runtime" / "platform_rules_updates.md"
 
 
 @dataclass(frozen=True)

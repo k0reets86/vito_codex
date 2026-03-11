@@ -4,7 +4,14 @@ Created: 2026-02-23
 Owner: VITO
 
 ## Purpose
-This file tracks all owner requests, tasks, and system requirements. It must be appended continuously with every new owner request going forward.
+This file is the canonical curated source for owner instructions, hard rules, and active focus areas.
+It must not be used as an append-only runtime log.
+Raw runtime request logging goes to `runtime/owner_requirements_log.md`, while this file is updated deliberately when instructions are consolidated or policy changes.
+
+## Canonical Use
+- Keep only important owner rules, consolidated requests, and active execution guidance here.
+- Do not dump simulator traffic, repetitive Telegram messages, or raw runtime chatter into this file.
+- Near-term focus should be recorded here only after consolidation, not message-by-message.
 
 ## 2026-02-23 — Consolidated Requirements (from chat)
 - Do not modify without explicit permission; then later allowed continuous work.

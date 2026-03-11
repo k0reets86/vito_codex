@@ -10,6 +10,7 @@ from typing import Any
 from config.paths import PROJECT_ROOT
 
 LOG_PATH = PROJECT_ROOT / 'docs' / 'OWNER_REQUIREMENTS_LOG.md'
+RUNTIME_LOG_PATH = PROJECT_ROOT / 'runtime' / 'owner_requirements_log.md'
 CACHE_PATH = PROJECT_ROOT / 'runtime' / 'owner_requirements_runtime.json'
 SCHEMA_VERSION = 1
 
@@ -84,6 +85,17 @@ def _read_text(path: Path) -> str:
         return ''
 
 
+def _read_combined_text() -> str:
+    parts = []
+    base = _read_text(LOG_PATH)
+    runtime = _read_text(RUNTIME_LOG_PATH)
+    if base:
+        parts.append(base)
+    if runtime:
+        parts.append(runtime)
+    return '\n'.join(parts).strip()
+
+
 def _hash_text(text: str) -> str:
     return hashlib.sha256((text or '').encode('utf-8')).hexdigest()
 
@@ -114,7 +126,7 @@ def _match_excerpts(text: str, patterns: list[str], *, limit: int = 5) -> list[s
 
 
 def build_owner_requirements_runtime() -> dict[str, Any]:
-    text = _read_text(LOG_PATH)
+    text = _read_combined_text()
     bullets = _extract_bullets(text, limit=500)
     joined = '\n'.join(bullets) if bullets else text
     rules: list[dict[str, Any]] = []
@@ -140,6 +152,7 @@ def build_owner_requirements_runtime() -> dict[str, Any]:
         'updated_at': datetime.now(timezone.utc).isoformat(),
         'source_meta': {
             'owner_requirements_log': str(LOG_PATH),
+            'owner_requirements_runtime_log': str(RUNTIME_LOG_PATH),
             'owner_requirements_hash': _hash_text(text),
             'bullet_count': len(bullets),
         },

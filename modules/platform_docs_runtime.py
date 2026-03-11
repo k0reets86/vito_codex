@@ -11,6 +11,8 @@ from config.paths import PROJECT_ROOT
 
 KNOWLEDGE_MD = PROJECT_ROOT / 'docs' / 'platform_knowledge.md'
 RULES_UPDATES_MD = PROJECT_ROOT / 'docs' / 'platform_rules_updates.md'
+RUNTIME_KNOWLEDGE_MD = PROJECT_ROOT / 'runtime' / 'platform_knowledge.md'
+RUNTIME_RULES_UPDATES_MD = PROJECT_ROOT / 'runtime' / 'platform_rules_updates.md'
 CACHE_PATH = PROJECT_ROOT / 'runtime' / 'platform_docs_runtime.json'
 SCHEMA_VERSION = 2
 
@@ -128,8 +130,12 @@ def _extract_labeled_list(body: str, label: str, limit: int = 20) -> list[str]:
 
 def build_docs_runtime(services: list[str] | None = None) -> dict[str, Any]:
     wanted = {_alias(s) for s in (services or []) if str(s).strip()}
-    knowledge_text = _read(KNOWLEDGE_MD)
-    rules_text = _read(RULES_UPDATES_MD)
+    knowledge_text = '\n'.join(
+        part for part in [_read(KNOWLEDGE_MD), _read(RUNTIME_KNOWLEDGE_MD)] if part.strip()
+    )
+    rules_text = '\n'.join(
+        part for part in [_read(RULES_UPDATES_MD), _read(RUNTIME_RULES_UPDATES_MD)] if part.strip()
+    )
     knowledge_sections = _split_sections(knowledge_text)
     rules_sections = _split_sections(rules_text)
     services_out: dict[str, Any] = {}
@@ -173,6 +179,8 @@ def build_docs_runtime(services: list[str] | None = None) -> dict[str, Any]:
         'source_meta': {
             'knowledge_md': str(KNOWLEDGE_MD),
             'rules_updates_md': str(RULES_UPDATES_MD),
+            'runtime_knowledge_md': str(RUNTIME_KNOWLEDGE_MD),
+            'runtime_rules_updates_md': str(RUNTIME_RULES_UPDATES_MD),
             'knowledge_hash': _hash_text(knowledge_text),
             'rules_hash': _hash_text(rules_text),
         },

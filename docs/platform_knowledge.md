@@ -1,5 +1,9 @@
 # Platform Knowledge Base (VITO)
 
+This file is the curated baseline for platform knowledge.
+Runtime lesson appends and live sync noise must go to `runtime/platform_knowledge.md`, not here.
+Only consolidated, durable platform knowledge should remain in this tracked document.
+
 Updated: 2026-02-23
 
 ## Amazon KDP — Paperback/Hardcover
