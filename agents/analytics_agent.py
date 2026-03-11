@@ -7,6 +7,7 @@ from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from llm_router import TaskType
 from modules.research_family_runtime import build_analytics_runtime_profile
+from modules.weak_agent_runtime import analytics_recovery_hints
 
 logger = get_logger("analytics_agent", agent="analytics_agent")
 
@@ -76,18 +77,21 @@ class AnalyticsAgent(BaseAgent):
             "has_revenue": revenue > 0,
             "profit_sign": "positive" if profit >= 0 else "negative",
         }
+        data["investigation_plan"] = ["continue_monitoring"] if profit >= 0 else ["check_offer_conversion", "review_channel_spend", "verify_platform_health"]
+        metadata = {
+            "analytics_runtime_profile": build_analytics_runtime_profile(
+                anomalies=[],
+                health=data.get("health"),
+                forecast_confidence=None,
+            ),
+            "analytics_handoff_targets": ["marketing_agent", "ecommerce_agent"] if data.get("health") == "watch" else ["analytics_agent"],
+            **self.get_skill_pack(),
+        }
+        data["recovery_hints"] = analytics_recovery_hints(data, metadata)
         return TaskResult(
             success=True,
             output=data,
-            metadata={
-                "analytics_runtime_profile": build_analytics_runtime_profile(
-                    anomalies=[],
-                    health=data.get("health"),
-                    forecast_confidence=None,
-                ),
-                "analytics_handoff_targets": ["marketing_agent", "ecommerce_agent"] if data.get("health") == "watch" else ["analytics_agent"],
-                **self.get_skill_pack(),
-            },
+            metadata=metadata,
         )
 
     async def detect_anomalies(self) -> TaskResult:
@@ -101,19 +105,17 @@ class AnalyticsAgent(BaseAgent):
         )
         if response:
             local["llm_notes"] = response
-        return TaskResult(
-            success=True,
-            output=local,
-            metadata={
-                "analytics_runtime_profile": build_analytics_runtime_profile(
-                    anomalies=local.get("anomalies"),
-                    health=local.get("status"),
-                    forecast_confidence=None,
-                ),
-                "analytics_handoff_targets": ["marketing_agent", "ecommerce_agent"] if local.get("anomalies") else ["analytics_agent"],
-                **self.get_skill_pack(),
-            },
-        )
+        metadata = {
+            "analytics_runtime_profile": build_analytics_runtime_profile(
+                anomalies=local.get("anomalies"),
+                health=local.get("status"),
+                forecast_confidence=None,
+            ),
+            "analytics_handoff_targets": ["marketing_agent", "ecommerce_agent"] if local.get("anomalies") else ["analytics_agent"],
+            **self.get_skill_pack(),
+        }
+        local["recovery_hints"] = analytics_recovery_hints(local, metadata)
+        return TaskResult(success=True, output=local, metadata=metadata)
 
     async def forecast_revenue(self, days: int = 30) -> TaskResult:
         local = await self._local_forecast(days)
@@ -127,19 +129,20 @@ class AnalyticsAgent(BaseAgent):
         if response:
             self._record_expense(0.01, f"Forecast {days}d")
             local["llm_notes"] = response
+        metadata = {
+            "analytics_runtime_profile": build_analytics_runtime_profile(
+                anomalies=[],
+                health="forecast",
+                forecast_confidence=local.get("confidence"),
+            ),
+            "analytics_handoff_targets": ["economics_agent", "marketing_agent"],
+            **self.get_skill_pack(),
+        }
         return TaskResult(
             success=True,
-            output=local,
+            output={**local, "recovery_hints": analytics_recovery_hints(local, metadata)},
             cost_usd=0.01 if response else 0.0,
-            metadata={
-                "analytics_runtime_profile": build_analytics_runtime_profile(
-                    anomalies=[],
-                    health="forecast",
-                    forecast_confidence=local.get("confidence"),
-                ),
-                "analytics_handoff_targets": ["economics_agent", "marketing_agent"],
-                **self.get_skill_pack(),
-            },
+            metadata=metadata,
         )
 
     async def agent_performance(self) -> TaskResult:
@@ -159,19 +162,25 @@ class AnalyticsAgent(BaseAgent):
         ]
         weakest = sorted(summary, key=lambda row: row.get("failed", 0), reverse=True)
         strongest = sorted(summary, key=lambda row: row.get("completed", 0), reverse=True)
+        metadata = {
+            "analytics_runtime_profile": build_analytics_runtime_profile(
+                anomalies=[],
+                health="agent_performance",
+                forecast_confidence=None,
+            ),
+            "analytics_handoff_targets": ["hr_agent", "vito_core"],
+            "benchmark_snapshot": {"weakest": weakest[:5], "strongest": strongest[:5]},
+            **self.get_skill_pack(),
+        }
         return TaskResult(
             success=True,
-            output={"agents": summary, "agent_count": len(summary)},
-            metadata={
-                "analytics_runtime_profile": build_analytics_runtime_profile(
-                    anomalies=[],
-                    health="agent_performance",
-                    forecast_confidence=None,
-                ),
-                "analytics_handoff_targets": ["hr_agent", "vito_core"],
-                "benchmark_snapshot": {"weakest": weakest[:5], "strongest": strongest[:5]},
-                **self.get_skill_pack(),
+            output={
+                "agents": summary,
+                "agent_count": len(summary),
+                "investigation_plan": ["review_weakest_agents", "compare_benchmark_deltas", "handoff_to_hr_and_vito_core"],
+                "recovery_hints": analytics_recovery_hints({"anomalies": []}, metadata),
             },
+            metadata=metadata,
         )
 
     async def _local_anomaly_snapshot(self) -> dict[str, Any]:

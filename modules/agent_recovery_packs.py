@@ -35,6 +35,8 @@ _RECOVERY_PACKS: dict[str, dict[str, Any]] = {
             "retry_with_provider_route",
             "apply_local_consistency_check",
             "cache_verified_result",
+            "package_translation_validation",
+            "request_quality_judge_review",
         ],
     },
     "economics_agent": {
@@ -48,6 +50,8 @@ _RECOVERY_PACKS: dict[str, dict[str, Any]] = {
             "request_analytics_snapshot",
             "request_research_market_scan",
             "switch_to_conservative_pricing_mode",
+            "request_benchmark_refresh",
+            "package_pricing_validation_notes",
         ],
     },
     "account_manager": {

@@ -7,6 +7,7 @@ from agents.base_agent import AgentStatus, BaseAgent, TaskResult
 from config.logger import get_logger
 from llm_router import TaskType
 from modules.economics_runtime import build_market_signal_pack, build_pricing_confidence
+from modules.weak_agent_runtime import economics_recovery_hints
 
 logger = get_logger("economics_agent", agent="economics_agent")
 
@@ -52,6 +53,11 @@ class EconomicsAgent(BaseAgent):
         confidence = build_pricing_confidence(product)
         local["market_signal_pack"] = market_signal
         local["pricing_confidence"] = confidence
+        local["recommendation_rationale"] = (
+            f"Recommended {local['recommended_tier']} based on competitor anchors, low variable costs, "
+            f"and confidence score {confidence.get('confidence_score', 0):.2f}."
+        )
+        local["recovery_hints"] = economics_recovery_hints(local)
         if not self.llm_router:
             return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", **self.get_skill_pack()})
         response = await self._call_llm(
@@ -68,6 +74,8 @@ class EconomicsAgent(BaseAgent):
         local = self._local_unit_economics(product)
         local["market_signal_pack"] = build_market_signal_pack(product)
         local["pricing_confidence"] = build_pricing_confidence(product)
+        local["recommendation_rationale"] = "Unit economics derived from standard price tier, fees, and blended CAC assumptions."
+        local["recovery_hints"] = economics_recovery_hints(local)
         if not self.llm_router:
             return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", **self.get_skill_pack()})
         response = await self._call_llm(
@@ -83,6 +91,8 @@ class EconomicsAgent(BaseAgent):
     async def model_pnl(self, scenario: dict) -> TaskResult:
         local = self._local_pnl(scenario)
         local["pricing_confidence"] = build_pricing_confidence(str(scenario.get("product") or "Digital product"), scenario)
+        local["recommendation_rationale"] = "P&L projection uses provided scenario inputs with conservative fixed and variable cost assumptions."
+        local["recovery_hints"] = economics_recovery_hints(local.get("monthly") or {})
         if not self.llm_router:
             return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", **self.get_skill_pack()})
         scenario_text = "\n".join(f"{k}: {v}" for k, v in scenario.items())

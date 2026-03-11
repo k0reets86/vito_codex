@@ -8,6 +8,7 @@ from config.logger import get_logger
 from llm_router import TaskType
 from modules.governance_runtime import build_partnership_execution_profile
 from modules.growth_runtime import build_partnership_runtime_profile
+from modules.weak_agent_runtime import partnership_recovery_hints
 
 logger = get_logger("partnership_agent", agent="partnership_agent")
 
@@ -65,6 +66,11 @@ class PartnershipAgent(BaseAgent):
         runtime_profile = build_partnership_runtime_profile(niche, local.get("candidates"))
         local["runtime_candidates"] = runtime_profile["top_candidates"]
         local["outreach_plan"] = [f"personalize_outreach::{row.get('name')}" for row in local["runtime_candidates"]]
+        local["partner_scorecard"] = {
+            row.get("name"): {"fit_score": row.get("fit_score"), "audience_match": row.get("audience_match")}
+            for row in local["runtime_candidates"]
+        }
+        local["recovery_hints"] = partnership_recovery_hints(runtime_profile)
         return TaskResult(
             success=True,
             output=local,
@@ -93,13 +99,17 @@ class PartnershipAgent(BaseAgent):
 
     async def propose_collaboration(self, partner: str) -> TaskResult:
         local = self._local_collaboration(partner)
+        runtime_profile = build_partnership_runtime_profile(partner, [{"name": partner, "fit": "direct"}])
+        local["runtime_candidates"] = runtime_profile["top_candidates"]
+        local["outreach_plan"] = [f"send_collaboration_pitch::{partner}"]
+        local["recovery_hints"] = partnership_recovery_hints(runtime_profile)
         if not self.llm_router:
             return TaskResult(
                 success=True,
                 output=local,
                 metadata={
                     "mode": "local_fallback",
-                    "partnership_runtime_profile": build_partnership_runtime_profile(partner, []),
+                    "partnership_runtime_profile": runtime_profile,
                     "partnership_execution_profile": build_partnership_execution_profile(niche=partner, candidate_count=1, shortlist_count=1),
                     **self.get_skill_pack(),
                 },
@@ -115,7 +125,7 @@ class PartnershipAgent(BaseAgent):
             success=True,
             output=local,
             metadata={
-                "partnership_runtime_profile": build_partnership_runtime_profile(partner, []),
+                "partnership_runtime_profile": runtime_profile,
                 "partnership_execution_profile": build_partnership_execution_profile(niche=partner, candidate_count=1, shortlist_count=1),
                 **self.get_skill_pack(),
             },

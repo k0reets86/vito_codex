@@ -54,22 +54,26 @@
 - Status: `done`
 
 ## Current verified deltas
-- overall benchmark: `6.89 -> 7.30 -> 7.41 -> 7.52 -> 7.52 -> 7.70 -> 8.19 -> 8.59`
+- overall benchmark: `6.89 -> 7.30 -> 7.41 -> 7.52 -> 7.52 -> 7.70 -> 8.19 -> 8.59 -> 8.74`
 - `intelligence_research`: `6.92 -> 7.56 -> 8.89`
-- `research_agent`: `7.16 -> 7.58 -> 9.00`
+- `research_agent`: `7.16 -> 7.58 -> 9.00 -> 9.10`
 - `trend_scout`: `6.87 -> 7.45 -> 9.23`
-- `analytics_agent`: `6.96 -> 7.55 -> 8.29`
-- `document_agent`: `6.67 -> 7.65 -> 9.03`
+- `analytics_agent`: `6.96 -> 7.55 -> 8.29 -> 8.87`
+- `document_agent`: `6.67 -> 7.65 -> 9.03 -> 9.13`
 - `marketing_agent`: `6.86 -> 7.44 -> 9.06`
 - `risk_agent`: `6.86 -> 7.44 -> 8.34`
 - `email_agent`: `6.96 -> 7.54 -> 9.02`
-- `partnership_agent`: `6.53 -> 7.25 -> 8.15`
+- `partnership_agent`: `6.53 -> 7.25 -> 8.15 -> 8.83`
 - `content_creator`: `7.40 -> 9.30`
-- `content_growth`: `6.81 -> 7.98 -> 8.60`
+- `content_growth`: `6.81 -> 7.98 -> 8.60 -> 8.84`
 - `commerce_execution`: `6.75 -> 7.88 -> 7.88 -> 8.61`
-- `publisher_agent`: `7.05 -> 8.55`
+- `publisher_agent`: `7.05 -> 8.55 -> 8.55`
 - `ecommerce_agent`: `7.62 -> 9.03`
-- `vito_core`: `7.28 -> 8.69`
+- `vito_core`: `7.28 -> 8.69 -> 8.69`
+- `translation_agent`: `7.92 -> 8.55`
+- `economics_agent`: `7.99 -> 8.62`
+- `devops_agent`: `7.05 -> 8.24 -> 8.92`
+- `governance_resilience`: `7.40 -> 8.37 -> 8.54`
 - Package 3 collaboration assertions: `done`
 - Package 4 commerce hardening: `done`
 - weakest-family uplift package: `done`

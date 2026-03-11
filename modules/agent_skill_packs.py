@@ -7,9 +7,9 @@ from typing import Any
 
 _PACKS: dict[str, dict[str, Any]] = {
     "translation_agent": {
-        "skills": ["language_detection", "term_preserving_translation", "listing_localization", "glossary_control", "locale_profile_selection", "consistency_checks"],
-        "evidence": ["source_lang", "target_lang", "mode", "translation_quality_hint", "glossary_terms", "quality_checks"],
-        "preferred_workflows": ["W01", "W02"],
+        "skills": ["language_detection", "term_preserving_translation", "listing_localization", "glossary_control", "locale_profile_selection", "consistency_checks", "script_mismatch_detection", "translation_validation_packaging", "locale_recovery_routing"],
+        "evidence": ["source_lang", "target_lang", "mode", "translation_quality_hint", "glossary_terms", "quality_checks", "locale_profile", "provider_route", "recovery_hints"],
+        "preferred_workflows": ["W01", "W02", "W05"],
     },
     "research_agent": {
         "skills": ["iterative_market_research", "evidence_digest", "opportunity_scoring", "operator_ready_recommendation", "competitor_mapping", "market_gap_analysis", "judge_rework_loop", "source_mix_expansion", "research_gap_triage", "source_coverage_audit", "commercial_recommendation_packaging"],
@@ -22,9 +22,9 @@ _PACKS: dict[str, dict[str, Any]] = {
         "preferred_workflows": ["W01", "W05", "W08"],
     },
     "analytics_agent": {
-        "skills": ["dashboard_snapshot", "anomaly_triage", "forecast_packaging", "agent_performance_review"],
-        "evidence": ["analytics_runtime_profile", "metrics", "anomalies", "forecast_confidence"],
-        "preferred_workflows": ["W03", "W06"],
+        "skills": ["dashboard_snapshot", "anomaly_triage", "forecast_packaging", "agent_performance_review", "benchmark_delta_review", "investigation_plan_building", "baseline_gap_detection"],
+        "evidence": ["analytics_runtime_profile", "metrics", "anomalies", "forecast_confidence", "investigation_plan", "benchmark_snapshot", "recovery_hints"],
+        "preferred_workflows": ["W03", "W06", "W08"],
     },
     "document_agent": {
         "skills": ["document_ingest", "recovery_aware_parse", "ocr_extract", "knowledge_capture", "parser_selection", "source_integrity_check", "extract_quality_review", "report_manifest_generation", "documentation_outline_building", "knowledge_update_packaging"],
@@ -77,9 +77,9 @@ _PACKS: dict[str, dict[str, Any]] = {
         "preferred_workflows": ["W08"],
     },
     "devops_agent": {
-        "skills": ["health_snapshot", "whitelisted_shell_execution", "backup_and_rollback_support", "operational_remediation"],
-        "evidence": ["health", "checks", "backup_dir", "actions"],
-        "preferred_workflows": ["W03"],
+        "skills": ["health_snapshot", "whitelisted_shell_execution", "backup_and_rollback_support", "operational_remediation", "repair_evidence_packaging", "incident_signature_mapping", "rollback_guidance"],
+        "evidence": ["health", "checks", "backup_dir", "actions", "recovery_hints", "devops_runtime_profile"],
+        "preferred_workflows": ["W03", "W08"],
     },
     "self_healer": {
         "skills": ["failure_signature_detection", "verified_remediation_pipeline", "rollback_on_failed_fix", "quarantine_and_cooldown_control"],
@@ -87,9 +87,9 @@ _PACKS: dict[str, dict[str, Any]] = {
         "preferred_workflows": ["W03", "W08"],
     },
     "economics_agent": {
-        "skills": ["price_band_selection", "margin_assumption_modeling", "competitor_anchor_fusion", "pricing_confidence_estimation"],
-        "evidence": ["pricing_options", "market_signal_pack", "pricing_confidence"],
-        "preferred_workflows": ["W01", "W06"],
+        "skills": ["price_band_selection", "margin_assumption_modeling", "competitor_anchor_fusion", "pricing_confidence_estimation", "unit_economics_validation", "pnl_projection_packaging", "anchor_conflict_detection"],
+        "evidence": ["pricing_options", "market_signal_pack", "pricing_confidence", "recovery_hints", "recommendation_rationale"],
+        "preferred_workflows": ["W01", "W06", "W08"],
     },
     "legal_agent": {
         "skills": ["platform_policy_pack_resolution", "copyright_risk_screening", "gdpr_checklist_generation", "publish_blocker_detection"],
@@ -102,9 +102,9 @@ _PACKS: dict[str, dict[str, Any]] = {
         "preferred_workflows": ["W07"],
     },
     "partnership_agent": {
-        "skills": ["candidate_shortlisting", "partner_scoring", "referral_tracking", "collaboration_pitching"],
-        "evidence": ["partnership_runtime_profile", "candidate_count", "top_candidates", "proposal"],
-        "preferred_workflows": ["growth_pipeline", "W05"],
+        "skills": ["candidate_shortlisting", "partner_scoring", "referral_tracking", "collaboration_pitching", "offer_match_validation", "outreach_plan_packaging", "partner_recovery_routing"],
+        "evidence": ["partnership_runtime_profile", "candidate_count", "top_candidates", "proposal", "runtime_candidates", "outreach_plan", "recovery_hints"],
+        "preferred_workflows": ["growth_pipeline", "W05", "email_pipeline"],
     },
     "content_creator": {
         "skills": ["article_drafting", "ebook_packaging", "listing_copy_building", "asset_manifest_assembly", "platform_fit_copy_packaging", "listing_seo_alignment", "content_quality_self_check", "preview_gallery_packaging", "handoff_manifest_building", "validation_checklist_generation", "angle_refresh_recovery"],

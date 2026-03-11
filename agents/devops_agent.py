@@ -17,6 +17,7 @@ from config.logger import get_logger
 from config.paths import PROJECT_ROOT
 from config.settings import settings
 from modules.ops_runtime import build_devops_runtime_profile
+from modules.weak_agent_runtime import devops_repair_confidence
 
 logger = get_logger("devops_agent", agent="devops_agent")
 
@@ -212,6 +213,7 @@ class DevOpsAgent(BaseAgent):
             "checks": checks,
             "issues": issues,
             "recovery_hints": self._recovery_hints_for_issues(issues),
+            "repair_confidence": devops_repair_confidence(all_ok, len(issues), bool(issues)),
             "skill_pack": self.get_skill_pack(),
         }, metadata={
             "devops_runtime_profile": build_devops_runtime_profile(
@@ -241,6 +243,7 @@ class DevOpsAgent(BaseAgent):
             "files": backed_up,
             "manifest": {"file_count": len(backed_up), "timestamp": ts},
             "recovery_hints": ["Verify backup readability before deleting old snapshots."],
+            "repair_confidence": devops_repair_confidence(True, 0, False),
             "skill_pack": self.get_skill_pack(),
         }, metadata={
             "devops_runtime_profile": build_devops_runtime_profile(
@@ -281,6 +284,11 @@ class DevOpsAgent(BaseAgent):
             "issue": issue,
             "actions": actions_taken,
             "recovery_hints": self._recovery_hints_for_issues([issue]),
+            "repair_confidence": devops_repair_confidence(
+                success=bool(actions_taken),
+                issue_count=0 if actions_taken else 1,
+                can_auto_remediate=bool(actions_taken and actions_taken[0].get("action") != "none"),
+            ),
             "skill_pack": self.get_skill_pack(),
         }, metadata={
             "devops_runtime_profile": build_devops_runtime_profile(

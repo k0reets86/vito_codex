@@ -10,6 +10,7 @@ from modules.translation_runtime import (
     build_listing_localization_notes,
     build_translation_route,
 )
+from modules.weak_agent_runtime import translation_recovery_hints
 
 logger = get_logger("translation_agent", agent="translation_agent")
 SUPPORTED_LANGS = ["en", "de", "ua", "pl"]
@@ -63,6 +64,7 @@ class TranslationAgent(BaseAgent):
 
         local = self._local_translate(raw_text, src, tgt)
         if not self.llm_router:
+            quality_checks = build_consistency_checks(raw_text, local, route["glossary_terms"])
             self._cache[cache_key] = local
             return TaskResult(
                 success=True,
@@ -72,7 +74,8 @@ class TranslationAgent(BaseAgent):
                     "source_lang": src,
                     "target_lang": tgt,
                     "translation_quality_hint": "dictionary_or_prefix_fallback",
-                    "quality_checks": build_consistency_checks(raw_text, local, route["glossary_terms"]),
+                    "quality_checks": quality_checks,
+                    "recovery_hints": translation_recovery_hints(quality_checks),
                     **route,
                     **self.get_skill_pack(),
                 },
@@ -92,6 +95,7 @@ class TranslationAgent(BaseAgent):
         if response:
             cost = 0.01
             self._record_expense(cost, f"Translate {src}->{tgt}")
+        quality_checks = build_consistency_checks(raw_text, output, route["glossary_terms"])
         self._cache[cache_key] = output
         return TaskResult(
             success=True,
@@ -101,7 +105,8 @@ class TranslationAgent(BaseAgent):
                 "source_lang": src,
                 "target_lang": tgt,
                 "translation_quality_hint": "llm_translation_with_local_fallback",
-                "quality_checks": build_consistency_checks(raw_text, output, route["glossary_terms"]),
+                "quality_checks": quality_checks,
+                "recovery_hints": translation_recovery_hints(quality_checks),
                 **route,
                 **self.get_skill_pack(),
             },
@@ -111,8 +116,23 @@ class TranslationAgent(BaseAgent):
         tgt = self._normalize_lang(target_lang)
         local = self._local_localize_listing(listing_data, tgt)
         notes = build_listing_localization_notes(listing_data, tgt)
+        quality_checks = build_consistency_checks(
+            str(listing_data.get("title", "")).strip(),
+            str(local),
+            notes.get("seo_keywords") or [],
+        )
         if not self.llm_router:
-            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", **notes, **self.get_skill_pack()})
+            return TaskResult(
+                success=True,
+                output=local,
+                metadata={
+                    "mode": "local_fallback",
+                    "quality_checks": quality_checks,
+                    "recovery_hints": translation_recovery_hints(quality_checks),
+                    **notes,
+                    **self.get_skill_pack(),
+                },
+            )
 
         text = "\n".join(f"{k}: {v}" for k, v in listing_data.items())
         response = await self._call_llm(
@@ -121,8 +141,34 @@ class TranslationAgent(BaseAgent):
             estimated_tokens=2000,
         )
         if not response:
-            return TaskResult(success=True, output=local, metadata={"mode": "local_fallback", **notes, **self.get_skill_pack()})
-        return TaskResult(success=True, output=response, cost_usd=0.01, metadata={"localized_lang": tgt, **notes, **self.get_skill_pack()})
+            return TaskResult(
+                success=True,
+                output=local,
+                metadata={
+                    "mode": "local_fallback",
+                    "quality_checks": quality_checks,
+                    "recovery_hints": translation_recovery_hints(quality_checks),
+                    **notes,
+                    **self.get_skill_pack(),
+                },
+            )
+        llm_checks = build_consistency_checks(
+            str(listing_data.get("title", "")).strip(),
+            str(response),
+            notes.get("seo_keywords") or [],
+        )
+        return TaskResult(
+            success=True,
+            output=response,
+            cost_usd=0.01,
+            metadata={
+                "localized_lang": tgt,
+                "quality_checks": llm_checks,
+                "recovery_hints": translation_recovery_hints(llm_checks),
+                **notes,
+                **self.get_skill_pack(),
+            },
+        )
 
     async def detect_language(self, text: str) -> TaskResult:
         sample = (text or "")[:500]
