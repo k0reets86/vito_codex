@@ -112,6 +112,7 @@ from modules.conversation_context_memory_lane import (
     turn_from_entry as _turn_from_entry_impl,
 )
 from modules.conversation_state_lane import clear_context as _clear_context_impl, get_context as _get_context_impl
+from modules.conversation_session_lane import set_defer_owner_actions as _set_defer_owner_actions_impl, set_session as _set_session_impl
 from modules.conversation_guard_lane import guard_response as _guard_response_impl
 from modules.conversation_process_lane import process_message as _process_message_impl
 from modules.conversation_quick_lane import (
@@ -207,14 +208,10 @@ class ConversationEngine:
         logger.info("ConversationEngine инициализирован", extra={"event": "init"})
 
     def set_session(self, session_id: str | None) -> None:
-        sid = str(session_id or "default").strip() or "default"
-        if sid == self._session_id:
-            return
-        self._session_id = sid
-        self._load_context_from_memory()
+        _set_session_impl(self, session_id)
 
     def set_defer_owner_actions(self, enabled: bool) -> None:
-        self._defer_owner_actions = bool(enabled)
+        _set_defer_owner_actions_impl(self, enabled)
 
     async def process_message(self, text: str) -> dict[str, Any]:
         return await _process_message_impl(self, text)
