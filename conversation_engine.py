@@ -52,6 +52,10 @@ from modules.conversation_action_lane import (
     handle_system_action as _handle_system_action_impl,
 )
 from modules.conversation_autonomy_action_lane import handle_autonomy_action as _handle_autonomy_action_impl
+from modules.conversation_dialogue_lane import (
+    handle_conversation as _handle_conversation_impl,
+    handle_feedback as _handle_feedback_impl,
+)
 from modules.conversation_question_lane import handle_question as _handle_question_impl
 from llm_router import LLMRouter, TaskType, MODEL_REGISTRY
 from modules.prompt_guard import wrap_untrusted_text
@@ -574,61 +578,10 @@ class ConversationEngine:
         return await _handle_goal_request_impl(self, text)
 
     async def _handle_feedback(self, text: str) -> dict[str, Any]:
-        if self.memory:
-            try:
-                self.memory.save_pattern(
-                    category="feedback",
-                    key=f"fb_{int(time.time())}",
-                    value=text[:500],
-                    confidence=0.8,
-                )
-            except Exception:
-                pass
-
-        response = await self.llm_router.call_llm(
-            task_type=TaskType.ROUTINE,
-            prompt=(
-                f"{VITO_PERSONALITY}\n\n"
-                f"Владелец оставил отзыв: \"{text}\"\n"
-                f"Поблагодари коротко и скажи как учтёшь. 2-3 предложения максимум."
-            ),
-            estimated_tokens=200,
-        )
-
-        return {
-            "intent": Intent.FEEDBACK.value,
-            "response": response or "Спасибо за обратную связь! Учту.",
-        }
+        return await _handle_feedback_impl(self, text)
 
     async def _handle_conversation(self, text: str) -> dict[str, Any]:
-        # Лёгкий контекст для обычного разговора — без полного дампа системы
-        now = datetime.now(timezone.utc)
-        light_context = f"Время: {now.strftime('%Y-%m-%d %H:%M UTC')}"
-        try:
-            daily_spend = self.llm_router.get_daily_spend()
-            light_context += f"\nРасходы сегодня: ${daily_spend:.2f} / ${settings.DAILY_LIMIT_USD:.2f}"
-        except Exception:
-            pass
-
-        prompt = (
-            f"{VITO_PERSONALITY}\n\n"
-            f"{light_context}\n\n"
-            f"{self._owner_task_focus_text()}\n\n"
-            f"История:\n{self._format_context()}\n\n"
-            f"Владелец: {text}\n\n"
-            f"Ответь коротко и по теме. Не добавляй информацию, о которой не спрашивали."
-        )
-
-        response = await self.llm_router.call_llm(
-            task_type=TaskType.ROUTINE,
-            prompt=prompt,
-            estimated_tokens=500,
-        )
-
-        return {
-            "intent": Intent.CONVERSATION.value,
-            "response": self._guard_response(response) or "Привет! Я VITO, твой AI-напарник. Чем могу помочь?",
-        }
+        return await _handle_conversation_impl(self, text)
 
     def _guard_response(self, response: Optional[str]) -> Optional[str]:
         """Prevent unverified completion claims in free-form responses."""
