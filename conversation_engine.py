@@ -112,7 +112,7 @@ from modules.conversation_context_memory_lane import (
     turn_from_entry as _turn_from_entry_impl,
 )
 from modules.conversation_state_lane import clear_context as _clear_context_impl, get_context as _get_context_impl
-from modules.conversation_guard_lane import guard_response as _guard_response_signal_impl
+from modules.conversation_guard_lane import guard_response as _guard_response_impl
 from modules.conversation_process_lane import process_message as _process_message_impl
 from modules.conversation_quick_lane import (
     quick_agents as _quick_agents_impl,
@@ -295,20 +295,7 @@ class ConversationEngine:
         return await _handle_conversation_impl(self, text)
 
     def _guard_response(self, response: Optional[str]) -> Optional[str]:
-        signal = _guard_response_signal_impl(response)
-        if signal != "__verify_execution_facts__":
-            return signal
-        try:
-            from modules.execution_facts import ExecutionFacts
-            facts = ExecutionFacts()
-            if not facts.recent_exists(
-                actions=["publisher_agent:publish", "browser_agent:form_fill", "ecommerce_agent:listing_create", "platform:publish"],
-                hours=24,
-            ):
-                return "Это было предложение, а не факт выполнения. Если хочешь, запущу это сейчас."
-        except Exception:
-            return "Это было предложение, а не факт выполнения. Если хочешь, запущу это сейчас."
-        return response
+        return _guard_response_impl(self, response)
 
     # ── Исполнение действий ──
 
