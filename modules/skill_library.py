@@ -14,7 +14,7 @@ from modules.skill_registry import SkillRegistry
 
 logger = get_logger("skill_library", agent="skill_library")
 
-SKILL_LIBRARY_DIR = PROJECT_ROOT / ".learnings" / "skills"
+SKILL_LIBRARY_DIR = PROJECT_ROOT / "runtime" / "learnings" / "skills"
 
 
 class VITOSkillLibrary:

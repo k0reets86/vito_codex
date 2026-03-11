@@ -10,7 +10,7 @@ from modules.owner_preference_model import OwnerPreferenceModel
 
 logger = get_logger("owner_model", agent="owner_model")
 
-OWNER_MODEL_FILE = PROJECT_ROOT / ".learnings" / "owner_model.json"
+OWNER_MODEL_FILE = PROJECT_ROOT / "runtime" / "learnings" / "owner_model.json"
 
 
 class OwnerModel:

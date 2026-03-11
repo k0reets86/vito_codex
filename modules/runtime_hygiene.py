@@ -16,6 +16,7 @@ PROJECT_TRASH_DIR_NAMES = {
     ".mypy_cache",
     ".ruff_cache",
     ".learnings",
+    "MagicMock",
 }
 PERMANENT_RUNTIME_DB_NAMES = {
     "knowledge_graph.db",
@@ -157,7 +158,11 @@ def cleanup_project_artifacts(*, apply: bool = True) -> ProjectCleanupResult:
         if not path.exists():
             continue
         name = path.name
-        if path.is_dir() and (name in PROJECT_TRASH_DIR_NAMES or name.startswith("<MagicMock")):
+        if path.is_dir() and (
+            name in PROJECT_TRASH_DIR_NAMES
+            or name.startswith("<MagicMock")
+            or str(path.relative_to(PROJECT_ROOT)).startswith("MagicMock/")
+        ):
             if apply:
                 for child in sorted(path.rglob("*"), reverse=True):
                     if child.is_file() or child.is_symlink():

@@ -12,7 +12,7 @@ from config.settings import settings
 
 logger = get_logger("reflector", agent="reflector")
 
-LEARNINGS_DIR = PROJECT_ROOT / ".learnings"
+LEARNINGS_DIR = PROJECT_ROOT / "runtime" / "learnings"
 LEARNINGS_FILE = LEARNINGS_DIR / "LEARNINGS.md"
 ATTRIBUTION_FILE = LEARNINGS_DIR / "attribution_map.json"
 

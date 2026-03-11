@@ -14,6 +14,7 @@ import math
 import sqlite3
 import time
 import threading
+import os
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -69,7 +70,6 @@ class MemoryManager:
 
     def _get_chroma(self):
         if self._chroma_client is None:
-            import os
             chroma_path = self._resolve_chroma_path()
             os.makedirs(chroma_path, exist_ok=True)
             try:
@@ -93,13 +93,28 @@ class MemoryManager:
 
     def _resolve_chroma_path(self) -> str:
         raw = getattr(self, "_chroma_path", None) or getattr(settings, "CHROMA_PATH", "")
-        try:
+        if isinstance(raw, Path):
             candidate = str(raw)
+        elif isinstance(raw, (str, bytes, os.PathLike)):
+            try:
+                candidate = os.fspath(raw)
+            except Exception:
+                return str(_DEFAULT_CHROMA_PATH)
+        else:
+            return str(_DEFAULT_CHROMA_PATH)
+        try:
+            candidate = str(candidate)
         except Exception:
             return str(_DEFAULT_CHROMA_PATH)
         # Some tests accidentally leave CHROMA_PATH as MagicMock, which would create
         # directories like "<MagicMock ...>" in project root. Fall back to default.
-        if not candidate or "MagicMock" in candidate or candidate.startswith("<"):
+        if (
+            not candidate
+            or "MagicMock" in candidate
+            or candidate.startswith("<")
+            or candidate.startswith("MagicMock/")
+            or candidate == "MagicMock"
+        ):
             return str(_DEFAULT_CHROMA_PATH)
         return candidate
 
