@@ -2377,42 +2377,7 @@ class CommsAgent:
         return False
 
     async def _maybe_handle_owner_task_commands(self, text: str) -> bool:
-        lower = str(text or "").lower().strip()
-        if lower in ("/task_current", "task_current"):
-            if self._owner_task_state:
-                active = self._owner_task_state.get_active()
-                if active:
-                    await self.send_message(
-                        "Текущая задача владельца:\n"
-                        f"- {str(active.get('text', ''))[:800]}\n"
-                        f"- intent: {active.get('intent', '')}\n"
-                        f"- status: {active.get('status', 'active')}\n"
-                        f"- service: {active.get('service_context', '') or 'n/a'}",
-                        level="result",
-                    )
-                else:
-                    await self.send_message("Текущая задача не зафиксирована.", level="result")
-                return True
-        if lower in ("/task_done", "task_done"):
-            if self._owner_task_state:
-                self._owner_task_state.complete(note="owner_marked_done")
-                await self.send_message("Текущая задача отмечена как выполненная.", level="result")
-                return True
-        if lower in ("/task_cancel", "task_cancel"):
-            if self._owner_task_state:
-                self._owner_task_state.cancel(note="owner_task_cancel")
-                await self.send_message("Текущая задача отменена.", level="result")
-                return True
-        if lower.startswith("/task_replace ") or lower.startswith("task_replace "):
-            if self._owner_task_state:
-                parts = text.split(maxsplit=1)
-                if len(parts) >= 2 and parts[1].strip():
-                    self._owner_task_state.set_active(parts[1].strip(), source="owner_inbox", intent="manual_replace", force=True)
-                    await self.send_message("Текущая задача заменена.", level="result")
-                else:
-                    await self.send_message("Использование: /task_replace <новая задача>", level="result")
-                return True
-        return False
+        return await _maybe_handle_owner_task_commands_impl(self, text)
 
     async def _maybe_handle_owner_publish_commands(self, text: str) -> bool:
         lower = str(text or "").lower().strip()
