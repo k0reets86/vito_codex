@@ -275,6 +275,27 @@ def _builtin(name: str) -> list[Step]:
             Step("ED11", "ладно потом", ["отлож", "потом", "ок"], ["traceback", "exception"]),
             Step("ED12", "не надо", ["отмен", "ок"], ["traceback", "exception"]),
         ]
+    if key == "phase_owner_everyday_noisy_dialogue":
+        return [
+            Step("EN01", "как дел", ["decision loop", "цели"], ["traceback", "exception"]),
+            Step("EN02", "че щас делаеш", ["сейчас", "работ"], ["traceback", "exception"]),
+            Step("EN03", "че по задач", ["decision loop", "цели"], ["traceback", "exception"]),
+            Step("EN04", "стоп", ["остановил", "продолж"], ["traceback", "exception"]),
+            Step("EN05", "продолжай", ["продолжаю работу"], ["traceback", "exception"]),
+            Step("EN06", "отмени все", ["все текущие задачи снял", "отмен"], ["traceback", "exception"]),
+            Step("EN07", "что от меня надо", ["ничего", "если"], ["traceback", "exception"]),
+            Step("EN08", "что уже сделано", ["подтвержден", "задач", "сводк"], ["traceback", "exception"]),
+            Step("EN09", "не трогай старое", ["стар", "target id"], ["traceback", "exception"]),
+            Step("EN10", "создай новое", ["уточни", "что именно", "платформ"], ["traceback", "exception"]),
+            Step("EN11", "ладно потом", ["отлож", "позже", "ок"], ["traceback", "exception"]),
+            Step("EN12", "не надо", ["отмен", "ок"], ["traceback", "exception"]),
+            Step("EN13", "не понял", ["уточни", "непонят"], ["traceback", "exception"]),
+            Step("EN14", "убери это", ["уточни", "что именно убрать"], ["traceback", "exception"]),
+            Step("EN15", "сейчас не делай", ["не запускаю", "позже"], ["traceback", "exception"]),
+            Step("EN16", "что мне делать", ["ничего", "если понадобится"], ["traceback", "exception"]),
+            Step("EN17", "почему остановился", ["активной задачи", "следующий шаг", "блокер", "пауза"], ["traceback", "exception"]),
+            Step("EN18", "не публикуй пока", ["публикац", "не запускаю"], ["traceback", "exception"]),
+        ]
     if key == "phase_platform_live_verify_safe":
         return [
             Step("PLV01", "зайди на амазон", ["amazon", "вход", "логин", "kdp"], ["traceback", "exception"]),

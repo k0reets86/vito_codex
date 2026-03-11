@@ -1996,6 +1996,48 @@ class CommsAgent:
                 level="result",
             )
             return True
+        if self._is_what_is_ready_prompt(text):
+            await self.send_message(
+                "Сейчас могу коротко показать только подтвержденные результаты и активные задачи. Для деталей скажи: «сводка» или «что по задачам».",
+                level="result",
+            )
+            return True
+        if self._is_what_should_i_do_prompt(text):
+            await self.send_message(
+                "Пока от тебя ничего не нужно. Если понадобится код, логин или подтверждение, я скажу это прямо.",
+                level="result",
+            )
+            return True
+        if self._is_do_not_publish_prompt(text):
+            await self.send_message(
+                "Ок. Публикацию не запускаю без отдельного явного указания.",
+                level="result",
+            )
+            return True
+        if self._is_remove_this_prompt(text):
+            await self.send_message(
+                "Уточни, что именно убрать: текущую задачу, публикацию, черновик или сообщение.",
+                level="result",
+            )
+            return True
+        if self._is_do_not_do_now_prompt(text):
+            await self.send_message(
+                "Ок. Сейчас не запускаю. Можем вернуться к этому позже или по новой команде.",
+                level="result",
+            )
+            return True
+        if self._is_not_understood_prompt(text):
+            await self.send_message(
+                "Уточни, что именно непонятно: задача, статус, платформа или следующий шаг.",
+                level="result",
+            )
+            return True
+        if self._is_why_stopped_prompt(text):
+            await self.send_message(
+                "Если я остановился, значит либо нет активной задачи, либо нужен явный следующий шаг, либо сработала пауза/блокер. Скажи: «что по задачам» или «продолжай».",
+                level="result",
+            )
+            return True
         if self._is_do_not_touch_old_prompt(text):
             await self.send_message(
                 "Правило зафиксировано: старые и опубликованные объекты не трогаются без явного указания и target id.",
@@ -2113,6 +2155,41 @@ class CommsAgent:
     def _is_what_do_you_need_prompt(text: str) -> bool:
         s = str(text or "").strip().lower().replace("ё", "е")
         return s in {"что от меня нужно", "что от меня надо", "что нужно от меня", "что тебе нужно", "что от меня требуется"}
+
+    @staticmethod
+    def _is_what_is_ready_prompt(text: str) -> bool:
+        s = str(text or "").strip().lower().replace("ё", "е")
+        return s in {"что уже готово", "что готово", "что уже сделал", "что уже сделано"}
+
+    @staticmethod
+    def _is_what_should_i_do_prompt(text: str) -> bool:
+        s = str(text or "").strip().lower().replace("ё", "е")
+        return s in {"что мне делать", "что мне сейчас делать", "что дальше делать мне"}
+
+    @staticmethod
+    def _is_do_not_publish_prompt(text: str) -> bool:
+        s = str(text or "").strip().lower().replace("ё", "е")
+        return s in {"не публикуй", "не публикуй пока", "пока не публикуй", "не надо публиковать"}
+
+    @staticmethod
+    def _is_remove_this_prompt(text: str) -> bool:
+        s = str(text or "").strip().lower().replace("ё", "е")
+        return s in {"убери это", "убери", "сними это", "убери пока"}
+
+    @staticmethod
+    def _is_do_not_do_now_prompt(text: str) -> bool:
+        s = str(text or "").strip().lower().replace("ё", "е")
+        return s in {"сейчас не делай", "не делай сейчас", "пока не делай"}
+
+    @staticmethod
+    def _is_not_understood_prompt(text: str) -> bool:
+        s = str(text or "").strip().lower().replace("ё", "е")
+        return s in {"не понял", "не поняла", "непонятно", "не понял тебя"}
+
+    @staticmethod
+    def _is_why_stopped_prompt(text: str) -> bool:
+        s = str(text or "").strip().lower().replace("ё", "е")
+        return s in {"почему остановился", "почему встал", "почему стоп"}
 
     @staticmethod
     def _is_do_not_touch_old_prompt(text: str) -> bool:
