@@ -24,7 +24,7 @@
 - [x] `NEEDS` / `CAPABILITIES` декларации для всех агентов
 - [x] runtime validation capability -> benchmark/evidence
 - [x] event/signal layer для handoff
-- [ ] `QualityGate` для publish/listing/content-required действий
+- [x] `QualityGate` для publish/listing/content-required действий
 - [x] backward-compatible rollout для новых handoff paths
 - Status: `done`
 - Weight: `18%`

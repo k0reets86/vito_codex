@@ -96,5 +96,5 @@
 - [x] `HumanBrowser` протянут в Gumroad adapter
 - [x] `HumanBrowser` протянут в Printful adapter
 - [x] Service-aware browser policy выровнена в adapter-path
-- [ ] Targeted browser regressions на новом runtime слое
+- [x] Targeted browser regressions на новом runtime слое
 - Status: `in_progress`
