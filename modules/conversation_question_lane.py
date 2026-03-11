@@ -38,7 +38,10 @@ async def handle_question(engine, text: str) -> dict:
             "intent": engine.Intent.QUESTION.value,
             "response": engine._format_time_answer(),
         }
-    quick = engine._quick_answer(lower)
+    try:
+        quick = engine._quick_answer(text, lower)
+    except TypeError:
+        quick = engine._quick_answer(lower)
     if quick:
         return {
             "intent": engine.Intent.QUESTION.value,
