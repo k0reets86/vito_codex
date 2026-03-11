@@ -57,6 +57,10 @@ from modules.conversation_dialogue_lane import (
     handle_feedback as _handle_feedback_impl,
 )
 from modules.conversation_question_lane import handle_question as _handle_question_impl
+from modules.conversation_intake_lane import (
+    bootstrap_owner_turn as _bootstrap_owner_turn_impl,
+    maybe_handle_fast_url_route as _maybe_handle_fast_url_route_impl,
+)
 from llm_router import LLMRouter, TaskType, MODEL_REGISTRY
 from modules.prompt_guard import wrap_untrusted_text
 
@@ -148,7 +152,6 @@ class ConversationEngine:
 
     async def process_message(self, text: str) -> dict[str, Any]:
         """Обрабатывает сообщение от владельца."""
-        owner_task_preserved = False
         self._remember_owner_profile_fact(text)
         try:
             self.owner_model.update_from_interaction(str(text or ""))
@@ -159,52 +162,9 @@ class ConversationEngine:
                 "intent": Intent.CONVERSATION.value,
                 "response": "Выполнение задач на паузе. Отправь /resume, чтобы продолжить.",
             }
-        # Fast path: browser/web fetch without LLM
-        url = self._extract_url(text)
-        if url and self.agent_registry and settings.BROWSER_DEFAULT_ON_URL:
-            # Prefer real browser for JS-heavy sites
-            try:
-                lower = text.lower()
-                if any(k in lower for k in ("скрин", "снимок", "screenshot", "screen")):
-                    task_type = "screenshot"
-                    path = f"/tmp/vito_browse_{int(time.time())}.png"
-                    result = await self.agent_registry.dispatch(task_type, url=url, path=path)
-                    if result and result.success:
-                        return {
-                            "response": f"Открыл страницу. Скриншот готов.\n📎 {result.output.get('path') if isinstance(result.output, dict) and result.output.get('path') else path}",
-                            "intent": Intent.QUESTION.value,
-                        }
-                if any(k in lower for k in ("текст", "прочитай", "extract", "вытащи", "что написано")):
-                    task_type = "web_scrape"
-                    result = await self.agent_registry.dispatch(task_type, url=url, selector="body")
-                    if result and result.success:
-                        return {
-                            "response": f"Текст со страницы:\n{str(result.output)[:3500]}",
-                            "intent": Intent.QUESTION.value,
-                        }
-                # default: quick browse (title + status)
-                result = await self.agent_registry.dispatch("browse", url=url)
-                if result and result.success:
-                    out = result.output or {}
-                    title = out.get("title", "")
-                    status = out.get("status", "")
-                    return {"response": f"Страница открыта. {title} (HTTP {status})", "intent": Intent.QUESTION.value}
-            except Exception:
-                pass
-
-        # Fallback: fetch URL without LLM (free web fetch)
-        if "http://" in text or "https://" in text:
-            try:
-                import re
-                from modules.web_fetch import fetch_url
-                m = re.search(r"https?://\S+", text)
-                if m:
-                    url = m.group(0).rstrip(".,)")
-                    data = fetch_url(url)
-                    response = f"URL: {url}\nTitle: {data.get('title','')}\n\n{data.get('text','')}"
-                    return {"response": response, "intent": Intent.QUESTION.value}
-            except Exception:
-                pass
+        fast_route = await _maybe_handle_fast_url_route_impl(self, text)
+        if fast_route is not None:
+            return fast_route
         preroute = await handle_owner_preroute(self, text)
         if preroute is not None:
             return preroute
@@ -214,26 +174,7 @@ class ConversationEngine:
         if intent is None:
             intent = await self._detect_intent_llm(text)
 
-        # 2. Save user turn
-        self._add_turn("user", text, intent)
-        if self.owner_task_state and intent in (Intent.GOAL_REQUEST, Intent.SYSTEM_ACTION):
-            try:
-                active_before = self.owner_task_state.get_active()
-                saved = self.owner_task_state.set_active(text=text, source="telegram", intent=intent.value, force=False)
-                owner_task_preserved = bool(active_before and not saved)
-            except Exception:
-                pass
-
-        # 2.5. Сохраняем важные запросы владельца в долгосрочную память
-        if intent in (Intent.GOAL_REQUEST, Intent.QUESTION, Intent.SYSTEM_ACTION) and self.memory:
-            try:
-                self.memory.store_knowledge(
-                    doc_id=f"user_msg_{int(time.time())}",
-                    text=f"Владелец: {text}",
-                    metadata={"type": "user_request", "intent": intent.value, "tones": tones},
-                )
-            except Exception:
-                pass
+        _bootstrap_owner_turn_impl(self, text, intent, tones)
 
         # 3. Process by intent
         result = await self._process_by_intent(intent, text)
