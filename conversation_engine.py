@@ -45,11 +45,13 @@ from modules.conversation_deterministic_owner_lane import (
     maybe_continue_from_research_state as _maybe_continue_from_research_state_impl,
 )
 from modules.conversation_action_lane import (
+    # action lane
     dispatch_action as _dispatch_action_impl,
     execute_actions as _execute_actions_impl,
     handle_goal_request as _handle_goal_request_impl,
     handle_system_action as _handle_system_action_impl,
 )
+from modules.conversation_autonomy_action_lane import handle_autonomy_action as _handle_autonomy_action_impl
 from llm_router import LLMRouter, TaskType, MODEL_REGISTRY
 from modules.prompt_guard import wrap_untrusted_text
 
@@ -731,6 +733,10 @@ class ConversationEngine:
 
     async def _dispatch_action_legacy(self, action: str, params: dict) -> str:
         """Роутер действий — подключён ко всем модулям."""
+
+        autonomy_result = await _handle_autonomy_action_impl(self, action, params)
+        if autonomy_result is not None:
+            return autonomy_result
 
         # Агенты
         if action == "dispatch_agent" and self.agent_registry:
