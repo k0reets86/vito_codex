@@ -111,6 +111,7 @@ from modules.conversation_context_memory_lane import (
     persist_turn as _persist_turn_impl,
     turn_from_entry as _turn_from_entry_impl,
 )
+from modules.conversation_state_lane import clear_context as _clear_context_impl, get_context as _get_context_impl
 from modules.conversation_guard_lane import guard_response as _guard_response_signal_impl
 from modules.conversation_process_lane import process_message as _process_message_impl
 from modules.conversation_quick_lane import (
@@ -467,23 +468,10 @@ class ConversationEngine:
         return _owner_task_focus_text_impl(self)
 
     def get_context(self) -> list[dict]:
-        return [
-            {
-                "role": t.role,
-                "text": t.text[:100],
-                "intent": t.intent.value if t.intent else None,
-                "timestamp": t.timestamp.isoformat(),
-            }
-            for t in self._context
-        ]
+        return _get_context_impl(self)
 
     def clear_context(self) -> None:
-        self._context.clear()
-        if self.conversation_memory:
-            try:
-                self.conversation_memory.clear(session_id=self._session_id)
-            except Exception:
-                pass
+        _clear_context_impl(self)
 
     def _load_context_from_memory(self) -> None:
         _load_context_from_memory_impl(self)
