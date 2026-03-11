@@ -76,3 +76,34 @@ def bootstrap_owner_turn(engine, text: str, intent, tones) -> None:
             )
         except Exception:
             pass
+
+
+def ensure_owner_task_state(engine, text: str, intent_value: str | None) -> None:
+    if not engine.owner_task_state:
+        return
+    try:
+        active_before = engine.owner_task_state.get_active()
+        intent_str = str(intent_value or "").strip().lower()
+        if intent_str not in {engine.Intent.GOAL_REQUEST.value, engine.Intent.SYSTEM_ACTION.value}:
+            return
+        saved = engine.owner_task_state.set_active(
+            text=text,
+            source="telegram",
+            intent=intent_str,
+            force=False,
+        )
+        if active_before and not saved:
+            return
+    except Exception:
+        return
+
+
+def owner_friendly_action_results(text: str) -> str:
+    s = str(text or "").strip()
+    if not s:
+        return "Принял задачу в работу. Дам краткий прогресс и вернусь с результатом."
+    low = s.lower()
+    noisy = ("task_id", "goal_id", "trace_id", "session_id", "{", "}", "[", "]")
+    if any(tok in low for tok in noisy):
+        return "Принял задачу в работу. Иду выполнять, вернусь с прогрессом и итогом."
+    return s

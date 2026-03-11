@@ -86,7 +86,18 @@ from modules.conversation_autonomy_lane import (
 )
 from modules.conversation_intake_lane import (
     bootstrap_owner_turn as _bootstrap_owner_turn_impl,
+    ensure_owner_task_state as _ensure_owner_task_state_impl,
     maybe_handle_fast_url_route as _maybe_handle_fast_url_route_impl,
+    owner_friendly_action_results as _owner_friendly_action_results_impl,
+)
+from modules.conversation_intent_lane import (
+    detect_intent_llm as _detect_intent_llm_impl,
+    detect_intent_rules as _detect_intent_rules_impl,
+    detect_tone as _detect_tone_impl,
+    extract_url as _extract_url_impl,
+    has_keywords as _has_keywords_impl,
+    normalize_for_nlu as _normalize_for_nlu_impl,
+    process_by_intent as _process_by_intent_impl,
 )
 from modules.conversation_context_lane import (
     build_operational_memory_context as _build_operational_memory_context_impl,
@@ -247,169 +258,36 @@ class ConversationEngine:
         return result
 
     def _ensure_owner_task_state(self, text: str, intent_value: str | None) -> None:
-        if not self.owner_task_state:
-            return
-        try:
-            active_before = self.owner_task_state.get_active()
-            intent_str = str(intent_value or "").strip().lower()
-            if intent_str not in {Intent.GOAL_REQUEST.value, Intent.SYSTEM_ACTION.value}:
-                return
-            saved = self.owner_task_state.set_active(
-                text=text,
-                source="telegram",
-                intent=intent_str,
-                force=False,
-            )
-            if active_before and not saved:
-                return
-        except Exception:
-            return
+        _ensure_owner_task_state_impl(self, text, intent_value)
 
     @staticmethod
     def _owner_friendly_action_results(text: str) -> str:
-        s = str(text or "").strip()
-        if not s:
-            return "Принял задачу в работу. Дам краткий прогресс и вернусь с результатом."
-        low = s.lower()
-        noisy = ("task_id", "goal_id", "trace_id", "session_id", "{", "}", "[", "]")
-        if any(tok in low for tok in noisy):
-            return "Принял задачу в работу. Иду выполнять, вернусь с прогрессом и итогом."
-        return s
+        return _owner_friendly_action_results_impl(text)
 
     async def _deterministic_owner_route(self, text: str) -> dict[str, Any] | None:
         return await _deterministic_owner_route_impl(self, text)
 
     def _detect_intent_rules(self, text: str) -> Optional[Intent]:
-        """Rule-based intent detection (быстрый первый фильтр)."""
-        stripped = text.strip()
+        return _detect_intent_rules_impl(self, text)
 
-        if stripped.startswith("/"):
-            return Intent.COMMAND
-
-        lower = stripped.lower()
-        normalized = self._normalize_for_nlu(stripped)
-        # Explicit question markers override goal detection
-        if "?" in stripped:
-            return Intent.QUESTION
-        if lower.startswith(("откуда", "почему", "зачем", "как", "кто", "что", "где", "когда", "какой", "какие", "чем")):
-            return Intent.QUESTION
-
-        # Time queries — no LLM needed
-        time_words = ("время", "час", "дата", "time", "what time", "date", "сколько время")
-        if self._has_keywords(normalized, time_words, fuzzy=True) and len(lower) < 40:
-            return Intent.QUESTION
-        approval_words = {"да", "нет", "ок", "ok", "yes", "no", "approve", "reject",
-                          "отмена", "одобряю", "отклоняю"}
-        if lower in approval_words:
-            return Intent.APPROVAL
-
-        info_verbs = ("дай", "покажи", "расскажи", "найди", "найти", "проанализируй", "собери")
-        info_targets = ("новост", "тренд", "статист", "аналит", "обзор", "отчет", "отчёт", "сводк", "ниши")
-        create_targets = ("создай", "опубликуй", "запусти", "загрузи", "сделай продукт", "сделай товар")
-        if self._has_keywords(normalized, info_verbs, fuzzy=True) and self._has_keywords(normalized, info_targets, fuzzy=True):
-            if not self._has_keywords(normalized, create_targets, fuzzy=True):
-                return Intent.QUESTION
-
-        # Goal request keywords (product creation, tasks, publishing)
-        goal_keywords = [
-            "создай", "сделай", "опубликуй", "напиши", "разработай",
-            "запусти продукт", "запусти товар", "продукт", "ebook",
-            "найди", "найти", "подбери", "собери", "сформируй",
-            "отчет", "отчёт", "тренд", "тренды",
-            "create", "make", "publish", "build", "launch", "find", "research",
-            "write an", "write a", "design", "generate",
-        ]
-        if self._has_keywords(normalized, goal_keywords, fuzzy=True):
-            return Intent.GOAL_REQUEST
-
-        # System action keywords (internal operations)
-        action_keywords = [
-            "запусти агент", "останови", "просканируй", "проанализируй",
-            "используй", "переключи", "смени модель", "сканируй тренды",
-            "проверь ошибки", "сделай бэкап", "откати", "обнови",
-        ]
-        self_improve_keywords = [
-            "исправь", "почини", "доработай", "улучши код", "улучши",
-            "самоисправ", "добавь интеграц", "сделай интеграц",
-            "добавь поддержку", "добавь навык",
-        ]
-        learn_service_keywords = [
-            "изучи сервис", "изучи платформ", "найди требования", "добавь знания",
-            "документац", "официальные требования",
-        ]
-        if self._has_keywords(normalized, self_improve_keywords, fuzzy=True):
-            return Intent.SYSTEM_ACTION
-        if self._has_keywords(normalized, learn_service_keywords, fuzzy=True):
-            return Intent.SYSTEM_ACTION
-        if self._has_keywords(normalized, action_keywords, fuzzy=True):
-            return Intent.SYSTEM_ACTION
-
-        return None
 
     @staticmethod
     def _normalize_for_nlu(text: str) -> str:
-        text = (text or "").lower().replace("ё", "е")
-        text = re.sub(r"[^a-zа-я0-9\s]", " ", text)
-        text = re.sub(r"\s+", " ", text).strip()
-        return text
+        return _normalize_for_nlu_impl(text)
 
     def _has_keywords(self, normalized_text: str, keywords: list[str] | tuple[str, ...], fuzzy: bool = False) -> bool:
-        if not normalized_text:
-            return False
-        tokens = normalized_text.split()
-        for raw_kw in keywords:
-            kw = self._normalize_for_nlu(str(raw_kw or ""))
-            if not kw:
-                continue
-            if kw in normalized_text:
-                return True
-            if not fuzzy:
-                continue
-            if " " in kw:
-                continue
-            if len(kw) < 4:
-                continue
-            for token in tokens:
-                if len(token) < 4:
-                    continue
-                if abs(len(token) - len(kw)) > 2:
-                    continue
-                if difflib.SequenceMatcher(None, token, kw).ratio() >= 0.78:
-                    return True
-        return False
+        return _has_keywords_impl(normalized_text, keywords, fuzzy=fuzzy)
 
     def _detect_tone(self, text: str) -> list[str]:
-        normalized = self._normalize_for_nlu(text)
-        tones: list[str] = []
-        frustrated_markers = (
-            "не работает", "бесит", "достало", "тупой", "ошибка", "сломал",
-            "не можешь", "не делает", "плохо", "ужас", "wtf",
-        )
-        urgent_markers = ("срочно", "asap", "немедленно", "прямо сейчас", "горит")
-        positive_markers = ("спасибо", "отлично", "супер", "класс", "good", "great")
-        if self._has_keywords(normalized, frustrated_markers, fuzzy=True):
-            tones.append("frustrated")
-        if self._has_keywords(normalized, urgent_markers, fuzzy=True):
-            tones.append("urgent")
-        if self._has_keywords(normalized, positive_markers, fuzzy=True):
-            tones.append("positive")
-        return tones
+        return _detect_tone_impl(text)
 
     @staticmethod
     def _extract_url(text: str) -> Optional[str]:
-        import re
-        # Full URL
-        m = re.search(r"https?://\S+", text)
-        if m:
-            return m.group(0).rstrip(".,)")
-        # Bare domain (avoid emails)
-        m = re.search(r"\b([a-z0-9.-]+\.[a-z]{2,})(/[^\s]*)?\b", text, re.IGNORECASE)
-        if m and "@" not in m.group(0):
-            return "https://" + m.group(0)
-        return None
+        return _extract_url_impl(text)
 
     async def _detect_intent_llm(self, text: str) -> Intent:
-        """LLM-based intent detection через structured Gemini parser."""
+        return await _detect_intent_llm_impl(self, text)
+
         if "?" in text:
             return Intent.QUESTION
         try:
@@ -435,26 +313,8 @@ class ConversationEngine:
         return Intent.CONVERSATION
 
     async def _process_by_intent(self, intent: Intent, text: str) -> dict[str, Any]:
-        if intent == Intent.COMMAND:
-            return {"intent": intent.value, "response": None, "pass_through": True}
-        if intent == Intent.APPROVAL:
-            return {"intent": intent.value, "response": None, "pass_through": True}
-        if intent == Intent.QUESTION:
-            result = await self._handle_question(text)
-        elif intent == Intent.GOAL_REQUEST:
-            result = await self._handle_goal_request(text)
-        elif intent == Intent.SYSTEM_ACTION:
-            result = await self._handle_system_action(text)
-        elif intent == Intent.FEEDBACK:
-            result = await self._handle_feedback(text)
-        else:
-            result = await self._handle_conversation(text)
-        try:
-            if isinstance(result, dict) and isinstance(result.get("response"), str):
-                result["response"] = self._guard_response(result["response"])
-        except Exception:
-            pass
-        return result
+        return await _process_by_intent_impl(self, intent, text)
+
 
     # ── Обработчики ──
 
@@ -581,59 +441,6 @@ class ConversationEngine:
         result_text: str,
     ) -> None:
         return _record_autonomy_learning_impl(self, request, capability, success, attempts, result_text)
-
-    def _record_autonomy_learning(
-        self,
-        request: str,
-        capability: str,
-        success: bool,
-        attempts: list[str],
-        result_text: str,
-    ) -> None:
-        """Persist autonomous execution lessons for future tasks."""
-        mm = self.memory
-        if mm is None:
-            return
-        skill_name = f"autonomy:{capability}"
-        try:
-            mm.save_skill(
-                name=skill_name,
-                description=f"Autonomous loop for '{request[:80]}'",
-                agent="conversation_engine",
-                task_type=capability,
-                method={
-                    "request": request[:240],
-                    "attempts": attempts[:10],
-                    "success": bool(success),
-                },
-            )
-            mm.update_skill_success(skill_name, success=bool(success))
-            mm.update_skill_last_result(skill_name, str(result_text or "")[:500])
-        except Exception:
-            pass
-        try:
-            if success:
-                mm.save_pattern(
-                    category="autonomy_success",
-                    key=f"{capability}:{hash(request) % 100000}",
-                    value=" | ".join(attempts[:8]),
-                    confidence=0.85,
-                )
-            else:
-                mm.save_pattern(
-                    category="anti_pattern",
-                    key=f"autonomy_fail:{capability}:{hash(request) % 100000}",
-                    value=" | ".join(attempts[:8]),
-                    confidence=0.95,
-                )
-                mm.log_error(
-                    module="conversation_engine",
-                    error_type="autonomous_execute_failed",
-                    message=f"{capability}: {request[:180]}",
-                    resolution="auto_learn_retry_scheduled",
-                )
-        except Exception:
-            pass
 
     @staticmethod
     def _extract_research_topic(text: str) -> str:
