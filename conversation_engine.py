@@ -82,6 +82,15 @@ from modules.conversation_context_lane import (
     build_operational_memory_context as _build_operational_memory_context_impl,
     format_system_context as _format_system_context_impl,
 )
+from modules.conversation_context_memory_lane import (
+    add_turn as _add_turn_impl,
+    extract_json as _extract_json_impl,
+    format_context as _format_context_impl,
+    load_context_from_memory as _load_context_from_memory_impl,
+    owner_task_focus_text as _owner_task_focus_text_impl,
+    persist_turn as _persist_turn_impl,
+    turn_from_entry as _turn_from_entry_impl,
+)
 from modules.conversation_quick_lane import (
     quick_agents as _quick_agents_impl,
     quick_answer as _quick_answer_impl,
@@ -1452,54 +1461,16 @@ class ConversationEngine:
     # ── Утилиты ──
 
     def _extract_json(self, text: str) -> Optional[dict]:
-        """Извлекает JSON из ответа LLM."""
-        parsed = text.strip()
-        if "```" in parsed:
-            for block in parsed.split("```"):
-                block = block.strip()
-                if block.startswith("json"):
-                    block = block[4:].strip()
-                if block.startswith("{"):
-                    parsed = block
-                    break
-        if parsed.startswith("{"):
-            return json.loads(parsed)
-        return None
+        return _extract_json_impl(text)
 
     def _add_turn(self, role: str, text: str, intent: Optional[Intent] = None) -> None:
-        turn = Turn(role=role, text=text, intent=intent)
-        self._context.append(turn)
-        if len(self._context) > MAX_CONTEXT_TURNS:
-            self._context = self._context[-MAX_CONTEXT_TURNS:]
-        self._persist_turn(turn)
+        _add_turn_impl(self, role, text, intent)
 
     def _format_context(self) -> str:
-        if not self._context:
-            return "(начало разговора)"
-        turns = max(5, min(20, int(getattr(settings, "CONVERSATION_CONTEXT_TURNS", 10) or 10)))
-        lines = []
-        for turn in self._context[-turns:]:
-            role_label = "Владелец" if turn.role == "user" else "VITO"
-            lines.append(f"{role_label}: {turn.text[:200]}")
-        return "\n".join(lines)
+        return _format_context_impl(self)
 
     def _owner_task_focus_text(self) -> str:
-        if not self.owner_task_state:
-            return "Фокус владельца: (не зафиксирован)"
-        try:
-            active = self.owner_task_state.get_active()
-            if not active:
-                return "Фокус владельца: (не зафиксирован)"
-            return (
-                "Фокус владельца:\n"
-                f"- текущая задача: {str(active.get('text', ''))[:260]}\n"
-                f"- intent: {str(active.get('intent', ''))[:80]}\n"
-                f"- статус: {str(active.get('status', 'active'))[:40]}\n"
-                f"- сервис: {str(active.get('service_context', ''))[:80] if active.get('service_context') else 'не зафиксирован'}\n"
-                f"- выбранная идея: {str(active.get('selected_research_title', ''))[:160] if active.get('selected_research_title') else 'не выбрана'}"
-            )
-        except Exception:
-            return "Фокус владельца: (не зафиксирован)"
+        return _owner_task_focus_text_impl(self)
 
     def get_context(self) -> list[dict]:
         return [
@@ -1521,45 +1492,10 @@ class ConversationEngine:
                 pass
 
     def _load_context_from_memory(self) -> None:
-        if not self.conversation_memory:
-            return
-        entries = self.conversation_memory.load(limit=MAX_CONTEXT_TURNS, session_id=self._session_id)
-        loaded: list[Turn] = []
-        for entry in entries:
-            turn = self._turn_from_entry(entry)
-            if turn:
-                loaded.append(turn)
-        self._context = loaded[-MAX_CONTEXT_TURNS:]
+        _load_context_from_memory_impl(self)
 
     def _turn_from_entry(self, entry: dict) -> Turn | None:
-        role = entry.get("role")
-        text = entry.get("text")
-        if not role or not text:
-            return None
-        intent_value = entry.get("intent")
-        timestamp = entry.get("timestamp")
-        intent = None
-        if intent_value:
-            try:
-                intent = Intent(intent_value)
-            except ValueError:
-                intent = None
-        try:
-            ts = datetime.fromisoformat(timestamp) if timestamp else datetime.now(timezone.utc)
-        except Exception:
-            ts = datetime.now(timezone.utc)
-        return Turn(role=role, text=text, intent=intent, timestamp=ts)
+        return _turn_from_entry_impl(entry)
 
     def _persist_turn(self, turn: Turn) -> None:
-        if not self.conversation_memory:
-            return
-        entry = {
-            "role": turn.role,
-            "text": turn.text,
-            "intent": turn.intent.value if turn.intent else None,
-            "timestamp": turn.timestamp.isoformat(),
-        }
-        try:
-            self.conversation_memory.append(entry, session_id=self._session_id)
-        except Exception:
-            pass
+        _persist_turn_impl(self, turn)
