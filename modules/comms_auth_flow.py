@@ -301,7 +301,7 @@ async def handle_kdp_login_flow(agent: Any, text: str, send_reply, with_button: 
             agent._pending_service_auth.pop("amazon_kdp", None)
             await send_reply("Готово: вход в KDP подтвержден (live-check OK).")
             return True
-        prepared_mode = bool((agent._pending_kdp_otp or {}).get("prepared", False)) or agent._kdp_preauth_ready()
+        prepared_mode = bool((agent._pending_kdp_otp or {}).get("prepared", False))
         attempts: list[tuple[str, tuple[int, str]]] = []
         if prepared_mode:
             attempts.append(("submit_otp_prepared", await agent._run_kdp_submit_otp(maybe_otp)))
