@@ -392,7 +392,6 @@ class ConversationEngine:
         return _quick_status_impl(self)
 
     @staticmethod
-    @staticmethod
     def _format_deep_research_owner_report(
         *,
         topic: str,
