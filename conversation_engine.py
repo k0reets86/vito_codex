@@ -112,6 +112,7 @@ from modules.conversation_context_memory_lane import (
     turn_from_entry as _turn_from_entry_impl,
 )
 from modules.conversation_guard_lane import guard_response as _guard_response_signal_impl
+from modules.conversation_process_lane import process_message as _process_message_impl
 from modules.conversation_quick_lane import (
     quick_agents as _quick_agents_impl,
     quick_answer as _quick_answer_impl,
@@ -215,47 +216,7 @@ class ConversationEngine:
         self._defer_owner_actions = bool(enabled)
 
     async def process_message(self, text: str) -> dict[str, Any]:
-        """Обрабатывает сообщение от владельца."""
-        self._remember_owner_profile_fact(text)
-        try:
-            self.owner_model.update_from_interaction(str(text or ""))
-        except Exception:
-            pass
-        if self.cancel_state and self.cancel_state.is_cancelled():
-            return {
-                "intent": Intent.CONVERSATION.value,
-                "response": "Выполнение задач на паузе. Отправь /resume, чтобы продолжить.",
-            }
-        fast_route = await _maybe_handle_fast_url_route_impl(self, text)
-        if fast_route is not None:
-            return fast_route
-        preroute = await handle_owner_preroute(self, text)
-        if preroute is not None:
-            return preroute
-        # 1. Detect intent + tone
-        tones = self._detect_tone(text)
-        intent = self._detect_intent_rules(text)
-        if intent is None:
-            intent = await self._detect_intent_llm(text)
-
-        _bootstrap_owner_turn_impl(self, text, intent, tones)
-
-        # 3. Process by intent
-        result = await self._process_by_intent(intent, text)
-
-        # 4. Execute actions if current caller allows blocking execution
-        if result.get("actions") and not result.get("needs_confirmation", False) and not self._defer_owner_actions:
-            action_results = await self._execute_actions(result["actions"])
-            if action_results:
-                friendly = self._owner_friendly_action_results(action_results)
-                result["response"] = (result.get("response") or "") + "\n\n" + friendly
-
-        # 5. Save assistant turn
-        if result.get("response"):
-            self._add_turn("assistant", result["response"])
-
-        result["nlu_tones"] = tones
-        return result
+        return await _process_message_impl(self, text)
 
     def _ensure_owner_task_state(self, text: str, intent_value: str | None) -> None:
         _ensure_owner_task_state_impl(self, text, intent_value)
