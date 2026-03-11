@@ -63,6 +63,16 @@ from modules.conversation_owner_profile_lane import (
     remember_owner_profile_fact as _remember_owner_profile_fact_impl,
     resolve_owner_name as _resolve_owner_name_impl,
 )
+from modules.conversation_parse_lane import (
+    extract_platform_key as _extract_platform_key_impl,
+    extract_platforms as _extract_platforms_impl,
+    extract_product_topic as _extract_product_topic_impl,
+    extract_research_topic as _extract_research_topic_impl,
+    extract_target_title as _extract_target_title_impl,
+    format_time_answer as _format_time_answer_impl,
+    is_time_query as _is_time_query_impl,
+    looks_like_imperative_request as _looks_like_imperative_request_impl,
+)
 from modules.conversation_question_lane import handle_question as _handle_question_impl
 from modules.conversation_intake_lane import (
     bootstrap_owner_turn as _bootstrap_owner_turn_impl,
@@ -1338,55 +1348,23 @@ class ConversationEngine:
 
     @staticmethod
     def _extract_research_topic(text: str) -> str:
-        s = str(text or "").strip()
-        s = re.sub(r"(?i)\b(проведи|сделай|запусти|выполни)\b", "", s).strip()
-        s = re.sub(r"(?i)\b(глубокое|глубокий|deep)\b", "", s).strip()
-        s = re.sub(r"(?i)\b(исследование|анализ|research)\b", "", s).strip(" :,-")
-        return s or "digital product niches for US market"
+        return _extract_research_topic_impl(text)
 
     @staticmethod
     def _extract_product_topic(text: str) -> str:
-        s = str(text or "").strip()
-        # remove imperative wrappers
-        s = re.sub(r"(?i)\b(сделай|создай|запусти|подготовь|оформи)\b", "", s).strip()
-        s = re.sub(r"(?i)\b(товар|продукт|под ключ|turnkey|pipeline)\b", "", s).strip(" :,-")
-        return s or "Digital Product Starter Kit"
+        return _extract_product_topic_impl(text)
 
     @staticmethod
     def _extract_platforms(text: str) -> list[str]:
-        s = str(text or "").lower()
-        out: list[str] = []
-        for k, v in (
-            ("gumroad", "gumroad"),
-            ("гумроад", "gumroad"),
-            ("etsy", "etsy"),
-            ("этси", "etsy"),
-            ("етси", "etsy"),
-            ("kofi", "kofi"),
-            ("ko-fi", "kofi"),
-            ("кофи", "kofi"),
-            ("amazon", "amazon_kdp"),
-            ("kdp", "amazon_kdp"),
-            ("амазон", "amazon_kdp"),
-        ):
-            if k in s and v not in out:
-                out.append(v)
-        return out or ["gumroad"]
+        return _extract_platforms_impl(text)
 
     @staticmethod
     def _is_time_query(lower: str) -> bool:
-        time_words = ("время", "час", "дата", "time", "what time", "date", "сколько время")
-        return any(w in lower for w in time_words) and len(lower) < 60
+        return _is_time_query_impl(lower)
 
     @staticmethod
     def _format_time_answer() -> str:
-        now_utc = datetime.now(timezone.utc)
-        now_local = datetime.now()
-        return (
-            f"Сейчас: {now_local.strftime('%Y-%m-%d %H:%M')} (локальное время сервера)\n"
-            f"UTC: {now_utc.strftime('%Y-%m-%d %H:%M')}\n"
-            f"День недели: {now_utc.strftime('%A')}"
-        )
+        return _format_time_answer_impl()
 
     def _quick_answer(self, text: str, lower: str) -> str:
         return _quick_answer_impl(self, text, lower)
@@ -1396,52 +1374,15 @@ class ConversationEngine:
 
     @staticmethod
     def _extract_target_title(text: str) -> str:
-        raw = str(text or "").strip()
-        # quoted title first
-        m = re.search(r"[\"“'«](.+?)[\"”'»]", raw)
-        if m:
-            return str(m.group(1) or "").strip()
-        # fallback after keyword
-        m2 = re.search(r"(?i)(?:заполни|редактируй|fill)\s+(.+)$", raw)
-        if m2:
-            v = str(m2.group(1) or "").strip()
-            # trim obvious tails
-            v = re.sub(r"(?i)\b(на английском|english|пожалуйста)\b.*$", "", v).strip(" .,:;")
-            return v
-        return ""
+        return _extract_target_title_impl(text)
 
     @staticmethod
     def _extract_platform_key(text: str) -> str:
-        s = str(text or "").lower()
-        mapping = (
-            ("amazon_kdp", ("amazon", "амазон", "kdp", "кдп")),
-            ("gumroad", ("gumroad", "гумроад", "гамроад")),
-            ("etsy", ("etsy", "етси", "этси")),
-            ("kofi", ("kofi", "ko-fi", "ko fi", "кофи", "ко-фи", "ко фи")),
-            ("printful", ("printful", "принтфул")),
-            ("twitter", ("twitter", "x.com", "икс", "твиттер")),
-            ("reddit", ("reddit", "реддит")),
-            ("pinterest", ("pinterest", "пинтерест")),
-            ("threads", ("threads", "тредс", "тхредс")),
-        )
-        for key, aliases in mapping:
-            if any(a in s for a in aliases):
-                return key
-        return ""
+        return _extract_platform_key_impl(text)
 
     @staticmethod
     def _looks_like_imperative_request(text: str) -> bool:
-        s = str(text or "").strip().lower()
-        if not s:
-            return False
-        if s.endswith("?"):
-            return False
-        verbs = (
-            "сделай", "создай", "запусти", "проверь", "найди", "заполни",
-            "опубликуй", "удали", "редактируй", "исправь", "почини",
-            "зайди", "зайти", "войди", "войти", "открой",
-        )
-        return any(v in s for v in verbs)
+        return _looks_like_imperative_request_impl(text)
 
     def _quick_status(self) -> str:
         return _quick_status_impl(self)
