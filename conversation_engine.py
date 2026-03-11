@@ -56,6 +56,13 @@ from modules.conversation_dialogue_lane import (
     handle_conversation as _handle_conversation_impl,
     handle_feedback as _handle_feedback_impl,
 )
+from modules.conversation_owner_profile_lane import (
+    extract_owner_name as _extract_owner_name_impl,
+    extract_owner_raw_text as _extract_owner_raw_text_impl,
+    is_probable_name_reply as _is_probable_name_reply_impl,
+    remember_owner_profile_fact as _remember_owner_profile_fact_impl,
+    resolve_owner_name as _resolve_owner_name_impl,
+)
 from modules.conversation_question_lane import handle_question as _handle_question_impl
 from modules.conversation_intake_lane import (
     bootstrap_owner_turn as _bootstrap_owner_turn_impl,
@@ -427,80 +434,21 @@ class ConversationEngine:
         return await _handle_question_impl(self, text)
 
     def _remember_owner_profile_fact(self, text: str) -> None:
-        """Best-effort extraction of stable owner profile facts from natural speech."""
-        source_text = self._extract_owner_raw_text(text)
-        owner_name = self._extract_owner_name(source_text)
-        if not owner_name and self._is_probable_name_reply(source_text):
-            owner_name = source_text.title()
-        if not owner_name:
-            return
-        try:
-            OwnerPreferenceModel().set_preference(
-                key="owner_name",
-                value={"name": owner_name},
-                source="owner",
-                confidence=1.0,
-                notes="extracted_from_chat",
-            )
-        except Exception:
-            pass
+        _remember_owner_profile_fact_impl(self, text)
 
     @staticmethod
     def _extract_owner_raw_text(text: str) -> str:
-        raw = str(text or "").strip()
-        if "[REPLY_CONTEXT]" not in raw:
-            return raw
-        m = re.search(r"owner_reply=(.*)", raw)
-        if m:
-            return str(m.group(1) or "").strip()
-        return raw
+        return _extract_owner_raw_text_impl(text)
 
     def _is_probable_name_reply(self, text: str) -> bool:
-        raw = str(text or "").strip()
-        if not re.fullmatch(r"[A-Za-zА-Яа-яЁё\\-]{2,40}", raw):
-            return False
-        if raw.lower() in {"да", "нет", "ок", "yes", "no", "approve", "reject"}:
-            return False
-        prompts = ("как тебя зовут", "как вас зовут", "твое имя", "твоё имя", "ваше имя", "your name")
-        for turn in reversed(self._context[-6:]):
-            if turn.role != "assistant":
-                continue
-            if self._has_keywords(self._normalize_for_nlu(turn.text), prompts, fuzzy=True):
-                return True
-        return False
+        return _is_probable_name_reply_impl(self, text)
 
     def _resolve_owner_name(self) -> str:
-        try:
-            pref = OwnerPreferenceModel().get_preference("owner_name")
-            if pref and isinstance(pref.get("value"), dict):
-                name = str(pref["value"].get("name", "")).strip()
-                if name:
-                    return name
-        except Exception:
-            pass
-        for turn in reversed(self._context):
-            if turn.role != "user":
-                continue
-            guessed = self._extract_owner_name(turn.text)
-            if guessed:
-                return guessed
-        return ""
+        return _resolve_owner_name_impl(self)
 
     @staticmethod
     def _extract_owner_name(text: str) -> str:
-        raw = ConversationEngine._extract_owner_raw_text(text)
-        if not raw:
-            return ""
-        patterns = [
-            r"\bменя\s+зовут\s+([A-Za-zА-Яа-яЁё\-]{2,40})",
-            r"\bmy\s+name\s+is\s+([A-Za-zА-Яа-яЁё\-]{2,40})",
-            r"\bi\s*am\s+([A-Za-zА-Яа-яЁё\-]{2,40})",
-        ]
-        for pat in patterns:
-            m = re.search(pat, raw, flags=re.IGNORECASE)
-            if m:
-                return m.group(1).strip().title()
-        return ""
+        return _extract_owner_name_impl(text)
 
     async def _quick_gumroad_analytics(self) -> str:
         if not self.agent_registry:
