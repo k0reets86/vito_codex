@@ -37,7 +37,6 @@ from modules.owner_task_state import OwnerTaskState
 from modules.autonomy_proposals import AutonomyProposalStore
 from modules.conversation_owner_lane import handle_owner_preroute
 from modules.status_snapshot import build_status_snapshot, render_status_snapshot
-from modules.telegram_command_compiler import compile_owner_message, parse_owner_message_structured
 from modules.conversation_deterministic_owner_lane import (
     deterministic_owner_route as _deterministic_owner_route_impl,
     format_deep_research_owner_report as _format_deep_research_owner_report_impl,
@@ -288,30 +287,6 @@ class ConversationEngine:
 
     async def _detect_intent_llm(self, text: str) -> Intent:
         return await _detect_intent_llm_impl(self, text)
-
-        if "?" in text:
-            return Intent.QUESTION
-        try:
-            active = self.owner_task_state.get_active() if self.owner_task_state else {}
-        except Exception:
-            active = {}
-        try:
-            parsed = await parse_owner_message_structured(text, active, self.llm_router)
-            if parsed:
-                detected = {
-                    "question": Intent.QUESTION,
-                    "goal_request": Intent.GOAL_REQUEST,
-                    "system_action": Intent.SYSTEM_ACTION,
-                    "feedback": Intent.FEEDBACK,
-                    "conversation": Intent.CONVERSATION,
-                }.get(str(parsed.get("intent") or "").strip().lower(), Intent.CONVERSATION)
-                if detected == Intent.GOAL_REQUEST and ("?" in text):
-                    return Intent.QUESTION
-                return detected
-        except Exception as e:
-            logger.debug(f"LLM intent detection failed: {e}", extra={"event": "intent_llm_error"})
-
-        return Intent.CONVERSATION
 
     async def _process_by_intent(self, intent: Intent, text: str) -> dict[str, Any]:
         return await _process_by_intent_impl(self, intent, text)
