@@ -2146,6 +2146,17 @@ class CommsAgent:
         s = str(text or "").strip().lower().replace("ё", "е")
         if not s:
             return False
+        short_all_patterns = {
+            "отмени все",
+            "отмена всего",
+            "сними все",
+            "убери все",
+            "очисти все",
+            "cancel all",
+            "stop all",
+        }
+        if s in short_all_patterns:
+            return True
         task_tokens = ("задач", "цели", "дела", "очеред")
         cancel_tokens = ("отмени", "отмена", "сними", "убери", "очисти", "stop all", "cancel all")
         all_tokens = ("все", "всё", "all")

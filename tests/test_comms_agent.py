@@ -840,6 +840,26 @@ async def test_owner_shortcut_cancel_all_tasks_cancels_immediately(comms, tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_owner_shortcut_cancel_all_short_form_cancels_immediately(comms, tmp_path):
+    owner_task_state = OwnerTaskState(path=tmp_path / "owner_task_state_cancel_short.json")
+    owner_task_state.set_active("старая задача", intent="goal_request")
+    comms.set_modules(owner_task_state=owner_task_state)
+    comms.send_message = AsyncMock()
+    comms._cancel_goal_queue = MagicMock(return_value=3)
+    comms._decision_loop = MagicMock()
+
+    handled = await comms._maybe_handle_owner_shortcuts("отмени все")
+
+    assert handled is True
+    comms._cancel_goal_queue.assert_called_once_with(reason="owner_text_cancel_all")
+    comms._decision_loop.stop.assert_called_once()
+    assert owner_task_state.get_active() is None
+    text = comms.send_message.await_args.kwargs.get("text") or comms.send_message.await_args.args[0]
+    assert "Все текущие задачи снял" in text
+    assert "3" in text
+
+
+@pytest.mark.asyncio
 async def test_owner_shortcut_pause_stops_work_immediately(comms):
     comms.send_message = AsyncMock()
     comms._cancel_goal_queue = MagicMock(return_value=2)
