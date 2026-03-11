@@ -112,6 +112,7 @@ from modules.conversation_context_memory_lane import (
     persist_turn as _persist_turn_impl,
     turn_from_entry as _turn_from_entry_impl,
 )
+from modules.conversation_guard_lane import guard_response as _guard_response_signal_impl
 from modules.conversation_quick_lane import (
     quick_agents as _quick_agents_impl,
     quick_answer as _quick_answer_impl,
@@ -379,26 +380,19 @@ class ConversationEngine:
         return await _handle_conversation_impl(self, text)
 
     def _guard_response(self, response: Optional[str]) -> Optional[str]:
-        """Prevent unverified completion claims in free-form responses."""
-        if not response:
-            return response
-        lower = response.lower()
-        risky_phrases = [
-            "готов и загружен", "готов и опубликован", "опубликован", "загружен",
-            "создан и загружен", "создан и опубликован", "я загрузил", "я опубликовал",
-            "already uploaded", "already published", "is live", "published on",
-        ]
-        if any(p in lower for p in risky_phrases):
-            try:
-                from modules.execution_facts import ExecutionFacts
-                facts = ExecutionFacts()
-                if not facts.recent_exists(
-                    actions=["publisher_agent:publish", "browser_agent:form_fill", "ecommerce_agent:listing_create", "platform:publish"],
-                    hours=24,
-                ):
-                    return "Это было предложение, а не факт выполнения. Если хочешь, запущу это сейчас."
-            except Exception:
+        signal = _guard_response_signal_impl(response)
+        if signal != "__verify_execution_facts__":
+            return signal
+        try:
+            from modules.execution_facts import ExecutionFacts
+            facts = ExecutionFacts()
+            if not facts.recent_exists(
+                actions=["publisher_agent:publish", "browser_agent:form_fill", "ecommerce_agent:listing_create", "platform:publish"],
+                hours=24,
+            ):
                 return "Это было предложение, а не факт выполнения. Если хочешь, запущу это сейчас."
+        except Exception:
+            return "Это было предложение, а не факт выполнения. Если хочешь, запущу это сейчас."
         return response
 
     # ── Исполнение действий ──
