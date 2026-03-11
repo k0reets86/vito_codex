@@ -52,6 +52,7 @@ from modules.conversation_action_lane import (
     handle_system_action as _handle_system_action_impl,
 )
 from modules.conversation_autonomy_action_lane import handle_autonomy_action as _handle_autonomy_action_impl
+from modules.conversation_question_lane import handle_question as _handle_question_impl
 from llm_router import LLMRouter, TaskType, MODEL_REGISTRY
 from modules.prompt_guard import wrap_untrusted_text
 
@@ -461,77 +462,7 @@ class ConversationEngine:
 
     async def _handle_question(self, text: str) -> dict[str, Any]:
         """Отвечает на вопрос с полным доступом к системе."""
-        lower = text.strip().lower()
-        normalized = self._normalize_for_nlu(text)
-        if self._has_keywords(normalized, ("как меня зовут", "мое имя", "моё имя", "забыл мое имя", "my name"), fuzzy=True):
-            owner_name = self._resolve_owner_name()
-            if owner_name:
-                return {
-                    "intent": Intent.QUESTION.value,
-                    "response": f"Тебя зовут {owner_name}.",
-                }
-            return {
-                "intent": Intent.QUESTION.value,
-                "response": "Пока не вижу в памяти твоего имени. Напиши: 'меня зовут ...', и я запомню.",
-            }
-        # Direct answer for "source of claim" questions to avoid hallucinations
-        if any(w in lower for w in ("откуда", "почему ты", "почему вы", "ты писал", "ты написал", "ты сказала", "ты говорил")):
-            return {
-                "intent": Intent.QUESTION.value,
-                "response": "У меня нет подтверждённых данных о публикации/создании. Это было ошибочное сообщение. Исправляю: без факта выполнения больше так не пишу.",
-            }
-        gumroad_kw = ("gumroad", "гумроад", "гамроад")
-        analytics_kw = ("стат", "statistics", "analytics", "продаж", "revenue", "выручк", "доход")
-        if self._has_keywords(normalized, gumroad_kw, fuzzy=True) and self._has_keywords(normalized, analytics_kw, fuzzy=True):
-            live = await self._quick_gumroad_analytics()
-            if live:
-                return {
-                    "intent": Intent.QUESTION.value,
-                    "response": live,
-                }
-        if self._is_time_query(lower):
-            return {
-                "intent": Intent.QUESTION.value,
-                "response": self._format_time_answer(),
-            }
-        quick = self._quick_answer(lower)
-        if quick:
-            return {
-                "intent": Intent.QUESTION.value,
-                "response": quick,
-            }
-
-        context_from_memory = self._build_operational_memory_context(text, include_errors=True)
-        try:
-            prefs = OwnerPreferenceModel().list_preferences(limit=5)
-            if prefs:
-                pref_lines = "\n".join(f"- {p.get('pref_key')}: {p.get('value')}" for p in prefs)
-                context_from_memory += f"\n\nПредпочтения владельца:\n{pref_lines}"
-        except Exception:
-            pass
-
-        system_context = self._format_system_context()
-        prompt = (
-            f"{VITO_PERSONALITY}\n\n"
-            f"=== ПОЛНОЕ СОСТОЯНИЕ СИСТЕМЫ ===\n{system_context}\n"
-            f"=== КОНЕЦ СОСТОЯНИЯ ===\n\n"
-            f"История разговора:\n{self._format_context()}\n\n"
-            f"{context_from_memory}\n\n"
-            f"Вопрос владельца: {wrap_untrusted_text(text)}\n\n"
-            f"ВАЖНО: отвечай с КОНКРЕТНЫМИ цифрами и данными из системы выше. "
-            f"Не говори что данных нет — они есть в состоянии системы."
-        )
-
-        response = await self.llm_router.call_llm(
-            task_type=TaskType.ROUTINE,
-            prompt=prompt,
-            estimated_tokens=800,
-        )
-
-        return {
-            "intent": Intent.QUESTION.value,
-            "response": self._guard_response(response) if response else "Не удалось получить ответ. Попробуй переформулировать.",
-        }
+        return await _handle_question_impl(self, text)
 
     def _remember_owner_profile_fact(self, text: str) -> None:
         """Best-effort extraction of stable owner profile facts from natural speech."""
