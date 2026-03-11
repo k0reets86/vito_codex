@@ -555,8 +555,16 @@ class DashboardServer:
                     return
                 if parsed.path == "/api/events":
                     try:
+                        events = []
+                        if parent.registry:
+                            try:
+                                events.extend(parent.registry.get_recent_agent_events(limit=50))
+                            except Exception:
+                                pass
                         from modules.data_lake import DataLake
-                        events = DataLake().recent_events(limit=50)
+                        events.extend(DataLake().recent_events(limit=50))
+                        events.sort(key=lambda row: str(row.get("ts") or row.get("created_at") or ""), reverse=True)
+                        events = events[:50]
                     except Exception:
                         events = []
                     self._json({"events": events})

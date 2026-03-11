@@ -43,8 +43,8 @@ class ModelProfiles:
                     (profile_name, default_model, enabled_models, disabled_models, notes)
                     VALUES
                     ('balanced', '', '', '', 'Default balanced profile'),
-                    ('economy', '', '', 'anthropic/claude-opus-4-1,openai/gpt-5', 'Cost-focused profile'),
-                    ('quality', '', 'anthropic/claude-opus-4-1,openai/gpt-5', '', 'High quality profile')
+                    ('economy', '', '', 'anthropic/claude-opus-4-1,openai/gpt-4o', 'Cost-focused profile'),
+                    ('quality', '', 'anthropic/claude-opus-4-1,openai/gpt-4o', '', 'High quality profile')
                     """
                 )
             conn.commit()

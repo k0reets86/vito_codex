@@ -198,7 +198,7 @@ class TestBrainstormRound:
         judge.llm_router._call_provider = AsyncMock(side_effect=Exception("network down"))
 
         text = await judge._brainstorm_round(
-            model_key="gpt-5",
+            model_key="gpt-4o-strategic",
             system_role="role",
             prompt="topic",
         )

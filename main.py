@@ -1570,9 +1570,22 @@ async def main() -> None:
 
     await vito.startup()
 
+    async def evolution_background_loop() -> None:
+        while True:
+            try:
+                evolver = getattr(vito, "_self_evolver_v2", None) or getattr(vito, "self_evolver_v2", None)
+                if evolver is not None:
+                    await evolver.execute_task("weekly_evolve_cycle", baseline_score=0.7)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Evolution background loop failed", extra={"event": "evolution_loop_failed"})
+            await asyncio.sleep(21600)
+
     tasks = [
         asyncio.create_task(vito.decision_loop.run(), name="decision_loop"),
         asyncio.create_task(vito.scheduler(), name="scheduler"),
+        asyncio.create_task(evolution_background_loop(), name="evolution"),
     ]
 
     def handle_signal(sig: int) -> None:

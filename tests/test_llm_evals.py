@@ -8,7 +8,7 @@ def test_llm_evals_compute_and_runs(tmp_path):
     try:
         conn.execute(
             "INSERT INTO spend_log (date, model, task_type, cost_usd) VALUES (date('now'), ?, ?, ?)",
-            ("gpt-5", "strategy", 2.5),
+            ("gpt-4o-strategic", "strategy", 2.5),
         )
         conn.execute(
             "INSERT INTO data_lake_events (agent, task_type, status) VALUES (?, ?, ?)",

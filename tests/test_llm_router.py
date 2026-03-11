@@ -38,7 +38,7 @@ def router(tmp_db, monkeypatch):
 
 
 def test_model_registry_has_all_models():
-    expected = {"claude-sonnet", "claude-opus", "claude-haiku", "gpt-o3", "gpt-5", "gpt-4o-mini", "perplexity", "gemini-flash"}
+    expected = {"claude-sonnet", "claude-opus", "claude-haiku", "gpt-o3", "gpt-4o-strategic", "gpt-4o-mini", "perplexity", "gemini-flash"}
     assert set(MODEL_REGISTRY.keys()) == expected
 
 
@@ -66,7 +66,7 @@ def test_select_model_content(router):
 
 def test_select_model_strategy(router):
     result = router.select_model(TaskType.STRATEGY)
-    assert result.model.model_id in ("gpt-5", "claude-opus", "claude-opus-4-6")
+    assert result.model.model_id in ("gpt-4o", "claude-opus", "claude-opus-4-6")
 
 
 def test_select_model_code(router):
@@ -95,7 +95,7 @@ def test_research_route_plan_battle_mode(router, monkeypatch):
     assert plan["mode"] == "battle"
     assert plan["raw_research"]["model_key"] == "perplexity"
     assert plan["synthesis"]["model_key"] == "claude-sonnet"
-    assert plan["judge"]["model_key"] == "gpt-5"
+    assert plan["judge"]["model_key"] == "gpt-4o-strategic"
 
 
 def test_select_model_routine(router):
@@ -161,7 +161,7 @@ def test_spend_persists_in_sqlite(router):
 
 def test_policy_report_contains_totals(router):
     router._record_spend("gemini-2.5-flash-lite", "routine", 100, 50, 0.0)
-    router._record_spend("gpt-5", "strategy", 300, 200, 0.2)
+    router._record_spend("gpt-4o-strategic", "strategy", 300, 200, 0.2)
     report = router.get_policy_report(days=1)
     assert "daily_spend_usd" in report
     assert "free_calls" in report

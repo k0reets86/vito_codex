@@ -53,6 +53,28 @@ class HumanBrowser:
             llm_navigation_allowed=bool(profile.get("llm_navigation_allowed", False)),
         )
 
+    @staticmethod
+    def resolve_browser_engine(preferred: str | None = None) -> tuple[str, Any]:
+        preferred_engine = str(preferred or getattr(settings, "BROWSER_AUTOMATION_ENGINE", "auto") or "auto").strip().lower()
+        preferred_engine = preferred_engine if preferred_engine in {"auto", "playwright", "patchright"} else "auto"
+        errors: list[str] = []
+        if preferred_engine in {"auto", "patchright"}:
+            try:
+                from patchright.async_api import async_playwright as async_patchright
+
+                return "patchright", async_patchright
+            except Exception as exc:
+                errors.append(f"patchright:{exc}")
+                if preferred_engine == "patchright":
+                    raise RuntimeError("patchright_unavailable")
+        try:
+            from playwright.async_api import async_playwright
+
+            return "playwright", async_playwright
+        except Exception as exc:
+            errors.append(f"playwright:{exc}")
+        raise RuntimeError("browser_engine_unavailable:" + " | ".join(errors))
+
     async def prepare_page(self, page, *, profile: dict[str, Any]) -> None:
         if bool(getattr(settings, "BROWSER_HUMANIZE_ENABLED", True)) and bool(profile.get("anti_bot_humanize", True)):
             await page.wait_for_timeout(_random_delay_ms(120, 420))

@@ -596,7 +596,7 @@ class CommsAgent:
                     "LLM_FORCE_GEMINI_FREE": "true",
                     "LLM_FORCE_GEMINI_MODEL": "gemini-2.5-flash",
                     "LLM_ENABLED_MODELS": "gemini-2.5-flash",
-                    "LLM_DISABLED_MODELS": "claude-haiku-4-5-20251001,gpt-4o-mini,claude-sonnet-4-6,o3,gpt-5,claude-opus-4-6,sonar-pro",
+                    "LLM_DISABLED_MODELS": "claude-haiku-4-5-20251001,gpt-4o-mini,claude-sonnet-4-6,o3,gpt-4o-strategic,claude-opus-4-6,sonar-pro",
                     "GEMINI_ENABLE_GROUNDING_SEARCH": "true",
                     "GEMINI_ENABLE_URL_CONTEXT": "true",
                     "GEMINI_EMBEDDINGS_ENABLED": "true",

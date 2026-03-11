@@ -104,10 +104,10 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         max_tokens=4096,
     ),
     # -- Strategy brainstorm --
-    "gpt-5": ModelConfig(
+    "gpt-4o-strategic": ModelConfig(
         provider="openai",
         model_id="gpt-4o",
-        display_name="GPT-4o Strategic Alias",
+        display_name="GPT-4o Strategic",
         cost_per_1k_input=0.0025,
         cost_per_1k_output=0.010,
         max_tokens=4096,
@@ -137,11 +137,13 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
 TASK_MODEL_MAP: dict[TaskType, list[str]] = {
     TaskType.ROUTINE: ["gemini-flash", "gpt-4o-mini", "claude-haiku"],
     TaskType.CONTENT: ["claude-sonnet", "claude-haiku", "gemini-flash"],
-    TaskType.CODE: ["gpt-o3", "claude-sonnet", "gpt-5", "gemini-flash"],
+    TaskType.CODE: ["gpt-o3", "claude-sonnet", "gpt-4o-strategic", "gemini-flash"],
     TaskType.RESEARCH: ["perplexity", "gemini-flash", "claude-sonnet"],
-    TaskType.STRATEGY: ["claude-opus", "gpt-5", "claude-sonnet", "gemini-flash"],
-    TaskType.SELF_HEAL: ["gpt-o3", "claude-sonnet", "gpt-5", "gemini-flash"],
+    TaskType.STRATEGY: ["claude-opus", "gpt-4o-strategic", "claude-sonnet", "gemini-flash"],
+    TaskType.SELF_HEAL: ["gpt-o3", "claude-sonnet", "gpt-4o-strategic", "gemini-flash"],
 }
+
+LEGACY_MODEL_ALIASES: dict[str, str] = {"gpt-5": "gpt-4o-strategic"}
 
 
 @dataclass
@@ -275,6 +277,7 @@ class LLMRouter:
 
     def _record_spend(self, model_name: str, task_type: str,
                       input_tokens: int, output_tokens: int, cost_usd: float) -> None:
+        model_name = LEGACY_MODEL_ALIASES.get(model_name, model_name)
         conn = self._get_sqlite()
         conn.execute(
             """INSERT INTO spend_log (date, model, task_type, input_tokens, output_tokens, cost_usd)
@@ -393,7 +396,7 @@ class LLMRouter:
         if bool(getattr(settings, "LLM_FORCE_GEMINI_FREE", False)):
             return ["gemini-flash"]
 
-        keys = list(TASK_MODEL_MAP[task_type])
+        keys = [LEGACY_MODEL_ALIASES.get(k, k) for k in list(TASK_MODEL_MAP[task_type])]
         allowed = [k for k in keys if self._model_allowed(MODEL_REGISTRY[k])]
         if allowed:
             return allowed
@@ -424,10 +427,10 @@ class LLMRouter:
             "active_for_single_call": "perplexity",
             "raw_research": {"model_key": "perplexity", "role": "web-grounded evidence collection"},
             "synthesis": {"model_key": "claude-sonnet", "role": "turn evidence into structured monetization report"},
-            "judge": {"model_key": "gpt-5", "role": "second-opinion quality/risk decision"},
+            "judge": {"model_key": "gpt-4o-strategic", "role": "second-opinion quality/risk decision"},
             "fallbacks": {
                 "raw_research": ["gemini-flash"],
-                "synthesis": ["gpt-5", "gemini-flash"],
+                "synthesis": ["gpt-4o-strategic", "gemini-flash"],
                 "judge": ["claude-opus", "gemini-flash"],
             },
         }

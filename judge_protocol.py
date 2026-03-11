@@ -164,7 +164,7 @@ class JudgeProtocol:
         )
 
         # Brainstorm: Opus + GPT-4o + Perplexity (мультиперспективный анализ)
-        models_to_query = ["claude-opus", "gpt-5", "perplexity"]
+        models_to_query = ["claude-opus", "gpt-4o-strategic", "perplexity"]
         tasks = [
             self._query_model(model_key, niche, context)
             for model_key in models_to_query
@@ -249,7 +249,7 @@ class JudgeProtocol:
 
         # Round 3a: Discussion — GPT-5 (критик + новые идеи)
         gpt_opinion = await self._brainstorm_round(
-            model_key="gpt-5",
+            model_key="gpt-4o-strategic",
             system_role=(
                 "Ты опытный бизнес-консультант. Критикуй, дополняй, предлагай альтернативы. "
                 "Не соглашайся просто так — спорь если видишь проблемы."
@@ -262,7 +262,7 @@ class JudgeProtocol:
                 f"что бы ты изменил. Предложи альтернативы если есть."
             ),
         )
-        rounds.append({"role": "critic", "model": "gpt-5", "content": gpt_opinion})
+        rounds.append({"role": "critic", "model": "gpt-4o-strategic", "content": gpt_opinion})
 
         # Round 3b: Discussion — Opus (стратегический взгляд)
         opus_opinion = await self._brainstorm_round(

@@ -122,3 +122,23 @@
 27. `platform_readiness goals as deterministic execution lane`
 - Статус: `done`
 - Аргумент: добавлен `modules/platform_readiness_actions.py`; `DecisionLoop` теперь строит для целей `source=platform_readiness` детерминированный plan-step `platform_readiness:<action>` и исполняет его без LLM через прямые ветки `reauth / run_probe / owner_grade_validate`, с тестами на remediation/probe/validation path. `reauth` больше не абстрактная рекомендация: для `etsy / printful / twitter` readiness теперь выдает конкретный `reauth_command` (`python3 scripts/browser_auth_capture.py <service>`) и точные пути `storage_state/profile_dir`.
+
+28. `requirements.txt reproducibility gap`
+- Статус: `done`
+- Аргумент: `requirements.txt` приведен в pinned/ordered состояние: добавлены отсутствовавшие `google-generativeai`, `psycopg2-binary`, `lxml`, `httpx`, `langchain-core`, расставлены upper bounds и нормализован reproducible dependency contract.
+
+29. `gpt-5 misleading alias`
+- Статус: `done`
+- Аргумент: стратегический ключ переименован в `gpt-4o-strategic`; legacy `gpt-5` оставлен только как backward-compatible alias map в `llm_router`, чтобы старые ссылки не ломались.
+
+30. `dashboard /api/events should expose AgentEventBus`
+- Статус: `done`
+- Аргумент: `/api/events` теперь отдает объединенный поток `AgentEventBus + DataLake`, а не только события lake.
+
+31. `evolution separate asyncio task`
+- Статус: `done`
+- Аргумент: в `main.py` добавлен независимый background task `evolution_background_loop()`, поэтому weekly evolve path больше не зависит только от maintenance тика `DecisionLoop`.
+
+32. `HumanBrowser direct engine resolution`
+- Статус: `done`
+- Аргумент: `modules/human_browser.py` теперь сам умеет `resolve_browser_engine()` с `patchright -> playwright` fallback, если его используют напрямую вне `browser_agent`.
