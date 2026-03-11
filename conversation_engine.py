@@ -74,6 +74,15 @@ from modules.conversation_parse_lane import (
     looks_like_imperative_request as _looks_like_imperative_request_impl,
 )
 from modules.conversation_question_lane import handle_question as _handle_question_impl
+from modules.conversation_autonomy_lane import (
+    allowed_actions as _allowed_actions_impl,
+    autonomous_execute as _autonomous_execute_impl,
+    get_available_actions as _get_available_actions_impl,
+    infer_capability as _infer_capability_impl,
+    maybe_quality_gate as _maybe_quality_gate_impl,
+    pick_capability_from_memory as _pick_capability_from_memory_impl,
+    record_autonomy_learning as _record_autonomy_learning_impl,
+)
 from modules.conversation_intake_lane import (
     bootstrap_owner_turn as _bootstrap_owner_turn_impl,
     maybe_handle_fast_url_route as _maybe_handle_fast_url_route_impl,
@@ -1017,290 +1026,32 @@ class ConversationEngine:
         return ""
 
     def _get_available_actions(self) -> str:
-        """Список доступных действий для LLM."""
-        actions = []
-        if self.agent_registry:
-            caps = set()
-            for a in self.agent_registry.get_all_statuses():
-                caps.update(a.get("capabilities", []))
-            actions.append(f'dispatch_agent(task_type) — запуск агента (доступные: {", ".join(sorted(caps)[:15])})')
-            actions.append("scan_trends() — сканировать тренды")
-            actions.append("scan_reddit() — сканировать Reddit")
-            actions.append("register_account(url, form, submit_selector, code_selector, ...) — регистрация с email-кодом")
-            actions.append("learn_service(service) — изучить платформу/сервис и собрать профиль")
-            actions.append("onboard_platform(platform_name) — провести онбординг платформы до регистрации в VITO")
-        if self.goal_engine:
-            actions.append("cancel_goal(goal_id) — отменить цель")
-            actions.append("change_priority(goal_id, priority) — сменить приоритет (CRITICAL/HIGH/MEDIUM/LOW)")
-        if self.decision_loop:
-            actions.append("stop_loop() — остановить Decision Loop")
-            actions.append("start_loop() — запустить Decision Loop")
-        if self.self_healer:
-            actions.append("check_errors() — проверить ошибки системы")
-        if self.judge_protocol:
-            actions.append("analyze_niche(topic, deep=false) — анализ ниши (1 модель, deep=true для 4 моделей)")
-        if self.knowledge_updater:
-            actions.append("update_knowledge() — обновить базу знаний и цены моделей")
-        if self.self_updater:
-            actions.append("create_backup() — создать бэкап кода")
-        if self.code_generator:
-            actions.append("apply_code_change(file, instruction) — изменить код файла через LLM (backup + test)")
-        if self.agent_registry:
-            actions.append("self_improve(request) — самонастройка: анализ → код → тесты")
-            actions.append("learn_service(service) — изучить сервис и добавить в базу знаний")
-            actions.append("run_deep_research(topic) — глубокое исследование с источниками")
-            actions.append("run_product_pipeline(topic, platforms, auto_publish=false) — сквозной pipeline товара")
-            actions.append("run_kdp_draft_maintenance(target_title, language) — заполнить метаданные KDP-драфта")
-            actions.append("run_platform_task(platform, request) — универсальный раннер платформенных задач")
-            actions.append("run_printful_etsy_sync(topic, auto_publish=true) — создать POD товар в Printful и проверить Etsy")
-            actions.append("run_improvement_cycle(request) — backup + HR + research + self-improve")
-            actions.append("autonomous_execute(request) — выполнить задачу или доучиться и выполнить")
-        return "\n".join(f"  - {a}" for a in actions) if actions else "(нет действий)"
+        return _get_available_actions_impl(self)
 
     def _allowed_actions(self) -> set[str]:
-        """Allowlist of actions based on connected modules."""
-        allowed: set[str] = set()
-        if self.agent_registry:
-            allowed.update({"dispatch_agent", "scan_trends", "scan_reddit"})
-        if self.goal_engine:
-            allowed.update({"cancel_goal", "change_priority"})
-        if self.decision_loop:
-            allowed.update({"stop_loop", "start_loop"})
-        if self.self_healer:
-            allowed.add("check_errors")
-        if self.judge_protocol:
-            allowed.add("analyze_niche")
-        if self.knowledge_updater:
-            allowed.add("update_knowledge")
-        if self.self_updater:
-            allowed.add("create_backup")
-        if self.code_generator:
-            allowed.add("apply_code_change")
-        if self.agent_registry:
-            allowed.add("self_improve")
-            allowed.add("learn_service")
-            allowed.add("onboard_platform")
-            allowed.add("register_account")
-            allowed.add("run_deep_research")
-            allowed.add("run_product_pipeline")
-            allowed.add("run_kdp_draft_maintenance")
-            allowed.add("run_platform_task")
-            allowed.add("run_printful_etsy_sync")
-            allowed.add("run_improvement_cycle")
-            allowed.add("autonomous_execute")
-            allowed.add("run_autonomy_proposal")
-        return allowed
+        return _allowed_actions_impl(self)
 
     async def _autonomous_execute(self, request: str) -> str:
-        """Owner request loop: execute with current skills, else learn and retry."""
-        if not self.agent_registry:
-            return "AgentRegistry недоступен."
-
-        capability = self._infer_capability(request)
-        attempts: list[str] = []
-        low_req = str(request or "").lower()
-        if any(k in low_req for k in ("amazon", "амазон", "kdp", "кдп")) and any(
-            k in low_req for k in ("удали", "удалить", "редакт", "заполни", "draft", "книг")
-        ):
-            return (
-                "По Amazon KDP сейчас доступны только: вход и проверка инвентаря. "
-                "Операции удаления/редактирования драфтов ещё не реализованы в безопасном автоконтуре."
-            )
-
-        async def _run_cap(cap: str) -> tuple[bool, str]:
-            if not cap:
-                return False, "capability_not_detected"
-            try:
-                res = await self.agent_registry.dispatch(cap, step=request, content=request, goal_title=request[:120])
-            except Exception as e:
-                return False, f"dispatch_exception:{e}"
-            if res and res.success:
-                out = getattr(res, "output", None)
-                txt = str(out)[:900] if out is not None else "completed"
-                return True, txt
-            return False, getattr(res, "error", "dispatch_failed") if res else "dispatch_none"
-
-        ok, detail = await _run_cap(capability)
-        attempts.append(f"run:{capability or 'unknown'}:{'ok' if ok else detail}")
-        if ok:
-            q_verdict = await self._maybe_quality_gate(capability, request, detail)
-            attempts.append(f"quality:{q_verdict}")
-            if q_verdict.startswith("rework"):
-                ok_re, detail_re = await _run_cap(capability)
-                attempts.append(f"rework:{capability or 'unknown'}:{'ok' if ok_re else detail_re}")
-                if ok_re:
-                    detail = detail_re
-                    q_verdict = await self._maybe_quality_gate(capability, request, detail_re)
-                    attempts.append(f"quality_after_rework:{q_verdict}")
-            self._record_autonomy_learning(
-                request=request,
-                capability=capability or "unknown",
-                success=not q_verdict.startswith("rework"),
-                attempts=attempts,
-                result_text=detail,
-            )
-            if q_verdict.startswith("rework"):
-                return (
-                    f"Задача выполнена технически ({capability}), но качество требует доработки.\n"
-                    f"Quality gate: {q_verdict}\n"
-                    f"Шаги: {' | '.join(attempts)}"
-                )
-            return f"Задача выполнена ({capability}).\nQuality gate: {q_verdict}\nРезультат: {detail}"
-
-        if bool(getattr(settings, "AUTONOMY_AUTO_LEARN_ON_FAILURE", True)):
-            # Learn via research agent and retry (cheap + robust).
-            try:
-                rr = await self.agent_registry.dispatch("research", step=request, topic=request, goal_title=f"Auto-learn: {request[:80]}")
-                attempts.append(f"learn:research:{'ok' if rr and rr.success else 'fail'}")
-            except Exception as e:
-                attempts.append(f"learn:research_exception:{e}")
-
-        if bool(getattr(settings, "AUTONOMY_AUTO_SELF_IMPROVE_ON_MISS", False)):
-            try:
-                si = await self.agent_registry.dispatch("self_improve", step=f"Improve capability for request: {request}")
-                attempts.append(f"learn:self_improve:{'ok' if si and si.success else 'fail'}")
-            except Exception as e:
-                attempts.append(f"learn:self_improve_exception:{e}")
-
-        # Retry with same capability or fallback orchestrate.
-        ok2, detail2 = await _run_cap(capability)
-        attempts.append(f"retry:{capability or 'unknown'}:{'ok' if ok2 else detail2}")
-        if ok2:
-            q2 = await self._maybe_quality_gate(capability, request, detail2)
-            attempts.append(f"quality:{q2}")
-            self._record_autonomy_learning(
-                request=request,
-                capability=capability or "unknown",
-                success=not q2.startswith("rework"),
-                attempts=attempts,
-                result_text=detail2,
-            )
-            return (
-                f"Задача выполнена после обучения ({capability}).\n"
-                f"Quality gate: {q2}\n"
-                f"Результат: {detail2}\n"
-                f"Шаги: {' | '.join(attempts)}"
-            )
-
-        # Last fallback: core orchestrator.
-        try:
-            core = self.agent_registry.get("vito_core") if hasattr(self.agent_registry, "get") else None
-            if core is not None:
-                res = await core.execute_task("orchestrate", step=request, goal_title=request[:120])
-                if res and res.success:
-                    q3 = await self._maybe_quality_gate("orchestrate", request, str(getattr(res, "output", "")))
-                    attempts.append(f"quality:{q3}")
-                    self._record_autonomy_learning(
-                        request=request,
-                        capability="orchestrate",
-                        success=not q3.startswith("rework"),
-                        attempts=attempts,
-                        result_text=str(getattr(res, "output", "")),
-                    )
-                    return (
-                        "Задача выполнена через оркестратор.\n"
-                        f"Quality gate: {q3}\n"
-                        f"Результат: {str(getattr(res, 'output', ''))[:900]}\n"
-                        f"Шаги: {' | '.join(attempts)}"
-                    )
-        except Exception as e:
-            attempts.append(f"fallback:orchestrate_exception:{e}")
-
-        self._record_autonomy_learning(
-            request=request,
-            capability=capability or "unknown",
-            success=False,
-            attempts=attempts,
-            result_text="",
-        )
-        return (
-            "Автономный контур не смог завершить задачу с текущими навыками.\n"
-            "Я сохранил попытки в память ошибок и продолжу дообучение по этой теме.\n"
-            f"Шаги: {' | '.join(attempts[:8])}"
-        )
+        return await _autonomous_execute_impl(self, request)
 
     def _infer_capability(self, request: str) -> str:
-        text = str(request or "").strip()
-        if not text:
-            return ""
-        skill_cap = self._pick_capability_from_memory(text)
-        if skill_cap:
-            return skill_cap
-        try:
-            core = self.agent_registry.get("vito_core") if hasattr(self.agent_registry, "get") else None
-            if core and hasattr(core, "classify_step"):
-                cap = core.classify_step(text)
-                if cap:
-                    return str(cap)
-        except Exception:
-            pass
-        # Heuristic fallback map.
-        s = self._normalize_for_nlu(text)
-        mapping = [
-            (("исслед", "research", "анализ", "deep"), "research"),
-            (("тренд", "niche", "ниш"), "trend_scan"),
-            (("seo", "ключев", "keyword", "мета"), "listing_seo_pack"),
-            (("пост", "tweet", "соц", "smm"), "social_media"),
-            (("товар", "листинг", "publish", "продукт"), "product_pipeline"),
-            (("перевод", "translate", "localize"), "translate"),
-            (("юрид", "tos", "gdpr", "copyright"), "legal"),
-            (("финанс", "юнит", "цена", "pricing"), "unit_economics"),
-            (("документ", "report", "отчет"), "documentation"),
-        ]
-        for keys, cap in mapping:
-            if any(k in s for k in keys):
-                return cap
-        return "orchestrate"
+        return _infer_capability_impl(self, request)
 
     def _pick_capability_from_memory(self, request: str) -> str:
-        mm = self.memory
-        if mm is None or not hasattr(mm, "search_skills"):
-            return ""
-        try:
-            rows = mm.search_skills(request, limit=5)
-        except Exception:
-            return ""
-        if not isinstance(rows, list):
-            return ""
-        best_cap = ""
-        best_score = -10**9
-        for r in rows:
-            if not isinstance(r, dict):
-                continue
-            cap = str(r.get("task_type") or "").strip()
-            if not cap:
-                continue
-            succ = int(r.get("success_count", 0) or 0)
-            fail = int(r.get("fail_count", 0) or 0)
-            score = (succ * 2) - fail
-            if score > best_score:
-                best_score = score
-                best_cap = cap
-        return best_cap
+        return _pick_capability_from_memory_impl(self, request)
 
     async def _maybe_quality_gate(self, capability: str, request: str, output_text: str) -> str:
-        if not self.agent_registry:
-            return "skipped(no_registry)"
-        cap = str(capability or "").strip().lower()
-        if cap not in {
-            "research", "content_creation", "product_pipeline", "social_media",
-            "listing_create", "publish", "documentation", "seo", "listing_seo_pack",
-        }:
-            return "skipped(not_required)"
-        try:
-            q = await self.agent_registry.dispatch(
-                "quality_review",
-                content=f"capability={cap}\nrequest={request[:400]}\noutput={str(output_text)[:5000]}",
-                content_type=f"autonomy_{cap}",
-            )
-            if q and q.success and isinstance(getattr(q, "output", None), dict):
-                qo = q.output
-                approved = bool(qo.get("approved", False))
-                score = int(qo.get("score", 0) or 0)
-                return ("ok" if approved else "rework") + f"(score={score})"
-            return "skipped(quality_unavailable)"
-        except Exception as e:
-            return f"skipped(quality_error:{e})"
+        return await _maybe_quality_gate_impl(self, capability, request, output_text)
+
+    def _record_autonomy_learning(
+        self,
+        request: str,
+        capability: str,
+        success: bool,
+        attempts: list[str],
+        result_text: str,
+    ) -> None:
+        return _record_autonomy_learning_impl(self, request, capability, success, attempts, result_text)
 
     def _record_autonomy_learning(
         self,
