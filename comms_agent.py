@@ -91,6 +91,17 @@ from modules.platform_target_registry import (
     save_working_platform_targets as _save_working_platform_targets,
 )
 from modules.comms_callback_lane import handle_callback as _handle_callback_lane_impl, safe_edit_callback_message as _safe_edit_callback_message_impl
+from modules.comms_bootstrap_lane import (
+    approval_channel as _approval_channel_bootstrap_impl,
+    append_telegram_trace as _append_telegram_trace_bootstrap_impl,
+    autonomy_max_enabled as _autonomy_max_enabled_bootstrap_impl,
+    init_runtime_state as _init_runtime_state_bootstrap_impl,
+    is_confirmed as _is_confirmed_bootstrap_impl,
+    is_no_token as _is_no_token_bootstrap_impl,
+    is_yes_token as _is_yes_token_bootstrap_impl,
+    parse_bool_env as _parse_bool_env_bootstrap_impl,
+    resolve_button_command as _resolve_button_command_bootstrap_impl,
+)
 from modules.comms_owner_lane import handle_owner_text as _handle_owner_text_impl
 from modules.comms_owner_control_lane import (
     cancel_all_owner_work as _cancel_all_owner_work_impl,
@@ -549,139 +560,38 @@ class CommsAgent:
     def __init__(self):
         self._bot: Optional[Bot] = None
         self._app: Optional[Application] = None
-        try:
-            self._owner_id = int(str(getattr(settings, "TELEGRAM_OWNER_CHAT_ID", "") or "0").strip())
-        except Exception:
-            self._owner_id = 0
-        self._notify_mode: str = getattr(settings, "NOTIFY_MODE", "minimal")
-
-        # Очередь запросов на одобрение: request_id → asyncio.Future
-        self._pending_approvals: dict[str, asyncio.Future] = {}
-        # Anti-spam: remember last approval prompt per channel (e.g. publish_twitter)
-        self._approval_last_sent_at: dict[str, str] = {}
-        # Ожидаем уточнение по расписанию
-        self._pending_schedule_update: dict | None = None
-        # Ожидаем подтверждение системного действия (из свободного текста)
-        self._pending_system_action: dict | None = None
-        # Локальное подтверждение владельца для конкретного действия (приоритетнее общей очереди)
-        self._pending_owner_confirmation: dict | None = None
-        # Контекст выбора вариантов (когда бот прислал список "1., 2., 3.")
-        self._pending_choice_context: dict | None = None
-        # Ожидаем OTP-код для KDP auto-login
-        self._pending_kdp_otp: dict | None = None
-        # Serialize KDP browser-auth subprocesses to avoid Chromium resource races.
-        self._kdp_auth_lock = asyncio.Lock()
-        # Pending browser auth confirmations by service key (e.g. amazon_kdp, etsy).
-        self._pending_service_auth: dict[str, dict] = {}
-        # Last confirmed auth timestamps (runtime-memory).
-        self._service_auth_confirmed: dict[str, str] = {}
-        # Last discussed external service for contextual follow-ups.
-        self._last_service_context: str = ""
-        self._last_service_context_at: str = ""
-        # Persistent auth/context state across restarts.
-        self._auth_state_path = Path(
-            str(getattr(settings, "TELEGRAM_AUTH_STATE_FILE", "runtime/service_auth_state.json") or "runtime/service_auth_state.json")
-        )
-        self._auth_broker = AuthBroker(state_path=str(getattr(settings, "AUTH_BROKER_STATE_FILE", "runtime/auth_broker_state.json")))
-        self._load_auth_state()
-        self._telegram_conflict_mode: bool = False
-        self._telegram_trace_path = Path(
-            str(
-                getattr(
-                    settings,
-                    "TELEGRAM_TRACE_FILE",
-                    "runtime/telegram_trace.jsonl",
-                )
-                or "runtime/telegram_trace.jsonl"
-            )
-        )
-        _install_reply_text_trace_patch(self._telegram_trace_path)
-        self._logger = logger
-        self._broadcast_queue = BroadcastQueue()
-        self._notification_router = NotificationRouter(self, self._broadcast_queue)
-
-        # Обратные ссылки на модули — устанавливаются через set_modules()
-        self._goal_engine = None
-        self._llm_router = None
-        self._decision_loop = None
-        self._agent_registry = None
-        self._self_healer = None
-        self._self_updater = None
-        self._conversation_engine = None
-        self._judge_protocol = None
-        self._finance = None
-        self._skill_registry = None
-        self._weekly_planner = None
-        self._schedule_manager = None
-        self._publisher_queue = None
-        self._cancel_state = None
-        self._owner_task_state = None
-
-        # Маппинг текста кнопок → имена команд
-        self._button_map: dict[str, str] = {
-            "Главная": "start",
-            "Статус": "status",
-            "Задачи": "tasks",
-            "В работе": "tasks",
-            "Исследовать": "research_hub",
-            "Создать": "create_hub",
-            "Платформы": "platforms_hub",
-            "Входы": "auth_hub",
-            "Сводка": "report",
-            "Отчёт": "report",
-            "Еще": "more",
-            "Ещё": "more",
-            "Цели": "goals",
-            "Расходы": "spend",
-            "Одобрить": "approve",
-            "Отклонить": "reject",
-            "Новая цель": "goal",
-            "Помощь": "help",
-            "Ежедневные": "help_daily",
-            "Редкие": "help_rare",
-            "Системные": "help_system",
-        }
-
-        logger.info("CommsAgent инициализирован", extra={"event": "init"})
+        _init_runtime_state_bootstrap_impl(self, _install_reply_text_trace_patch, self._load_auth_state)
 
     @staticmethod
     def _approval_channel(request_id: str) -> str:
-        rid = str(request_id or "").strip().lower()
-        if rid.startswith("publish_"):
-            parts = rid.split("_")
-            if len(parts) >= 2:
-                return f"publish_{parts[1]}"
-        return ""
+        return _approval_channel_bootstrap_impl(request_id)
 
     def _append_telegram_trace(self, direction: str, text: str, meta: dict[str, Any] | None = None) -> None:
         """Best-effort trace for Telegram E2E verification without extra pollers."""
-        _append_telegram_trace_file(self._telegram_trace_path, direction, text, meta)
+        _append_telegram_trace_bootstrap_impl(self, _append_telegram_trace_file, direction, text, meta)
 
     def _resolve_button_command(self, text: str) -> str | None:
-        return _resolve_button_command_impl(self._button_map, text)
+        return _resolve_button_command_bootstrap_impl(self._button_map, text)
 
     @staticmethod
     def _is_confirmed(args: list[str] | None) -> bool:
-        if not args:
-            return False
-        token = str(args[0] or "").strip().lower()
-        return token in {"yes", "y", "да", "confirm", "ok"}
+        return _is_confirmed_bootstrap_impl(args)
 
     @staticmethod
     def _autonomy_max_enabled() -> bool:
-        return bool(getattr(settings, "AUTONOMY_MAX_MODE", False))
+        return _autonomy_max_enabled_bootstrap_impl()
 
     @staticmethod
     def _parse_bool_env(value: str) -> bool:
-        return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+        return _parse_bool_env_bootstrap_impl(value)
 
     @staticmethod
     def _is_yes_token(text: str) -> bool:
-        return str(text or "").strip().lower() in {"да", "yes", "ок", "ok", "approve", "✅", "👍"}
+        return _is_yes_token_bootstrap_impl(text)
 
     @staticmethod
     def _is_no_token(text: str) -> bool:
-        return str(text or "").strip().lower() in {"нет", "no", "reject", "отмена", "❌", "👎"}
+        return _is_no_token_bootstrap_impl(text)
 
     def _set_env_values(self, updates: dict[str, str]) -> bool:
         return _set_env_values_impl(self, updates)

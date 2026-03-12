@@ -24,10 +24,11 @@ async def handle_deterministic_message_routes(agent, update: Update, context: Co
         await agent._cmd_balances(update, context)
         return True
 
+    cmd = agent._resolve_button_command(text)
+
     for candidate in (
         agent._maybe_handle_owner_shortcuts,
         agent._maybe_handle_owner_service_commands,
-        agent._maybe_handle_owner_menu_commands,
         agent._maybe_handle_owner_task_commands,
         agent._maybe_handle_owner_publish_commands,
         agent._maybe_handle_owner_webop_commands,
@@ -65,7 +66,6 @@ async def handle_deterministic_message_routes(agent, update: Update, context: Co
             )
             return True
 
-    cmd = agent._resolve_button_command(text)
     if cmd:
         if cmd == "help":
             await update.message.reply_text(agent._render_help(), reply_markup=agent._main_keyboard())
@@ -111,6 +111,9 @@ async def handle_deterministic_message_routes(agent, update: Update, context: Co
             "Отправь текст цели, и я создам её.",
             reply_markup=agent._main_keyboard(),
         )
+        return True
+
+    if await agent._maybe_handle_owner_menu_commands(text):
         return True
 
     return False
