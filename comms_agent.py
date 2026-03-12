@@ -202,6 +202,13 @@ from modules.comms_admin_lane import (
     send_prefs_metrics as _send_prefs_metrics_impl,
 )
 from modules.comms_admin_command_lane import cmd_rollback as _cmd_rollback_lane_impl
+from modules.comms_ui_command_lane import (
+    cmd_llm_mode as _cmd_llm_mode_lane_impl,
+    cmd_packs as _cmd_packs_lane_impl,
+    cmd_prefs as _cmd_prefs_lane_impl,
+    cmd_prefs_metrics as _cmd_prefs_metrics_lane_impl,
+    cmd_status as _cmd_status_lane_impl,
+)
 from modules.comms_approval_lane import (
     pending_approvals_count as _pending_approvals_count_impl,
     pending_approvals_list as _pending_approvals_list_impl,
@@ -1150,10 +1157,7 @@ class CommsAgent:
         )
 
     async def _cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if await self._reject_stranger(update):
-            return
-        await update.message.reply_text(self._render_unified_status(), reply_markup=self._main_keyboard())
-        logger.info("Команда /status выполнена", extra={"event": "cmd_status"})
+        await _cmd_status_lane_impl(self, update, context)
 
     async def _cmd_goals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await _cmd_goals_impl(self, update, context)
@@ -1219,16 +1223,10 @@ class CommsAgent:
         await _cmd_handoffs_impl(self, update, context)
 
     async def _cmd_prefs(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Показать предпочтения владельца."""
-        if await self._reject_stranger(update):
-            return
-        await self._send_prefs(reply_to=update)
+        await _cmd_prefs_lane_impl(self, update, context)
 
     async def _cmd_prefs_metrics(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Показать метрики предпочтений владельца."""
-        if await self._reject_stranger(update):
-            return
-        await self._send_prefs_metrics(reply_to=update)
+        await _cmd_prefs_metrics_lane_impl(self, update, context)
 
     async def _send_prefs(self, reply_to: Update | None = None) -> None:
         await _send_prefs_impl(self, reply_to=reply_to)
@@ -1237,10 +1235,7 @@ class CommsAgent:
         await _send_prefs_metrics_impl(self, reply_to=reply_to)
 
     async def _cmd_packs(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Показать список capability packs."""
-        if await self._reject_stranger(update):
-            return
-        await self._send_packs(reply_to=update)
+        await _cmd_packs_lane_impl(self, update, context)
 
     async def _send_packs(self, reply_to: Update | None = None) -> None:
         await _send_packs_impl(self, reply_to=reply_to)
@@ -1264,17 +1259,7 @@ class CommsAgent:
         await _cmd_smoke_impl(self, update, context)
 
     async def _cmd_llm_mode(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Switch LLM routing mode quickly: free/prod/status."""
-        if await self._reject_stranger(update):
-            return
-        args = list(getattr(context, "args", None) or [])
-        mode = (args[0] if args else "status").strip().lower()
-        ok, msg = self._apply_llm_mode(mode)
-        if not ok:
-            await update.message.reply_text(msg, reply_markup=self._main_keyboard())
-            return
-        await update.message.reply_text(msg, reply_markup=self._main_keyboard())
-        logger.info("LLM mode switched", extra={"event": "llm_mode_set", "context": {"mode": mode}})
+        await _cmd_llm_mode_lane_impl(self, update, context)
 
     async def _on_attachment(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await _on_attachment_impl(self, update, context)
