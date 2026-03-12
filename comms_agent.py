@@ -337,7 +337,80 @@ _TELEGRAM_TRACE_DEFAULT = root_path("runtime/telegram_trace.jsonl")
 
 def _remember_platform_working_target(platform: str, result: dict[str, Any]) -> None:
     """Compatibility wrapper around platform target persistence for tests and legacy hooks."""
-    return _remember_platform_working_target_impl(platform, result)
+    p = str(platform or "").strip().lower()
+    if not p or not isinstance(result, dict):
+        return
+    targets = _load_working_platform_targets()
+    current = dict(targets.get(p) or {})
+    rid = str(
+        result.get("listing_id")
+        or result.get("product_id")
+        or result.get("target_product_id")
+        or result.get("post_id")
+        or result.get("document_id")
+        or result.get("target_document_id")
+        or result.get("book_id")
+        or result.get("id")
+        or ""
+    ).strip()
+    url = str(result.get("url") or "").strip()
+    if p == "gumroad":
+        slug = str(result.get("slug") or "").strip()
+        if slug:
+            current["target_slug"] = slug
+    elif p == "etsy" and rid:
+        current["target_listing_id"] = rid
+    elif p == "amazon_kdp" and rid:
+        current["target_document_id"] = rid
+    elif p in {"kofi", "printful"} and rid:
+        current["target_product_id"] = rid
+    if _is_target_protected(p, current):
+        current_id = str(
+            current.get("id")
+            or current.get("target_slug")
+            or current.get("target_listing_id")
+            or current.get("target_document_id")
+            or current.get("target_product_id")
+            or current.get("url")
+            or ""
+        ).strip()
+        incoming_id = str(
+            rid
+            or current.get("target_slug")
+            or current.get("target_listing_id")
+            or current.get("target_document_id")
+            or current.get("target_product_id")
+            or url
+            or ""
+        ).strip()
+        if current_id and incoming_id and current_id != incoming_id:
+            return
+    if rid:
+        current["id"] = rid
+    if url:
+        current["url"] = url
+    current["platform"] = p
+    task_root_id = str(
+        result.get("task_root_id")
+        or result.get("project_id")
+        or result.get("listing_work_id")
+        or result.get("publish_work_id")
+        or ""
+    ).strip()
+    if task_root_id:
+        current["task_root_id"] = task_root_id
+    status = str(result.get("status") or "").strip().lower()
+    is_published = bool(result.get("is_published")) or status == "published"
+    if "draft_confirmed" in result:
+        current["draft_confirmed"] = bool(result.get("draft_confirmed"))
+    current["mutable"] = not is_published
+    current["locked"] = bool(is_published)
+    if is_published:
+        current["locked_reason"] = "published_requires_explicit_target"
+    current["status"] = status or current.get("status", "")
+    current["updated_at"] = datetime.now(timezone.utc).isoformat()
+    targets[p] = current
+    _save_working_platform_targets(targets)
 def _append_telegram_trace_file(path: Path, direction: str, text: str, meta: dict[str, Any] | None = None) -> None:
     """Write one Telegram trace line (best-effort, no exceptions)."""
     try:
