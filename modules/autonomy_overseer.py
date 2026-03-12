@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
+import json
+
+from llm_router import TaskType
 
 
 class AutonomyOverseer:
-    def __init__(self, *, stuck_tick_threshold: int = 288):
-        self.stuck_tick_threshold = max(12, int(stuck_tick_threshold or 288))
+    def __init__(self, *, stuck_tick_threshold: int = 288, llm_router: Any | None = None):
+        self.stuck_tick_threshold = max(1, int(stuck_tick_threshold or 288))
+        self.llm_router = llm_router
 
     def inspect(
         self,
@@ -46,7 +50,28 @@ class AutonomyOverseer:
             'ok': not findings,
             'finding_count': len(findings),
             'findings': findings,
+            'diagnostics': self._heuristic_diagnostics(findings),
         }
+
+    async def inspect_async(
+        self,
+        *,
+        tick_count: int,
+        proposal_store,
+        workflow_sessions: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        report = self.inspect(
+            tick_count=tick_count,
+            proposal_store=proposal_store,
+            workflow_sessions=workflow_sessions,
+        )
+        if not self.llm_router or report.get("ok"):
+            return report
+        diagnostics = await self._llm_diagnostics(report.get("findings") or [])
+        if diagnostics:
+            report = dict(report)
+            report["diagnostics"] = diagnostics
+        return report
 
     async def execute_actions(self, findings, goal_engine, comms, proposal_store=None) -> dict[str, Any]:
         actions: list[dict[str, Any]] = []
@@ -77,3 +102,47 @@ class AutonomyOverseer:
                 except Exception:
                     continue
         return {"actions_taken": actions, "count": len(actions)}
+
+    def _heuristic_diagnostics(self, findings: list[dict[str, Any]]) -> dict[str, Any]:
+        if not findings:
+            return {"summary": "no_findings", "recommended_actions": [], "risk_level": "low"}
+        types = [str(f.get("type") or "issue") for f in findings]
+        risk_level = "medium" if len(types) < 3 else "high"
+        return {
+            "summary": ", ".join(types[:4]),
+            "recommended_actions": [self._action_hint(t) for t in types[:3]],
+            "risk_level": risk_level,
+        }
+
+    async def _llm_diagnostics(self, findings: list[dict[str, Any]]) -> dict[str, Any] | None:
+        prompt = (
+            "Проанализируй stuck-cases автономного контура и верни JSON: "
+            '{"summary": "...", "recommended_actions": ["..."], "risk_level": "low|medium|high"}.\n'
+            f"Findings: {json.dumps(findings, ensure_ascii=False)}"
+        )
+        try:
+            raw = await self.llm_router.call_llm(task_type=TaskType.STRATEGY, prompt=prompt, estimated_tokens=700)
+        except Exception:
+            return None
+        try:
+            cleaned = str(raw or "").strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+            data = json.loads(cleaned.strip())
+            if isinstance(data, dict):
+                data.setdefault("recommended_actions", [])
+                data.setdefault("summary", "diagnostics_unavailable")
+                data.setdefault("risk_level", "medium")
+                return data
+        except Exception:
+            return None
+        return None
+
+    def _action_hint(self, finding_type: str) -> str:
+        if finding_type == "workflow_stuck":
+            return "reset_or_fail_stuck_goal"
+        if finding_type == "stale_proposal":
+            return "archive_or_reprioritize_stale_proposal"
+        return "manual_review"

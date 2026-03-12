@@ -107,9 +107,83 @@ Thumbnail:
 □ rating display — enabled (for Discover visibility)
 """
 
+ETSY_SPEC = """
+=== ETSY DIGITAL LISTING SPECIFICATION ===
+
+REQUIRED
+- title: max 140 chars
+- description: required
+- tags: max 13
+- price: required
+- taxonomy_id: required
+- who_made: required
+- when_made: required
+- is_supply: false for standard digital goods
+- primary_image: required
+- digital_file: required for instant-download listings
+
+RECOMMENDED
+- materials
+- preview images
+- clear SEO-first phrasing in title and tags
+
+OWNER-GRADE DONE CHECK
+□ file attached and visible after reload
+□ image_count >= 1 after reload
+□ title / description / tags / category / price confirmed
+□ listing state verified as draft or published
+"""
+
+KDP_SPEC = """
+=== AMAZON KDP SPECIFICATION ===
+
+DETAILS
+- title: required
+- subtitle: optional
+- author: required
+- description: required
+- keywords: max 7
+- categories: max 2
+
+CONTENT
+- manuscript: required
+- cover_image: required
+
+PRICING
+- list_price_usd: required
+- rights / territories: required
+
+OWNER-GRADE DONE CHECK
+□ details saved and reload-confirmed
+□ manuscript uploaded and confirmed
+□ cover uploaded and confirmed
+□ pricing saved and reload-confirmed
+□ bookshelf object visible
+"""
+
+PRINTFUL_SPEC = """
+=== PRINTFUL TEMPLATE / SYNC SPECIFICATION ===
+
+REQUIRED
+- product selected
+- design uploaded
+- design applied to print area
+- template saved
+- sync destination confirmed
+
+OWNER-GRADE DONE CHECK
+□ template exists
+□ placement applied
+□ destination object URL captured
+"""
+
 # Platform specs dict — agents can look up specs by platform name
 PLATFORM_SPECS = {
     "gumroad": GUMROAD_SPEC,
+    "etsy": ETSY_SPEC,
+    "amazon_kdp": KDP_SPEC,
+    "kdp": KDP_SPEC,
+    "printful": PRINTFUL_SPEC,
 }
 
 

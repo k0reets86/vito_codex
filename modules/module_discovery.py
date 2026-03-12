@@ -6,6 +6,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, asdict
 from typing import Any
+import re
 
 
 @dataclass
@@ -25,16 +26,17 @@ class ModuleDiscovery:
         self.user_agent = user_agent
 
     def discover_pypi(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
-        q = urllib.parse.quote_plus(query.strip())
-        url = f'https://pypi.org/search/?q={q}'
-        req = urllib.request.Request(url, headers={'User-Agent': self.user_agent})
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            html = resp.read().decode(errors='replace')
         items: list[dict[str, Any]] = []
-        import re
-        pattern = re.compile(r'<a class="package-snippet" href="([^"]+)">.*?<span class="package-snippet__name">([^<]+)</span>.*?<p class="package-snippet__description">([^<]*)</p>', re.S)
-        for href, name, summary in pattern.findall(html)[:max(1, int(limit or 5))]:
-            items.append(asdict(ModuleCandidate('pypi', name.strip(), summary.strip(), f'https://pypi.org{href}', self._score(name, summary, query), self._tags(name, summary))))
+        seen: set[str] = set()
+        for candidate in self._candidate_package_names(query)[: max(1, int(limit or 5)) * 4]:
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            row = self._fetch_pypi_package(candidate, query)
+            if row:
+                items.append(row)
+            if len(items) >= max(1, int(limit or 5)):
+                break
         return items
 
     def discover_github(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
@@ -69,3 +71,48 @@ class ModuleDiscovery:
             if token in hay:
                 tags.append(token)
         return tags
+
+    def _candidate_package_names(self, query: str) -> list[str]:
+        tokens = [t for t in re.split(r"[^a-z0-9]+", query.lower()) if t]
+        candidates: list[str] = []
+        if tokens:
+            candidates.extend([
+                "-".join(tokens),
+                "_".join(tokens),
+                "".join(tokens),
+            ])
+        for token in tokens:
+            candidates.append(token)
+        for a, b in zip(tokens, tokens[1:]):
+            candidates.extend([f"{a}-{b}", f"{a}_{b}", f"{a}{b}"])
+        # Preserve order while deduplicating
+        out: list[str] = []
+        seen: set[str] = set()
+        for item in candidates:
+            if item and item not in seen:
+                seen.add(item)
+                out.append(item)
+        return out
+
+    def _fetch_pypi_package(self, name: str, query: str) -> dict[str, Any] | None:
+        url = f'https://pypi.org/pypi/{urllib.parse.quote(name)}/json'
+        req = urllib.request.Request(url, headers={'User-Agent': self.user_agent, 'Accept': 'application/json'})
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode(errors='replace'))
+        except Exception:
+            return None
+        info = dict(data.get("info") or {})
+        pkg_name = str(info.get("name") or name).strip()
+        summary = str(info.get("summary") or "").strip()
+        package_url = str(info.get("package_url") or f"https://pypi.org/project/{pkg_name}/")
+        return asdict(
+            ModuleCandidate(
+                'pypi',
+                pkg_name,
+                summary,
+                package_url,
+                self._score(pkg_name, summary, query),
+                self._tags(pkg_name, summary),
+            )
+        )

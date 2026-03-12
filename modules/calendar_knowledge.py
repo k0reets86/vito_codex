@@ -82,9 +82,9 @@ def _parse_date_from_text(text: str) -> Optional[str]:
         d = int(m.group(1))
         mo = int(m.group(2))
         y = int(m.group(3))
-        return f\"{y:04d}-{mo:02d}-{d:02d}\"
+        return f"{y:04d}-{mo:02d}-{d:02d}"
     # "14 февраля" / "14 february"
-    m = re.search(r\"(\\d{1,2})\\s+([a-zа-я]+)\", text)
+    m = re.search(r"(\d{1,2})\s+([a-zа-я]+)", text)
     if m:
         d = int(m.group(1))
         mon_raw = m.group(2)
@@ -99,7 +99,7 @@ def _parse_date_from_text(text: str) -> Optional[str]:
                     month = v
                     break
         if month:
-            return f\"{month:02d}-{d:02d}\"
+            return f"{month:02d}-{d:02d}"
     return None
 
 
@@ -118,7 +118,7 @@ def search_calendar(query: str, limit: int = 8) -> list[CalendarEntry]:
             if e.date == date:
                 results.append(e)
         # Also match MM-DD if date is full
-        if re.match(r\"^\\d{4}-\\d{2}-\\d{2}$\", date):
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", date):
             mmdd = date[5:]
             for e in entries:
                 if e.date == mmdd:
@@ -133,7 +133,7 @@ def search_calendar(query: str, limit: int = 8) -> list[CalendarEntry]:
             results.append(e)
         else:
             # fallback token overlap
-            for token in re.split(r\"\\W+\", q):
+            for token in re.split(r"\W+", q):
                 if token and token in e.name.lower():
                     results.append(e)
                     break
@@ -143,9 +143,9 @@ def search_calendar(query: str, limit: int = 8) -> list[CalendarEntry]:
 
 def format_calendar_results(results: list[CalendarEntry]) -> str:
     if not results:
-        return \"В календаре не нашёл совпадений. Уточни дату или название праздника.\"
-    lines = [\"Календарь: найденные даты\"]
+        return "В календаре не нашёл совпадений. Уточни дату или название праздника."
+    lines = ["Календарь: найденные даты"]
     for e in results:
-        note = f\" — {e.notes}\" if e.notes else \"\"
-        lines.append(f\"  {e.date} | {e.region} | {e.name}{note}\")
-    return \"\\n\".join(lines)
+        note = f" — {e.notes}" if e.notes else ""
+        lines.append(f"  {e.date} | {e.region} | {e.name}{note}")
+    return "\n".join(lines)

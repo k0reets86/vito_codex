@@ -32,11 +32,12 @@ from modules.evolution_events import EvolutionEventStore
 
 
 class DashboardServer:
-    def __init__(self, goal_engine=None, decision_loop=None, finance=None, registry=None, schedule_manager=None, platform_registry=None, llm_router=None, publisher_queue=None, comms=None):
+    def __init__(self, goal_engine=None, decision_loop=None, finance=None, registry=None, event_bus=None, schedule_manager=None, platform_registry=None, llm_router=None, publisher_queue=None, comms=None):
         self.goal_engine = goal_engine
         self.decision_loop = decision_loop
         self.finance = finance
         self.registry = registry
+        self.event_bus = event_bus
         self.schedule_manager = schedule_manager
         self.platform_registry = platform_registry
         self.llm_router = llm_router
@@ -556,6 +557,11 @@ class DashboardServer:
                 if parsed.path == "/api/events":
                     try:
                         events = []
+                        if parent.event_bus:
+                            try:
+                                events.extend(parent.event_bus.recent(limit=50))
+                            except Exception:
+                                pass
                         if parent.registry:
                             try:
                                 events.extend(parent.registry.get_recent_agent_events(limit=50))

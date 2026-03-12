@@ -3146,11 +3146,18 @@ class DecisionLoop:
                 sessions = self.orchestrator.list_sessions(limit=200)
             except Exception:
                 sessions = []
-            report = overseer.inspect(
-                tick_count=self._tick_count,
-                proposal_store=self.autonomy_proposals,
-                workflow_sessions=sessions,
-            )
+            if hasattr(overseer, "inspect_async"):
+                report = await overseer.inspect_async(
+                    tick_count=self._tick_count,
+                    proposal_store=self.autonomy_proposals,
+                    workflow_sessions=sessions,
+                )
+            else:
+                report = overseer.inspect(
+                    tick_count=self._tick_count,
+                    proposal_store=self.autonomy_proposals,
+                    workflow_sessions=sessions,
+                )
             if events is not None:
                 events.record_event(
                     event_type="autonomy_overseer",

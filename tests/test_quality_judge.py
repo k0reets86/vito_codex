@@ -70,3 +70,15 @@ class TestQualityJudge:
         assert result.output["domain_scorecard"]["completeness"] == 8
         assert "quality_runtime_profile" in result.metadata
         assert "handoff_plan" in result.output
+
+    @pytest.mark.asyncio
+    async def test_review_blocks_low_domain_dimension(self, agent, monkeypatch):
+        monkeypatch.setattr(settings, "QUALITY_JUDGE_APPROVAL_THRESHOLD", 7, raising=False)
+        monkeypatch.setattr(settings, "QUALITY_JUDGE_MIN_DOMAIN_THRESHOLD", 7, raising=False)
+        agent.llm_router.call_llm = AsyncMock(
+            return_value='{"score": 9, "feedback": "Looks good", "issues": [], "domain_scorecard": {"completeness": 9, "evidence": 6, "compliance": 9, "readiness": 9}}'
+        )
+        result = await agent.review("Detailed content with proof", "article")
+        assert result.success is True
+        assert result.output["approved"] is False
+        assert "evidence" in result.output["blocked_dimensions"]

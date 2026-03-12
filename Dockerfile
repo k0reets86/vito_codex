@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt /app/requirements.txt
 RUN pip install -r /app/requirements.txt
-RUN python -m playwright install --with-deps chromium
+RUN python -m patchright install chromium || python -m playwright install --with-deps chromium
 
 COPY . /app
 

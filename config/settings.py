@@ -278,6 +278,9 @@ class Settings:
     SELF_HEALER_CANARY_ENABLED: bool = os.getenv("SELF_HEALER_CANARY_ENABLED", "false").lower() in ("1", "true", "yes", "on")
     SELF_HEALER_CANARY_COMMAND: str = os.getenv("SELF_HEALER_CANARY_COMMAND", "systemctl is-active vito")
     QUALITY_JUDGE_APPROVAL_THRESHOLD: int = int(os.getenv("QUALITY_JUDGE_APPROVAL_THRESHOLD", "7") or 7)
+    QUALITY_JUDGE_MIN_DOMAIN_THRESHOLD: int = int(
+        os.getenv("QUALITY_JUDGE_MIN_DOMAIN_THRESHOLD", os.getenv("QUALITY_JUDGE_APPROVAL_THRESHOLD", "7")) or 7
+    )
     AUTONOMOUS_IMPROVEMENT_ENABLED: bool = os.getenv("AUTONOMOUS_IMPROVEMENT_ENABLED", "false").lower() in ("1", "true", "yes", "on")
     AUTONOMOUS_IMPROVEMENT_ALERTS_ENABLED: bool = os.getenv("AUTONOMOUS_IMPROVEMENT_ALERTS_ENABLED", "false").lower() in ("1", "true", "yes", "on")
     AUTONOMOUS_IMPROVEMENT_INTERVAL_TICKS: int = int(os.getenv("AUTONOMOUS_IMPROVEMENT_INTERVAL_TICKS", "288") or 288)

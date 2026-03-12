@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Any
+import json
 
 from agents.base_agent import BaseAgent, TaskResult
 from modules.apply_engine import ApplyEngine
@@ -13,6 +14,7 @@ from modules.owner_model import OwnerModel
 from modules.sandbox_manager import SandboxManager
 from modules.skill_library import VITOSkillLibrary
 from modules.vito_benchmarks import VITOBenchmarks
+from llm_router import TaskType
 
 
 class SelfEvolverV2(BaseAgent):
@@ -59,6 +61,7 @@ class SelfEvolverV2(BaseAgent):
             return TaskResult(success=False, error=str(exc))
 
     async def propose_and_benchmark(self, candidates: list[dict[str, Any]], baseline_score: float) -> dict[str, Any]:
+        candidates = await self._expand_candidates_with_llm(candidates, baseline_score=baseline_score)
         result = self.benchmarks.evaluate(candidates, baseline_score=baseline_score)
         used_skills = [str(item.get("name") or "").strip() for item in self.skill_lib.retrieve("self healing benchmarks runtime", n=4)]
         owner_profile = self.owner_model.get_preferences() if hasattr(self.owner_model, "get_preferences") else {}
@@ -111,6 +114,7 @@ class SelfEvolverV2(BaseAgent):
             "owner_alignment": bool(owner_profile),
         }
         result["archive_ref"] = "self_evolve_v2:benchmark_proposals"
+        result["candidates"] = candidates
         return result
 
     async def weekly_evolve_cycle(self, queries: list[str] | None = None, baseline_score: float = 0.0) -> dict[str, Any]:
@@ -181,3 +185,58 @@ class SelfEvolverV2(BaseAgent):
             "issue_buckets": buckets,
             "dominant_issue_bucket": dominant,
         }
+
+    async def _expand_candidates_with_llm(self, candidates: list[dict[str, Any]], baseline_score: float) -> list[dict[str, Any]]:
+        if not self.llm_router:
+            return list(candidates or [])
+        owner_profile = self.owner_model.get_preferences() if hasattr(self.owner_model, "get_preferences") else {}
+        issue_analysis = self._build_issue_analysis()
+        prompt = (
+            "Предложи до 3 безопасных self-evolution кандидатов для VITO. "
+            "Верни JSON-массив объектов {name, score, evidence, scenario_scores}. "
+            "Не предлагай ничего destructive. "
+            f"baseline={baseline_score}\n"
+            f"existing={json.dumps(list(candidates or []), ensure_ascii=False)}\n"
+            f"owner_profile={json.dumps(owner_profile, ensure_ascii=False)}\n"
+            f"issue_analysis={json.dumps(issue_analysis, ensure_ascii=False)}"
+        )
+        try:
+            raw = await self._call_llm(task_type=TaskType.STRATEGY, prompt=prompt, estimated_tokens=900)
+        except Exception:
+            raw = None
+        parsed = self._parse_llm_candidates(raw)
+        merged: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for row in list(candidates or []) + parsed:
+            name = str(row.get("name") or "").strip().lower()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            merged.append(dict(row))
+        return merged
+
+    def _parse_llm_candidates(self, raw: Any) -> list[dict[str, Any]]:
+        try:
+            cleaned = str(raw or "").strip()
+            if not cleaned:
+                return []
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+            data = json.loads(cleaned.strip())
+            if isinstance(data, dict):
+                data = data.get("items") or data.get("candidates") or []
+            out: list[dict[str, Any]] = []
+            for row in list(data or [])[:3]:
+                if not isinstance(row, dict):
+                    continue
+                out.append({
+                    "name": str(row.get("name") or "candidate").strip(),
+                    "score": float(row.get("score", 0.0) or 0.0),
+                    "evidence": dict(row.get("evidence") or {}),
+                    "scenario_scores": list(row.get("scenario_scores") or []),
+                })
+            return out
+        except Exception:
+            return []

@@ -502,10 +502,13 @@ def _install_owner_flow_stubs(vito) -> None:
 async def _amain() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--scenario", default="smoke", help="smoke | platform_context")
+    ap.add_argument("--phase", default="", help=argparse.SUPPRESS)
     ap.add_argument("--out", default="", help="Optional output report path")
     ap.add_argument("--step-timeout", type=float, default=35.0, help="Max seconds per step")
     ap.add_argument("--stub-owner-flow", action="store_true", help="Stub research/quality/product pipeline for cheap owner-flow regression")
     args = ap.parse_args()
+    if args.phase and (not args.scenario or args.scenario == "smoke"):
+        args.scenario = args.phase
     cleanup_simulator_artifacts(keep_latest=20, apply=True)
 
     steps = _builtin(args.scenario)

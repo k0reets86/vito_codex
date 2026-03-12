@@ -153,6 +153,7 @@ from modules.sandbox_manager import SandboxManager
 from modules.apply_engine import ApplyEngine
 from modules.vito_benchmarks import VITOBenchmarks
 from modules.module_discovery import ModuleDiscovery
+from modules.startup_warnings import emit_startup_warnings
 from modules.conversation_memory import ConversationMemory
 from modules.cancel_state import CancelState
 from modules.owner_task_state import OwnerTaskState
@@ -172,6 +173,7 @@ class VITO:
         self.running = False
         self._last_process_guard_ts = 0.0
         self.goal_engine = GoalEngine()
+        emit_startup_warnings(logger)
         self.llm_router = LLMRouter()
         self.memory = MemoryManager()
         self.conversation_memory = ConversationMemory(path=settings.CONVERSATION_HISTORY_PATH)
@@ -218,6 +220,7 @@ class VITO:
 
         # Agent Registry + 23 агентов
         self.registry = AgentRegistry()
+        self.agent_event_bus = self.registry.get_event_bus()
         self._init_agents()
 
         # v0.3.0: Новые модули
@@ -245,7 +248,8 @@ class VITO:
                 self.evolution_archive = EvolutionArchive()
                 self.evolution_events = EvolutionEventStore()
                 self.autonomy_overseer = AutonomyOverseer(
-                    stuck_tick_threshold=int(getattr(settings, "EVOLUTION_OVERSEER_STUCK_TICKS", 288) or 288)
+                    stuck_tick_threshold=int(getattr(settings, "EVOLUTION_OVERSEER_STUCK_TICKS", 288) or 288),
+                    llm_router=self.llm_router,
                 )
                 self.self_healer_v2 = SelfHealerV2(
                     sandbox_manager=self.sandbox_manager,
@@ -313,6 +317,7 @@ class VITO:
                 decision_loop=None,
                 finance=self.finance,
                 registry=self.registry,
+                event_bus=self.agent_event_bus,
                 schedule_manager=self.schedule_manager,
                 platform_registry=self.platform_registry,
                 llm_router=self.llm_router,

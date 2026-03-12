@@ -16,6 +16,9 @@ class Mem0Bridge:
         self._enabled = bool(getattr(settings, "MEM0_ENABLED", False))
         self._user_id = str(getattr(settings, "MEM0_USER_ID", "vito_owner") or "vito_owner")
         self._collection = str(getattr(settings, "MEM0_COLLECTION", "vito_runtime") or "vito_runtime")
+        api_key = str(getattr(settings, "MEM0_API_KEY", "") or "").strip()
+        if api_key and not self._enabled:
+            logger.warning("MEM0_API_KEY present but MEM0 bridge disabled by settings", extra={"event": "mem0_disabled_with_key"})
         if self._backend is None and self._enabled:
             self._backend = self._build_backend()
 

@@ -77,19 +77,29 @@ class QualityJudge(BaseAgent):
             data = {"score": 5, "feedback": response, "issues": []}
         score = data.get("score", 5)
         threshold = max(1, min(10, int(getattr(settings, "QUALITY_JUDGE_APPROVAL_THRESHOLD", APPROVAL_THRESHOLD) or APPROVAL_THRESHOLD)))
-        approved = score >= threshold
         result_output = {
             "score": score,
             "feedback": data.get("feedback", ""),
-            "approved": approved,
             "issues": data.get("issues", []),
         }
+        raw_domain_scorecard = data.get("domain_scorecard")
         result_output["domain_scorecard"] = self._normalize_domain_scorecard(
-            data.get("domain_scorecard"),
+            raw_domain_scorecard,
             content=str(content or ""),
             content_type=str(content_type or "article"),
         )
+        domain_threshold = max(1, min(10, int(getattr(settings, "QUALITY_JUDGE_MIN_DOMAIN_THRESHOLD", threshold) or threshold)))
+        blocked_dimensions = []
+        if isinstance(raw_domain_scorecard, dict) and raw_domain_scorecard:
+            blocked_dimensions = [
+                key for key, value in dict(result_output["domain_scorecard"] or {}).items()
+                if int(value or 0) < domain_threshold
+            ]
+        approved = bool(score >= threshold and not blocked_dimensions)
         result_output["threshold"] = threshold
+        result_output["domain_threshold"] = domain_threshold
+        result_output["blocked_dimensions"] = blocked_dimensions
+        result_output["approved"] = approved
         result_output["recovery_plan"] = self._build_recovery_plan(
             issues=result_output["issues"],
             scorecard=result_output["domain_scorecard"],
@@ -133,14 +143,23 @@ class QualityJudge(BaseAgent):
             issues.append("listing_lacks_depth")
             score -= 1
         threshold = max(1, min(10, int(getattr(settings, "QUALITY_JUDGE_APPROVAL_THRESHOLD", APPROVAL_THRESHOLD) or APPROVAL_THRESHOLD)))
+        domain_scorecard = self._normalize_domain_scorecard(None, content=text, content_type=content_type)
+        domain_threshold = max(1, min(10, int(getattr(settings, "QUALITY_JUDGE_MIN_DOMAIN_THRESHOLD", threshold) or threshold)))
+        blocked_dimensions = [
+            key for key, value in dict(domain_scorecard or {}).items()
+            if int(value or 0) < domain_threshold
+        ]
+        approved = bool(score >= threshold and not blocked_dimensions)
         out = {
             "score": max(score, 1),
             "feedback": "Local heuristic review completed.",
-            "approved": score >= threshold,
+            "approved": approved,
             "issues": issues,
-            "domain_scorecard": self._normalize_domain_scorecard(None, content=text, content_type=content_type),
+            "domain_scorecard": domain_scorecard,
             "threshold": threshold,
-            "recovery_plan": self._build_recovery_plan(issues=issues, scorecard=self._normalize_domain_scorecard(None, content=text, content_type=content_type), approved=score >= threshold),
+            "domain_threshold": domain_threshold,
+            "blocked_dimensions": blocked_dimensions,
+            "recovery_plan": self._build_recovery_plan(issues=issues, scorecard=domain_scorecard, approved=approved),
             "evidence": self._build_evidence(content=text, content_type=content_type),
         }
         out["handoff_plan"] = build_quality_handoff_plan(
