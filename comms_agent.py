@@ -294,6 +294,7 @@ from modules.comms_service_runtime_lane import (
     touch_service_context as _touch_service_context_impl,
 )
 from modules.comms_research_state_lane import (
+    build_research_pipeline_action as _build_research_pipeline_action_impl,
     get_memory_manager as _get_memory_manager_impl,
     has_fresh_service_context as _has_fresh_service_context_impl,
     prime_research_pending_actions as _prime_research_pending_actions_impl,
@@ -336,76 +337,7 @@ _TELEGRAM_TRACE_DEFAULT = root_path("runtime/telegram_trace.jsonl")
 
 def _remember_platform_working_target(platform: str, result: dict[str, Any]) -> None:
     """Compatibility wrapper around platform target persistence for tests and legacy hooks."""
-    p = str(platform or "").strip().lower()
-    if not p or not isinstance(result, dict):
-        return
-    targets = _load_working_platform_targets()
-    if targets is None:
-        targets = {}
-    if not isinstance(targets, dict):
-        targets = {}
-    current = dict(targets.get(p) or {})
-    rid = str(
-        result.get("listing_id")
-        or result.get("product_id")
-        or result.get("target_product_id")
-        or result.get("post_id")
-        or result.get("document_id")
-        or result.get("target_document_id")
-        or result.get("book_id")
-        or result.get("id")
-        or ""
-    ).strip()
-    url = str(result.get("url") or "").strip()
-    if p == "gumroad":
-        slug = str(result.get("slug") or "").strip()
-        if slug:
-            current["target_slug"] = slug
-    elif p == "etsy" and rid:
-        current["target_listing_id"] = rid
-    elif p == "amazon_kdp" and rid:
-        current["target_document_id"] = rid
-    elif p in {"kofi", "printful"} and rid:
-        current["target_product_id"] = rid
-    incoming_target = {
-        "id": rid,
-        "url": url,
-        "target_slug": current.get("target_slug"),
-        "target_listing_id": current.get("target_listing_id"),
-        "target_document_id": current.get("target_document_id"),
-        "target_product_id": current.get("target_product_id"),
-    }
-    if _is_target_protected(p, current) and current and incoming_target:
-        current_identity = {k: str(v or "").strip() for k, v in current.items() if k in incoming_target}
-        incoming_identity = {k: str(v or "").strip() for k, v in incoming_target.items() if str(v or "").strip()}
-        if current_identity != incoming_identity:
-            return
-    if rid:
-        current["id"] = rid
-    if url:
-        current["url"] = url
-    current["platform"] = p
-    task_root_id = str(
-        result.get("task_root_id")
-        or result.get("project_id")
-        or result.get("listing_work_id")
-        or result.get("publish_work_id")
-        or ""
-    ).strip()
-    if task_root_id:
-        current["task_root_id"] = task_root_id
-    status = str(result.get("status") or "").strip().lower()
-    is_published = bool(result.get("is_published")) or status == "published"
-    if "draft_confirmed" in result:
-        current["draft_confirmed"] = bool(result.get("draft_confirmed"))
-    current["mutable"] = not is_published
-    current["locked"] = bool(is_published)
-    if is_published:
-        current["locked_reason"] = "published_requires_explicit_target"
-    current["status"] = status or current.get("status", "")
-    current["updated_at"] = datetime.now(timezone.utc).isoformat()
-    targets[p] = current
-    _save_working_platform_targets(targets)
+    return _remember_platform_working_target_impl(platform, result)
 def _append_telegram_trace_file(path: Path, direction: str, text: str, meta: dict[str, Any] | None = None) -> None:
     """Write one Telegram trace line (best-effort, no exceptions)."""
     try:
@@ -674,16 +606,7 @@ class CommsAgent:
 
     @staticmethod
     def _build_research_pipeline_action(item: dict[str, Any], fallback_topic: str) -> dict[str, Any]:
-        topic = str(item.get("title") or fallback_topic or "Digital Product").strip()[:180]
-        platform = str(item.get("platform") or "gumroad").strip().lower() or "gumroad"
-        return {
-            "action": "run_product_pipeline",
-            "params": {
-                "topic": topic,
-                "platforms": [platform],
-                "auto_publish": False,
-            },
-        }
+        return _build_research_pipeline_action_impl(item, fallback_topic)
 
     def _remember_research_selection(self, idx: int, item: dict[str, Any]) -> None:
         return _remember_research_selection_impl(self, idx, item)

@@ -5,6 +5,19 @@ from datetime import datetime, timezone
 from typing import Any
 
 
+def build_research_pipeline_action(item: dict[str, Any], fallback_topic: str) -> dict[str, Any]:
+    topic = str(item.get("title") or fallback_topic or "Digital Product").strip()[:180]
+    platform = str(item.get("platform") or "gumroad").strip().lower() or "gumroad"
+    return {
+        "action": "run_product_pipeline",
+        "params": {
+            "topic": topic,
+            "platforms": [platform],
+            "auto_publish": False,
+        },
+    }
+
+
 def remember_research_selection(agent, idx: int, item: dict[str, Any]) -> None:
     if not agent._owner_task_state or not isinstance(item, dict):
         return
@@ -40,7 +53,7 @@ def prime_research_pending_actions(
         rank = int(item.get("rank", pos) or pos)
         item["rank"] = rank
         normalized_ideas.append(item)
-        actions.append(agent._build_research_pipeline_action(item, topic))
+        actions.append(build_research_pipeline_action(item, topic))
         if rec_title and str(item.get("title") or "").strip().lower() == rec_title:
             if not rec_platform or str(item.get("platform") or "").strip().lower() == rec_platform:
                 recommended_rank = rank
