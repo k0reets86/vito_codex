@@ -176,6 +176,16 @@ from modules.comms_message_preflight_lane import (
     handle_pending_service_auth as _handle_pending_service_auth_impl,
     handle_pending_system_action as _handle_pending_system_action_impl,
 )
+from modules.comms_owner_message_lane import (
+    decorate_with_numeric_hint as _decorate_with_numeric_hint_impl,
+    expand_short_choice as _expand_short_choice_impl,
+    extract_reply_context as _extract_reply_context_impl,
+    has_numbered_options as _has_numbered_options_impl,
+    normalize_owner_control_reply as _normalize_owner_control_reply_impl,
+    on_message as _on_message_impl,
+    owner_goal_response_override as _owner_goal_response_override_impl,
+    remember_choice_context as _remember_choice_context_impl,
+)
 from modules.comms_startup_lane import start as _start_impl
 from modules.comms_owner_runtime_lane import (
     execute_pending_system_action as _execute_pending_system_action_impl,
@@ -1483,39 +1493,10 @@ class CommsAgent:
         return self._notification_router.humanize_owner_text(text)
 
     def _owner_goal_response_override(self, source_text: str, default_response: str, goal_title: str) -> str:
-        text = str(source_text or "").strip().lower()
-        response = str(default_response or "").strip()
-        goal = str(goal_title or "").strip()
-        platform = ""
-        try:
-            platform = str(self._extract_platform_key(source_text) or "").strip().lower()
-        except Exception:
-            platform = ""
-        if platform and any(tok in text for tok in ("создавай", "сделай", "запускай", "публикуй")):
-            return f"Собираю и запускаю работу на {platform}: {goal or response}."
-        return response
+        return _owner_goal_response_override_impl(self, source_text, default_response, goal_title)
 
     def _normalize_owner_control_reply(self, source_text: str, response_text: str) -> str:
-        src = str(source_text or "").strip().lower()
-        out = str(response_text or "").strip()
-        low_out = out.lower()
-        if src.isdigit():
-            if "зафиксировал вариант" in low_out:
-                return out
-            idx = int(src)
-            return f"Зафиксировал вариант {idx}. Жду следующую команду."
-        platform = ""
-        try:
-            platform = str(self._extract_platform_key(source_text) or "").strip().lower()
-        except Exception:
-            platform = ""
-        if platform and any(tok in src for tok in ("создавай", "сделай", "запускай", "публикуй")):
-            if "собираю" in low_out and platform in low_out:
-                return out
-            return f"Собираю и запускаю работу на {platform}."
-        if any(tok in src for tok in ("соц", "social", "соцпакет")) and any(tok in low_out for tok in ("x", "pinterest", "соц")):
-            return out
-        return out
+        return _normalize_owner_control_reply_impl(self, source_text, response_text)
 
     async def _reject_stranger(self, update: Update) -> bool:
         """Отклоняет сообщения от не-владельцев."""
@@ -1724,317 +1705,24 @@ class CommsAgent:
         await _on_attachment_impl(self, update, context)
 
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Произвольное текстовое сообщение от владельца → ConversationEngine."""
-        if await self._reject_stranger(update):
-            return
-
-        text = update.message.text.strip()
-        if not text:
-            return
-
-        self._append_telegram_trace("in", text, {"chat_id": int(self._owner_id)})
-
-        reply_meta = self._extract_reply_context(update)
-        reply_service = self._detect_service_from_reply_context(reply_meta)
-        if reply_service:
-            self._touch_service_context(reply_service)
-        if reply_meta:
-            source = "text_reply"
-        else:
-            source = "text"
-
-        self._log_owner_request(text, source=source)
-        strict_cmds = bool(getattr(settings, "TELEGRAM_STRICT_COMMANDS", True)) and not self._autonomy_max_enabled()
-
-        async def _tg_reply(msg: str, markup=None) -> None:
-            kwargs = {"reply_markup": markup} if markup is not None else {"reply_markup": self._main_keyboard()}
-            await update.message.reply_text(msg, **kwargs)
-
-        # Login/auth intent must win over contextual inventory/status parsing,
-        # otherwise phrases like "зайди ... проверь товары" can be misrouted.
-        login_svc = self._detect_service_login_request(text)
-        if login_svc and self._is_inventory_prompt(text):
-            self._touch_service_context(login_svc)
-            if self._service_auth_confirmed.get(login_svc):
-                await update.message.reply_text(
-                    await self._format_service_inventory_snapshot(login_svc),
-                    reply_markup=self._main_keyboard(),
-                )
-                return
-        if await self._handle_kdp_login_flow(text, _tg_reply, with_button=True):
-            self._touch_service_context("amazon_kdp")
-            return
-        svc = login_svc
-        if svc and svc != "amazon_kdp":
-            if await self._start_service_auth_flow(svc, _tg_reply, with_button=True):
-                return
-
-        lower = text.lower()
-        if await _handle_pending_service_auth_impl(self, update, lower):
-            return
-
-        # Highest-priority contextual routing: account inventory/status/auth issue.
-        if await _handle_contextual_service_prompts_impl(self, update, text):
-            return
-
-        lower = text.lower()
-        if await _handle_pending_service_auth_impl(self, update, lower):
-            return
-        if await _handle_pending_owner_confirmation_impl(self, update, lower):
-            return
-        if await _handle_pending_system_action_impl(self, update, text, lower, strict_cmds):
-            return
-        if await _handle_pending_schedule_update_impl(self, update, text):
-            return
-
-        if text.isdigit() and self._prime_research_pending_actions_from_owner_state(text):
-            idx = int(text)
-            picked = self._select_pending_research_option(idx)
-            if picked is not None:
-                title = str(picked.get("title") or "").strip()
-                score = int(picked.get("score", 0) or 0)
-                await update.message.reply_text(
-                    (
-                        f"Зафиксировал вариант {idx}: {title} ({score}/100). "
-                        "Если запускать сразу, напиши: «создавай» или укажи платформу."
-                    ),
-                    reply_markup=self._main_keyboard(),
-                )
-                return
-
-        if not strict_cmds:
-            text = self._expand_short_choice(text)
-            lower = text.lower()
-
-        if (not strict_cmds) and any(kw in lower for kw in [
-            "очисти очередь",
-            "очисти очередь целей",
-            "удали все цели",
-            "удали цели",
-            "очисти цели",
-            "сними все цели",
-            "убери все цели",
-            "delete all goals",
-        ]):
-            self._pending_owner_confirmation = {"kind": "clear_goals", "created_at": datetime.now(timezone.utc).isoformat()}
-            await update.message.reply_text(
-                "Подтверди очистку всех целей: да/нет",
-                reply_markup=self._main_keyboard(),
-            )
-            return
-
-        # Schedule from plain text (no command required)
-        if (not strict_cmds) and await self._maybe_schedule_from_text(update, text):
-            return
-
-        # Brainstorm from plain text (no command required)
-        if (not strict_cmds) and await self._maybe_brainstorm_from_text(update, text):
-            return
-
-        # 0. Accept secrets/key updates via Telegram (KEY=VALUE or "set KEY=VALUE")
-        if self._try_set_env_from_text(text):
-            await update.message.reply_text(
-                "Ключ принят и сохранён. Если нужен перезапуск сервиса — скажи 'перезапусти'.",
-                reply_markup=self._main_keyboard(),
-            )
-            return
-
-        # 1. Обработка нажатий persistent-кнопок (+алиасы старого меню)
-        cmd = self._resolve_button_command(text)
-        if cmd:
-            if cmd == "help":
-                await update.message.reply_text(self._render_help(), reply_markup=self._main_keyboard())
-                return
-            if cmd == "help_daily":
-                await update.message.reply_text(self._render_help("daily"), reply_markup=self._main_keyboard())
-                return
-            if cmd == "help_rare":
-                await update.message.reply_text(self._render_help("rare"), reply_markup=self._main_keyboard())
-                return
-            if cmd == "help_system":
-                await update.message.reply_text(self._render_help("system"), reply_markup=self._main_keyboard())
-                return
-            if cmd == "auth_hub":
-                await update.message.reply_text(self._render_auth_hub(), reply_markup=self._main_keyboard())
-                return
-            if cmd == "research_hub":
-                await update.message.reply_text(self._render_research_hub(), reply_markup=self._main_keyboard())
-                return
-            if cmd == "create_hub":
-                await update.message.reply_text(self._render_create_hub(), reply_markup=self._main_keyboard())
-                return
-            if cmd == "platforms_hub":
-                await update.message.reply_text(self._render_platforms_hub(), reply_markup=self._main_keyboard())
-                return
-            if cmd == "more":
-                await update.message.reply_text(self._render_more_menu(), reply_markup=self._main_keyboard())
-                return
-            handler = {
-                "start": self._cmd_start,
-                "status": self._cmd_status,
-                "goals": self._cmd_goals,
-                "tasks": self._cmd_tasks,
-                "report": self._cmd_report,
-                "spend": self._cmd_spend,
-                "approve": self._cmd_approve,
-                "reject": self._cmd_reject,
-            }.get(cmd)
-            if handler:
-                await handler(update, context)
-                return
-            await update.message.reply_text(
-                "Отправь текст цели, и я создам её.",
-                reply_markup=self._main_keyboard(),
-            )
-            return
-
-        if await _handle_deterministic_message_routes_impl(self, update, context, text, strict_cmds=strict_cmds):
-            return
-
-        async def _tg_reply(msg: str, reply_markup=None):
-            await update.message.reply_text(msg, reply_markup=reply_markup or self._main_keyboard())
-
-        if await self._handle_kdp_login_flow(text, _tg_reply, with_button=True):
-            return
-
-        text_for_engine = text
-        if reply_meta:
-            text_for_engine = (
-                f"[REPLY_CONTEXT]\n"
-                f"reply_to_message_id={reply_meta.get('message_id','')}\n"
-                f"reply_to_text={reply_meta.get('text','')}\n"
-                f"owner_reply={text}\n"
-                f"[/REPLY_CONTEXT]"
-            )
-
-        # 3. ConversationEngine — живой разговор
-        if self._conversation_engine:
-            try:
-                if hasattr(self._conversation_engine, "set_session"):
-                    sid = str(update.effective_chat.id) if update and update.effective_chat else "telegram_owner"
-                    self._conversation_engine.set_session(sid)
-                if hasattr(self._conversation_engine, "set_defer_owner_actions"):
-                    self._conversation_engine.set_defer_owner_actions(True)
-                result = await self._conversation_engine.process_message(text_for_engine)
-
-                # Pass-through для команд и одобрений (обработаны выше)
-                if result.get("pass_through"):
-                    pass  # Уже обработано правилами выше
-                elif result.get("create_goal") and self._goal_engine:
-                    from goal_engine import GoalPriority, GoalStatus
-                    priority_map = {"CRITICAL": GoalPriority.CRITICAL, "HIGH": GoalPriority.HIGH,
-                                    "MEDIUM": GoalPriority.MEDIUM, "LOW": GoalPriority.LOW}
-                    goal = self._goal_engine.create_goal(
-                        title=result.get("goal_title", text[:100]),
-                        description=result.get("goal_description", text),
-                        priority=priority_map.get(result.get("goal_priority", "HIGH"), GoalPriority.HIGH),
-                        source="owner",
-                        estimated_cost_usd=result.get("estimated_cost_usd", 0.05),
-                    )
-                    # Approval workflow: set goal to WAITING_APPROVAL
-                    if result.get("needs_approval", False):
-                        goal.status = GoalStatus.WAITING_APPROVAL
-                        self._goal_engine._persist_goal(goal)
-                    response = result.get("response", f"Цель создана: {goal.title}")
-                    response = self._owner_goal_response_override(text_for_engine, response, goal.title)
-                    if result.get("needs_approval"):
-                        response += "\n\nПодтверди запуск: да/нет."
-                    response = self._decorate_with_numeric_hint(response, result.get("actions", []))
-                    response = self._normalize_owner_control_reply(text_for_engine, response)
-                    response = self._humanize_owner_text(response)
-                    self._remember_choice_context(response)
-                    await update.message.reply_text(response, reply_markup=self._main_keyboard())
-                elif result.get("response"):
-                    response = self._decorate_with_numeric_hint(result["response"], result.get("actions", []))
-                    response = self._normalize_owner_control_reply(text_for_engine, response)
-                    self._remember_choice_context(response)
-                    await self._send_response(update, response)
-                    self._prime_research_pending_actions_from_owner_state(text_for_engine)
-                    if result.get("actions") and result.get("needs_confirmation"):
-                        if self._autonomy_max_enabled() and self._conversation_engine:
-                            out = await self._conversation_engine._execute_actions(result.get("actions", []))
-                            await self._send_response(update, out or "Действие выполнено.")
-                        else:
-                            self._pending_system_action = {
-                                "actions": result.get("actions", []),
-                                "origin_text": text_for_engine,
-                            }
-                    elif result.get("actions"):
-                        self._schedule_system_actions_background(
-                            result.get("actions", []),
-                            update=update,
-                            origin_text=text_for_engine,
-                        )
-                else:
-                    await update.message.reply_text(
-                        "Понял. Чем могу помочь?", reply_markup=self._main_keyboard()
-                    )
-
-                logger.info(
-                    f"ConversationEngine: intent={result.get('intent')}",
-                    extra={"event": "conversation_processed", "context": {"intent": result.get("intent")}},
-                )
-                return
-            except Exception as e:
-                logger.warning(f"ConversationEngine error: {e}", extra={"event": "conversation_error"})
-
-        # 4. Fallback — старое поведение
-        await update.message.reply_text(
-            "Не понял: это вопрос или задача? Напиши одним предложением, что нужно сделать.",
-            reply_markup=self._main_keyboard(),
-        )
-        logger.info(
-            f"Сообщение от владельца: {text[:100]}",
-            extra={"event": "owner_message"},
-        )
+        await _on_message_impl(self, update, context)
 
     @staticmethod
     def _extract_reply_context(update: Update) -> dict[str, str]:
-        """Extract replied message payload from Telegram swipe-reply."""
-        try:
-            msg = getattr(update, "message", None)
-            if msg is None:
-                return {}
-            parent = getattr(msg, "reply_to_message", None)
-            if parent is None:
-                return {}
-            parent_text = getattr(parent, "text", None) or getattr(parent, "caption", None) or ""
-            if not isinstance(parent_text, str):
-                return {}
-            parent_text = parent_text.strip()
-            if not parent_text:
-                return {}
-            message_id = getattr(parent, "message_id", "")
-            return {"message_id": str(message_id or ""), "text": parent_text[:1200]}
-        except Exception:
-            return {}
+        return _extract_reply_context_impl(update)
 
     @staticmethod
     def _has_numbered_options(text: str) -> bool:
-        import re
-
-        lines = re.findall(r"(?m)^\s*(\d{1,2})[\.\)]\s+\S+", str(text or ""))
-        return len(lines) >= 2
+        return _has_numbered_options_impl(text)
 
     def _remember_choice_context(self, response_text: str) -> None:
-        if self._has_numbered_options(response_text):
-            self._pending_choice_context = {"saved_at": datetime.now(timezone.utc).isoformat()}
+        _remember_choice_context_impl(self, response_text)
 
     def _expand_short_choice(self, raw_text: str) -> str:
-        text = str(raw_text or "").strip()
-        if not text.isdigit():
-            return text
-        if not self._pending_choice_context:
-            return text
-        idx = int(text)
-        if idx <= 0:
-            return text
-        self._pending_choice_context = None
-        return f"Вариант {idx}. Зафиксируй выбор и жди следующую команду."
+        return _expand_short_choice_impl(self, raw_text)
 
     def _decorate_with_numeric_hint(self, response: str, actions: list[dict] | None) -> str:
-        text = str(response or "").strip()
-        return text
+        return _decorate_with_numeric_hint_impl(response, actions)
 
     # ── Новые команды v0.3.0 ──
 
