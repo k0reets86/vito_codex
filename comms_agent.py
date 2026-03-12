@@ -110,6 +110,12 @@ from modules.comms_auth_command_lane import (
     cmd_auth_cookie as _cmd_auth_cookie_impl,
     cmd_auth_status as _cmd_auth_status_impl,
 )
+from modules.comms_approval_lane import (
+    pending_approvals_count as _pending_approvals_count_impl,
+    pending_approvals_list as _pending_approvals_list_impl,
+    request_approval as _request_approval_impl,
+    request_approval_with_files as _request_approval_with_files_impl,
+)
 from modules.comms_planning_lane import (
     cmd_brainstorm as _cmd_brainstorm_impl,
     cmd_deep as _cmd_deep_impl,
@@ -4134,92 +4140,7 @@ class CommsAgent:
     async def request_approval(
         self, request_id: str, message: str, timeout_seconds: int = 3600
     ) -> Optional[bool]:
-        """Запрашивает одобрение у владельца. Возвращает True/False/None (timeout)."""
-        import os
-        if os.getenv("AUTO_APPROVE_TESTS") == "1":
-            logger.info(
-                "Auto-approve enabled for tests",
-                extra={"event": "approval_auto", "context": {"request_id": request_id}},
-            )
-            if timeout_seconds <= 0:
-                return None
-            return True
-
-        # Anti-spam gate for repetitive publish approvals (e.g. publish_twitter_*)
-        channel = self._approval_channel(request_id)
-        if channel:
-            cooldown_sec = int(getattr(settings, "APPROVAL_REPEAT_COOLDOWN_SEC", 1800) or 1800)
-            # If same channel is already pending, suppress duplicate prompt.
-            if any(str(k).lower().startswith(f"{channel}_") for k in (self._pending_approvals or {}).keys()):
-                logger.info(
-                    "Approval suppressed: channel already pending",
-                    extra={"event": "approval_suppressed_pending", "context": {"request_id": request_id, "channel": channel}},
-                )
-                return None
-            last_iso = str(self._approval_last_sent_at.get(channel, "") or "").strip()
-            if last_iso:
-                try:
-                    last_dt = datetime.fromisoformat(last_iso)
-                    if last_dt.tzinfo is None:
-                        last_dt = last_dt.replace(tzinfo=timezone.utc)
-                    age = (datetime.now(timezone.utc) - last_dt).total_seconds()
-                    if age < max(60, cooldown_sec):
-                        logger.info(
-                            "Approval suppressed by cooldown",
-                            extra={
-                                "event": "approval_suppressed_cooldown",
-                                "context": {"request_id": request_id, "channel": channel, "age_sec": int(age)},
-                            },
-                        )
-                        return None
-                except Exception:
-                    pass
-        future: asyncio.Future = asyncio.get_running_loop().create_future()
-        self._pending_approvals[request_id] = future
-        if channel:
-            self._approval_last_sent_at[channel] = datetime.now(timezone.utc).isoformat()
-
-        inline_kb = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("Одобрить", callback_data=f"approve:{request_id}"),
-                InlineKeyboardButton("Отклонить", callback_data=f"reject:{request_id}"),
-            ]
-        ])
-        if self._bot:
-            try:
-                await self._bot.send_message(
-                    chat_id=self._owner_id,
-                    text=message,
-                    reply_markup=inline_kb,
-                )
-            except Exception:
-                await self.send_message(message, level="approval")
-        else:
-            await self.send_message(message, level="approval")
-
-        logger.info(
-            f"Запрос одобрения: {request_id}",
-            extra={"event": "approval_requested", "context": {"request_id": request_id}},
-        )
-
-        if timeout_seconds <= 0:
-            self._pending_approvals.pop(request_id, None)
-            logger.warning(
-                f"Таймаут одобрения: {request_id}",
-                extra={"event": "approval_timeout", "context": {"request_id": request_id}},
-            )
-            return None
-
-        try:
-            result = await asyncio.wait_for(future, timeout=timeout_seconds)
-            return result
-        except asyncio.TimeoutError:
-            self._pending_approvals.pop(request_id, None)
-            logger.warning(
-                f"Таймаут одобрения: {request_id}",
-                extra={"event": "approval_timeout", "context": {"request_id": request_id}},
-            )
-            return None
+        return await _request_approval_impl(self, request_id=request_id, message=message, timeout_seconds=timeout_seconds)
 
     async def request_approval_with_files(
         self,
@@ -4228,32 +4149,23 @@ class CommsAgent:
         files: list[str],
         timeout_seconds: int = 3600,
     ) -> Optional[bool]:
-        """Запрашивает одобрение и отправляет файлы-превью до запроса."""
-        sent_any = False
-        for fp in files:
-            try:
-                await self.send_file(fp, caption=f"Превью: {Path(fp).name}")
-                sent_any = True
-            except Exception:
-                continue
-        if not sent_any and files:
-            message = message + "\n(ВНИМАНИЕ: файлы превью не отправлены.)"
-        return await self.request_approval(request_id=request_id, message=message, timeout_seconds=timeout_seconds)
+        return await _request_approval_with_files_impl(
+            self,
+            request_id=request_id,
+            message=message,
+            files=files,
+            timeout_seconds=timeout_seconds,
+        )
 
     async def send_morning_report(self, report: str) -> bool:
         """Отправляет утренний отчёт."""
         return await self.send_message(report, level="result")
 
     def pending_approvals_count(self) -> int:
-        """Return count of pending approvals in comms layer."""
-        return len(self._pending_approvals or {})
+        return _pending_approvals_count_impl(self)
 
     def pending_approvals_list(self) -> list[str]:
-        """Return pending approval request ids."""
-        try:
-            return list(self._pending_approvals.keys())
-        except Exception:
-            return []
+        return _pending_approvals_list_impl(self)
 
     async def notify_error(self, module: str, error: str) -> bool:
         """Уведомляет владельца о критической ошибке."""
