@@ -155,15 +155,27 @@ class KnowledgeUpdater:
         return False
 
     def load_platform_knowledge(self) -> bool:
-        """Load platform knowledge from docs into memory."""
+        """Load curated platform knowledge plus runtime overlay into memory."""
         try:
-            path = PROJECT_ROOT / "docs" / "platform_knowledge.md"
-            if path.exists() and self.memory:
-                text = path.read_text(encoding="utf-8")
+            docs_path = PROJECT_ROOT / "docs" / "platform_knowledge.md"
+            runtime_path = PROJECT_ROOT / "runtime" / "platform_knowledge.md"
+            if self.memory:
+                text_parts: list[str] = []
+                if docs_path.exists():
+                    text_parts.append(docs_path.read_text(encoding="utf-8"))
+                if runtime_path.exists():
+                    text_parts.append(runtime_path.read_text(encoding="utf-8"))
+                text = "\n".join(part for part in text_parts if part.strip())
+                if not text.strip():
+                    return False
                 self.memory.store_knowledge(
                     doc_id="platform_knowledge",
                     text=text,
-                    metadata={"type": "platform_knowledge", "source": "static", "updated": datetime.now(timezone.utc).isoformat()},
+                    metadata={
+                        "type": "platform_knowledge",
+                        "source": "static+runtime_overlay",
+                        "updated": datetime.now(timezone.utc).isoformat(),
+                    },
                 )
                 return True
         except Exception:
