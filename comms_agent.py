@@ -177,6 +177,11 @@ from modules.comms_message_preflight_lane import (
     handle_pending_system_action as _handle_pending_system_action_impl,
 )
 from modules.comms_startup_lane import start as _start_impl
+from modules.comms_owner_runtime_lane import (
+    execute_pending_system_action as _execute_pending_system_action_impl,
+    maybe_handle_owner_service_commands as _maybe_handle_owner_service_commands_runtime_impl,
+    schedule_system_actions_background as _schedule_system_actions_background_impl,
+)
 from modules.comms_operational_command_lane import (
     cancel_goal_queue as _cancel_goal_queue_lane_impl,
     cmd_balances as _cmd_balances_lane_impl,
@@ -1407,25 +1412,7 @@ class CommsAgent:
         return _cancel_all_owner_work_impl(self, reason=reason)
 
     async def _maybe_handle_owner_service_commands(self, text: str) -> bool:
-        service_status = self._detect_contextual_service_status_request(text)
-        if service_status:
-            await self.send_message(await self._format_service_auth_status_live(service_status), level="result")
-            return True
-        service_inventory = self._detect_contextual_service_inventory_request(text)
-        if service_inventory:
-            await self.send_message(await self._format_service_inventory_snapshot(service_inventory), level="result")
-            self._record_context_learning(
-                skill_name="contextual_service_inventory_resolution",
-                description=(
-                    "Если активен контекст платформы, запросы вида 'проверь товары/листинги' выполняются как проверка аккаунта этой платформы, а не как market research."
-                ),
-                anti_pattern=(
-                    "Плохо: отправлять владельца в analyze_niche, когда он просит проверить товары в текущем аккаунте."
-                ),
-                method={"service": service_inventory, "source_text": text[:120]},
-            )
-            return True
-        return False
+        return await _maybe_handle_owner_service_commands_runtime_impl(self, text)
 
     async def _maybe_handle_owner_menu_commands(self, text: str) -> bool:
         return await _maybe_handle_owner_menu_commands_impl(self, text)
@@ -1440,30 +1427,7 @@ class CommsAgent:
         return await _maybe_handle_owner_webop_commands_impl(self, text)
 
     async def _execute_pending_system_action(self, update: Update | None = None) -> None:
-        payload = self._pending_system_action or {}
-        self._pending_system_action = None
-        actions = payload.get("actions") or []
-        if not actions:
-            if update is not None:
-                await update.message.reply_text("Нет действий для выполнения.", reply_markup=self._main_keyboard())
-            else:
-                await self.send_message("Нет действий для выполнения.", level="result")
-            return
-        if not self._conversation_engine:
-            if update is not None:
-                await update.message.reply_text("ConversationEngine не подключён.", reply_markup=self._main_keyboard())
-            else:
-                await self.send_message("ConversationEngine не подключён.", level="result")
-            return
-        try:
-            out = await self._conversation_engine._execute_actions(actions)
-            msg = out or "Действие выполнено."
-        except Exception as e:
-            msg = f"Ошибка выполнения действия: {e}"
-        if update is not None:
-            await self._send_response(update, msg)
-        else:
-            await self.send_message(msg, level="result")
+        await _execute_pending_system_action_impl(self, update)
 
     def _schedule_system_actions_background(
         self,
@@ -1472,37 +1436,7 @@ class CommsAgent:
         update: Update | None = None,
         origin_text: str = "",
     ) -> None:
-        if not actions or not self._conversation_engine:
-            return
-
-        async def _runner() -> None:
-            try:
-                out = await self._conversation_engine._execute_actions(actions)
-                msg = out or "Действие выполнено."
-            except Exception as e:
-                msg = f"Ошибка выполнения действия: {e}"
-            try:
-                if update is not None:
-                    await self._send_response(update, msg)
-                else:
-                    await self.send_message(msg, level="result")
-            except Exception:
-                logger.exception(
-                    "Background system action follow-up failed",
-                    extra={
-                        "event": "background_system_action_followup_failed",
-                        "context": {"origin_text": origin_text[:200], "actions_count": len(actions)},
-                    },
-                )
-
-        task = asyncio.create_task(_runner())
-        logger.info(
-            "Scheduled background system actions",
-            extra={
-                "event": "background_system_actions_scheduled",
-                "context": {"origin_text": origin_text[:200], "actions_count": len(actions), "task_id": id(task)},
-            },
-        )
+        _schedule_system_actions_background_impl(self, actions, update=update, origin_text=origin_text)
 
     async def _poll_owner_inbox(self) -> None:
         """Poll file-based owner inbox for offline testing and fallback comms."""
