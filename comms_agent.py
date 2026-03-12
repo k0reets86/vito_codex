@@ -100,6 +100,47 @@ from modules.comms_owner_control_lane import (
     maybe_handle_owner_task_commands as _maybe_handle_owner_task_commands_impl,
     render_owner_brief_status as _render_owner_brief_status_impl,
 )
+from modules.comms_preference_lane import (
+    parse_pref_value as _parse_pref_value_impl,
+    try_deactivate_preference_from_text as _try_deactivate_preference_from_text_impl,
+    try_set_preference_from_text as _try_set_preference_from_text_impl,
+)
+from modules.comms_auth_command_lane import (
+    cmd_auth as _cmd_auth_impl,
+    cmd_auth_cookie as _cmd_auth_cookie_impl,
+    cmd_auth_status as _cmd_auth_status_impl,
+)
+from modules.comms_planning_lane import (
+    cmd_brainstorm as _cmd_brainstorm_impl,
+    cmd_deep as _cmd_deep_impl,
+    maybe_brainstorm_from_text as _maybe_brainstorm_from_text_impl,
+    maybe_schedule_from_text as _maybe_schedule_from_text_impl,
+)
+from modules.comms_service_lane import (
+    detect_contextual_service_inventory_request as _detect_contextual_service_inventory_request_impl,
+    detect_contextual_service_status_request as _detect_contextual_service_status_request_impl,
+    detect_service_from_reply_context as _detect_service_from_reply_context_impl,
+    format_service_auth_status as _format_service_auth_status_impl,
+    format_service_auth_status_live as _format_service_auth_status_live_impl,
+    format_service_inventory_snapshot as _format_service_inventory_snapshot_impl,
+    is_inventory_prompt as _is_inventory_prompt_impl,
+    is_status_prompt as _is_status_prompt_impl,
+)
+from modules.comms_owner_everyday_lane import (
+    is_cancel_all_tasks_prompt as _is_cancel_all_tasks_prompt_impl,
+    is_do_not_do_now_prompt as _is_do_not_do_now_prompt_impl,
+    is_do_not_publish_prompt as _is_do_not_publish_prompt_impl,
+    is_do_not_touch_old_prompt as _is_do_not_touch_old_prompt_impl,
+    is_how_are_you_prompt as _is_how_are_you_prompt_impl,
+    is_not_understood_prompt as _is_not_understood_prompt_impl,
+    is_pause_prompt as _is_pause_prompt_impl,
+    is_remove_this_prompt as _is_remove_this_prompt_impl,
+    is_resume_prompt as _is_resume_prompt_impl,
+    is_what_do_you_need_prompt as _is_what_do_you_need_prompt_impl,
+    is_what_is_ready_prompt as _is_what_is_ready_prompt_impl,
+    is_what_should_i_do_prompt as _is_what_should_i_do_prompt_impl,
+    is_why_stopped_prompt as _is_why_stopped_prompt_impl,
+)
 from modules.comms_recipe_lane import build_recipe_payload as _build_recipe_payload_impl, run_recipe_direct as _run_recipe_direct_impl
 from modules.comms_broadcast_queue import BroadcastQueue
 from modules.comms_notification_router import NotificationRouter
@@ -1096,137 +1137,20 @@ class CommsAgent:
 
     @staticmethod
     def _is_status_prompt(text: str) -> bool:
-        s = str(text or "").strip().lower()
-        return any(
-            token in s
-            for token in (
-                "статус",
-                "status",
-                "состояние аккаунта",
-                "состояние",
-                "state",
-                "проверь аккаунт",
-                "покажи аккаунт",
-                "проверка входа",
-                "авториз",
-                "логин",
-            )
-        )
+        return _is_status_prompt_impl(text)
 
     @staticmethod
     def _is_inventory_prompt(text: str) -> bool:
-        s = str(text or "").strip().lower()
-        if not s:
-            return False
-        # Creation/publish intents must not be misrouted as inventory checks
-        # just because they contain words like "листинг"/"товар".
-        if any(
-            x in s
-            for x in (
-                "создай",
-                "создать",
-                "собери",
-                "собрать",
-                "опубликуй",
-                "опубликовать",
-                "размести",
-                "разместить",
-                "заполни",
-                "заполнить",
-                "сгенерируй",
-                "сделай",
-                "make",
-                "create",
-                "publish",
-                "post ",
-            )
-        ):
-            return False
-        if any(x in s for x in ("соцпак", "соц пак", "social pack", "social", "пинтерест", "pinterest", "твиттер", "twitter", "reddit", "реддит")):
-            return False
-        if any(x in s for x in ("тренд", "trend", "ниш", "niche", "конкурент", "рынок")):
-            return False
-        if any(x in s for x in ("профиль", "profile")) and any(x in s for x in ("настрой", "settings")):
-            return False
-        return any(
-            token in s
-            for token in (
-                "аккаунт",
-                "account",
-                "кабинет",
-                "профиль",
-                "товар",
-                "товары",
-                "продукт",
-                "продукты",
-                "листинг",
-                "листинги",
-                "каталог",
-                "ассортимент",
-                "products",
-                "listings",
-                "inventory",
-            )
-        )
+        return _is_inventory_prompt_impl(text)
 
     def _detect_contextual_service_status_request(self, text: str) -> str:
-        s = str(text or "").strip().lower()
-        if not s or not self._is_status_prompt(s):
-            return ""
-        explicit = self._detect_service_from_text(s)
-        if explicit:
-            return explicit
-        if any(x in s for x in ("vito", "вито", "система", "system")):
-            return ""
-        if self._has_fresh_service_context():
-            return self._last_service_context
-        if self._pending_service_auth:
-            try:
-                return next(reversed(self._pending_service_auth))
-            except Exception:
-                return ""
-        return ""
+        return _detect_contextual_service_status_request_impl(self, text)
 
     def _detect_contextual_service_inventory_request(self, text: str) -> str:
-        s = str(text or "").strip().lower()
-        if not s or not self._is_inventory_prompt(s):
-            return ""
-        if any(
-            x in s
-            for x in (
-                "выбери",
-                "предлож",
-                "структур",
-                "идея",
-                "идея",
-                "вариант",
-                "концеп",
-                "упаков",
-                "план",
-            )
-        ):
-            return ""
-        explicit = self._detect_service_from_text(s)
-        if explicit:
-            return explicit
-        if any(x in s for x in ("vito", "вито", "система", "system")):
-            return ""
-        if self._has_fresh_service_context():
-            return self._last_service_context
-        if self._pending_service_auth:
-            try:
-                return next(reversed(self._pending_service_auth))
-            except Exception:
-                return ""
-        return ""
+        return _detect_contextual_service_inventory_request_impl(self, text)
 
     def _detect_service_from_reply_context(self, reply_meta: dict[str, str] | None) -> str:
-        if not isinstance(reply_meta, dict):
-            return ""
-        text = str(reply_meta.get("text", "") or "").strip()
-        if not text:
-            return ""
-        return self._detect_service_from_text(text)
+        return _detect_service_from_reply_context_impl(self, reply_meta)
 
     @staticmethod
     def _is_auth_issue_prompt(text: str) -> bool:
@@ -1248,179 +1172,13 @@ class CommsAgent:
         )
 
     def _format_service_auth_status(self, service: str) -> str:
-        svc = str(service or "").strip().lower()
-        if not svc:
-            return "Не понял, по какому сервису показать статус."
-        title, auth_url = self._service_auth_meta(svc)
-        if svc in self._pending_service_auth:
-            return (
-                f"{title}: ожидается подтверждение входа.\n"
-                f"Ссылка: {auth_url}\n"
-                "После входа нажми «Я вошел» или напиши «готово»."
-            )
-        if self._service_auth_confirmed.get(svc):
-            return f"{title}: вход подтверждён. Повторный логин сейчас не требуется."
-        return f"{title}: вход пока не подтверждён. Напиши «зайди на {title}» для авторизации."
+        return _format_service_auth_status_impl(self, service)
 
     async def _format_service_auth_status_live(self, service: str) -> str:
-        svc = str(service or "").strip().lower()
-        base = self._format_service_auth_status(svc)
-        if not svc:
-            return base
-        title, _ = self._service_auth_meta(svc)
-        if svc in self._pending_service_auth:
-            return base
-
-        # Для Amazon делаем только probe (без авто-логина), чтобы статус не триггерил новый вход.
-        if svc == "amazon_kdp":
-            try:
-                probe_rc, _ = await self._run_kdp_probe_stable()
-                if probe_rc == 0:
-                    self._mark_service_auth_confirmed(svc)
-                    return f"{title}: подключение активно (live-check OK). Повторный логин не требуется."
-                if self._service_auth_confirmed.get(svc):
-                    return (
-                        f"{title}: вход ранее подтверждён, но live-check сейчас не прошёл. "
-                        "Если действия в Amazon не выполняются, запусти вход заново."
-                    )
-                return (
-                    f"{title}: live-check не подтвердил сессию. "
-                    f"Нужна авторизация: зайди на {title}."
-                )
-            except Exception:
-                return (
-                    f"{title}: статус по кэшу — вход ранее подтверждён, "
-                    "но live-check сейчас недоступен."
-                    if self._service_auth_confirmed.get(svc)
-                    else f"{title}: вход пока не подтверждён."
-                )
-
-        if self._requires_strict_auth_verification(svc):
-            try:
-                ok, detail = await self._verify_service_auth(svc)
-                if ok:
-                    self._mark_service_auth_confirmed(svc)
-                    return f"{title}: подключение активно (live-check OK). Повторный логин не требуется."
-                has_storage, _ = self._has_cookie_storage_state(svc)
-                if has_storage and self._service_auth_confirmed.get(svc):
-                    return (
-                        f"{title}: есть сохранённая browser-сессия, но прямой live-check сейчас не прошёл. "
-                        "Если действие не выполняется, запусти вход заново."
-                    )
-                self._clear_service_auth_confirmed(svc)
-                return f"{title}: вход не подтверждён (live-check fail). {detail}"
-            except Exception as e:
-                self._clear_service_auth_confirmed(svc)
-                return f"{title}: вход не подтверждён. Ошибка проверки: {e}"
-
-        # Для остальных сервисов сохраняем быстрый статус без тяжёлого live probe.
-        return base
+        return await _format_service_auth_status_live_impl(self, service)
 
     async def _format_service_inventory_snapshot(self, service: str) -> str:
-        svc = str(service or "").strip().lower()
-        if not svc:
-            return "Не понял, по какому сервису проверить товары."
-        title, _ = self._service_auth_meta(svc)
-
-        if svc == "amazon_kdp":
-            try:
-                probe_rc, _ = await self._run_kdp_probe_stable()
-                if probe_rc != 0:
-                    return (
-                        f"{title}: не вижу активной сессии аккаунта (live-check не пройден). "
-                        "Сначала зайди в аккаунт, потом повтори проверку товаров."
-                    )
-            except Exception:
-                pass
-            try:
-                inv_rc, inv_out = await self._run_kdp_inventory_probe()
-                if inv_rc == 0:
-                    payload_line = ""
-                    for ln in reversed((inv_out or "").splitlines()):
-                        ln = ln.strip()
-                        if ln.startswith("{") and ln.endswith("}"):
-                            payload_line = ln
-                            break
-                    if payload_line:
-                        data = json.loads(payload_line)
-                        if bool(data.get("ok", False)):
-                            items = data.get("items") or []
-                            if isinstance(items, list):
-                                noise = (
-                                    "how would you rate your experience",
-                                    "visit our help center",
-                                    "thank you for your feedback",
-                                )
-                                cleaned: list[str] = []
-                                seen: set[str] = set()
-                                for it in items:
-                                    t = str(it or "").strip()
-                                    if not t:
-                                        continue
-                                    low = t.lower()
-                                    if any(n in low for n in noise):
-                                        continue
-                                    if low in seen:
-                                        continue
-                                    seen.add(low)
-                                    cleaned.append(t)
-                                items = cleaned
-                            count = int(data.get("products_count", 0) or 0)
-                            if isinstance(items, list):
-                                count = len(items)
-                            lines = [f"{title}: состояние аккаунта", f"- Товаров/книг: {count}"]
-                            if items:
-                                lines.append("- Примеры:")
-                                for it in items[:5]:
-                                    lines.append(f"  - {str(it)[:120]}")
-                            return "\n".join(lines)
-            except Exception:
-                pass
-
-        if not self._agent_registry:
-            return f"{title}: модуль проверки товаров не подключён."
-        try:
-            result = await self._agent_registry.dispatch("sales_check", platform=svc)
-        except Exception as e:
-            return f"{title}: ошибка запроса данных аккаунта: {e}"
-
-        if not result or not getattr(result, "success", False):
-            return f"{title}: не удалось получить данные аккаунта."
-        payload = getattr(result, "output", {}) or {}
-        data = payload.get(svc, payload) if isinstance(payload, dict) else {}
-        if not isinstance(data, dict):
-            return f"{title}: данные аккаунта получены в неподдерживаемом формате."
-        if data.get("error"):
-            return f"{title}: проверка аккаунта вернула ошибку: {data.get('error')}"
-
-        lines = [f"{title}: состояние аккаунта"]
-        has_metrics = False
-
-        for key, label in (
-            ("products_count", "Товаров"),
-            ("listings", "Листингов"),
-            ("sales", "Продаж"),
-            ("orders", "Заказов"),
-            ("total_views", "Просмотров"),
-            ("total_favorites", "Добавили в избранное"),
-        ):
-            if key in data:
-                lines.append(f"- {label}: {data.get(key)}")
-                has_metrics = True
-        if "revenue" in data:
-            try:
-                lines.append(f"- Выручка: ${float(data.get('revenue') or 0.0):.2f}")
-            except Exception:
-                lines.append(f"- Выручка: {data.get('revenue')}")
-            has_metrics = True
-
-        if not has_metrics:
-            if data.get("raw_data"):
-                lines.append("- Детальные данные получены, но формат неструктурирован.")
-            else:
-                lines.append("- Метрики товаров не вернулись. Возможно, у аккаунта нет доступных данных через текущий канал.")
-
-        return "\n".join(lines)
+        return await _format_service_inventory_snapshot_impl(self, service)
 
     async def _run_kdp_probe(self) -> tuple[int, str]:
         storage = str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json") or "runtime/kdp_storage_state.json")
@@ -2125,189 +1883,79 @@ class CommsAgent:
 
     @staticmethod
     def _is_how_are_you_prompt(text: str) -> bool:
-        s = str(text or "").strip().lower().replace("ё", "е")
-        if not s:
-            return False
-        return any(
-            token in s
-            for token in (
-                "как дела",
-                "как дел",
-                "как ты",
-                "че по задач",
-                "что по задач",
-                "что с задач",
-                "что сейчас делаешь",
-                "что щас делаеш",
-                "че щас делаеш",
-                "че сейчас делаеш",
-                "че щас делаешь",
-                "че сейчас делаешь",
-                "что сейчас делаеш",
-                "как успехи",
-            )
-        )
+        return _is_how_are_you_prompt_impl(text)
 
     @staticmethod
     def _is_pause_prompt(text: str) -> bool:
-        s = str(text or "").strip().lower().replace("ё", "е")
-        return s in {"стоп", "пауза", "остановись", "останови все", "прекрати", "pause"}
+        return _is_pause_prompt_impl(text)
 
     @staticmethod
     def _is_resume_prompt(text: str) -> bool:
-        s = str(text or "").strip().lower().replace("ё", "е")
-        return s in {"продолжай", "продолжим", "поехали", "resume", "возобнови", "возобновляй"}
+        return _is_resume_prompt_impl(text)
 
     @staticmethod
     def _is_cancel_all_tasks_prompt(text: str) -> bool:
-        s = str(text or "").strip().lower().replace("ё", "е")
-        if not s:
-            return False
-        short_all_patterns = {
-            "отмени все",
-            "отмена всего",
-            "сними все",
-            "убери все",
-            "очисти все",
-            "cancel all",
-            "stop all",
-        }
-        if s in short_all_patterns:
-            return True
-        task_tokens = ("задач", "цели", "дела", "очеред")
-        cancel_tokens = ("отмени", "отмена", "сними", "убери", "очисти", "stop all", "cancel all")
-        all_tokens = ("все", "всё", "all")
-        return any(tok in s for tok in cancel_tokens) and any(tok in s for tok in all_tokens) and any(tok in s for tok in task_tokens)
+        return _is_cancel_all_tasks_prompt_impl(text)
 
     @staticmethod
     def _is_what_do_you_need_prompt(text: str) -> bool:
-        s = str(text or "").strip().lower().replace("ё", "е")
-        return s in {"что от меня нужно", "что от меня надо", "что нужно от меня", "что тебе нужно", "что от меня требуется"}
+        return _is_what_do_you_need_prompt_impl(text)
 
     @staticmethod
     def _is_what_is_ready_prompt(text: str) -> bool:
-        s = str(text or "").strip().lower().replace("ё", "е")
-        return s in {"что уже готово", "что готово", "что уже сделал", "что уже сделано"}
+        return _is_what_is_ready_prompt_impl(text)
 
     @staticmethod
     def _is_what_should_i_do_prompt(text: str) -> bool:
-        s = str(text or "").strip().lower().replace("ё", "е")
-        return s in {"что мне делать", "что мне сейчас делать", "что дальше делать мне"}
+        return _is_what_should_i_do_prompt_impl(text)
 
     @staticmethod
     def _is_do_not_publish_prompt(text: str) -> bool:
-        s = str(text or "").strip().lower().replace("ё", "е")
-        return s in {"не публикуй", "не публикуй пока", "пока не публикуй", "не надо публиковать"}
+        return _is_do_not_publish_prompt_impl(text)
 
     @staticmethod
     def _is_remove_this_prompt(text: str) -> bool:
-        s = str(text or "").strip().lower().replace("ё", "е")
-        return s in {"убери это", "убери", "сними это", "убери пока"}
+        return _is_remove_this_prompt_impl(text)
 
     @staticmethod
     def _is_do_not_do_now_prompt(text: str) -> bool:
-        s = str(text or "").strip().lower().replace("ё", "е")
-        return s in {"сейчас не делай", "не делай сейчас", "пока не делай"}
+        return _is_do_not_do_now_prompt_impl(text)
 
     @staticmethod
     def _is_not_understood_prompt(text: str) -> bool:
-        s = str(text or "").strip().lower().replace("ё", "е")
-        return s in {"не понял", "не поняла", "непонятно", "не понял тебя"}
+        return _is_not_understood_prompt_impl(text)
 
     @staticmethod
     def _is_why_stopped_prompt(text: str) -> bool:
-        s = str(text or "").strip().lower().replace("ё", "е")
-        return s in {"почему остановился", "почему встал", "почему стоп"}
+        return _is_why_stopped_prompt_impl(text)
 
     @staticmethod
     def _is_do_not_touch_old_prompt(text: str) -> bool:
-        s = str(text or "").strip().lower().replace("ё", "е")
-        return ("не трогай" in s and any(tok in s for tok in ("стар", "опублик", "прошл"))) or s in {
-            "старое не трогай",
-            "не трогай старое",
-            "не трогай опубликованное",
-        }
+        return _is_do_not_touch_old_prompt_impl(text)
 
     @staticmethod
     def _is_create_new_prompt(text: str) -> bool:
-        s = str(text or "").strip().lower().replace("ё", "е")
-        return s in {"создай новое", "создай новый", "сделай новое", "новое создай"}
+        from modules.comms_owner_everyday_lane import is_create_new_prompt
+
+        return is_create_new_prompt(text)
 
     @staticmethod
     def _is_postpone_prompt(text: str) -> bool:
-        s = str(text or "").strip().lower().replace("ё", "е")
-        return s in {"ладно потом", "потом", "позже", "давай потом", "отложи пока"}
+        from modules.comms_owner_everyday_lane import is_postpone_prompt
+
+        return is_postpone_prompt(text)
 
     @staticmethod
     def _is_nevermind_prompt(text: str) -> bool:
-        s = str(text or "").strip().lower().replace("ё", "е")
-        return s in {"не надо", "не нужно", "отмена", "забей", "отбой"}
+        from modules.comms_owner_everyday_lane import is_nevermind_prompt
+
+        return is_nevermind_prompt(text)
 
     def _render_owner_brief_status(self) -> str:
-        running = False
-        if self._decision_loop:
-            try:
-                st = self._decision_loop.get_status() or {}
-                running = bool(st.get("running", False))
-            except Exception:
-                pass
-        active_text = ""
-        if self._owner_task_state:
-            try:
-                active = self._owner_task_state.get_active() or {}
-                active_text = str(active.get("text") or "").strip()
-            except Exception:
-                pass
-        pending_approvals = len(getattr(self, "_pending_approvals", {}) or {})
-        queued = 0
-        if self._goal_engine:
-            try:
-                goals = self._goal_engine.get_all_goals(status=None) or []
-                queued = sum(
-                    1
-                    for g in goals
-                    if str(getattr(getattr(g, "status", None), "value", "") or "")
-                    not in {"completed", "failed", "cancelled"}
-                )
-            except Exception:
-                pass
-        lines = []
-        if active_text:
-            lines.append(f"Сейчас в работе: {active_text[:200]}")
-        else:
-            lines.append("Сейчас активной задачи от тебя не зафиксировано.")
-        lines.append(f"Decision Loop: {'работает' if running else 'на паузе'}.")
-        if pending_approvals:
-            lines.append(f"Ожидают подтверждения: {pending_approvals}.")
-        if queued:
-            lines.append(
-                f"В системной очереди еще {queued}. Если это старые хвосты, напиши: «отмени все задачи»."
-            )
-        return "\n".join(lines)
+        return _render_owner_brief_status_impl(self)
 
     def _cancel_all_owner_work(self, reason: str = "owner_cancelled") -> int:
-        if self._cancel_state:
-            try:
-                self._cancel_state.cancel(reason=reason)
-            except Exception:
-                pass
-        cancelled_goals = self._cancel_goal_queue(reason=reason)
-        if self._owner_task_state:
-            try:
-                self._owner_task_state.cancel(note=reason)
-            except Exception:
-                pass
-        self._pending_approvals.clear()
-        self._pending_schedule_update = None
-        self._pending_owner_confirmation = None
-        self._pending_choice_context = None
-        self._pending_system_action = None
-        if self._decision_loop:
-            try:
-                self._decision_loop.stop()
-            except Exception:
-                pass
-        return int(cancelled_goals or 0)
+        return _cancel_all_owner_work_impl(self, reason=reason)
 
     async def _maybe_handle_owner_service_commands(self, text: str) -> bool:
         service_status = self._detect_contextual_service_status_request(text)
@@ -4291,138 +3939,7 @@ class CommsAgent:
         logger.info("Команда /earnings выполнена", extra={"event": "cmd_earnings"})
 
     async def _cmd_deep(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Глубокий анализ ниши: /deep <тема>."""
-        if await self._reject_stranger(update):
-            return
-        text = update.message.text.removeprefix("/deep").strip()
-        if not text:
-            await update.message.reply_text("Использование: /deep <тема для анализа>", reply_markup=self._main_keyboard())
-            return
-        if not self._judge_protocol:
-            await update.message.reply_text("JudgeProtocol не подключён.", reply_markup=self._main_keyboard())
-            return
-        # /deep brainstorm <тема> — полный brainstorm с ролями
-        # /deep <тема> — быстрая оценка ниши
-        if text.lower().startswith("brainstorm "):
-            topic = text[len("brainstorm "):].strip()
-            await update.message.reply_text(
-                f"Запускаю brainstorm: {topic}\n"
-                f"(Sonnet → Perplexity → GPT-5 → Opus → Perplexity → Opus, ~$0.50-0.80)",
-                reply_markup=self._main_keyboard(),
-            )
-            try:
-                result = await self._judge_protocol.brainstorm(topic)
-                formatted = self._judge_protocol.format_brainstorm_for_telegram(result)
-                # Split if too long for Telegram
-                if len(formatted) > 4000:
-                    parts = [formatted[i:i+4000] for i in range(0, len(formatted), 4000)]
-                    for part in parts:
-                        await update.message.reply_text(part, reply_markup=self._main_keyboard())
-                else:
-                    await update.message.reply_text(formatted, reply_markup=self._main_keyboard())
-            except Exception as e:
-                await update.message.reply_text(f"Ошибка brainstorm: {e}", reply_markup=self._main_keyboard())
-        else:
-            await update.message.reply_text(f"Анализирую нишу: {text}...", reply_markup=self._main_keyboard())
-            try:
-                verdict = await self._judge_protocol.evaluate_niche(text)
-                blocks: list[str] = [self._judge_protocol.format_verdict_for_telegram(verdict)]
-                # Attach richer research report if research agent is available.
-                if self._agent_registry:
-                    try:
-                        deep_result = await self._agent_registry.dispatch(
-                            "research",
-                            step=text,
-                            goal_title=f"Deep research: {text[:80]}",
-                            content=text,
-                        )
-                        if deep_result and deep_result.success and deep_result.output:
-                            meta = getattr(deep_result, "metadata", {}) or {}
-                            top_ideas = list(meta.get("top_ideas") or [])
-                            recommended_product = meta.get("recommended_product") if isinstance(meta.get("recommended_product"), dict) else {}
-                            if self._owner_task_state:
-                                try:
-                                    self._owner_task_state.enrich_active(
-                                        research_topic=text[:200],
-                                        research_report_path=str(meta.get("report_path") or "")[:500],
-                                        research_options_json=json.dumps(top_ideas, ensure_ascii=False),
-                                        research_recommended_json=json.dumps(recommended_product, ensure_ascii=False),
-                                        selected_research_title=str((recommended_product or {}).get("title") or "")[:180],
-                                    )
-                                except Exception:
-                                    pass
-                            report = str(deep_result.output).strip()
-                            if report:
-                                blocks.append("Детальное исследование:\n" + report)
-                            if top_ideas:
-                                option_lines = []
-                                for item in top_ideas[:5]:
-                                    option_lines.append(
-                                        f"{int(item.get('rank', len(option_lines) + 1) or len(option_lines) + 1)}. "
-                                        f"{str(item.get('title') or 'Idea').strip()} — "
-                                        f"{int(item.get('score', 0) or 0)}/100 "
-                                        f"[{str(item.get('platform') or 'gumroad').strip()}]"
-                                    )
-                                blocks.append("Выбор для запуска:\n" + "\n".join(option_lines))
-                    except Exception as e:
-                        blocks.append(f"Доп. исследование недоступно: {e}")
-                formatted = "\n\n".join(blocks)
-                if len(formatted) > 4000:
-                    parts = [formatted[i:i+4000] for i in range(0, len(formatted), 4000)]
-                    for part in parts:
-                        await update.message.reply_text(part, reply_markup=self._main_keyboard())
-                else:
-                    await update.message.reply_text(formatted, reply_markup=self._main_keyboard())
-                # Final single-owner verdict for deep research quality.
-                try:
-                    if self._agent_registry:
-                        q = await self._agent_registry.dispatch(
-                            "quality_review",
-                            content=formatted[:6000],
-                            content_type="deep_research_report",
-                        )
-                        if q and q.success and isinstance(getattr(q, "output", None), dict):
-                            qout = q.output
-                            q_msg = (
-                                f"Финальный вердикт качества: "
-                                f"{'OK' if bool(qout.get('approved', False)) else 'ПЕРЕДЕЛАТЬ'} "
-                                f"(score={int(qout.get('score', 0) or 0)})."
-                            )
-                            await update.message.reply_text(q_msg, reply_markup=self._main_keyboard())
-                except Exception:
-                    pass
-                if self._conversation_engine:
-                    ideas: list[dict[str, Any]] = []
-                    recommended_item: dict[str, Any] | None = None
-                    if self._owner_task_state:
-                        try:
-                            active = self._owner_task_state.get_active() or {}
-                            raw = str(active.get("research_options_json") or "").strip()
-                            if raw:
-                                parsed = json.loads(raw)
-                                if isinstance(parsed, list):
-                                    ideas = [dict(item) for item in parsed[:5] if isinstance(item, dict)]
-                            rec_raw = str(active.get("research_recommended_json") or "").strip()
-                            if rec_raw:
-                                rec_val = json.loads(rec_raw)
-                                if isinstance(rec_val, dict):
-                                    recommended_item = dict(rec_val)
-                        except Exception:
-                            ideas = []
-                            recommended_item = None
-                    self._prime_research_pending_actions(
-                        topic=text,
-                        ideas=ideas,
-                        recommended=recommended_item,
-                        origin_text=f"deep:{text}",
-                    )
-                    await update.message.reply_text(
-                        "Если ок — напиши «да» для рекомендованного варианта или просто номер варианта для точного запуска.",
-                        reply_markup=self._main_keyboard(),
-                    )
-            except Exception as e:
-                await update.message.reply_text(f"Ошибка анализа: {e}", reply_markup=self._main_keyboard())
-        logger.info(f"Команда /deep выполнена: {text[:50]}", extra={"event": "cmd_deep"})
+        return await _cmd_deep_impl(self, update, context)
 
     async def _cmd_kdp_login(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Запуск browser-auth для Amazon KDP; при MFA ждёт код в следующем сообщении."""
@@ -4456,352 +3973,22 @@ class CommsAgent:
         return ""
 
     async def _cmd_auth(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Управление входом по платформам.
-
-        Usage:
-          /auth <service> status
-          /auth <service> refresh
-          /auth <service> verify
-          /auth etsy remote
-        """
-        if await self._reject_stranger(update):
-            return
-        args = list(getattr(context, "args", None) or [])
-        if len(args) < 2:
-            await update.message.reply_text(
-                "Использование: /auth <service> <status|refresh|verify>\n"
-                "Пример: /auth etsy refresh",
-                reply_markup=self._main_keyboard(),
-            )
-            return
-        service = self._resolve_service_key(args[0])
-        action = str(args[1] or "").strip().lower()
-        if not service:
-            await update.message.reply_text(
-                "Неизвестный сервис. Примеры: etsy, amazon_kdp, gumroad, printful, twitter, kofi, reddit.",
-                reply_markup=self._main_keyboard(),
-            )
-            return
-
-        async def _reply(msg: str, markup=None) -> None:
-            kwargs = {"reply_markup": markup} if markup is not None else {"reply_markup": self._main_keyboard()}
-            await update.message.reply_text(msg, **kwargs)
-
-        if action == "status":
-            await _reply(await self._format_service_auth_status_live(service))
-            return
-        if action == "refresh":
-            if service == "amazon_kdp":
-                await self._handle_kdp_login_flow("зайди на amazon kdp", _reply, with_button=True)
-                return
-            started = await self._start_service_auth_flow(service, _reply, with_button=True)
-            if not started:
-                title, _ = self._service_auth_meta(service)
-                await _reply(f"Не удалось запустить flow входа для {title}.")
-            return
-        if action == "verify":
-            ok, detail = await self._verify_service_auth(service)
-            title, _ = self._service_auth_meta(service)
-            if ok:
-                self._mark_service_auth_confirmed(service)
-                await _reply(f"Вход подтверждён: {title}.")
-            else:
-                self._clear_service_auth_confirmed(service)
-                await _reply(self._service_needs_session_refresh_text(service, title, detail))
-            return
-
-        if action == "remote":
-            if service not in {"etsy", "amazon_kdp", "kofi", "printful"}:
-                await update.message.reply_text(
-                    "Remote browser-сессия сейчас поддержана для Etsy/Amazon KDP/Ko-fi/Printful.",
-                    reply_markup=self._main_keyboard(),
-                )
-                return
-            rc, out = await self._run_remote_auth_session(service, "start")
-            if rc != 0:
-                await update.message.reply_text(
-                    f"Не удалось запустить remote session для {service}.\n{out[:800]}",
-                    reply_markup=self._main_keyboard(),
-                )
-                return
-            await update.message.reply_text(
-                "Etsy remote-сессия запущена.\n"
-                f"{out[:1200]}\n"
-                "Открой REMOTE_URL, введи VNC_PASSWORD, пройди вход Etsy в окне браузера, "
-                "потом нажми «Я вошел» в Telegram.",
-                reply_markup=self._main_keyboard(),
-            )
-            return
-
-        await update.message.reply_text(
-            "Неизвестное действие. Используй: status, refresh, verify или remote (для Etsy).",
-            reply_markup=self._main_keyboard(),
-        )
+        return await _cmd_auth_impl(self, update, context)
 
     async def _cmd_auth_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Показать Auth Broker статусы по сервисам (status/method/ttl)."""
-        if await self._reject_stranger(update):
-            return
-        services = sorted(self._SERVICE_CATALOG.keys())
-        lines = ["Auth Broker:"]
-        for svc in services:
-            node = self._auth_broker.get(svc)
-            status = str(node.get("status", "unknown"))
-            method = str(node.get("method", "-"))
-            valid = "yes" if bool(node.get("is_valid")) else "no"
-            exp = str(node.get("expires_at", ""))[:19] if node.get("expires_at") else "-"
-            lines.append(f"- {svc}: {status} via {method}, valid={valid}, exp={exp}")
-        await update.message.reply_text("\n".join(lines[:80]), reply_markup=self._main_keyboard())
+        return await _cmd_auth_status_impl(self, update, context)
 
     async def _cmd_auth_cookie(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Import cookie JSON into storage_state and verify auth.
-
-        Usage:
-          /auth_cookie <service> <cookies_json_path> [verify]
-        """
-        if await self._reject_stranger(update):
-            return
-        args = list(getattr(context, "args", None) or [])
-        if len(args) < 2:
-            await update.message.reply_text(
-                "Использование: /auth_cookie <service> <cookies_json_path> [verify]\n"
-                "Пример: /auth_cookie etsy input/owner_inbox/etsy.cookies.json verify",
-                reply_markup=self._main_keyboard(),
-            )
-            return
-        service = self._resolve_service_key(args[0])
-        if not service:
-            await update.message.reply_text("Неизвестный сервис.", reply_markup=self._main_keyboard())
-            return
-        cookies_path = str(args[1] or "").strip()
-        verify = any(str(a).strip().lower() in {"verify", "check", "1", "true"} for a in args[2:])
-        if not cookies_path:
-            await update.message.reply_text("Не указан путь к cookies JSON.", reply_markup=self._main_keyboard())
-            return
-        cookie_file = Path(cookies_path)
-        if not cookie_file.is_absolute():
-            cookie_file = PROJECT_ROOT / cookie_file
-        if not cookie_file.exists():
-            await update.message.reply_text(f"Файл не найден: {cookie_file}", reply_markup=self._main_keyboard())
-            return
-
-        cmd = [
-            "python3",
-            "scripts/browser_session_import.py",
-            "--service",
-            service,
-            "--cookies-file",
-            str(cookie_file),
-        ]
-        if verify:
-            cmd.append("--verify")
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=str(PROJECT_ROOT),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        out_b, _ = await proc.communicate()
-        output = (out_b or b"").decode("utf-8", errors="ignore").strip()
-        if int(proc.returncode or 0) == 0:
-            try:
-                self._auth_broker.mark_authenticated(
-                    service,
-                    method="cookie_import",
-                    detail="auth_cookie_import_ok",
-                    ttl_sec=int(getattr(settings, "AUTH_SESSION_TTL_SEC", 10800) or 10800),
-                )
-            except Exception:
-                pass
-            self._mark_service_auth_confirmed(service)
-            await update.message.reply_text(
-                f"Cookie-импорт выполнен: {service}.\n{output[:1200]}",
-                reply_markup=self._main_keyboard(),
-            )
-            return
-
-        self._auth_broker.mark_failed(service, detail=f"auth_cookie_import_failed_rc={int(proc.returncode or 0)}")
-        await update.message.reply_text(
-            f"Cookie-импорт не удался: {service}\n{output[:1200]}",
-            reply_markup=self._main_keyboard(),
-        )
+        return await _cmd_auth_cookie_impl(self, update, context)
 
     async def _cmd_brainstorm(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Мультимодельный брейншторм: /brainstorm <тема>."""
-        if await self._reject_stranger(update):
-            return
-        if not self._judge_protocol:
-            await update.message.reply_text("JudgeProtocol не подключён.", reply_markup=self._main_keyboard())
-            return
-        text = update.message.text.removeprefix("/brainstorm").strip()
-        if not text:
-            await update.message.reply_text("Использование: /brainstorm <тема>", reply_markup=self._main_keyboard())
-            return
-        await update.message.reply_text(
-            f"Запускаю brainstorm: {text}\n"
-            f"(Sonnet → Perplexity → GPT-5 → Opus → Perplexity → Opus, ~$0.50-0.80)",
-            reply_markup=self._main_keyboard(),
-        )
-        try:
-            result = await self._judge_protocol.brainstorm(text)
-            formatted = self._judge_protocol.format_brainstorm_for_telegram(result)
-            if len(formatted) > 4000:
-                parts = [formatted[i:i+4000] for i in range(0, len(formatted), 4000)]
-                for part in parts:
-                    await update.message.reply_text(part, reply_markup=self._main_keyboard())
-            else:
-                await update.message.reply_text(formatted, reply_markup=self._main_keyboard())
-        except Exception as e:
-            await update.message.reply_text(f"Ошибка brainstorm: {e}", reply_markup=self._main_keyboard())
-        logger.info(f"Команда /brainstorm выполнена: {text[:50]}", extra={"event": "cmd_brainstorm"})
+        return await _cmd_brainstorm_impl(self, update, context)
 
     async def _maybe_brainstorm_from_text(self, update: Update, text: str) -> bool:
-        """Detect brainstorm/weekly planning intent from plain text and run it."""
-        if not self._judge_protocol:
-            return False
-        if not text:
-            return False
-
-        lower = text.lower()
-        trigger_words = ["брейншторм", "brainstorm", "мозговой штурм"]
-        plan_words = ["план", "планирование", "стратег", "strategy", "roadmap", "расписание"]
-        time_words = ["недел", "week", "weekly", "месяц", "month", "monthly", "квартал", "quarter", "год", "year"]
-
-        wants_brainstorm = any(w in lower for w in trigger_words)
-        wants_week_plan = any(p in lower for p in plan_words) and any(t in lower for t in time_words)
-
-        if not wants_brainstorm and not wants_week_plan:
-            return False
-
-        # Weekly planning request (natural text)
-        if wants_week_plan and self._weekly_planner:
-            await update.message.reply_text(
-                "Запускаю недельное планирование и стратегический брейншторм.",
-                reply_markup=self._main_keyboard(),
-            )
-            try:
-                await self._weekly_planner()
-            except Exception as e:
-                await update.message.reply_text(f"Ошибка недельного планирования: {e}", reply_markup=self._main_keyboard())
-            return True
-
-        # Brainstorm request
-        topic = text.strip()
-        if len(topic) > 800:
-            topic = topic[:800] + "…"
-
-        await update.message.reply_text(
-            f"Запускаю brainstorm: {topic}\n"
-            f"(Sonnet → Perplexity → GPT-5 → Opus → Perplexity → Opus, ~$0.50-0.80)",
-            reply_markup=self._main_keyboard(),
-        )
-        try:
-            result = await self._judge_protocol.brainstorm(topic)
-            formatted = self._judge_protocol.format_brainstorm_for_telegram(result)
-            if len(formatted) > 4000:
-                parts = [formatted[i:i+4000] for i in range(0, len(formatted), 4000)]
-                for part in parts:
-                    await update.message.reply_text(part, reply_markup=self._main_keyboard())
-            else:
-                await update.message.reply_text(formatted, reply_markup=self._main_keyboard())
-        except Exception as e:
-            await update.message.reply_text(f"Ошибка brainstorm: {e}", reply_markup=self._main_keyboard())
-        return True
+        return await _maybe_brainstorm_from_text_impl(self, update, text)
 
     async def _maybe_schedule_from_text(self, update: Update, text: str) -> bool:
-        """Detect scheduling intent from plain text and create a scheduled task."""
-        if not self._schedule_manager:
-            return False
-        if not text:
-            return False
-
-        from modules.schedule_parser import parse_schedule
-        result = parse_schedule(text)
-        if not result.ok:
-            if result.needs_clarification:
-                await update.message.reply_text(result.clarification or "Уточни дату/время.", reply_markup=self._main_keyboard())
-                return True
-            return False
-
-        lower = text.lower()
-        is_update = any(w in lower for w in ("перенеси", "перенести", "сдвинь", "измени", "изменить", "update", "reschedule", "move"))
-        is_delete = any(w in lower for w in ("отмени", "удали", "удалить", "cancel", "remove"))
-
-        # Try to find similar existing tasks
-        similar = self._schedule_manager.find_similar(text, action=result.action)
-
-        if is_delete and similar:
-            # Delete the most similar (or ask if ambiguous)
-            if len(similar) > 1:
-                options = "\n".join([f"{i+1}. #{t.id} — {t.title}" for i, t in enumerate(similar)])
-                self._pending_schedule_update = {"choices": similar, "new_schedule": None, "mode": "delete"}
-                await update.message.reply_text(
-                    "Уточни, какое расписание удалить:\n" + options,
-                    reply_markup=self._main_keyboard(),
-                )
-                return True
-            self._schedule_manager.delete_task(similar[0].id)
-            await update.message.reply_text(
-                f"Готово. Расписание #{similar[0].id} удалено.",
-                reply_markup=self._main_keyboard(),
-            )
-            return True
-
-        if is_update and similar:
-            if len(similar) > 1:
-                options = "\n".join([f"{i+1}. #{t.id} — {t.title}" for i, t in enumerate(similar)])
-                self._pending_schedule_update = {"choices": similar, "new_schedule": result, "mode": "update"}
-                await update.message.reply_text(
-                    "Уточни, какое расписание обновить:\n" + options,
-                    reply_markup=self._main_keyboard(),
-                )
-                return True
-            self._schedule_manager.update_task(
-                similar[0].id,
-                schedule_type=result.schedule_type,
-                time_of_day=result.time_of_day,
-                weekday=result.weekday,
-                run_at=result.run_at,
-            )
-            await update.message.reply_text(
-                f"Готово. Расписание #{similar[0].id} обновлено.",
-                reply_markup=self._main_keyboard(),
-            )
-            return True
-
-        # If similar exists but no update intent, ask clarification
-        if similar:
-            options = "\n".join([f"{i+1}. #{t.id} — {t.title}" for i, t in enumerate(similar)])
-            self._pending_schedule_update = {"choices": similar, "new_schedule": result, "mode": "update"}
-            await update.message.reply_text(
-                "Похоже, такое расписание уже есть. Обновить его?\n"
-                "Ответь номером:\n" + options,
-                reply_markup=self._main_keyboard(),
-            )
-            return True
-
-        task_id = self._schedule_manager.add_task(
-            title=result.title or text[:120],
-            action=result.action or "reminder",
-            schedule_type=result.schedule_type or "once",
-            time_of_day=result.time_of_day,
-            weekday=result.weekday,
-            run_at=result.run_at,
-        )
-
-        when = ""
-        if result.schedule_type == "daily":
-            when = f"ежедневно в {result.time_of_day}"
-        elif result.schedule_type == "weekly":
-            when = f"еженедельно в {result.time_of_day}"
-        elif result.schedule_type == "once":
-            when = f"{result.run_at}"
-
-        await update.message.reply_text(
-            f"Готово. Поставил задачу #{task_id}: {when}.",
-            reply_markup=self._main_keyboard(),
-        )
-        return True
+        return await _maybe_schedule_from_text_impl(self, update, text)
 
     async def _cmd_healer(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Статистика самолечения."""
@@ -4930,106 +4117,10 @@ class CommsAgent:
         return self._notification_router.should_send(text, level)
 
     def _try_set_preference_from_text(self, text: str) -> bool:
-        """Parse explicit preference commands and store in OwnerPreferenceModel.
-
-        Supported:
-        - /pref key=value
-        - pref key = value
-        - preference: key=value
-        - предпочтение: key=value
-        - remember: key=value
-        """
-        raw = (text or "").strip()
-        if not raw:
-            return False
-        lower = raw.lower()
-        if not (
-            lower.startswith("/pref")
-            or lower.startswith("pref ")
-            or lower.startswith("pref:")
-            or lower.startswith("preference:")
-            or lower.startswith("предпочтение:")
-            or lower.startswith("remember:")
-        ):
-            return False
-
-        payload = raw
-        for prefix in ("/pref", "pref:", "pref ", "preference:", "предпочтение:", "remember:"):
-            if lower.startswith(prefix):
-                payload = raw[len(prefix):].strip()
-                break
-        if "=" not in payload:
-            return False
-        key, value = payload.split("=", 1)
-        key = key.strip()
-        if not key:
-            return False
-        value = value.strip()
-        if not value:
-            return False
-
-        parsed_value = _parse_pref_value(value)
-        try:
-            OwnerPreferenceModel().set_preference(
-                key=key,
-                value=parsed_value,
-                source="owner",
-                confidence=1.0,
-                notes="explicit owner preference",
-            )
-            try:
-                DataLake().record(
-                    agent="comms_agent",
-                    task_type="owner_preference_set",
-                    status="success",
-                    output={"key": key, "value": parsed_value},
-                    source="owner",
-                )
-            except Exception:
-                pass
-            return True
-        except Exception:
-            return False
+        return _try_set_preference_from_text_impl(text)
 
     def _try_deactivate_preference_from_text(self, text: str) -> bool:
-        """Parse preference removal commands.
-
-        Supported:
-        - /pref_del key
-        - /pref_remove key
-        - forget key
-        - забыть key
-        """
-        raw = (text or "").strip()
-        if not raw:
-            return False
-        lower = raw.lower()
-        prefixes = ("/pref_del", "/pref_remove", "forget ", "забыть ")
-        if not any(lower.startswith(p) for p in prefixes):
-            return False
-        for p in prefixes:
-            if lower.startswith(p):
-                key = raw[len(p):].strip()
-                break
-        else:
-            key = ""
-        if not key:
-            return False
-        try:
-            OwnerPreferenceModel().deactivate_preference(key, notes="owner_request")
-            try:
-                DataLake().record(
-                    agent="comms_agent",
-                    task_type="owner_preference_deactivate",
-                    status="success",
-                    output={"key": key},
-                    source="owner",
-                )
-            except Exception:
-                pass
-            return True
-        except Exception:
-            return False
+        return _try_deactivate_preference_from_text_impl(text)
 
     def _guard_outgoing(self, text: str) -> str:
         return self._notification_router.guard_outgoing(text)
@@ -5173,22 +4264,4 @@ class CommsAgent:
 
 
 def _parse_pref_value(raw: str):
-    raw = raw.strip()
-    if not raw:
-        return ""
-    if (raw.startswith("{") and raw.endswith("}")) or (raw.startswith("[") and raw.endswith("]")):
-        try:
-            return json.loads(raw)
-        except Exception:
-            return raw
-    low = raw.lower()
-    if low in ("true", "yes", "да", "on"):
-        return True
-    if low in ("false", "no", "нет", "off"):
-        return False
-    try:
-        if "." in raw:
-            return float(raw)
-        return int(raw)
-    except Exception:
-        return raw
+    return _parse_pref_value_impl(raw)
