@@ -110,12 +110,28 @@ from modules.comms_auth_command_lane import (
     cmd_auth_cookie as _cmd_auth_cookie_impl,
     cmd_auth_status as _cmd_auth_status_impl,
 )
+from modules.comms_goal_skill_lane import (
+    cmd_agents as _cmd_agents_impl,
+    cmd_fix as _cmd_fix_impl,
+    cmd_goal as _cmd_goal_impl,
+    cmd_goals as _cmd_goals_impl,
+    cmd_goals_all as _cmd_goals_all_impl,
+    cmd_playbooks as _cmd_playbooks_impl,
+    cmd_skill_eval as _cmd_skill_eval_impl,
+    cmd_skill_matrix_v2 as _cmd_skill_matrix_v2_impl,
+    cmd_skills as _cmd_skills_impl,
+    cmd_skills_audit as _cmd_skills_audit_impl,
+    cmd_skills_fix as _cmd_skills_fix_impl,
+    cmd_skills_pending as _cmd_skills_pending_impl,
+)
 from modules.comms_approval_lane import (
     pending_approvals_count as _pending_approvals_count_impl,
     pending_approvals_list as _pending_approvals_list_impl,
     request_approval as _request_approval_impl,
     request_approval_with_files as _request_approval_with_files_impl,
 )
+from modules.comms_attachment_lane import on_attachment as _on_attachment_impl
+from modules.comms_startup_lane import start as _start_impl
 from modules.comms_planning_lane import (
     cmd_brainstorm as _cmd_brainstorm_impl,
     cmd_deep as _cmd_deep_impl,
@@ -1605,136 +1621,7 @@ class CommsAgent:
     # ── Запуск / Остановка ──
 
     async def start(self) -> None:
-        """Запускает Telegram polling."""
-        if not settings.TELEGRAM_BOT_TOKEN:
-            logger.warning("TELEGRAM_BOT_TOKEN не задан — бот не запущен", extra={"event": "no_token"})
-            return
-
-        self._app = (
-            Application.builder()
-            .token(settings.TELEGRAM_BOT_TOKEN)
-            .build()
-        )
-        self._bot = self._app.bot
-
-        self._app.add_handler(CommandHandler("start", self._cmd_start))
-        self._app.add_handler(CommandHandler("help", self._cmd_help))
-        self._app.add_handler(CommandHandler("help_daily", self._cmd_help_daily))
-        self._app.add_handler(CommandHandler("help_rare", self._cmd_help_rare))
-        self._app.add_handler(CommandHandler("help_system", self._cmd_help_system))
-        self._app.add_handler(CommandHandler("main", self._cmd_start))
-        self._app.add_handler(CommandHandler("status", self._cmd_status))
-        self._app.add_handler(CommandHandler("goals", self._cmd_goals))
-        self._app.add_handler(CommandHandler("spend", self._cmd_spend))
-        self._app.add_handler(CommandHandler("approve", self._cmd_approve))
-        self._app.add_handler(CommandHandler("reject", self._cmd_reject))
-        self._app.add_handler(CommandHandler("goal", self._cmd_goal))
-        self._app.add_handler(CommandHandler("agents", self._cmd_agents))
-        self._app.add_handler(CommandHandler("skill_matrix_v2", self._cmd_skill_matrix_v2))
-        self._app.add_handler(CommandHandler("skill_eval", self._cmd_skill_eval))
-        # New v0.3.0 commands
-        self._app.add_handler(CommandHandler("report", self._cmd_report))
-        self._app.add_handler(CommandHandler("stop", self._cmd_stop))
-        self._app.add_handler(CommandHandler("cancel", self._cmd_cancel))
-        self._app.add_handler(CommandHandler("resume", self._cmd_resume))
-        self._app.add_handler(CommandHandler("budget", self._cmd_budget))
-        self._app.add_handler(CommandHandler("tasks", self._cmd_tasks))
-        self._app.add_handler(CommandHandler("trends", self._cmd_trends))
-        self._app.add_handler(CommandHandler("earnings", self._cmd_earnings))
-        self._app.add_handler(CommandHandler("deep", self._cmd_deep))
-        self._app.add_handler(CommandHandler("brainstorm", self._cmd_brainstorm))
-        self._app.add_handler(CommandHandler("healer", self._cmd_healer))
-        self._app.add_handler(CommandHandler("logs", self._cmd_logs))
-        self._app.add_handler(CommandHandler("backup", self._cmd_backup))
-        self._app.add_handler(CommandHandler("rollback", self._cmd_rollback))
-        self._app.add_handler(CommandHandler("health", self._cmd_health))
-        self._app.add_handler(CommandHandler("errors", self._cmd_errors))
-        self._app.add_handler(CommandHandler("balances", self._cmd_balances))
-        self._app.add_handler(CommandHandler("goals_all", self._cmd_goals_all))
-        self._app.add_handler(CommandHandler("fix", self._cmd_fix))
-        self._app.add_handler(CommandHandler("skills", self._cmd_skills))
-        self._app.add_handler(CommandHandler("skills_pending", self._cmd_skills_pending))
-        self._app.add_handler(CommandHandler("skills_audit", self._cmd_skills_audit))
-        self._app.add_handler(CommandHandler("skills_fix", self._cmd_skills_fix))
-        self._app.add_handler(CommandHandler("playbooks", self._cmd_playbooks))
-        self._app.add_handler(CommandHandler("recipes", self._cmd_recipes))
-        self._app.add_handler(CommandHandler("recipe_run", self._cmd_recipe_run))
-        self._app.add_handler(CommandHandler("workflow", self._cmd_workflow))
-        self._app.add_handler(CommandHandler("handoffs", self._cmd_handoffs))
-        self._app.add_handler(CommandHandler("prefs", self._cmd_prefs))
-        self._app.add_handler(CommandHandler("prefs_metrics", self._cmd_prefs_metrics))
-        self._app.add_handler(CommandHandler("packs", self._cmd_packs))
-        self._app.add_handler(CommandHandler("pubq", self._cmd_pubq))
-        self._app.add_handler(CommandHandler("pubrun", self._cmd_pubrun))
-        self._app.add_handler(CommandHandler("webop", self._cmd_webop))
-        self._app.add_handler(CommandHandler("task_current", self._cmd_task_current))
-        self._app.add_handler(CommandHandler("task_done", self._cmd_task_done))
-        self._app.add_handler(CommandHandler("task_cancel", self._cmd_task_cancel))
-        self._app.add_handler(CommandHandler("task_replace", self._cmd_task_replace))
-        self._app.add_handler(CommandHandler("clear_goals", self._cmd_clear_goals))
-        self._app.add_handler(CommandHandler("nettest", self._cmd_nettest))
-        self._app.add_handler(CommandHandler("smoke", self._cmd_smoke))
-        self._app.add_handler(CommandHandler("llm_mode", self._cmd_llm_mode))
-        self._app.add_handler(CommandHandler("kdp_login", self._cmd_kdp_login))
-        self._app.add_handler(CommandHandler("auth", self._cmd_auth))
-        self._app.add_handler(CommandHandler("auth_status", self._cmd_auth_status))
-        self._app.add_handler(CommandHandler("auth_cookie", self._cmd_auth_cookie))
-        self._app.add_handler(
-            MessageHandler(
-                filters.Document.ALL | filters.PHOTO | filters.VIDEO,
-                self._on_attachment,
-            )
-        )
-        self._app.add_handler(
-            MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_message)
-        )
-        self._app.add_handler(CallbackQueryHandler(self._handle_callback))
-        self._app.add_error_handler(self._on_app_error)
-
-        await self._app.initialize()
-        # Ensure webhook state does not interfere with polling mode.
-        try:
-            await self._bot.delete_webhook(drop_pending_updates=True)
-        except Exception:
-            pass
-
-        # Keep Telegram menu concise; full command catalog is available via /help.
-        command_catalog = [
-            BotCommand("help", "Справка по командам и сценариям"),
-            BotCommand("help_daily", "Ежедневные команды"),
-            BotCommand("help_rare", "Редкие команды"),
-            BotCommand("help_system", "Системные команды"),
-            BotCommand("status", "Статус системы"),
-            BotCommand("goals", "Активные цели"),
-            BotCommand("goal", "Создать цель"),
-            BotCommand("spend", "Расходы за сегодня"),
-            BotCommand("report", "Сводный отчёт"),
-            BotCommand("approve", "Одобрить ожидающий запрос"),
-            BotCommand("reject", "Отклонить ожидающий запрос"),
-            BotCommand("cancel", "Пауза текущих задач"),
-            BotCommand("resume", "Возобновить работу"),
-            BotCommand("task_current", "Текущая задача владельца"),
-            BotCommand("task_done", "Закрыть текущую задачу"),
-            BotCommand("balances", "Балансы сервисов"),
-            BotCommand("llm_mode", "Режим LLM: free/prod"),
-            BotCommand("kdp_login", "Вход в Amazon KDP"),
-            BotCommand("auth", "Вход: status/refresh/verify"),
-            BotCommand("health", "Проверка здоровья системы"),
-            BotCommand("logs", "Последние логи"),
-        ]
-        # Set commands in all relevant scopes to avoid stale Telegram menu cache.
-        await self._bot.set_my_commands(command_catalog, scope=BotCommandScopeDefault())
-        await self._bot.set_my_commands(command_catalog, scope=BotCommandScopeAllPrivateChats())
-        await self._bot.set_my_commands(command_catalog, scope=BotCommandScopeChat(chat_id=self._owner_id))
-
-        await self._app.start()
-        await self._app.updater.start_polling(drop_pending_updates=True)
-
-        logger.info("Telegram бот запущен", extra={"event": "bot_started"})
-        await self.send_message("VITO запущен и готов к работе.")
-        # Start file-based inbox poller (offline testing)
-        if settings.OWNER_INBOX_ENABLED:
-            asyncio.create_task(self._poll_owner_inbox())
+        await _start_impl(self)
 
     async def _on_app_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle Telegram runtime errors without crashing VITO."""
@@ -1765,127 +1652,7 @@ class CommsAgent:
         await _handle_owner_text_impl(self, text, source=source)
 
     async def _maybe_handle_owner_shortcuts(self, text: str) -> bool:
-        lower = str(text or "").lower()
-        strict_cmds = bool(getattr(settings, "TELEGRAM_STRICT_COMMANDS", True)) and not self._autonomy_max_enabled()
-        if self._is_what_do_you_need_prompt(text):
-            await self.send_message(
-                "Сейчас от тебя ничего не нужно. Если захочешь продолжить работу или поставить новую цель, напиши это одной фразой.",
-                level="result",
-            )
-            return True
-        if self._is_what_is_ready_prompt(text):
-            await self.send_message(
-                "Сейчас могу коротко показать только подтвержденные результаты и активные задачи. Для деталей скажи: «сводка» или «что по задачам».",
-                level="result",
-            )
-            return True
-        if self._is_what_should_i_do_prompt(text):
-            await self.send_message(
-                "Пока от тебя ничего не нужно. Если понадобится код, логин или подтверждение, я скажу это прямо.",
-                level="result",
-            )
-            return True
-        if self._is_do_not_publish_prompt(text):
-            await self.send_message(
-                "Ок. Публикацию не запускаю без отдельного явного указания.",
-                level="result",
-            )
-            return True
-        if self._is_remove_this_prompt(text):
-            await self.send_message(
-                "Уточни, что именно убрать: текущую задачу, публикацию, черновик или сообщение.",
-                level="result",
-            )
-            return True
-        if self._is_do_not_do_now_prompt(text):
-            await self.send_message(
-                "Ок. Сейчас не запускаю. Можем вернуться к этому позже или по новой команде.",
-                level="result",
-            )
-            return True
-        if self._is_not_understood_prompt(text):
-            await self.send_message(
-                "Уточни, что именно непонятно: задача, статус, платформа или следующий шаг.",
-                level="result",
-            )
-            return True
-        if self._is_why_stopped_prompt(text):
-            await self.send_message(
-                "Если я остановился, значит либо нет активной задачи, либо нужен явный следующий шаг, либо сработала пауза/блокер. Скажи: «что по задачам» или «продолжай».",
-                level="result",
-            )
-            return True
-        if self._is_do_not_touch_old_prompt(text):
-            await self.send_message(
-                "Правило зафиксировано: старые и опубликованные объекты не трогаются без явного указания и target id.",
-                level="result",
-            )
-            return True
-        if self._is_create_new_prompt(text):
-            await self.send_message(
-                "Уточни, что именно создать и на какой платформе: например «создай новый товар на etsy» или «создай новую книгу на amazon kdp».",
-                level="result",
-            )
-            return True
-        if self._is_postpone_prompt(text):
-            await self.send_message("Ок, отложил. Можем вернуться к этому позже.", level="result")
-            return True
-        if self._is_nevermind_prompt(text):
-            self._pending_system_action = None
-            self._pending_owner_confirmation = None
-            await self.send_message("Ок, отменил текущий запрос.", level="result")
-            return True
-        if self._is_resume_prompt(text):
-            if self._cancel_state:
-                try:
-                    self._cancel_state.clear()
-                except Exception:
-                    pass
-            if self._decision_loop and not self._decision_loop.running:
-                try:
-                    self._decision_loop.start()
-                except Exception:
-                    pass
-            await self.send_message("Продолжаю работу. Если нужна новая цель, напиши ее одной фразой.", level="result")
-            return True
-        if self._is_pause_prompt(text):
-            cancelled = self._cancel_all_owner_work(reason="owner_text_pause")
-            await self.send_message(
-                f"Остановил текущую работу. Снято задач из очереди: {cancelled}. Для продолжения напиши: «продолжай».",
-                level="result",
-            )
-            return True
-        if self._is_cancel_all_tasks_prompt(text):
-            cancelled = self._cancel_all_owner_work(reason="owner_text_cancel_all")
-            await self.send_message(
-                f"Все текущие задачи снял. Отменено из очереди: {cancelled}.",
-                level="result",
-            )
-            return True
-        if self._is_how_are_you_prompt(text):
-            await self.send_message(self._render_owner_brief_status(), level="result")
-            return True
-        if text.isdigit() and self._prime_research_pending_actions_from_owner_state(text):
-            idx = int(text)
-            picked = self._select_pending_research_option(idx)
-            if picked is not None:
-                title = str(picked.get("title") or "").strip()
-                score = int(picked.get("score", 0) or 0)
-                await self.send_message(
-                    f"Зафиксировал вариант {idx}: {title} ({score}/100). Если запускать сразу, напиши: «создавай» или укажи платформу.",
-                    level="result",
-                )
-                return True
-        if (not strict_cmds) and any(x in lower for x in ("llm_mode ", "режим llm", "режим lmm", "llm режим")):
-            mode = "status"
-            if any(x in lower for x in (" free", " тест", " gemini", " flash")):
-                mode = "free"
-            elif any(x in lower for x in (" prod", " боев", " production")):
-                mode = "prod"
-            ok, msg = self._apply_llm_mode(mode)
-            await self.send_message(msg if ok else "Используй: /llm_mode free|prod|status", level="result")
-            return True
-        return False
+        return await _maybe_handle_owner_shortcuts_impl(self, text)
 
     @staticmethod
     def _is_how_are_you_prompt(text: str) -> bool:
@@ -2364,50 +2131,10 @@ class CommsAgent:
         logger.info("Команда /status выполнена", extra={"event": "cmd_status"})
 
     async def _cmd_goals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if await self._reject_stranger(update):
-            return
-        if not self._goal_engine:
-            await update.message.reply_text("GoalEngine не подключён", reply_markup=self._main_keyboard())
-            return
-
-        try:
-            self._goal_engine.reload_goals()
-        except Exception:
-            pass
-        goals = self._goal_engine.get_all_goals()
-        if not goals:
-            await update.message.reply_text("Нет целей.", reply_markup=self._main_keyboard())
-            return
-
-        lines = []
-        for g in goals[:15]:
-            icon = {"completed": "done", "failed": "fail", "executing": ">>",
-                    "pending": "..", "waiting_approval": "??", "planning": "~~"}.get(
-                g.status.value, g.status.value
-            )
-            lines.append(f"[{icon}] {g.title} (${g.estimated_cost_usd:.2f})")
-
-        await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
-        logger.info("Команда /goals выполнена", extra={"event": "cmd_goals"})
+        await _cmd_goals_impl(self, update, context)
 
     async def _cmd_goals_all(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if await self._reject_stranger(update):
-            return
-        if not self._goal_engine:
-            await update.message.reply_text("GoalEngine не подключён", reply_markup=self._main_keyboard())
-            return
-        try:
-            self._goal_engine.reload_goals()
-        except Exception:
-            pass
-        goals = self._goal_engine.get_all_goals(status=None)
-        if not goals:
-            await update.message.reply_text("Целей нет.", reply_markup=self._main_keyboard())
-            return
-        lines = [f"Всего целей: {len(goals)}"]
-        for g in goals[:30]:
-            lines.append(f"[{g.status.value}] {g.title} (${g.estimated_cost_usd:.2f})")
-        await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
+        await _cmd_goals_all_impl(self, update, context)
 
     async def _cmd_spend(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self._reject_stranger(update):
@@ -2459,252 +2186,34 @@ class CommsAgent:
         )
 
     async def _cmd_goal(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Создание цели от владельца: /goal Заработать на Etsy шаблонах"""
-        if await self._reject_stranger(update):
-            return
-        if not self._goal_engine:
-            await update.message.reply_text("GoalEngine не подключён", reply_markup=self._main_keyboard())
-            return
-
-        text = update.message.text.removeprefix("/goal").strip()
-        if not text:
-            await update.message.reply_text("Использование: /goal <описание цели>", reply_markup=self._main_keyboard())
-            return
-
-        from goal_engine import GoalPriority
-
-        goal = self._goal_engine.create_goal(
-            title=text[:100],
-            description=text,
-            priority=GoalPriority.HIGH,
-            source="owner",
-        )
-        if self._owner_task_state:
-            try:
-                self._owner_task_state.set_active(text, source="telegram", intent="goal_request", force=False)
-            except Exception:
-                pass
-        await update.message.reply_text(
-            f"Цель создана: {goal.title}\nПриоритет: HIGH.",
-            reply_markup=self._main_keyboard(),
-        )
-        logger.info(
-            f"Цель от владельца: {goal.goal_id}",
-            extra={"event": "owner_goal", "context": {"goal_id": goal.goal_id, "title": text[:100]}},
-        )
+        await _cmd_goal_impl(self, update, context)
 
     async def _cmd_agents(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Список всех агентов со статусом."""
-        if await self._reject_stranger(update):
-            return
-        if not self._agent_registry:
-            await update.message.reply_text("AgentRegistry не подключён", reply_markup=self._main_keyboard())
-            return
-
-        statuses = self._agent_registry.get_all_statuses()
-        if not statuses:
-            await update.message.reply_text("Нет зарегистрированных агентов.", reply_markup=self._main_keyboard())
-            return
-
-        lines = [f"Агенты ({len(statuses)}):"]
-        for s in statuses:
-            icon = {"idle": "o", "running": ">>", "stopped": "x", "error": "!"}.get(s["status"], "?")
-            lines.append(f"[{icon}] {s['name']} — {s['status']} (done:{s.get('tasks_completed', 0)}, ${s.get('total_cost', 0):.2f})")
-
-        await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
-        logger.info("Команда /agents выполнена", extra={"event": "cmd_agents"})
+        await _cmd_agents_impl(self, update, context)
 
     async def _cmd_skill_matrix_v2(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Показать Skill Matrix v2 (service/helper/persona/recipe) по всем агентам."""
-        if await self._reject_stranger(update):
-            return
-        if not self._agent_registry:
-            await update.message.reply_text("AgentRegistry не подключён", reply_markup=self._main_keyboard())
-            return
-        try:
-            rows = self._agent_registry.get_skill_matrix_v2()
-        except Exception as e:
-            await update.message.reply_text(f"Ошибка Skill Matrix v2: {e}", reply_markup=self._main_keyboard())
-            return
-        if not rows:
-            await update.message.reply_text("Skill Matrix v2 пуст.", reply_markup=self._main_keyboard())
-            return
-        lines = [f"Skill Matrix v2: {len(rows)} агентов"]
-        for r in rows:
-            lines.append(
-                f"- {r.get('agent')}: kind={r.get('primary_kind')} "
-                f"svc={len(r.get('service', []))} helper={len(r.get('helper', []))} recipe={len(r.get('recipe', []))}"
-            )
-        await update.message.reply_text("\n".join(lines[:60]), reply_markup=self._main_keyboard())
+        await _cmd_skill_matrix_v2_impl(self, update, context)
 
     async def _cmd_skill_eval(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Run lightweight skill eval loop for trigger quality."""
-        if await self._reject_stranger(update):
-            return
-        args = list(getattr(context, "args", None) or [])
-        if len(args) < 2:
-            await update.message.reply_text(
-                "Использование: /skill_eval <candidate_desc> | <baseline_desc>",
-                reply_markup=self._main_keyboard(),
-            )
-            return
-        raw = " ".join(args)
-        if "|" not in raw:
-            await update.message.reply_text(
-                "Формат: /skill_eval candidate | baseline",
-                reply_markup=self._main_keyboard(),
-            )
-            return
-        candidate_desc, baseline_desc = [x.strip() for x in raw.split("|", 1)]
-        from modules.skill_eval_loop import EvalCase, run_skill_eval_loop
-        evals = [
-            EvalCase(id="1", prompt="проведи глубокое исследование ниши", should_trigger=True, required_terms=["исслед"], forbidden_terms=[]),
-            EvalCase(id="2", prompt="опубликуй листинг на gumroad", should_trigger=True, required_terms=["gumroad"], forbidden_terms=[]),
-            EvalCase(id="3", prompt="какая погода в берлине", should_trigger=False, required_terms=[], forbidden_terms=["погода"]),
-            EvalCase(id="4", prompt="просто поболтай со мной", should_trigger=False, required_terms=[], forbidden_terms=["поболтай"]),
-        ]
-        res = run_skill_eval_loop(candidate_desc, baseline_desc, evals, max_iters=3)
-        rate = float(res.get("best_pass_rate", 0.0))
-        iters = int(res.get("iterations", 0))
-        await update.message.reply_text(
-            f"Skill Eval: best_pass_rate={rate:.2f}, iterations={iters}",
-            reply_markup=self._main_keyboard(),
-        )
+        await _cmd_skill_eval_impl(self, update, context)
 
     async def _cmd_fix(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Запуск self-improve пайплайна (кодовые исправления/интеграции)."""
-        if await self._reject_stranger(update):
-            return
-        if not self._agent_registry:
-            await update.message.reply_text("AgentRegistry не подключён.", reply_markup=self._main_keyboard())
-            return
-        request = " ".join(context.args) if context.args else ""
-        if not request:
-            await update.message.reply_text(
-                "Использование: /fix <что нужно исправить или интегрировать>",
-                reply_markup=self._main_keyboard(),
-            )
-            return
-        await update.message.reply_text(
-            "Принято. Запускаю self-improve пайплайн (анализ → код → тесты).",
-            reply_markup=self._main_keyboard(),
-        )
-        try:
-            result = await self._agent_registry.dispatch("self_improve", step=request)
-            if result and result.success:
-                await update.message.reply_text("Self-improve завершён успешно.", reply_markup=self._main_keyboard())
-            else:
-                err = getattr(result, "error", "unknown")
-                await update.message.reply_text(f"Self-improve завершён с ошибкой: {err}", reply_markup=self._main_keyboard())
-        except Exception as e:
-            await update.message.reply_text(f"Ошибка self-improve: {e}", reply_markup=self._main_keyboard())
+        await _cmd_fix_impl(self, update, context)
 
     async def _cmd_skills(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Показать реестр навыков."""
-        if await self._reject_stranger(update):
-            return
-        if not self._skill_registry:
-            await update.message.reply_text("SkillRegistry не подключён.", reply_markup=self._main_keyboard())
-            return
-        skills = self._skill_registry.list_skills(limit=20)
-        if not skills:
-            await update.message.reply_text("Реестр навыков пуст.", reply_markup=self._main_keyboard())
-            return
-        lines = ["Навыки (последние 20):"]
-        for s in skills:
-            lines.append(
-                f"- {s['name']} | {s['status']} | accept:{s.get('acceptance_status','?')} | sec:{s['security']} | v{s['version']}"
-            )
-        await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
+        await _cmd_skills_impl(self, update, context)
 
     async def _cmd_skills_pending(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Показать навыки, ожидающие acceptance."""
-        if await self._reject_stranger(update):
-            return
-        if not self._skill_registry:
-            await update.message.reply_text("SkillRegistry не подключён.", reply_markup=self._main_keyboard())
-            return
-        rows = self._skill_registry.pending_skills(limit=30)
-        if not rows:
-            await update.message.reply_text("Нет pending навыков.", reply_markup=self._main_keyboard())
-            return
-        lines = ["Pending skills (до acceptance):"]
-        for r in rows:
-            lines.append(f"- {r.get('name')} | {r.get('category','')} | updated:{r.get('updated_at','')}")
-        await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
+        await _cmd_skills_pending_impl(self, update, context)
 
     async def _cmd_skills_audit(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Запустить аудит навыков и показать агрегированный риск-профиль."""
-        if await self._reject_stranger(update):
-            return
-        if not self._skill_registry:
-            await update.message.reply_text("SkillRegistry не подключён.", reply_markup=self._main_keyboard())
-            return
-        try:
-            audited = self._skill_registry.audit_coverage()
-            summary = self._skill_registry.audit_summary(limit=8)
-            lines = [
-                "Skill Audit",
-                f"Проверено: {audited}",
-                f"Всего: {summary.get('total', 0)}",
-                f"Stable: {summary.get('stable', 0)}",
-                f"Pending: {summary.get('pending', 0)}",
-                f"Rejected: {summary.get('rejected', 0)}",
-                f"High risk: {summary.get('high_risk', 0)}",
-            ]
-            risky = summary.get("top_risky", []) or []
-            if risky:
-                lines.append("Top risk:")
-                for row in risky[:5]:
-                    lines.append(
-                        f"- {row.get('name')} | risk:{float(row.get('risk_score', 0.0)):.2f} | "
-                        f"{row.get('compatibility')} | {row.get('acceptance_status')}"
-                    )
-            await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
-        except Exception as e:
-            await update.message.reply_text(f"Skill audit error: {e}", reply_markup=self._main_keyboard())
+        await _cmd_skills_audit_impl(self, update, context)
 
     async def _cmd_skills_fix(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Создать remediation-задачи для высокорисковых навыков."""
-        if await self._reject_stranger(update):
-            return
-        if not self._skill_registry:
-            await update.message.reply_text("SkillRegistry не подключён.", reply_markup=self._main_keyboard())
-            return
-        try:
-            result = self._skill_registry.remediate_high_risk(limit=50)
-            lines = [
-                "Skill Remediation",
-                f"Создано задач: {result.get('created', 0)}",
-                f"Открыто задач: {result.get('open_total', 0)}",
-            ]
-            for item in (result.get("items", []) or [])[:5]:
-                lines.append(
-                    f"- {item.get('skill_name')} | {item.get('reason')} | action: {item.get('action')}"
-                )
-            await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
-        except Exception as e:
-            await update.message.reply_text(f"Skill remediation error: {e}", reply_markup=self._main_keyboard())
+        await _cmd_skills_fix_impl(self, update, context)
 
     async def _cmd_playbooks(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Показать лучшие playbooks из verified run-ов."""
-        if await self._reject_stranger(update):
-            return
-        try:
-            from modules.playbook_registry import PlaybookRegistry
-            rows = PlaybookRegistry().top(limit=20)
-        except Exception:
-            rows = []
-        if not rows:
-            await update.message.reply_text("Реестр playbooks пуст.", reply_markup=self._main_keyboard())
-            return
-        lines = ["Playbooks (top 20):"]
-        for r in rows:
-            lines.append(
-                f"- {r.get('agent')}::{r.get('action')} "
-                f"(ok:{r.get('success_count',0)} fail:{r.get('fail_count',0)})"
-            )
-        await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
+        await _cmd_playbooks_impl(self, update, context)
 
     async def _cmd_recipes(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Показать workflow recipes по платформам."""
@@ -3109,113 +2618,7 @@ class CommsAgent:
         logger.info("LLM mode switched", extra={"event": "llm_mode_set", "context": {"mode": mode}})
 
     async def _on_attachment(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Приём файлов/фото/видео от владельца и запуск document_agent."""
-        if await self._reject_stranger(update):
-            return
-        if not update.message:
-            return
-        if not self._agent_registry:
-            await update.message.reply_text("AgentRegistry не подключён.", reply_markup=self._main_keyboard())
-            return
-
-        attachment_dir = PROJECT_ROOT / "input" / "attachments"
-        attachment_dir.mkdir(parents=True, exist_ok=True)
-
-        file_path = None
-        task_type = "document_parse"
-
-        try:
-            if update.message.document:
-                doc = update.message.document
-                tg_file = await doc.get_file()
-                safe_name = doc.file_name or f"document_{doc.file_unique_id}"
-                file_path = attachment_dir / safe_name
-                await tg_file.download_to_drive(custom_path=str(file_path))
-                task_type = "document_parse"
-            elif update.message.photo:
-                photo = update.message.photo[-1]
-                tg_file = await photo.get_file()
-                file_path = attachment_dir / f"photo_{photo.file_unique_id}.jpg"
-                await tg_file.download_to_drive(custom_path=str(file_path))
-                task_type = "image_ocr"
-            elif update.message.video:
-                video = update.message.video
-                tg_file = await video.get_file()
-                file_path = attachment_dir / f"video_{video.file_unique_id}.mp4"
-                await tg_file.download_to_drive(custom_path=str(file_path))
-                task_type = "video_extract"
-
-            if not file_path:
-                await update.message.reply_text("Не удалось определить тип вложения.", reply_markup=self._main_keyboard())
-                return
-
-            await update.message.reply_text(
-                f"Файл получен: {file_path.name}\nНачинаю анализ.",
-                reply_markup=self._main_keyboard(),
-            )
-
-            result = await self._agent_registry.dispatch(task_type, path=str(file_path))
-            if not result or not result.success:
-                err = getattr(result, "error", "Ошибка обработки")
-                await update.message.reply_text(f"Ошибка обработки: {err}", reply_markup=self._main_keyboard())
-                return
-
-            output = result.output or {}
-            extracted = ""
-            if isinstance(output, dict):
-                if "text" in output:
-                    extracted = output.get("text") or ""
-                elif "json" in output:
-                    extracted = json.dumps(output.get("json"), ensure_ascii=False)[:8000]
-                elif "rows" in output:
-                    extracted = "\n".join([", ".join(row) for row in output.get("rows", [])])
-            elif isinstance(output, str):
-                extracted = output
-
-            extracted = extracted.strip()
-            caption = (update.message.caption or "").strip()
-            if not extracted and caption:
-                extracted = caption
-            elif caption:
-                extracted = caption + "\n\n" + extracted
-            if not extracted:
-                await update.message.reply_text("Извлечённый текст пуст.", reply_markup=self._main_keyboard())
-                return
-            self._log_owner_request(extracted[:2000], source=f"attachment:{file_path.name}")
-
-            # Сохраним полный текст рядом
-            out_dir = PROJECT_ROOT / "output" / "attachments"
-            out_dir.mkdir(parents=True, exist_ok=True)
-            out_path = out_dir / f"{Path(file_path).stem}_extracted.txt"
-            out_path.write_text(extracted, encoding="utf-8", errors="ignore")
-
-            preview = extracted[:3000]
-            if len(extracted) > 3000:
-                preview += f"\n\n(Полный текст сохранён в {out_path.relative_to(PROJECT_ROOT)})"
-            await update.message.reply_text(preview, reply_markup=self._main_keyboard())
-
-            # Brainstorm from extracted text if applicable
-            if await self._maybe_brainstorm_from_text(update, extracted):
-                return
-
-            # If conversation_engine exists, pass extracted text for natural language handling
-            if self._conversation_engine:
-                try:
-                    if hasattr(self._conversation_engine, "set_session"):
-                        sid = str(update.effective_chat.id) if update and update.effective_chat else "telegram_owner"
-                        self._conversation_engine.set_session(sid)
-                    await self._conversation_engine.process_message(
-                        f"[Вложение:{file_path.name}]\n{extracted[:4000]}"
-                    )
-                except Exception:
-                    pass
-            logger.info(
-                "Вложение обработано",
-                extra={"event": "attachment_processed", "context": {"file": file_path.name, "task_type": task_type}},
-            )
-        except Exception as e:
-            logger.error("Ошибка обработки вложения", extra={"event": "attachment_error"}, exc_info=True)
-            await update.message.reply_text(f"Ошибка обработки вложения: {e}", reply_markup=self._main_keyboard())
+        await _on_attachment_impl(self, update, context)
 
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Произвольное текстовое сообщение от владельца → ConversationEngine."""
