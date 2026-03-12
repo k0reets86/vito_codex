@@ -142,6 +142,16 @@ from modules.comms_runtime_auth_lane import (
     save_auth_state as _save_auth_state_impl,
     service_needs_session_refresh_text as _service_needs_session_refresh_text_impl,
 )
+from modules.comms_core_runtime_lane import (
+    cmd_kdp_login as _cmd_kdp_login_core_impl,
+    is_bot_sender as _is_bot_sender_core_impl,
+    is_owner as _is_owner_core_impl,
+    main_keyboard as _main_keyboard_core_impl,
+    notify_error as _notify_error_core_impl,
+    poll_owner_inbox as _poll_owner_inbox_core_impl,
+    reject_stranger as _reject_stranger_core_impl,
+    resolve_service_key as _resolve_service_key_core_impl,
+)
 from modules.comms_help_lane import (
     cmd_help as _cmd_help_lane_impl,
     cmd_help_daily as _cmd_help_daily_lane_impl,
@@ -942,15 +952,7 @@ class CommsAgent:
 
     def _main_keyboard(self) -> ReplyKeyboardMarkup:
         """Компактная persistent-клавиатура owner-сценариев."""
-        return ReplyKeyboardMarkup(
-            [
-                [KeyboardButton("Статус"), KeyboardButton("Задачи")],
-                [KeyboardButton("Создать"), KeyboardButton("Входы")],
-                [KeyboardButton("Отчёт"), KeyboardButton("Еще")],
-            ],
-            resize_keyboard=True,
-            is_persistent=True,
-        )
+        return _main_keyboard_core_impl()
 
     def set_modules(
         self,
@@ -1139,15 +1141,7 @@ class CommsAgent:
 
     async def _poll_owner_inbox(self) -> None:
         """Poll file-based owner inbox for offline testing and fallback comms."""
-        from modules.owner_inbox import read_pending_messages, mark_processed
-        while True:
-            try:
-                for fp, text in read_pending_messages(limit=10):
-                    await self._handle_owner_text(text, source="owner_inbox")
-                    mark_processed(fp)
-            except Exception as e:
-                logger.warning(f"Owner inbox poll error: {e}", extra={"event": "owner_inbox_error"})
-            await asyncio.sleep(5)
+        await _poll_owner_inbox_core_impl(self)
 
     async def stop(self) -> None:
         """Останавливает Telegram polling."""
@@ -1160,17 +1154,11 @@ class CommsAgent:
     # ── Проверка владельца ──
 
     def _is_owner(self, update: Update) -> bool:
-        if not update.effective_chat:
-            return False
-        return update.effective_chat.id == self._owner_id
+        return _is_owner_core_impl(self, update)
 
     @staticmethod
     def _is_bot_sender(update: Update) -> bool:
-        try:
-            user = getattr(update, "effective_user", None)
-            return bool(user and getattr(user, "is_bot", False))
-        except Exception:
-            return False
+        return _is_bot_sender_core_impl(update)
 
     async def _send_response(self, update: Update, text: str) -> None:
         await self._notification_router.send_response(update, text)
@@ -1189,20 +1177,7 @@ class CommsAgent:
 
     async def _reject_stranger(self, update: Update) -> bool:
         """Отклоняет сообщения от не-владельцев."""
-        if self._is_bot_sender(update):
-            logger.debug(
-                "Игнорирую сообщение от bot-sender",
-                extra={"event": "ignore_bot_sender"},
-            )
-            return True
-        if self._is_owner(update):
-            return False
-        chat_id = update.effective_chat.id if update.effective_chat else "unknown"
-        logger.warning(
-            f"Попытка доступа от чужого chat_id: {chat_id}",
-            extra={"event": "unauthorized_access", "context": {"chat_id": chat_id}},
-        )
-        return True
+        return await _reject_stranger_core_impl(self, update)
 
     # ── Команды ──
 
@@ -1462,34 +1437,11 @@ class CommsAgent:
 
     async def _cmd_kdp_login(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Запуск browser-auth для Amazon KDP; при MFA ждёт код в следующем сообщении."""
-        if await self._reject_stranger(update):
-            return
-
-        async def _reply(msg: str, markup=None) -> None:
-            kwargs = {"reply_markup": markup} if markup is not None else {"reply_markup": self._main_keyboard()}
-            await update.message.reply_text(msg, **kwargs)
-
-        otp = ""
-        if context and getattr(context, "args", None):
-            otp = self._extract_otp_code(" ".join(context.args))
-        if otp:
-            self._pending_kdp_otp = {"requested_at": datetime.now(timezone.utc).isoformat()}
-            await self._handle_kdp_login_flow(otp, _reply, with_button=True)
-            return
-        await self._handle_kdp_login_flow("зайди на amazon kdp", _reply, with_button=True)
+        await _cmd_kdp_login_core_impl(self, update, context)
 
     @staticmethod
     def _resolve_service_key(raw: str) -> str:
-        s = str(raw or "").strip().lower()
-        if not s:
-            return ""
-        if s in CommsAgent._SERVICE_CATALOG:
-            return s
-        for service, meta in CommsAgent._SERVICE_CATALOG.items():
-            aliases = tuple(meta.get("aliases") or ())
-            if s == service or s in aliases:
-                return service
-        return ""
+        return _resolve_service_key_core_impl(CommsAgent._SERVICE_CATALOG, raw)
 
     async def _cmd_auth(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return await _cmd_auth_impl(self, update, context)
@@ -1593,6 +1545,8 @@ class CommsAgent:
 
     async def notify_error(self, module: str, error: str) -> bool:
         """Уведомляет владельца о критической ошибке."""
+        return await _notify_error_core_impl(self, module, error)
+
         return await self.send_message(
             f"VITO Error | {module}\n{error}",
             level="critical",
