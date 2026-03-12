@@ -111,12 +111,36 @@ from modules.comms_auth_command_lane import (
     cmd_auth_status as _cmd_auth_status_impl,
 )
 from modules.comms_runtime_control_lane import (
-    apply_llm_mode as _apply_llm_mode_impl,
     execute_pending_system_action as _execute_pending_system_action_impl,
     on_app_error as _on_app_error_impl,
     schedule_system_actions_background as _schedule_system_actions_background_impl,
     set_env_values as _set_env_values_impl,
     try_set_env_from_text as _try_set_env_from_text_impl,
+)
+from modules.comms_runtime_auth_lane import (
+    apply_llm_mode as _apply_llm_mode_impl,
+    auto_detect_preference as _auto_detect_preference_impl,
+    is_auth_done_text as _is_auth_done_text_impl,
+    is_auth_issue_prompt as _is_auth_issue_prompt_impl,
+    kdp_prepare_has_mfa_evidence as _kdp_prepare_has_mfa_evidence_impl,
+    kdp_preauth_ready as _kdp_preauth_ready_impl,
+    load_auth_state as _load_auth_state_impl,
+    log_owner_request as _log_owner_request_impl,
+    manual_capture_hint as _manual_capture_hint_impl,
+    parse_remote_kv as _parse_remote_kv_impl,
+    reset_kdp_auth_state_files as _reset_kdp_auth_state_files_impl,
+    run_etsy_remote_session as _run_etsy_remote_session_impl,
+    run_kdp_inventory_probe as _run_kdp_inventory_probe_impl,
+    run_kdp_probe as _run_kdp_probe_impl,
+    run_kdp_probe_stable as _run_kdp_probe_stable_impl,
+    run_remote_auth_session as _run_remote_auth_session_impl,
+    run_etsy_auto_login as _run_etsy_auto_login_impl,
+    run_kdp_auto_login as _run_kdp_auto_login_impl,
+    run_kdp_prepare_otp as _run_kdp_prepare_otp_impl,
+    run_kdp_submit_otp as _run_kdp_submit_otp_impl,
+    run_kdp_variants as _run_kdp_variants_impl,
+    save_auth_state as _save_auth_state_impl,
+    service_needs_session_refresh_text as _service_needs_session_refresh_text_impl,
 )
 from modules.comms_help_lane import (
     cmd_help as _cmd_help_lane_impl,
@@ -656,76 +680,7 @@ class CommsAgent:
         return _try_set_env_from_text_impl(self, text)
 
     def _apply_llm_mode(self, mode: str) -> tuple[bool, str]:
-        """Switch LLM routing profile quickly: free|prod."""
-        m = str(mode or "").strip().lower()
-        if m in {"free", "test", "gemini", "flash"}:
-            self._set_env_values(
-                {
-                    "LLM_ROUTER_MODE": "free",
-                    "LLM_FORCE_GEMINI_FREE": "true",
-                    "LLM_FORCE_GEMINI_MODEL": "gemini-2.5-flash",
-                    "LLM_ENABLED_MODELS": "gemini-2.5-flash",
-                    "LLM_DISABLED_MODELS": "claude-haiku-4-5-20251001,gpt-4o-mini,claude-sonnet-4-6,o3,gpt-4o-strategic,claude-opus-4-6,sonar-pro",
-                    "GEMINI_ENABLE_GROUNDING_SEARCH": "true",
-                    "GEMINI_ENABLE_URL_CONTEXT": "true",
-                    "GEMINI_EMBEDDINGS_ENABLED": "true",
-                    "GEMINI_EMBED_MODEL": "gemini-embedding-001",
-                    "GEMINI_ENABLE_IMAGEN": "true",
-                    "GEMINI_LIVE_API_ENABLED": "true",
-                    "IMAGE_ROUTER_PREFER_GEMINI": "true",
-                    "GEMINI_FREE_MAX_RPM": "15",
-                    "GEMINI_FREE_TEXT_RPD": "1000",
-                    "GEMINI_FREE_SEARCH_RPD": "1500",
-                    "MODEL_ACTIVE_PROFILE": "gemini_free",
-                }
-            )
-            return True, (
-                "LLM режим: FREE (тест)\n"
-                "- Все задачи идут через Gemini 2.5 Flash\n"
-                "- Платные модели отключены\n"
-                "- Grounding Search + URL Context включены\n"
-                "- Embeddings + Imagen + Live API включены (если есть доступ)\n"
-                "- Перезапуск не обязателен, но желателен для чистого цикла"
-            )
-        if m in {"prod", "production", "battle", "боевой"}:
-            self._set_env_values(
-                {
-                    "LLM_ROUTER_MODE": "prod",
-                    "LLM_FORCE_GEMINI_FREE": "false",
-                    "LLM_FORCE_GEMINI_MODEL": "gemini-2.5-flash",
-                    "LLM_ENABLED_MODELS": "",
-                    "LLM_DISABLED_MODELS": "",
-                    "IMAGE_ROUTER_PREFER_GEMINI": "false",
-                    "MODEL_ACTIVE_PROFILE": "balanced",
-                }
-            )
-            return True, (
-                "LLM режим: PROD (боевой)\n"
-                "- ROUTINE: Gemini -> 4o-mini -> Haiku\n"
-                "- CONTENT: Sonnet -> Haiku -> Gemini\n"
-                "- CODE/SELF_HEAL: o3 -> Sonnet -> GPT-5\n"
-                "- RESEARCH: Perplexity -> Gemini -> Sonnet\n"
-                "- STRATEGY: Opus -> GPT-5 -> Sonnet"
-            )
-        if m in {"status", "show", "current", "текущий"}:
-            free = bool(getattr(settings, "LLM_FORCE_GEMINI_FREE", False))
-            enabled = str(getattr(settings, "LLM_ENABLED_MODELS", "") or "")
-            disabled = str(getattr(settings, "LLM_DISABLED_MODELS", "") or "")
-            model = str(getattr(settings, "LLM_FORCE_GEMINI_MODEL", "gemini-2.5-flash") or "gemini-2.5-flash")
-            mode = str(getattr(settings, "LLM_ROUTER_MODE", "prod") or "prod")
-            embed = bool(getattr(settings, "GEMINI_EMBEDDINGS_ENABLED", False))
-            img = bool(getattr(settings, "GEMINI_ENABLE_IMAGEN", False))
-            live = bool(getattr(settings, "GEMINI_LIVE_API_ENABLED", False))
-            mode_name = "FREE (Gemini-only)" if free else "PROD (task-based)"
-            return True, (
-                f"LLM режим сейчас: {mode_name}\n"
-                f"LLM_ROUTER_MODE={mode}\n"
-                f"LLM_FORCE_GEMINI_MODEL={model}\n"
-                f"GEMINI_EMBEDDINGS_ENABLED={str(embed).lower()} | GEMINI_ENABLE_IMAGEN={str(img).lower()} | GEMINI_LIVE_API_ENABLED={str(live).lower()}\n"
-                f"LLM_ENABLED_MODELS={enabled or '(empty)'}\n"
-                f"LLM_DISABLED_MODELS={disabled or '(empty)'}"
-            )
-        return False, "Использование: /llm_mode free | /llm_mode prod | /llm_mode status"
+        return _apply_llm_mode_impl(self, mode)
 
     @staticmethod
     def _is_kdp_login_request(text: str) -> bool:
@@ -742,13 +697,7 @@ class CommsAgent:
 
     @staticmethod
     def _is_auth_done_text(text: str) -> bool:
-        s = str(text or "").strip().lower()
-        if not s:
-            return False
-        return any(
-            token in s
-            for token in ("я вошел", "я вошёл", "вошел", "вошёл", "готово", "ok", "ок", "done", "авторизовался", "авторизовалась")
-        )
+        return _is_auth_done_text_impl(text)
 
     @staticmethod
     def _detect_service_login_request(text: str) -> str:
@@ -838,36 +787,10 @@ class CommsAgent:
         return _record_context_learning_impl(self, skill_name, description, anti_pattern, method=method)
 
     def _load_auth_state(self) -> None:
-        path = self._auth_state_path
-        try:
-            if not path.exists():
-                return
-            payload = json.loads(path.read_text(encoding="utf-8"))
-            confirmed = payload.get("service_auth_confirmed", {})
-            if isinstance(confirmed, dict):
-                self._service_auth_confirmed = {
-                    str(k).strip().lower(): str(v)
-                    for k, v in confirmed.items()
-                    if str(k).strip()
-                }
-            self._last_service_context = str(payload.get("last_service_context", "") or "").strip().lower()
-            self._last_service_context_at = str(payload.get("last_service_context_at", "") or "").strip()
-        except Exception:
-            pass
+        return _load_auth_state_impl(self)
 
     def _save_auth_state(self) -> None:
-        path = self._auth_state_path
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            payload = {
-                "service_auth_confirmed": self._service_auth_confirmed,
-                "last_service_context": self._last_service_context,
-                "last_service_context_at": self._last_service_context_at,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }
-            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception:
-            pass
+        return _save_auth_state_impl(self)
 
     def _mark_service_auth_confirmed(self, service: str) -> None:
         return _mark_service_auth_confirmed_impl(self, service, settings, get_browser_runtime_profile, capture_session_snapshot)
@@ -882,21 +805,11 @@ class CommsAgent:
 
     @staticmethod
     def _manual_capture_hint(service: str) -> str:
-        svc = str(service or "").strip().lower()
-        if svc == "etsy":
-            return (
-                "Требуется обновление серверной сессии Etsy: "
-                "`python3 scripts/etsy_auth_helper.py browser-capture --storage-path runtime/etsy_storage_state.json`"
-            )
-        return "Нужен ручной вход в серверной browser-сессии и сохранение storage_state."
+        return _manual_capture_hint_impl(service)
 
     @staticmethod
     def _service_needs_session_refresh_text(service: str, title: str, detail: str) -> str:
-        base = f"{title}: нужно обновить серверную сессию."
-        d = str(detail or "").strip()
-        if d:
-            return f"{base}\nДеталь: {d}"
-        return base
+        return _service_needs_session_refresh_text_impl(service, title, detail)
 
     @staticmethod
     def _is_status_prompt(text: str) -> bool:
@@ -917,22 +830,7 @@ class CommsAgent:
 
     @staticmethod
     def _is_auth_issue_prompt(text: str) -> bool:
-        s = str(text or "").strip().lower()
-        if not s:
-            return False
-        return any(
-            token in s
-            for token in (
-                "почему не заходит",
-                "не заходит",
-                "не входит",
-                "не могу войти",
-                "не получается войти",
-                "why can",
-                "why not login",
-                "login issue",
-            )
-        )
+        return _is_auth_issue_prompt_impl(text)
 
     def _format_service_auth_status(self, service: str) -> str:
         return _format_service_auth_status_impl(self, service)
@@ -944,20 +842,7 @@ class CommsAgent:
         return await _format_service_inventory_snapshot_impl(self, service)
 
     async def _run_kdp_probe(self) -> tuple[int, str]:
-        storage = str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json") or "runtime/kdp_storage_state.json")
-        base = [
-            "python3",
-            "scripts/kdp_auth_helper.py",
-            "probe",
-            "--storage-path",
-            storage,
-            "--headless",
-        ]
-        variants = [
-            base,
-            ["xvfb-run", "-a", *base],
-        ]
-        return await self._run_kdp_variants(variants, timeout_sec=120)
+        return await _run_kdp_probe_impl()
 
     async def _run_kdp_probe_stable(self) -> tuple[int, str]:
         rc, out = await self._run_kdp_probe()
@@ -967,20 +852,7 @@ class CommsAgent:
         return await self._run_kdp_probe()
 
     async def _run_kdp_inventory_probe(self) -> tuple[int, str]:
-        storage = str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json") or "runtime/kdp_storage_state.json")
-        base = [
-            "python3",
-            "scripts/kdp_auth_helper.py",
-            "inventory",
-            "--storage-path",
-            storage,
-            "--headless",
-        ]
-        variants = [
-            base,
-            ["xvfb-run", "-a", *base],
-        ]
-        return await self._run_kdp_variants(variants, timeout_sec=150)
+        return await _run_kdp_inventory_probe_impl()
 
     async def _run_kdp_variants(self, variants: list[list[str]], timeout_sec: int) -> tuple[int, str]:
         """Run KDP helper command variants, returning first success or full diagnostics."""
@@ -1004,66 +876,17 @@ class CommsAgent:
             return last_rc, "\n\n--- variant ---\n".join(chunks)
 
     async def _run_etsy_auto_login(self) -> tuple[int, str]:
-        storage = str(getattr(settings, "ETSY_STORAGE_STATE_FILE", "runtime/etsy_storage_state.json") or "runtime/etsy_storage_state.json")
-        cmd = [
-            "python3",
-            "scripts/etsy_auth_helper.py",
-            "auto-login",
-            "--timeout-sec",
-            "120",
-            "--storage-path",
-            storage,
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=180)
-        output = (out_b or b"").decode("utf-8", errors="ignore")
-        return int(proc.returncode or 0), output
+        return await _run_etsy_auto_login_impl()
 
     async def _run_etsy_remote_session(self, action: str = "status") -> tuple[int, str]:
-        cmd = [
-            "bash",
-            "scripts/etsy_remote_session.sh",
-            str(action or "status"),
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=90)
-        output = (out_b or b"").decode("utf-8", errors="ignore")
-        return int(proc.returncode or 0), output
+        return await _run_etsy_remote_session_impl(action=action)
 
     async def _run_remote_auth_session(self, service: str, action: str = "status") -> tuple[int, str]:
-        cmd = [
-            "bash",
-            "scripts/remote_auth_session.sh",
-            str(service or "").strip().lower(),
-            str(action or "status"),
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
-        output = (out_b or b"").decode("utf-8", errors="ignore")
-        return int(proc.returncode or 0), output
+        return await _run_remote_auth_session_impl(service, action=action)
 
     @staticmethod
     def _parse_remote_kv(text: str) -> dict[str, str]:
-        out: dict[str, str] = {}
-        for line in str(text or "").splitlines():
-            s = line.strip()
-            if "=" not in s:
-                continue
-            k, v = s.split("=", 1)
-            out[k.strip().lower()] = v.strip()
-        return out
+        return _parse_remote_kv_impl(text)
 
     def _service_storage_state_path(self, service: str) -> Path | None:
         return _service_storage_state_path_impl(service, storage_state_path_for_service, settings, PROJECT_ROOT)
@@ -1081,120 +904,33 @@ class CommsAgent:
         return await _start_service_auth_flow_impl(self, service, send_reply, with_button=with_button)
 
     async def _run_kdp_auto_login(self, otp_code: str = "") -> tuple[int, str]:
-        storage = str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json") or "runtime/kdp_storage_state.json")
-        base = [
-            "python3",
-            "scripts/kdp_auth_helper.py",
-            "auto-login",
-            "--timeout-sec",
-            "180",
-            "--storage-path",
-            storage,
-        ]
-        if otp_code:
-            base.extend(["--otp-code", otp_code])
-        variants = [
-            base,
-            ["xvfb-run", "-a", *base],
-        ]
-        return await self._run_kdp_variants(variants, timeout_sec=220)
+        return await _run_kdp_auto_login_impl(otp_code)
 
     async def _run_kdp_prepare_otp(self) -> tuple[int, str]:
-        base = [
-            "python3",
-            "scripts/kdp_auth_helper.py",
-            "prepare-otp",
-            "--timeout-sec",
-            "120",
-            "--preauth-state-path",
-            "runtime/kdp_preauth_state.json",
-            "--preauth-meta-path",
-            "runtime/kdp_preauth_meta.json",
-        ]
-        variants = [
-            base,
-            ["xvfb-run", "-a", *base],
-        ]
-        return await self._run_kdp_variants(variants, timeout_sec=180)
+        return await _run_kdp_prepare_otp_impl()
 
     async def _cleanup_browser_runtime(self) -> None:
         """Keep browser runtime untouched to avoid killing active startup flow."""
         return
 
     async def _run_kdp_submit_otp(self, otp_code: str) -> tuple[int, str]:
-        storage = str(getattr(settings, "KDP_STORAGE_STATE_FILE", "runtime/kdp_storage_state.json") or "runtime/kdp_storage_state.json")
-        base = [
-            "python3",
-            "scripts/kdp_auth_helper.py",
-            "submit-otp",
-            "--timeout-sec",
-            "120",
-            "--preauth-state-path",
-            "runtime/kdp_preauth_state.json",
-            "--preauth-meta-path",
-            "runtime/kdp_preauth_meta.json",
-            "--storage-path",
-            storage,
-            "--otp-code",
-            str(otp_code or "").strip(),
-        ]
-        variants = [
-            base,
-            ["xvfb-run", "-a", *base],
-        ]
-        return await self._run_kdp_variants(variants, timeout_sec=180)
+        return await _run_kdp_submit_otp_impl(otp_code)
 
     @staticmethod
     def _kdp_prepare_has_mfa_evidence(output: str) -> bool:
-        low = str(output or "").lower()
-        return ("otp_ready" in low) or ("/ap/mfa" in low) or ("mfa.arb" in low)
+        return _kdp_prepare_has_mfa_evidence_impl(output)
 
     def _kdp_preauth_ready(self) -> bool:
-        st = PROJECT_ROOT / "runtime" / "kdp_preauth_state.json"
-        meta = PROJECT_ROOT / "runtime" / "kdp_preauth_meta.json"
-        if not st.exists():
-            return False
-        if not meta.exists():
-            return True
-        try:
-            data = json.loads(meta.read_text(encoding="utf-8"))
-            url = str(data.get("url") or "").lower()
-            return ("/ap/mfa" in url) or ("mfa.arb" in url) or bool(data.get("prepared", False))
-        except Exception:
-            return True
+        return _kdp_preauth_ready_impl(PROJECT_ROOT)
 
     def _reset_kdp_auth_state_files(self) -> None:
-        """Force fresh KDP auth by clearing preauth+storage artifacts."""
-        paths = [
-            PROJECT_ROOT / "runtime" / "kdp_preauth_state.json",
-            PROJECT_ROOT / "runtime" / "kdp_preauth_meta.json",
-            PROJECT_ROOT / "runtime" / "kdp_storage_state.json",
-        ]
-        for p in paths:
-            try:
-                if p.exists():
-                    p.unlink()
-            except Exception:
-                pass
+        return _reset_kdp_auth_state_files_impl(PROJECT_ROOT)
 
     async def _handle_kdp_login_flow(self, text: str, send_reply, with_button: bool = False) -> bool:
         return await _handle_kdp_login_flow_impl(self, text, send_reply, with_button=with_button)
 
     def _log_owner_request(self, text: str, source: str = "text") -> None:
-        """Append owner requests to requirements log with timestamp."""
-        try:
-            from datetime import datetime, timezone
-            ts = datetime.now(timezone.utc).isoformat()
-            log_path = PROJECT_ROOT / "runtime" / "owner_requirements_log.md"
-            entry = f"- [{ts}] ({source}) {text.strip()}\n"
-            if not log_path.exists():
-                log_path.parent.mkdir(parents=True, exist_ok=True)
-                log_path.write_text("# Owner Requests & Requirements Log\n\n", encoding="utf-8")
-            with log_path.open("a", encoding="utf-8") as f:
-                f.write(entry)
-        except Exception:
-            pass
-        # Best-effort preference auto-detect (disabled by default)
+        _log_owner_request_impl(PROJECT_ROOT, text, source=source)
         try:
             if getattr(settings, "OWNER_PREF_AUTO_DETECT", False):
                 self._auto_detect_preference(text)
@@ -1202,54 +938,7 @@ class CommsAgent:
             pass
 
     def _auto_detect_preference(self, text: str) -> None:
-        """Heuristic preference detection. Disabled by default."""
-        raw = (text or "").strip()
-        lower = raw.lower()
-        if "пиши кратко" in lower or lower == "кратко":
-            OwnerPreferenceModel().record_signal(
-                key="style.verbosity",
-                value="concise",
-                signal_type="observation",
-                source="owner",
-                confidence_delta=0.1,
-                notes="auto_detect",
-            )
-        if "пиши подробно" in lower or "подробно" == lower:
-            OwnerPreferenceModel().record_signal(
-                key="style.verbosity",
-                value="verbose",
-                signal_type="observation",
-                source="owner",
-                confidence_delta=0.1,
-                notes="auto_detect",
-            )
-        if "на английском" in lower or "по-английски" in lower or "english only" in lower:
-            OwnerPreferenceModel().record_signal(
-                key="content.language",
-                value="en",
-                signal_type="observation",
-                source="owner",
-                confidence_delta=0.08,
-                notes="auto_detect",
-            )
-        if "на русском" in lower or "по-русски" in lower:
-            OwnerPreferenceModel().record_signal(
-                key="content.language",
-                value="ru",
-                signal_type="observation",
-                source="owner",
-                confidence_delta=0.08,
-                notes="auto_detect",
-            )
-        if "сначала тесты" in lower or "после тестов" in lower:
-            OwnerPreferenceModel().record_signal(
-                key="workflow.tests_first",
-                value=True,
-                signal_type="observation",
-                source="owner",
-                confidence_delta=0.08,
-                notes="auto_detect",
-            )
+        _auto_detect_preference_impl(text)
 
     def _main_keyboard(self) -> ReplyKeyboardMarkup:
         """Компактная persistent-клавиатура owner-сценариев."""
