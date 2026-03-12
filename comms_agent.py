@@ -110,6 +110,21 @@ from modules.comms_auth_command_lane import (
     cmd_auth_cookie as _cmd_auth_cookie_impl,
     cmd_auth_status as _cmd_auth_status_impl,
 )
+from modules.comms_runtime_control_lane import (
+    apply_llm_mode as _apply_llm_mode_impl,
+    execute_pending_system_action as _execute_pending_system_action_impl,
+    on_app_error as _on_app_error_impl,
+    schedule_system_actions_background as _schedule_system_actions_background_impl,
+    set_env_values as _set_env_values_impl,
+    try_set_env_from_text as _try_set_env_from_text_impl,
+)
+from modules.comms_help_lane import (
+    cmd_help as _cmd_help_lane_impl,
+    cmd_help_daily as _cmd_help_daily_lane_impl,
+    cmd_help_rare as _cmd_help_rare_lane_impl,
+    cmd_help_system as _cmd_help_system_lane_impl,
+    cmd_start as _cmd_start_lane_impl,
+)
 from modules.comms_goal_skill_lane import (
     cmd_agents as _cmd_agents_impl,
     cmd_fix as _cmd_fix_impl,
@@ -153,6 +168,7 @@ from modules.comms_owner_command_lane import (
     maybe_handle_owner_publish_commands as _maybe_handle_owner_publish_commands_impl,
     maybe_handle_owner_webop_commands as _maybe_handle_owner_webop_commands_impl,
 )
+from modules.comms_message_route_lane import handle_deterministic_message_routes as _handle_deterministic_message_routes_impl
 from modules.comms_message_preflight_lane import (
     handle_contextual_service_prompts as _handle_contextual_service_prompts_impl,
     handle_pending_owner_confirmation as _handle_pending_owner_confirmation_impl,
@@ -176,6 +192,7 @@ from modules.comms_operational_command_lane import (
     cmd_task_replace as _cmd_task_replace_lane_impl,
     cmd_tasks as _cmd_tasks_lane_impl,
 )
+from modules.comms_recipe_command_lane import cmd_recipe_run as _cmd_recipe_run_lane_impl
 from modules.comms_planning_lane import (
     cmd_brainstorm as _cmd_brainstorm_impl,
     cmd_deep as _cmd_deep_impl,
@@ -618,78 +635,10 @@ class CommsAgent:
         return str(text or "").strip().lower() in {"нет", "no", "reject", "отмена", "❌", "👎"}
 
     def _set_env_values(self, updates: dict[str, str]) -> bool:
-        """Persist multiple env keys to .env and update runtime settings."""
-        import os
-        import re
-        from pathlib import Path
-
-        if not updates:
-            return False
-        env_path = Path(root_path(".env"))
-        text_env = env_path.read_text() if env_path.exists() else ""
-        for key, value in updates.items():
-            k = str(key or "").strip().upper()
-            v = str(value or "").strip()
-            if not k:
-                continue
-            if re.search(rf"^{re.escape(k)}=.*$", text_env, flags=re.M):
-                text_env = re.sub(rf"^{re.escape(k)}=.*$", f"{k}={v}", text_env, flags=re.M)
-            else:
-                if text_env and not text_env.endswith("\n"):
-                    text_env += "\n"
-                text_env += f"{k}={v}\n"
-            os.environ[k] = v
-            try:
-                if hasattr(settings, k):
-                    cur = getattr(settings, k)
-                    if isinstance(cur, bool):
-                        setattr(settings, k, self._parse_bool_env(v))
-                    elif isinstance(cur, int):
-                        try:
-                            setattr(settings, k, int(v))
-                        except Exception:
-                            setattr(settings, k, v)
-                    elif isinstance(cur, float):
-                        try:
-                            setattr(settings, k, float(v))
-                        except Exception:
-                            setattr(settings, k, v)
-                    else:
-                        setattr(settings, k, v)
-            except Exception:
-                pass
-        env_path.write_text(text_env)
-        return True
+        return _set_env_values_impl(self, updates)
 
     def _try_set_env_from_text(self, text: str) -> bool:
-        """Parse KEY=VALUE messages and save to .env (owner only)."""
-        import re
-
-        # Accept formats: KEY=VALUE or "set KEY=VALUE"
-        m = re.search(r"(?:^|\\bset\\s+)([A-Z0-9_]{3,})\\s*=\\s*([^\\s]+)", text, re.IGNORECASE)
-        if not m:
-            return False
-        key = m.group(1).upper()
-        value = m.group(2).strip()
-
-        allowed = {
-            "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY",
-            "PERPLEXITY_API_KEY", "OPENROUTER_API_KEY",
-            "TELEGRAM_BOT_TOKEN", "TELEGRAM_OWNER_CHAT_ID",
-            "GUMROAD_API_KEY", "GUMROAD_OAUTH_TOKEN", "GUMROAD_APP_ID", "GUMROAD_APP_SECRET",
-            "ETSY_KEYSTRING", "ETSY_SHARED_SECRET", "ETSY_EMAIL", "ETSY_PASSWORD", "KOFI_API_KEY", "KOFI_PAGE_ID",
-            "REPLICATE_API_TOKEN", "ANTICAPTCHA_KEY",
-            "TWITTER_BEARER_TOKEN", "TWITTER_CONSUMER_KEY", "TWITTER_CONSUMER_SECRET",
-            "TWITTER_ACCESS_TOKEN", "TWITTER_ACCESS_SECRET",
-            "THREADS_ACCESS_TOKEN", "THREADS_USER_ID",
-            "REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET", "REDDIT_USERNAME", "REDDIT_PASSWORD", "REDDIT_USER_AGENT",
-            "TIKTOK_ACCESS_TOKEN",
-        }
-        if key not in allowed:
-            return False
-        self._set_env_values({key: value})
-        logger.info("Env key set via Telegram", extra={"event": "env_set", "context": {"key": key}})
-        return True
+        return _try_set_env_from_text_impl(self, text)
 
     def _apply_llm_mode(self, mode: str) -> tuple[bool, str]:
         """Switch LLM routing profile quickly: free|prod."""
@@ -1665,54 +1614,19 @@ class CommsAgent:
         return _help_inline_keyboard_impl()
 
     async def _cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if await self._reject_stranger(update):
-            return
-        await update.message.reply_text(
-            "VITO на связи.\n\n"
-            "Главные сценарии теперь вынесены в меню:\n"
-            "- Исследовать\n"
-            "- Создать\n"
-            "- Платформы\n"
-            "- Входы\n\n"
-            "Быстрый старт:\n"
-            "/status\n"
-            "/goals\n"
-            "/goal <текст>\n"
-            "/tasks\n"
-            "/report\n\n"
-            "Если нужен каталог команд:\n"
-            "/help — обзор\n"
-            "/help_daily — ежедневные\n"
-            "/help_rare — редкие\n"
-            "/help_system — системные",
-            reply_markup=self._main_keyboard(),
-        )
+        await _cmd_start_lane_impl(self, update, context)
 
     async def _cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if await self._reject_stranger(update):
-            return
-        args = getattr(context, "args", None) or []
-        topic = args[0] if args else None
-        text = self._render_help(topic=topic)
-        if topic:
-            await update.message.reply_text(text, reply_markup=self._main_keyboard())
-            return
-        await update.message.reply_text(text, reply_markup=self._help_inline_keyboard())
+        await _cmd_help_lane_impl(self, update, context)
 
     async def _cmd_help_daily(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if await self._reject_stranger(update):
-            return
-        await update.message.reply_text(self._render_help("daily"), reply_markup=self._main_keyboard())
+        await _cmd_help_daily_lane_impl(self, update, context)
 
     async def _cmd_help_rare(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if await self._reject_stranger(update):
-            return
-        await update.message.reply_text(self._render_help("rare"), reply_markup=self._main_keyboard())
+        await _cmd_help_rare_lane_impl(self, update, context)
 
     async def _cmd_help_system(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if await self._reject_stranger(update):
-            return
-        await update.message.reply_text(self._render_help("system"), reply_markup=self._main_keyboard())
+        await _cmd_help_system_lane_impl(self, update, context)
 
     @staticmethod
     def _render_auth_hub() -> str:
@@ -1800,65 +1714,7 @@ class CommsAgent:
         await _cmd_recipes_impl(self, update, context)
 
     async def _cmd_recipe_run(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Execute a workflow recipe through PublisherQueue with acceptance gate.
-
-        Usage:
-          /recipe_run <recipe_name> [live]
-        """
-        if await self._reject_stranger(update):
-            return
-        if not self._publisher_queue:
-            await update.message.reply_text("PublisherQueue не подключён.", reply_markup=self._main_keyboard())
-            return
-        args = list(getattr(context, "args", None) or [])
-        if not args:
-            await update.message.reply_text(
-                "Использование: /recipe_run <recipe_name> [live]",
-                reply_markup=self._main_keyboard(),
-            )
-            return
-        recipe_name = str(args[0] or "").strip().lower()
-        live = any(str(a).strip().lower() == "live" for a in args[1:])
-        dry_run = not live
-        from modules.workflow_recipes import get_workflow_recipe
-        from modules.platform_artifact_pack import build_platform_bundle
-
-        rec = get_workflow_recipe(recipe_name)
-        if not rec:
-            await update.message.reply_text(f"Recipe не найден: {recipe_name}", reply_markup=self._main_keyboard())
-            return
-        try:
-            out = await self._run_recipe_direct(recipe_name, live=live)
-        except Exception as e:
-            await update.message.reply_text(f"Recipe run error: {e}", reply_markup=self._main_keyboard())
-            return
-        st = str(out.get("status") or "")
-        if st == "accepted":
-            res = out.get("result") if isinstance(out.get("result"), dict) else {}
-            _remember_platform_working_target(platform, res)
-            status = str(res.get("status") or "")
-            evidence = res.get("evidence") if isinstance(res.get("evidence"), dict) else {}
-            url = str(res.get("url") or evidence.get("url") or "")
-            rid = str(
-                res.get("listing_id")
-                or res.get("product_id")
-                or res.get("post_id")
-                or res.get("tweet_id")
-                or res.get("id")
-                or evidence.get("id")
-                or ""
-            )
-            await update.message.reply_text(
-                f"Recipe accepted: {recipe_name} ({out.get('platform')})\nstatus={status}\nurl={url or '-'}\nid={rid or '-'}",
-                reply_markup=self._main_keyboard(),
-            )
-        else:
-            result = out.get("result") if isinstance(out.get("result"), dict) else {}
-            status = str(result.get("status") or "")
-            await update.message.reply_text(
-                f"Recipe failed: {recipe_name}\nПричина: {out.get('error', 'unknown')}\nstatus={status or '-'}",
-                reply_markup=self._main_keyboard(),
-            )
+        await _cmd_recipe_run_lane_impl(self, update, context)
 
     def _build_recipe_payload(self, recipe_name: str, *, live: bool, request_text: str = "") -> tuple[str, dict[str, Any]]:
         return _build_recipe_payload_impl(self, recipe_name, live=live, request_text=request_text)
@@ -2098,71 +1954,8 @@ class CommsAgent:
             )
             return
 
-        # 1.5. Natural language shortcuts (balance check, etc.)
-        lower = text.strip().lower()
-        if (not strict_cmds) and any(x in lower for x in ("llm_mode ", "режим llm", "режим lmm", "llm режим")):
-            mode = "status"
-            if any(x in lower for x in (" free", " тест", " gemini", " flash")):
-                mode = "free"
-            elif any(x in lower for x in (" prod", " боев", " production")):
-                mode = "prod"
-            ok, msg = self._apply_llm_mode(mode)
-            await update.message.reply_text(
-                msg if ok else "Используй: /llm_mode free|prod|status",
-                reply_markup=self._main_keyboard(),
-            )
+        if await _handle_deterministic_message_routes_impl(self, update, context, text, strict_cmds=strict_cmds):
             return
-        if (not strict_cmds) and any(kw in lower for kw in ["баланс", "balance", "balances", "остатки", "сколько на счетах", "сколько осталось"]):
-            await self._cmd_balances(update, context)
-            return
-
-        for candidate in (
-            self._maybe_handle_owner_shortcuts,
-            self._maybe_handle_owner_service_commands,
-            self._maybe_handle_owner_menu_commands,
-            self._maybe_handle_owner_task_commands,
-            self._maybe_handle_owner_publish_commands,
-            self._maybe_handle_owner_webop_commands,
-        ):
-            handled = await candidate(text)
-            if handled:
-                return
-
-        # 2. Pending approvals — да/нет/✅/❌
-        if self._pending_approvals:
-            if self._is_yes_token(lower):
-                await self._cmd_approve(update, context)
-                return
-            elif self._is_no_token(lower):
-                await self._cmd_reject(update, context)
-                return
-
-        # 2.5. Goal approval — approve goals in WAITING_APPROVAL status
-        if self._is_yes_token(lower) and self._goal_engine:
-            from goal_engine import GoalStatus
-            waiting = [g for g in self._goal_engine.get_all_goals()
-                       if g.status == GoalStatus.WAITING_APPROVAL]
-            if waiting:
-                goal = waiting[0]  # Approve the most recent waiting goal
-                goal.status = GoalStatus.PENDING  # Move to PENDING so DecisionLoop picks it up
-                self._goal_engine._persist_goal(goal)
-                await update.message.reply_text(
-                    f"✅ Одобрено: {goal.title}\nПриступаю к выполнению.",
-                    reply_markup=self._main_keyboard(),
-                )
-                return
-        elif self._is_no_token(lower) and self._goal_engine:
-            from goal_engine import GoalStatus
-            waiting = [g for g in self._goal_engine.get_all_goals()
-                       if g.status == GoalStatus.WAITING_APPROVAL]
-            if waiting:
-                goal = waiting[0]
-                self._goal_engine.fail_goal(goal.goal_id, "Отклонено владельцем")
-                await update.message.reply_text(
-                    f"❌ Отклонено: {goal.title}",
-                    reply_markup=self._main_keyboard(),
-                )
-                return
 
         async def _tg_reply(msg: str, reply_markup=None):
             await update.message.reply_text(msg, reply_markup=reply_markup or self._main_keyboard())
