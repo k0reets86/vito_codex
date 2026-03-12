@@ -161,6 +161,21 @@ from modules.comms_message_preflight_lane import (
     handle_pending_system_action as _handle_pending_system_action_impl,
 )
 from modules.comms_startup_lane import start as _start_impl
+from modules.comms_operational_command_lane import (
+    cancel_goal_queue as _cancel_goal_queue_lane_impl,
+    cmd_balances as _cmd_balances_lane_impl,
+    cmd_cancel as _cmd_cancel_lane_impl,
+    cmd_earnings as _cmd_earnings_lane_impl,
+    cmd_errors as _cmd_errors_lane_impl,
+    cmd_health as _cmd_health_lane_impl,
+    cmd_resume as _cmd_resume_lane_impl,
+    cmd_stop as _cmd_stop_lane_impl,
+    cmd_task_cancel as _cmd_task_cancel_lane_impl,
+    cmd_task_current as _cmd_task_current_lane_impl,
+    cmd_task_done as _cmd_task_done_lane_impl,
+    cmd_task_replace as _cmd_task_replace_lane_impl,
+    cmd_tasks as _cmd_tasks_lane_impl,
+)
 from modules.comms_planning_lane import (
     cmd_brainstorm as _cmd_brainstorm_impl,
     cmd_deep as _cmd_deep_impl,
@@ -2303,135 +2318,40 @@ class CommsAgent:
         logger.info("Команда /report выполнена", extra={"event": "cmd_report"})
 
     async def _cmd_stop(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Остановить Decision Loop."""
-        if await self._reject_stranger(update):
-            return
-        if not self._is_confirmed(getattr(context, "args", None)):
-            await update.message.reply_text(
-                "Подтверди остановку цикла: `/stop yes`",
-                reply_markup=self._main_keyboard(),
-            )
-            return
-        if self._decision_loop:
-            self._decision_loop.stop()
-            await update.message.reply_text("Decision Loop остановлен.", reply_markup=self._main_keyboard())
-        else:
-            await update.message.reply_text("Decision Loop не подключён.", reply_markup=self._main_keyboard())
-        logger.info("Команда /stop выполнена", extra={"event": "cmd_stop"})
+        await _cmd_stop_lane_impl(self, update, context)
 
     async def _cmd_cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Пауза всех текущих задач и очистка очередей."""
-        if await self._reject_stranger(update):
-            return
-        cancelled_goals = self._cancel_all_owner_work(reason="owner_cancelled")
-        await update.message.reply_text(
-            f"Всё приостановлено. Отправь /resume, когда будешь готов продолжить.\n"
-            f"Отменено задач из очереди: {cancelled_goals}.",
-            reply_markup=self._main_keyboard(),
-        )
-        logger.info("Команда /cancel выполнена", extra={"event": "cmd_cancel"})
+        await _cmd_cancel_lane_impl(self, update, context)
 
     def _cancel_goal_queue(self, reason: str = "owner_cancelled") -> int:
-        return _cancel_goal_queue_impl(self, reason=reason)
+        return _cancel_goal_queue_lane_impl(self, reason=reason)
 
     async def _cmd_resume(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Возобновить Decision Loop."""
-        if await self._reject_stranger(update):
-            return
-        if self._cancel_state:
-            self._cancel_state.clear()
-        if self._decision_loop and not self._decision_loop.running:
-            import asyncio
-            asyncio.create_task(self._decision_loop.run())
-            await update.message.reply_text("Decision Loop возобновлён.", reply_markup=self._main_keyboard())
-        elif self._decision_loop and self._decision_loop.running:
-            await update.message.reply_text("Decision Loop уже работает.", reply_markup=self._main_keyboard())
-        else:
-            await update.message.reply_text("Decision Loop не подключён.", reply_markup=self._main_keyboard())
-        logger.info("Команда /resume выполнена", extra={"event": "cmd_resume"})
+        await _cmd_resume_lane_impl(self, update, context)
 
     async def _cmd_budget(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Бюджет и P&L."""
-        if await self._reject_stranger(update):
-            return
-        if not self._finance:
-            await update.message.reply_text("FinancialController не подключён.", reply_markup=self._main_keyboard())
-            return
-        check = self._finance.check_expense(0)
-        pnl = self._finance.get_pnl(days=30)
-        text = (
-            f"Бюджет\n"
-            f"Сегодня: ${check.get('daily_spent', 0):.2f} / ${settings.DAILY_LIMIT_USD:.2f}\n"
-            f"Осталось: ${check.get('remaining', 0):.2f}\n\n"
-            f"P&L за 30 дней:\n"
-            f"Расходы: ${pnl['total_expenses']:.2f}\n"
-            f"Доходы: ${pnl['total_income']:.2f}\n"
-            f"{'Прибыль' if pnl['profitable'] else 'Убыток'}: ${abs(pnl['net_profit']):.2f}"
-        )
-        await update.message.reply_text(text, reply_markup=self._main_keyboard())
-        logger.info("Команда /budget выполнена", extra={"event": "cmd_budget"})
+        await _cmd_budget_lane_impl(self, update, context)
 
     async def _cmd_tasks(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if await self._reject_stranger(update):
-            return
-        await _cmd_tasks_impl(self, update)
-        logger.info("Команда /tasks выполнена", extra={"event": "cmd_tasks"})
+        await _cmd_tasks_lane_impl(self, update, context)
 
     async def _cmd_task_current(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if await self._reject_stranger(update):
-            return
-        await _cmd_task_current_impl(self, update)
+        await _cmd_task_current_lane_impl(self, update, context)
 
     async def _cmd_task_done(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if await self._reject_stranger(update):
-            return
-        await _cmd_task_done_impl(self, update)
+        await _cmd_task_done_lane_impl(self, update, context)
 
     async def _cmd_task_cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if await self._reject_stranger(update):
-            return
-        await _cmd_task_cancel_impl(self, update)
+        await _cmd_task_cancel_lane_impl(self, update, context)
 
     async def _cmd_task_replace(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if await self._reject_stranger(update):
-            return
-        await _cmd_task_replace_impl(self, update)
+        await _cmd_task_replace_lane_impl(self, update, context)
 
     async def _cmd_trends(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Сканирование трендов."""
-        if await self._reject_stranger(update):
-            return
-        if not self._agent_registry:
-            await update.message.reply_text("AgentRegistry не подключён.", reply_markup=self._main_keyboard())
-            return
-        await update.message.reply_text("Сканирую тренды...", reply_markup=self._main_keyboard())
-        try:
-            result = await self._agent_registry.dispatch("trend_scan")
-            if result and result.success:
-                output = str(result.output)[:3000]
-                await update.message.reply_text(f"Тренды:\n{output}", reply_markup=self._main_keyboard())
-            else:
-                await update.message.reply_text("Не удалось просканировать тренды.", reply_markup=self._main_keyboard())
-        except Exception as e:
-            await update.message.reply_text(f"Ошибка: {e}", reply_markup=self._main_keyboard())
-        logger.info("Команда /trends выполнена", extra={"event": "cmd_trends"})
+        await _cmd_trends_lane_impl(self, update, context)
 
     async def _cmd_earnings(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Доходы за 7 дней."""
-        if await self._reject_stranger(update):
-            return
-        if not self._finance:
-            await update.message.reply_text("FinancialController не подключён.", reply_markup=self._main_keyboard())
-            return
-        trend = self._finance.get_revenue_trend(7)
-        if not trend:
-            await update.message.reply_text("Нет данных о доходах за 7 дней.", reply_markup=self._main_keyboard())
-            return
-        lines = ["Доходы за 7 дней:"]
-        for day in trend:
-            lines.append(f"  {day['date']}: ${day.get('earned_usd', 0):.2f} (расход: ${day.get('spent_usd', 0):.2f})")
-        await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
-        logger.info("Команда /earnings выполнена", extra={"event": "cmd_earnings"})
+        await _cmd_earnings_lane_impl(self, update, context)
 
     async def _cmd_deep(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return await _cmd_deep_impl(self, update, context)
@@ -2486,114 +2406,25 @@ class CommsAgent:
         return await _maybe_schedule_from_text_impl(self, update, text)
 
     async def _cmd_healer(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Статистика самолечения."""
-        if await self._reject_stranger(update):
-            return
-        if not self._self_healer:
-            await update.message.reply_text("SelfHealer не подключён.", reply_markup=self._main_keyboard())
-            return
-        stats = self._self_healer.get_error_stats()
-        text = (
-            f"SelfHealer Stats\n"
-            f"Всего ошибок: {stats['total']}\n"
-            f"Решено: {stats['resolved']}\n"
-            f"Не решено: {stats['unresolved']}\n"
-            f"Процент решения: {stats.get('resolution_rate', 0):.0%}\n"
-            f"В очереди: {stats.get('pending_retries', 0)}"
-        )
-        await update.message.reply_text(text, reply_markup=self._main_keyboard())
-        logger.info("Команда /healer выполнена", extra={"event": "cmd_healer"})
+        await _cmd_healer_lane_impl(self, update, context)
 
     async def _cmd_logs(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Последние 20 строк из логов."""
-        if await self._reject_stranger(update):
-            return
-        log_path = Path("logs/vito.log")
-        if not log_path.exists():
-            await update.message.reply_text("Лог-файл не найден.", reply_markup=self._main_keyboard())
-            return
-        try:
-            with open(log_path, "r") as f:
-                lines = f.readlines()
-            last_lines = lines[-20:]
-            text = "".join(last_lines)[-3000:]  # Telegram limit
-            await update.message.reply_text(f"Последние логи:\n{text}", reply_markup=self._main_keyboard())
-        except Exception as e:
-            await update.message.reply_text(f"Ошибка чтения логов: {e}", reply_markup=self._main_keyboard())
-        logger.info("Команда /logs выполнена", extra={"event": "cmd_logs"})
+        await _cmd_logs_lane_impl(self, update, context)
 
     async def _cmd_backup(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Создать бэкап."""
-        if await self._reject_stranger(update):
-            return
-        if self._agent_registry:
-            try:
-                result = await self._agent_registry.dispatch("backup")
-                if result and result.success:
-                    await update.message.reply_text(f"Бэкап создан: {result.output}", reply_markup=self._main_keyboard())
-                    return
-            except Exception:
-                pass
-        if self._self_updater:
-            backup_path = self._self_updater.backup_current_code()
-            if backup_path:
-                await update.message.reply_text(f"Бэкап создан: {backup_path}", reply_markup=self._main_keyboard())
-            else:
-                await update.message.reply_text("Не удалось создать бэкап.", reply_markup=self._main_keyboard())
-        else:
-            await update.message.reply_text("SelfUpdater не подключён.", reply_markup=self._main_keyboard())
-        logger.info("Команда /backup выполнена", extra={"event": "cmd_backup"})
+        await _cmd_backup_lane_impl(self, update, context)
 
     async def _cmd_rollback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Откат кода."""
-        if await self._reject_stranger(update):
-            return
-        if not self._self_updater:
-            await update.message.reply_text("SelfUpdater не подключён.", reply_markup=self._main_keyboard())
-            return
-        history = self._self_updater.get_update_history(limit=1)
-        if not history:
-            await update.message.reply_text("Нет истории обновлений для отката.", reply_markup=self._main_keyboard())
-            return
-        last = history[0]
-        backup_path = last.get("backup_path", "")
-        if not backup_path:
-            await update.message.reply_text("Нет бэкапа для отката.", reply_markup=self._main_keyboard())
-            return
-        if not self._is_confirmed(getattr(context, "args", None)):
-            self._pending_owner_confirmation = {
-                "kind": "rollback",
-                "backup_path": backup_path,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            }
-            await update.message.reply_text(
-                "Откат меняет код и может удалить последние доработки.\n"
-                "Подтверди: `/rollback yes` или ответь `да` на это сообщение.",
-                reply_markup=self._main_keyboard(),
-            )
-            return
-        success = self._self_updater.rollback(backup_path)
-        status = "Откат выполнен" if success else "Ошибка отката"
-        await update.message.reply_text(f"{status}: {backup_path}", reply_markup=self._main_keyboard())
-        logger.info(f"Команда /rollback: {status}", extra={"event": "cmd_rollback"})
+        await _cmd_rollback_lane_impl(self, update, context)
 
     async def _cmd_health(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if await self._reject_stranger(update):
-            return
-        await _cmd_health_impl(self, update)
-        logger.info("Команда /health выполнена", extra={"event": "cmd_health"})
+        await _cmd_health_lane_impl(self, update, context)
 
     async def _cmd_errors(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if await self._reject_stranger(update):
-            return
-        await _cmd_errors_impl(self, update)
-        logger.info("Команда /errors выполнена", extra={"event": "cmd_errors"})
+        await _cmd_errors_lane_impl(self, update, context)
 
     async def _cmd_balances(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if await self._reject_stranger(update):
-            return
-        await _cmd_balances_impl(self, update)
-        logger.info("Команда /balances выполнена", extra={"event": "cmd_balances"})
+        await _cmd_balances_lane_impl(self, update, context)
 
     # ── Inline callback ──
 
