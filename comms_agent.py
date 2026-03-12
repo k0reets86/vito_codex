@@ -148,6 +148,11 @@ from modules.comms_approval_lane import (
     request_approval_with_files as _request_approval_with_files_impl,
 )
 from modules.comms_attachment_lane import on_attachment as _on_attachment_impl
+from modules.comms_owner_command_lane import (
+    maybe_handle_owner_menu_commands as _maybe_handle_owner_menu_commands_impl,
+    maybe_handle_owner_publish_commands as _maybe_handle_owner_publish_commands_impl,
+    maybe_handle_owner_webop_commands as _maybe_handle_owner_webop_commands_impl,
+)
 from modules.comms_message_preflight_lane import (
     handle_contextual_service_prompts as _handle_contextual_service_prompts_impl,
     handle_pending_owner_confirmation as _handle_pending_owner_confirmation_impl,
@@ -171,6 +176,15 @@ from modules.comms_service_lane import (
     format_service_inventory_snapshot as _format_service_inventory_snapshot_impl,
     is_inventory_prompt as _is_inventory_prompt_impl,
     is_status_prompt as _is_status_prompt_impl,
+)
+from modules.comms_research_state_lane import (
+    get_memory_manager as _get_memory_manager_impl,
+    has_fresh_service_context as _has_fresh_service_context_impl,
+    prime_research_pending_actions as _prime_research_pending_actions_impl,
+    prime_research_pending_actions_from_owner_state as _prime_research_pending_actions_from_owner_state_impl,
+    record_context_learning as _record_context_learning_impl,
+    remember_research_selection as _remember_research_selection_impl,
+    select_pending_research_option as _select_pending_research_option_impl,
 )
 from modules.comms_owner_everyday_lane import (
     is_cancel_all_tasks_prompt as _is_cancel_all_tasks_prompt_impl,
@@ -927,18 +941,7 @@ class CommsAgent:
         }
 
     def _remember_research_selection(self, idx: int, item: dict[str, Any]) -> None:
-        if not self._owner_task_state or not isinstance(item, dict):
-            return
-        try:
-            platform = str(item.get("platform") or "").strip().lower()
-            self._owner_task_state.enrich_active(
-                selected_research_option=int(idx or 0),
-                selected_research_json=json.dumps(item, ensure_ascii=False),
-                selected_research_title=str(item.get("title") or "")[:180],
-                selected_research_platform=platform,
-            )
-        except Exception:
-            pass
+        return _remember_research_selection_impl(self, idx, item)
 
     def _prime_research_pending_actions(
         self,
@@ -948,145 +951,24 @@ class CommsAgent:
         recommended: dict[str, Any] | None = None,
         origin_text: str = "",
     ) -> None:
-        actions: list[dict[str, Any]] = []
-        normalized_ideas: list[dict[str, Any]] = []
-        recommended_rank = 1
-        rec_title = str((recommended or {}).get("title") or "").strip().lower()
-        rec_platform = str((recommended or {}).get("platform") or "").strip().lower()
-        for pos, raw in enumerate(ideas[:5], start=1):
-            if not isinstance(raw, dict):
-                continue
-            item = dict(raw)
-            rank = int(item.get("rank", pos) or pos)
-            item["rank"] = rank
-            normalized_ideas.append(item)
-            actions.append(self._build_research_pipeline_action(item, topic))
-            if rec_title and str(item.get("title") or "").strip().lower() == rec_title:
-                if not rec_platform or str(item.get("platform") or "").strip().lower() == rec_platform:
-                    recommended_rank = rank
-        if not actions:
-            actions = [
-                {
-                    "action": "run_product_pipeline",
-                    "params": {"topic": topic, "platforms": ["gumroad"], "auto_publish": False},
-                }
-            ]
-            normalized_ideas = [{"rank": 1, "title": topic, "platform": "gumroad"}]
-            recommended_rank = 1
-        self._pending_system_action = {
-            "kind": "research_options",
-            "actions": actions,
-            "ideas": normalized_ideas,
-            "recommended_index": int(recommended_rank or 1),
-            "origin_text": origin_text or topic,
-        }
+        return _prime_research_pending_actions_impl(
+            self, topic=topic, ideas=ideas, recommended=recommended, origin_text=origin_text
+        )
 
     def _prime_research_pending_actions_from_owner_state(self, origin_text: str) -> bool:
-        if self._pending_system_action or not self._owner_task_state:
-            return False
-        try:
-            active = self._owner_task_state.get_active() or {}
-            raw = str(active.get("research_options_json") or "").strip()
-            if not raw:
-                return False
-            parsed = json.loads(raw)
-            if not isinstance(parsed, list) or not parsed:
-                return False
-            ideas = [dict(item) for item in parsed[:5] if isinstance(item, dict)]
-            if not ideas:
-                return False
-            recommended_item: dict[str, Any] | None = None
-            rec_raw = str(active.get("research_recommended_json") or "").strip()
-            if rec_raw:
-                rec_val = json.loads(rec_raw)
-                if isinstance(rec_val, dict):
-                    recommended_item = dict(rec_val)
-            topic = str(
-                active.get("selected_research_title")
-                or active.get("text")
-                or (ideas[0].get("title") if isinstance(ideas[0], dict) else "")
-                or "Digital Product"
-            ).strip()
-            self._prime_research_pending_actions(
-                topic=topic,
-                ideas=ideas,
-                recommended=recommended_item,
-                origin_text=origin_text,
-            )
-            return True
-        except Exception:
-            return False
+        return _prime_research_pending_actions_from_owner_state_impl(self, origin_text)
 
     def _select_pending_research_option(self, idx: int) -> dict[str, Any] | None:
-        payload = self._pending_system_action or {}
-        if str(payload.get("kind") or "").strip().lower() != "research_options":
-            return None
-        actions = list(payload.get("actions") or [])
-        ideas = list(payload.get("ideas") or [])
-        if idx < 1 or idx > len(actions):
-            return None
-        chosen_action = actions[idx - 1]
-        chosen_item = ideas[idx - 1] if idx - 1 < len(ideas) and isinstance(ideas[idx - 1], dict) else {}
-        self._remember_research_selection(idx, chosen_item)
-        self._pending_system_action = {
-            "kind": "research_options",
-            "actions": [chosen_action],
-            "ideas": [chosen_item] if chosen_item else [],
-            "recommended_index": 1,
-            "origin_text": f"choice:{idx}",
-        }
-        return chosen_item if isinstance(chosen_item, dict) else None
+        return _select_pending_research_option_impl(self, idx)
 
     def _has_fresh_service_context(self, max_age_minutes: int = 180) -> bool:
-        if not self._last_service_context:
-            return False
-        stamp = str(self._last_service_context_at or "").strip()
-        if not stamp:
-            return True
-        try:
-            dt = datetime.fromisoformat(stamp)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            age_sec = (datetime.now(timezone.utc) - dt).total_seconds()
-            return age_sec <= max(60, int(max_age_minutes) * 60)
-        except Exception:
-            return True
+        return _has_fresh_service_context_impl(self, max_age_minutes=max_age_minutes)
 
     def _get_memory_manager(self):
-        # Prefer shared runtime memory from conversation/decision loop.
-        candidates = [getattr(self, "_conversation_engine", None), getattr(self, "_decision_loop", None)]
-        for obj in candidates:
-            mm = getattr(obj, "memory", None) if obj else None
-            if mm and hasattr(mm, "save_skill") and hasattr(mm, "save_pattern"):
-                return mm
-        return None
+        return _get_memory_manager_impl(self)
 
     def _record_context_learning(self, skill_name: str, description: str, anti_pattern: str, method: dict | None = None) -> None:
-        mm = self._get_memory_manager()
-        if mm is None:
-            return
-        try:
-            mm.save_skill(
-                name=skill_name,
-                description=description,
-                agent="comms_agent",
-                task_type="nlu_context",
-                method=method or {},
-            )
-            mm.save_pattern(
-                category="owner_context",
-                key=skill_name,
-                value=description,
-                confidence=0.95,
-            )
-            mm.save_pattern(
-                category="anti_pattern",
-                key=f"{skill_name}_anti",
-                value=anti_pattern,
-                confidence=0.95,
-            )
-        except Exception:
-            pass
+        return _record_context_learning_impl(self, skill_name, description, anti_pattern, method=method)
 
     def _load_auth_state(self) -> None:
         path = self._auth_state_path
@@ -1776,122 +1658,16 @@ class CommsAgent:
         return False
 
     async def _maybe_handle_owner_menu_commands(self, text: str) -> bool:
-        lower = str(text or "").lower().strip()
-        strict_cmds = bool(getattr(settings, "TELEGRAM_STRICT_COMMANDS", True)) and not self._autonomy_max_enabled()
-        if not strict_cmds:
-            text = self._expand_short_choice(text)
-            lower = text.lower().strip()
-        if lower in ("/help", "help"):
-            await self.send_message(self._render_help())
-            return True
-        if lower in ("/help_daily", "help_daily", "/help daily", "help daily", "/help daily_commands"):
-            await self.send_message(self._render_help("daily"))
-            return True
-        if lower in ("/help_rare", "help_rare", "/help rare", "help rare"):
-            await self.send_message(self._render_help("rare"))
-            return True
-        if lower in ("/help_system", "help_system", "/help system", "help system"):
-            await self.send_message(self._render_help("system"))
-            return True
-        if (not strict_cmds and any(kw in lower for kw in ["статус", "/status"])) or lower in ("/status", "status"):
-            await self.send_message(self._render_unified_status())
-            return True
-        if lower in ("/workflow", "workflow"):
-            try:
-                from modules.workflow_state_machine import WorkflowStateMachine
-                h = WorkflowStateMachine().health()
-                await self.send_message(f"Workflow\nВсего: {h.get('workflows_total',0)}\nОбновлён: {h.get('last_update','-')}")
-                return True
-            except Exception:
-                return False
-        if lower in ("/handoffs", "handoffs"):
-            try:
-                from modules.data_lake import DataLake
-                rows = DataLake().handoff_summary(days=7)[:5]
-                if not rows:
-                    await self.send_message("Handoffs: нет событий за 7 дней")
-                    return True
-                lines = ["Handoffs (7d):"]
-                for r in rows:
-                    lines.append(f"- {r.get('from','?')} -> {r.get('to','?')}: ok={r.get('ok',0)} fail={r.get('fail',0)} total={r.get('total',0)}")
-                await self.send_message("\n".join(lines))
-                return True
-            except Exception:
-                return False
-        if lower in ("/prefs", "prefs", "предпочтения"):
-            try:
-                await self._send_prefs()
-                return True
-            except Exception:
-                return False
-        if lower in ("/prefs_metrics", "prefs_metrics"):
-            try:
-                await self._send_prefs_metrics()
-                return True
-            except Exception:
-                return False
-        if lower in ("/packs", "packs"):
-            try:
-                await self._send_packs()
-                return True
-            except Exception:
-                return False
-        return False
+        return await _maybe_handle_owner_menu_commands_impl(self, text)
 
     async def _maybe_handle_owner_task_commands(self, text: str) -> bool:
         return await _maybe_handle_owner_task_commands_impl(self, text)
 
     async def _maybe_handle_owner_publish_commands(self, text: str) -> bool:
-        lower = str(text or "").lower().strip()
-        if lower in ("/pubq", "pubq"):
-            try:
-                if not self._publisher_queue:
-                    await self.send_message("PublisherQueue не подключён.")
-                    return True
-                st = self._publisher_queue.stats()
-                await self.send_message(
-                    f"Publish Queue\nqueued={st.get('queued',0)} running={st.get('running',0)} done={st.get('done',0)} failed={st.get('failed',0)} total={st.get('total',0)}"
-                )
-                return True
-            except Exception:
-                return False
-        if lower.startswith("/pubrun") or lower == "pubrun":
-            try:
-                if not self._publisher_queue:
-                    await self.send_message("PublisherQueue не подключён.")
-                    return True
-                lim = 5
-                parts = lower.split()
-                if len(parts) >= 2 and parts[1].isdigit():
-                    lim = max(1, min(20, int(parts[1])))
-                rows = await self._publisher_queue.process_all(limit=lim)
-                await self.send_message(f"Publish run: processed={len(rows)}")
-                return True
-            except Exception:
-                return False
-        return False
+        return await _maybe_handle_owner_publish_commands_impl(self, text)
 
     async def _maybe_handle_owner_webop_commands(self, text: str) -> bool:
-        lower = str(text or "").lower().strip()
-        if lower.startswith("/webop") or lower.startswith("webop"):
-            try:
-                if not self._agent_registry:
-                    await self.send_message("AgentRegistry не подключён.")
-                    return True
-                from modules.web_operator_pack import WebOperatorPack
-                pack = WebOperatorPack(self._agent_registry)
-                parts = lower.split()
-                if len(parts) == 1 or parts[1] in {"list", "ls"}:
-                    items = pack.list_scenarios()
-                    await self.send_message("WebOp scenarios:\n" + ("\n".join(f"- {x}" for x in items) if items else "- empty"))
-                    return True
-                if len(parts) >= 3 and parts[1] == "run":
-                    res = await pack.run(parts[2], overrides={})
-                    await self.send_message(f"WebOp run: {parts[2]}\nstatus={res.get('status')}\nerror={res.get('error','')}")
-                    return True
-            except Exception:
-                return False
-        return False
+        return await _maybe_handle_owner_webop_commands_impl(self, text)
 
     async def _execute_pending_system_action(self, update: Update | None = None) -> None:
         payload = self._pending_system_action or {}
