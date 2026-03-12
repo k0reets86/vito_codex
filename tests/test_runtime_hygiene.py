@@ -60,11 +60,32 @@ def test_cleanup_reports_artifacts_keeps_latest(tmp_path, monkeypatch):
 
     import modules.runtime_hygiene as rh
     monkeypatch.setattr(rh, "REPORTS_ROOT", reports_root)
+    monkeypatch.setattr(rh, "_tracked_report_files", lambda root: set())
 
     result = cleanup_reports_artifacts(keep_latest=2, apply=True)
     remaining = sorted(p.name for p in reports_root.iterdir())
     assert len(remaining) == 2
     assert len(result.removed_files) == 3
+
+
+def test_cleanup_reports_artifacts_preserves_tracked_files(tmp_path, monkeypatch):
+    reports_root = tmp_path / "reports"
+    reports_root.mkdir()
+    tracked = reports_root / "tracked.md"
+    tracked.write_text("keep", encoding="utf-8")
+    for idx in range(4):
+        path = reports_root / f"r_{idx}.json"
+        path.write_text("{}", encoding="utf-8")
+
+    import modules.runtime_hygiene as rh
+    monkeypatch.setattr(rh, "REPORTS_ROOT", reports_root)
+    monkeypatch.setattr(rh, "_tracked_report_files", lambda root: {"tracked.md"})
+
+    result = cleanup_reports_artifacts(keep_latest=2, apply=True)
+    remaining = sorted(p.name for p in reports_root.iterdir())
+    assert "tracked.md" in remaining
+    assert len([name for name in remaining if name.endswith(".json")]) == 2
+    assert all(name != "tracked.md" for name in result.removed_files)
 
 
 def test_cleanup_runtime_db_artifacts_keeps_permanent_and_simulator(tmp_path, monkeypatch):

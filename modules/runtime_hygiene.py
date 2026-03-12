@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import subprocess
 from typing import Any
 
 from config.paths import PROJECT_ROOT
@@ -23,6 +24,34 @@ PERMANENT_RUNTIME_DB_NAMES = {
     "platform_auth_interrupts.db",
 }
 REPORT_RETENTION_SUFFIXES = {".json", ".txt", ".md"}
+
+
+def _tracked_report_files(root: Path) -> set[str]:
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--", str(root)],
+            cwd=PROJECT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except Exception:
+        return set()
+    tracked: set[str] = set()
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rel = str(Path(line).relative_to(root.name))
+        except Exception:
+            try:
+                rel = str(Path(line).relative_to(root))
+            except Exception:
+                rel = Path(line).name
+        tracked.add(rel)
+        tracked.add(Path(rel).name)
+    return tracked
 
 
 @dataclass(frozen=True)
@@ -82,9 +111,12 @@ def cleanup_reports_artifacts(*, keep_latest: int = 120, apply: bool = True) -> 
     root = REPORTS_ROOT
     if not root.exists():
         return ReportCleanupResult([], [], str(root))
+    tracked = _tracked_report_files(root)
     files = [
         p for p in root.iterdir()
-        if p.is_file() and p.suffix in REPORT_RETENTION_SUFFIXES
+        if p.is_file()
+        and p.suffix in REPORT_RETENTION_SUFFIXES
+        and p.name not in tracked
     ]
     files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     keep = files[: max(0, int(keep_latest))]
