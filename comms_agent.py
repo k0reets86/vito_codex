@@ -177,6 +177,21 @@ from modules.comms_service_lane import (
     is_inventory_prompt as _is_inventory_prompt_impl,
     is_status_prompt as _is_status_prompt_impl,
 )
+from modules.comms_service_runtime_lane import (
+    auth_interrupt_prompt as _auth_interrupt_prompt_impl,
+    clear_service_auth_confirmed as _clear_service_auth_confirmed_impl,
+    detect_service_from_text as _detect_service_from_text_impl,
+    detect_service_login_request as _detect_service_login_request_impl,
+    has_cookie_storage_state as _has_cookie_storage_state_impl,
+    is_manual_auth_service as _is_manual_auth_service_impl,
+    mark_service_auth_confirmed as _mark_service_auth_confirmed_impl,
+    requires_strict_auth_verification as _requires_strict_auth_verification_impl,
+    resolve_button_command as _resolve_button_command_impl,
+    service_auth_meta as _service_auth_meta_impl,
+    service_storage_state_path as _service_storage_state_path_impl,
+    sync_owner_task_service_context as _sync_owner_task_service_context_impl,
+    touch_service_context as _touch_service_context_impl,
+)
 from modules.comms_research_state_lane import (
     get_memory_manager as _get_memory_manager_impl,
     has_fresh_service_context as _has_fresh_service_context_impl,
@@ -562,45 +577,7 @@ class CommsAgent:
         _append_telegram_trace_file(self._telegram_trace_path, direction, text, meta)
 
     def _resolve_button_command(self, text: str) -> str | None:
-        """Resolve keyboard/menu button command with alias compatibility."""
-        raw = str(text or "").strip()
-        if not raw:
-            return None
-        if raw in self._button_map:
-            return self._button_map[raw]
-        normalized = re.sub(r"[^a-zA-Zа-яА-ЯёЁ0-9_ ]+", " ", raw).strip().lower()
-        normalized = re.sub(r"\s+", " ", normalized)
-        aliases = {
-            "статус": "status",
-            "в работе": "tasks",
-            "цели": "goals",
-            "расходы": "spend",
-            "новая цель": "goal",
-            "задачи": "tasks",
-            "исследовать": "research_hub",
-            "создать": "goal",
-            "платформы": "platforms_hub",
-            "входы": "auth_hub",
-            "сводка": "report",
-            "отчёт": "report",
-            "отчет": "report",
-            "еще": "more",
-            "ещё": "more",
-            "помощь": "help",
-            "ежедневные": "help_daily",
-            "редкие": "help_rare",
-            "системные": "help_system",
-            "главная": "start",
-            "home": "start",
-            "main": "start",
-            "menu": "help",
-            "daily": "help_daily",
-            "daily commands": "help_daily",
-            "rare": "help_rare",
-            "system": "help_system",
-            "system commands": "help_system",
-        }
-        return aliases.get(normalized)
+        return _resolve_button_command_impl(self._button_map, text)
 
     @staticmethod
     def _is_confirmed(args: list[str] | None) -> bool:
@@ -796,76 +773,25 @@ class CommsAgent:
 
     @staticmethod
     def _detect_service_login_request(text: str) -> str:
-        s = str(text or "").strip().lower()
-        if not s:
-            return ""
-        has_action = any(
-            x in s
-            for x in (
-                "зайди",
-                "зайти",
-                "войди",
-                "вход",
-                "логин",
-                "login",
-                "auth",
-                "авториза",
-                "войти",
-                "открой",
-                "обнови сес",
-                "обновить сес",
-                "refresh session",
-                "перелогин",
-                "перевойти",
-            )
+        return _detect_service_login_request_impl(
+            text,
+            CommsAgent._SERVICE_CATALOG,
+            CommsAgent._extract_custom_login_target,
+            CommsAgent._extract_loose_site_target,
         )
-        if not has_action:
-            return ""
-        for service, meta in CommsAgent._SERVICE_CATALOG.items():
-            keys = tuple(meta.get("aliases") or ())
-            if any(k in s for k in keys):
-                return service
-        custom = CommsAgent._extract_custom_login_target(s)
-        if custom:
-            return f"custom:{custom}"
-        loose = CommsAgent._extract_loose_site_target(s)
-        if loose:
-            return f"custom:{loose}"
-        return ""
 
     @staticmethod
     def _detect_service_from_text(text: str) -> str:
-        s = str(text or "").strip().lower()
-        if not s:
-            return ""
-        for service, meta in CommsAgent._SERVICE_CATALOG.items():
-            keys = tuple(meta.get("aliases") or ())
-            if any(k in s for k in keys):
-                return service
-        custom = CommsAgent._extract_custom_login_target(s)
-        if custom:
-            return f"custom:{custom}"
-        loose = CommsAgent._extract_loose_site_target(s)
-        if loose:
-            return f"custom:{loose}"
-        return ""
+        return _detect_service_from_text_impl(
+            text,
+            CommsAgent._SERVICE_CATALOG,
+            CommsAgent._extract_custom_login_target,
+            CommsAgent._extract_loose_site_target,
+        )
 
     @staticmethod
     def _service_auth_meta(service: str) -> tuple[str, str]:
-        svc = str(service or "").strip().lower()
-        if svc.startswith("custom:"):
-            target = svc.split(":", 1)[1].strip()
-            if target.startswith("http://") or target.startswith("https://"):
-                auth_url = target
-                host = urlparse(target).netloc or target
-            else:
-                host = target
-                auth_url = f"https://{target}"
-            return f"Сайт {host}", auth_url
-        meta = CommsAgent._SERVICE_CATALOG.get(svc) or {}
-        title = str(meta.get("title") or service)
-        url = str(meta.get("url") or "")
-        return title, url
+        return _service_auth_meta_impl(service, CommsAgent._SERVICE_CATALOG)
 
     @staticmethod
     def _extract_custom_login_target(text: str) -> str:
@@ -877,55 +803,17 @@ class CommsAgent:
 
     @staticmethod
     def _is_manual_auth_service(service: str) -> bool:
-        svc = str(service or "").strip().lower()
-        if svc.startswith("custom:"):
-            return True
-        meta = CommsAgent._SERVICE_CATALOG.get(svc) or {}
-        return bool(meta.get("manual_fallback", False))
+        return _is_manual_auth_service_impl(service, CommsAgent._SERVICE_CATALOG)
 
     @staticmethod
     def _requires_strict_auth_verification(service: str) -> bool:
-        svc = str(service or "").strip().lower()
-        # Сервисы, для которых запрещаем "ручное подтверждение" без реального live-check.
-        if svc == "twitter":
-            mode = str(getattr(settings, "TWITTER_MODE", "api") or "api").strip().lower()
-            return mode not in {"browser", "browser_only"}
-        if svc == "gumroad":
-            mode = str(getattr(settings, "GUMROAD_MODE", "api") or "api").strip().lower()
-            return mode not in {"browser", "browser_only"}
-        return svc in {"amazon_kdp", "etsy", "printful", "kofi"}
+        return _requires_strict_auth_verification_impl(service, settings)
 
     def _touch_service_context(self, service: str) -> None:
-        svc = str(service or "").strip().lower()
-        if not svc:
-            return
-        self._last_service_context = svc
-        self._last_service_context_at = datetime.now(timezone.utc).isoformat()
-        self._sync_owner_task_service_context(svc)
-        self._save_auth_state()
-        self._record_context_learning(
-            skill_name="service_context_tracking",
-            description=(
-                "После команд входа запоминай последний сервис и используй его как контекст для коротких уточнений "
-                "вроде 'статус', 'проверь аккаунт', 'вход ок?'."
-            ),
-            anti_pattern=(
-                "Плохо: терять контекст и трактовать короткое 'статус' как общий статус VITO, "
-                "когда владелец только что говорил о конкретной платформе."
-            ),
-            method={"service": svc},
-        )
+        return _touch_service_context_impl(self, service)
 
     def _sync_owner_task_service_context(self, service: str) -> None:
-        if not self._owner_task_state:
-            return
-        svc = str(service or "").strip().lower()
-        if not svc:
-            return
-        try:
-            self._owner_task_state.enrich_active(service_context=svc)
-        except Exception:
-            pass
+        return _sync_owner_task_service_context_impl(self, service)
 
     @staticmethod
     def _build_research_pipeline_action(item: dict[str, Any], fallback_topic: str) -> dict[str, Any]:
@@ -1003,42 +891,10 @@ class CommsAgent:
             pass
 
     def _mark_service_auth_confirmed(self, service: str) -> None:
-        svc = str(service or "").strip().lower()
-        if not svc:
-            return
-        self._service_auth_confirmed[svc] = datetime.now(timezone.utc).isoformat()
-        try:
-            ttl_sec = int(getattr(settings, "AUTH_SESSION_TTL_SEC", 10800) or 10800)
-            self._auth_broker.mark_authenticated(svc, method="manual_confirmed", detail="owner_confirmed", ttl_sec=ttl_sec)
-        except Exception:
-            pass
-        try:
-            profile = get_browser_runtime_profile(svc)
-            capture_session_snapshot(
-                svc,
-                storage_state_path=profile.storage_state_path,
-                profile_dir=profile.persistent_profile_dir,
-                verified=True,
-            )
-        except Exception:
-            pass
-        self._save_auth_state()
+        return _mark_service_auth_confirmed_impl(self, service, settings, get_browser_runtime_profile, capture_session_snapshot)
 
     def _clear_service_auth_confirmed(self, service: str) -> None:
-        svc = str(service or "").strip().lower()
-        if not svc:
-            return
-        if svc in self._service_auth_confirmed:
-            self._service_auth_confirmed.pop(svc, None)
-            try:
-                self._auth_broker.clear(svc)
-            except Exception:
-                pass
-            try:
-                clear_service_session(svc)
-            except Exception:
-                pass
-            self._save_auth_state()
+        return _clear_service_auth_confirmed_impl(self, service, clear_service_session)
 
     @staticmethod
     def _is_challenge_detail(detail: str) -> bool:
@@ -1231,63 +1087,13 @@ class CommsAgent:
         return out
 
     def _service_storage_state_path(self, service: str) -> Path | None:
-        svc = str(service or "").strip().lower()
-        p = storage_state_path_for_service(svc)
-        if p is not None:
-            return p
-        raw = ""
-        if svc == "threads":
-            raw = str(getattr(settings, "THREADS_STORAGE_STATE_FILE", "runtime/threads_storage_state.json") or "runtime/threads_storage_state.json")
-        elif svc == "instagram":
-            raw = str(getattr(settings, "INSTAGRAM_STORAGE_STATE_FILE", "runtime/instagram_storage_state.json") or "runtime/instagram_storage_state.json")
-        elif svc == "facebook":
-            raw = str(getattr(settings, "FACEBOOK_STORAGE_STATE_FILE", "runtime/facebook_storage_state.json") or "runtime/facebook_storage_state.json")
-        elif svc == "tiktok":
-            raw = str(getattr(settings, "TIKTOK_STORAGE_STATE_FILE", "runtime/tiktok_storage_state.json") or "runtime/tiktok_storage_state.json")
-        elif svc == "linkedin":
-            raw = str(getattr(settings, "LINKEDIN_STORAGE_STATE_FILE", "runtime/linkedin_storage_state.json") or "runtime/linkedin_storage_state.json")
-        elif svc == "youtube":
-            raw = str(getattr(settings, "YOUTUBE_STORAGE_STATE_FILE", "runtime/youtube_storage_state.json") or "runtime/youtube_storage_state.json")
-        if not raw:
-            return None
-        p2 = Path(raw)
-        if not p2.is_absolute():
-            p2 = PROJECT_ROOT / p2
-        return p2
+        return _service_storage_state_path_impl(service, storage_state_path_for_service, settings, PROJECT_ROOT)
 
     def _auth_interrupt_prompt(self, service: str) -> str:
-        profile = get_browser_runtime_profile(service)
-        completion = get_profile_completion_runbook(service)
-        base = str(profile.get("otp_prompt") or f"Для {service} нужен ручной вход в browser-сессии.")
-        route = str(completion.get("route") or "").strip()
-        if completion.get("requires_profile_completion") and route:
-            return f"{base} Если платформа упирается в незаполненный профиль, сначала пройди: {route}"
-        return base
+        return _auth_interrupt_prompt_impl(service, get_browser_runtime_profile, get_profile_completion_runbook)
 
     def _has_cookie_storage_state(self, service: str, since_iso: str = "") -> tuple[bool, str]:
-        p = self._service_storage_state_path(service)
-        if p is None:
-            return False, "no_storage_path"
-        if not p.exists():
-            return False, "storage_missing"
-        try:
-            data = json.loads(p.read_text(encoding="utf-8"))
-            cookies = data.get("cookies") if isinstance(data, dict) else None
-            if not isinstance(cookies, list) or not cookies:
-                return False, "cookies_missing"
-            if since_iso:
-                try:
-                    req_dt = datetime.fromisoformat(str(since_iso))
-                    if req_dt.tzinfo is None:
-                        req_dt = req_dt.replace(tzinfo=timezone.utc)
-                    mtime = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
-                    if mtime < req_dt:
-                        return False, "storage_not_updated_after_login"
-                except Exception:
-                    pass
-            return True, "storage_cookies_ok"
-        except Exception:
-            return False, "storage_parse_failed"
+        return _has_cookie_storage_state_impl(self, service, since_iso=since_iso)
 
     async def _verify_service_auth(self, service: str) -> tuple[bool, str]:
         return await _verify_service_auth_impl(self, service)
