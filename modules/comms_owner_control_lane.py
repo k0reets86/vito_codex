@@ -283,6 +283,16 @@ async def maybe_handle_owner_menu_commands(agent: Any, text: str) -> bool:
 
 async def maybe_handle_owner_task_commands(agent: Any, text: str) -> bool:
     lower = str(text or "").lower().strip()
+    if lower in (
+        "задачи",
+        "что по задачам",
+        "что по задач",
+        "че по задач",
+        "очередь",
+        "очередь задач",
+    ):
+        await agent.send_message(render_owner_brief_status(agent), level="result")
+        return True
     if lower in ("/task_current", "task_current"):
         if agent._owner_task_state:
             active = agent._owner_task_state.get_active()

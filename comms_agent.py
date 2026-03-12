@@ -201,6 +201,7 @@ from modules.comms_admin_lane import (
     send_prefs as _send_prefs_impl,
     send_prefs_metrics as _send_prefs_metrics_impl,
 )
+from modules.comms_admin_command_lane import cmd_rollback as _cmd_rollback_lane_impl
 from modules.comms_approval_lane import (
     pending_approvals_count as _pending_approvals_count_impl,
     pending_approvals_list as _pending_approvals_list_impl,
@@ -1456,12 +1457,3 @@ class CommsAgent:
     async def notify_error(self, module: str, error: str) -> bool:
         """Уведомляет владельца о критической ошибке."""
         return await _notify_error_core_impl(self, module, error)
-
-        return await self.send_message(
-            f"VITO Error | {module}\n{error}",
-            level="critical",
-        )
-
-
-def _parse_pref_value(raw: str):
-    return _parse_pref_value_impl(raw)
