@@ -153,6 +153,7 @@ from modules.comms_runtime_auth_lane import (
     save_auth_state as _save_auth_state_impl,
     service_needs_session_refresh_text as _service_needs_session_refresh_text_impl,
 )
+from modules.comms_lifecycle_lane import on_app_error as _on_app_error_lifecycle_impl, set_modules as _set_modules_lifecycle_impl, stop as _stop_lifecycle_impl
 from modules.comms_core_runtime_lane import (
     cmd_kdp_login as _cmd_kdp_login_core_impl,
     is_bot_sender as _is_bot_sender_core_impl,
@@ -891,32 +892,24 @@ class CommsAgent:
         owner_task_state=None,
     ) -> None:
         """Привязывает модули после инициализации (избегаем циклических импортов)."""
-        self._goal_engine = goal_engine
-        self._llm_router = llm_router
-        self._decision_loop = decision_loop
-        self._agent_registry = agent_registry
-        if self_healer is not None:
-            self._self_healer = self_healer
-        if self_updater is not None:
-            self._self_updater = self_updater
-        if conversation_engine is not None:
-            self._conversation_engine = conversation_engine
-        if judge_protocol is not None:
-            self._judge_protocol = judge_protocol
-        if finance is not None:
-            self._finance = finance
-        if skill_registry is not None:
-            self._skill_registry = skill_registry
-        if weekly_planner is not None:
-            self._weekly_planner = weekly_planner
-        if schedule_manager is not None:
-            self._schedule_manager = schedule_manager
-        if publisher_queue is not None:
-            self._publisher_queue = publisher_queue
-        if cancel_state is not None:
-            self._cancel_state = cancel_state
-        if owner_task_state is not None:
-            self._owner_task_state = owner_task_state
+        _set_modules_lifecycle_impl(
+            self,
+            goal_engine=goal_engine,
+            llm_router=llm_router,
+            decision_loop=decision_loop,
+            agent_registry=agent_registry,
+            self_healer=self_healer,
+            self_updater=self_updater,
+            conversation_engine=conversation_engine,
+            judge_protocol=judge_protocol,
+            finance=finance,
+            skill_registry=skill_registry,
+            weekly_planner=weekly_planner,
+            schedule_manager=schedule_manager,
+            publisher_queue=publisher_queue,
+            cancel_state=cancel_state,
+            owner_task_state=owner_task_state,
+        )
 
     # ── Запуск / Остановка ──
 
@@ -924,29 +917,7 @@ class CommsAgent:
         await _start_impl(self)
 
     async def _on_app_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle Telegram runtime errors without crashing VITO."""
-        err = getattr(context, "error", None)
-        if isinstance(err, TgConflict):
-            if self._telegram_conflict_mode:
-                return
-            self._telegram_conflict_mode = True
-            logger.error(
-                "Telegram polling conflict detected; switching to degraded mode (owner_inbox fallback).",
-                extra={"event": "telegram_conflict_mode"},
-            )
-            try:
-                if self._app and self._app.updater:
-                    await self._app.updater.stop()
-            except Exception:
-                pass
-            try:
-                from modules.owner_inbox import write_outbox
-                write_outbox(
-                    "⚠️ Telegram Conflict: другой инстанс использует getUpdates. "
-                    "VITO переключен в fallback owner_inbox до устранения конфликта."
-                )
-            except Exception:
-                pass
+        await _on_app_error_lifecycle_impl(self, update, context)
 
     async def _handle_owner_text(self, text: str, source: str = "owner_inbox") -> None:
         await _handle_owner_text_impl(self, text, source=source)
@@ -1063,11 +1034,7 @@ class CommsAgent:
 
     async def stop(self) -> None:
         """Останавливает Telegram polling."""
-        if self._app and self._app.updater.running:
-            await self._app.updater.stop()
-            await self._app.stop()
-            await self._app.shutdown()
-            logger.info("Telegram бот остановлен", extra={"event": "bot_stopped"})
+        await _stop_lifecycle_impl(self)
 
     # ── Проверка владельца ──
 
