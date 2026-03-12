@@ -124,6 +124,23 @@ from modules.comms_goal_skill_lane import (
     cmd_skills_fix as _cmd_skills_fix_impl,
     cmd_skills_pending as _cmd_skills_pending_impl,
 )
+from modules.comms_admin_lane import (
+    cmd_approve as _cmd_approve_impl,
+    cmd_clear_goals as _cmd_clear_goals_impl,
+    cmd_handoffs as _cmd_handoffs_impl,
+    cmd_nettest as _cmd_nettest_impl,
+    cmd_pubq as _cmd_pubq_impl,
+    cmd_pubrun as _cmd_pubrun_impl,
+    cmd_recipes as _cmd_recipes_impl,
+    cmd_reject as _cmd_reject_impl,
+    cmd_smoke as _cmd_smoke_impl,
+    cmd_spend as _cmd_spend_impl,
+    cmd_webop as _cmd_webop_impl,
+    cmd_workflow as _cmd_workflow_impl,
+    send_packs as _send_packs_impl,
+    send_prefs as _send_prefs_impl,
+    send_prefs_metrics as _send_prefs_metrics_impl,
+)
 from modules.comms_approval_lane import (
     pending_approvals_count as _pending_approvals_count_impl,
     pending_approvals_list as _pending_approvals_list_impl,
@@ -131,6 +148,13 @@ from modules.comms_approval_lane import (
     request_approval_with_files as _request_approval_with_files_impl,
 )
 from modules.comms_attachment_lane import on_attachment as _on_attachment_impl
+from modules.comms_message_preflight_lane import (
+    handle_contextual_service_prompts as _handle_contextual_service_prompts_impl,
+    handle_pending_owner_confirmation as _handle_pending_owner_confirmation_impl,
+    handle_pending_schedule_update as _handle_pending_schedule_update_impl,
+    handle_pending_service_auth as _handle_pending_service_auth_impl,
+    handle_pending_system_action as _handle_pending_system_action_impl,
+)
 from modules.comms_startup_lane import start as _start_impl
 from modules.comms_planning_lane import (
     cmd_brainstorm as _cmd_brainstorm_impl,
@@ -2137,53 +2161,13 @@ class CommsAgent:
         await _cmd_goals_all_impl(self, update, context)
 
     async def _cmd_spend(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if await self._reject_stranger(update):
-            return
-        spend = float(self._llm_router.get_daily_spend() if self._llm_router else 0.0)
-        fin_spend = float(self._finance.get_daily_spent() if self._finance else 0.0)
-        limit = settings.DAILY_LIMIT_USD
-        lines = [
-            f"Расходы сегодня (LLM): ${spend:.2f} / ${limit:.2f}",
-            f"Осталось по лимиту LLM: ${max(limit - spend, 0):.2f}",
-        ]
-        if fin_spend > 0:
-            lines.append(f"Финконтроль (все типы расходов): ${fin_spend:.2f}")
-        await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
-        logger.info("Команда /spend выполнена", extra={"event": "cmd_spend"})
+        await _cmd_spend_impl(self, update, context)
 
     async def _cmd_approve(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if await self._reject_stranger(update):
-            return
-        if not self._pending_approvals:
-            await update.message.reply_text("Нет запросов, ожидающих одобрения.", reply_markup=self._main_keyboard())
-            return
-
-        request_id = next(iter(self._pending_approvals))
-        future = self._pending_approvals.pop(request_id)
-        if not future.done():
-            future.set_result(True)
-        await update.message.reply_text("Одобрено.", reply_markup=self._main_keyboard())
-        logger.info(
-            f"Запрос одобрен: {request_id}",
-            extra={"event": "approval_granted", "context": {"request_id": request_id}},
-        )
+        await _cmd_approve_impl(self, update, context)
 
     async def _cmd_reject(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if await self._reject_stranger(update):
-            return
-        if not self._pending_approvals:
-            await update.message.reply_text("Нет запросов, ожидающих одобрения.", reply_markup=self._main_keyboard())
-            return
-
-        request_id = next(iter(self._pending_approvals))
-        future = self._pending_approvals.pop(request_id)
-        if not future.done():
-            future.set_result(False)
-        await update.message.reply_text("Отклонено.", reply_markup=self._main_keyboard())
-        logger.info(
-            f"Запрос отклонён: {request_id}",
-            extra={"event": "approval_rejected", "context": {"request_id": request_id}},
-        )
+        await _cmd_reject_impl(self, update, context)
 
     async def _cmd_goal(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await _cmd_goal_impl(self, update, context)
@@ -2216,36 +2200,7 @@ class CommsAgent:
         await _cmd_playbooks_impl(self, update, context)
 
     async def _cmd_recipes(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Показать workflow recipes по платформам."""
-        if await self._reject_stranger(update):
-            return
-        try:
-            from modules.workflow_recipes import list_workflow_recipes, get_workflow_recipe
-            args = list(getattr(context, "args", None) or [])
-            if args:
-                key = str(args[0] or "").strip().lower()
-                rec = get_workflow_recipe(key)
-                if not rec:
-                    await update.message.reply_text(f"Recipe не найден: {key}", reply_markup=self._main_keyboard())
-                    return
-                lines = [
-                    f"Recipe: {key}",
-                    f"Platform: {rec.get('platform', '-')}",
-                    f"Goal: {rec.get('goal', '-')}",
-                    "Steps:",
-                ]
-                for idx, step in enumerate(rec.get("steps", []), start=1):
-                    lines.append(f"{idx}. {step}")
-                lines.append(f"Evidence: {', '.join(rec.get('required_evidence', []) or [])}")
-                await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
-                return
-            rows = list_workflow_recipes()
-            lines = ["Workflow Recipes:"]
-            for r in rows:
-                lines.append(f"- {r.get('name')}: {r.get('platform')} ({len(r.get('steps', []) or [])} steps)")
-            await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
-        except Exception as e:
-            await update.message.reply_text(f"Recipes error: {e}", reply_markup=self._main_keyboard())
+        await _cmd_recipes_impl(self, update, context)
 
     async def _cmd_recipe_run(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Execute a workflow recipe through PublisherQueue with acceptance gate.
@@ -2315,66 +2270,10 @@ class CommsAgent:
         return await _run_recipe_direct_impl(self, recipe_name, live=live, request_text=request_text)
 
     async def _cmd_workflow(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Показать здоровье workflow и последние события по цели."""
-        if await self._reject_stranger(update):
-            return
-        try:
-            from modules.workflow_state_machine import WorkflowStateMachine
-            wf = WorkflowStateMachine()
-            health = wf.health()
-            goal_id = " ".join(context.args).strip() if getattr(context, "args", None) else ""
-            if not goal_id and self._goal_engine:
-                goals = self._goal_engine.get_all_goals()
-                if goals:
-                    goal_id = goals[-1].goal_id
-            lines = [
-                "Workflow",
-                f"Всего: {health.get('workflows_total', 0)}",
-                f"Обновлён: {health.get('last_update', '-')}",
-            ]
-            if goal_id:
-                lines.append(f"Goal: {goal_id}")
-                events = wf.recent_events(goal_id, limit=8)
-                if events:
-                    for e in events:
-                        lines.append(
-                            f"- {e.get('created_at','')} | {e.get('from_state','')} -> {e.get('to_state','')} | {e.get('reason','')}"
-                        )
-                else:
-                    lines.append("- Нет событий по этой цели")
-            await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
-        except Exception as e:
-            await update.message.reply_text(f"Workflow error: {e}", reply_markup=self._main_keyboard())
+        await _cmd_workflow_impl(self, update, context)
 
     async def _cmd_handoffs(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Показать сводку передач между агентами (handoff)."""
-        if await self._reject_stranger(update):
-            return
-        try:
-            from modules.data_lake import DataLake
-            dl = DataLake()
-            summary = dl.handoff_summary(days=7)[:10]
-            recent = dl.recent_handoffs(limit=8)
-            lines = ["Handoffs (7d)"]
-            if summary:
-                for r in summary:
-                    lines.append(
-                        f"- {r.get('from','?')} -> {r.get('to','?')}: ok={r.get('ok',0)} fail={r.get('fail',0)} total={r.get('total',0)}"
-                    )
-            else:
-                lines.append("- Нет handoff событий")
-            lines.append("")
-            lines.append("Recent:")
-            if recent:
-                for r in recent[:5]:
-                    lines.append(
-                        f"- {r.get('created_at','')} | {r.get('from','?')} -> {r.get('to','?')} | {r.get('status','?')} | {r.get('capability','')}"
-                    )
-            else:
-                lines.append("- Нет recent событий")
-            await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
-        except Exception as e:
-            await update.message.reply_text(f"Handoffs error: {e}", reply_markup=self._main_keyboard())
+        await _cmd_handoffs_impl(self, update, context)
 
     async def _cmd_prefs(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Показать предпочтения владельца."""
@@ -2389,46 +2288,10 @@ class CommsAgent:
         await self._send_prefs_metrics(reply_to=update)
 
     async def _send_prefs(self, reply_to: Update | None = None) -> None:
-        try:
-            model = OwnerPreferenceModel()
-            prefs = model.list_preferences(limit=20)
-            if not prefs:
-                msg = "Предпочтения владельца: пока нет записей. Используй /pref ключ=значение."
-            else:
-                lines = ["Предпочтения владельца:"]
-                for p in prefs:
-                    conf = float(p.get("confidence", 0.0))
-                    key = p.get("pref_key", "")
-                    val = p.get("value")
-                    lines.append(f"- {key}: {val} (conf={conf:.2f})")
-                lines.append("Чтобы добавить: /pref ключ=значение")
-                msg = "\n".join(lines)
-            if reply_to is not None and getattr(reply_to, "message", None):
-                await reply_to.message.reply_text(msg, reply_markup=self._main_keyboard())
-            else:
-                await self.send_message(msg)
-        except Exception:
-            if reply_to is not None and getattr(reply_to, "message", None):
-                await reply_to.message.reply_text("Не удалось загрузить предпочтения.", reply_markup=self._main_keyboard())
-            else:
-                await self.send_message("Не удалось загрузить предпочтения.")
+        await _send_prefs_impl(self, reply_to=reply_to)
 
     async def _send_prefs_metrics(self, reply_to: Update | None = None) -> None:
-        try:
-            metrics = OwnerPreferenceMetrics().summary()
-            lines = ["Метрики предпочтений:"]
-            for k, v in metrics.items():
-                lines.append(f"- {k}: {v}")
-            msg = "\n".join(lines)
-            if reply_to is not None and getattr(reply_to, "message", None):
-                await reply_to.message.reply_text(msg, reply_markup=self._main_keyboard())
-            else:
-                await self.send_message(msg)
-        except Exception:
-            if reply_to is not None and getattr(reply_to, "message", None):
-                await reply_to.message.reply_text("Не удалось загрузить метрики предпочтений.", reply_markup=self._main_keyboard())
-            else:
-                await self.send_message("Не удалось загрузить метрики предпочтений.")
+        await _send_prefs_metrics_impl(self, reply_to=reply_to)
 
     async def _cmd_packs(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Показать список capability packs."""
@@ -2437,172 +2300,25 @@ class CommsAgent:
         await self._send_packs(reply_to=update)
 
     async def _send_packs(self, reply_to: Update | None = None) -> None:
-        try:
-            from pathlib import Path
-            root = Path(__file__).resolve().parent / "capability_packs"
-            packs = []
-            for spec in root.glob("*/spec.json"):
-                try:
-                    data = json.loads(spec.read_text(encoding="utf-8"))
-                except Exception:
-                    continue
-                packs.append((data.get("name") or spec.parent.name, data.get("category", ""), data.get("acceptance_status", "pending")))
-            if not packs:
-                msg = "Capability packs: пусто."
-            else:
-                lines = ["Capability packs:"]
-                for name, cat, status in sorted(packs):
-                    lines.append(f"- {name} ({cat}) [{status}]")
-                msg = "\n".join(lines)
-            if reply_to is not None and getattr(reply_to, "message", None):
-                await reply_to.message.reply_text(msg, reply_markup=self._main_keyboard())
-            else:
-                await self.send_message(msg)
-        except Exception:
-            if reply_to is not None and getattr(reply_to, "message", None):
-                await reply_to.message.reply_text("Не удалось загрузить capability packs.", reply_markup=self._main_keyboard())
-            else:
-                await self.send_message("Не удалось загрузить capability packs.")
+        await _send_packs_impl(self, reply_to=reply_to)
 
     async def _cmd_pubq(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Показать состояние unified publisher queue."""
-        if await self._reject_stranger(update):
-            return
-        if not self._publisher_queue:
-            await update.message.reply_text("PublisherQueue не подключён.", reply_markup=self._main_keyboard())
-            return
-        try:
-            st = self._publisher_queue.stats()
-            rows = self._publisher_queue.list_jobs(limit=10)
-            lines = [
-                "Publish Queue",
-                f"queued={st.get('queued',0)} running={st.get('running',0)} done={st.get('done',0)} failed={st.get('failed',0)} total={st.get('total',0)}",
-            ]
-            for r in rows[:8]:
-                lines.append(
-                    f"- #{r.get('id')} {r.get('platform')} [{r.get('status')}] a={r.get('attempts',0)}/{r.get('max_attempts',0)}"
-                )
-            await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
-        except Exception as e:
-            await update.message.reply_text(f"PubQ error: {e}", reply_markup=self._main_keyboard())
+        await _cmd_pubq_impl(self, update, context)
 
     async def _cmd_pubrun(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Ручной запуск обработки очереди публикаций."""
-        if await self._reject_stranger(update):
-            return
-        if not self._publisher_queue:
-            await update.message.reply_text("PublisherQueue не подключён.", reply_markup=self._main_keyboard())
-            return
-        limit = 5
-        try:
-            if context.args:
-                limit = max(1, min(20, int(context.args[0])))
-        except Exception:
-            limit = 5
-        try:
-            rows = await self._publisher_queue.process_all(limit=limit)
-            if not rows:
-                await update.message.reply_text("Очередь пустая.", reply_markup=self._main_keyboard())
-                return
-            ok = sum(1 for x in rows if x.get("status") == "done")
-            fail = len(rows) - ok
-            await update.message.reply_text(
-                f"Publish run: processed={len(rows)} done={ok} fail/retry={fail}",
-                reply_markup=self._main_keyboard(),
-            )
-        except Exception as e:
-            await update.message.reply_text(f"PubRun error: {e}", reply_markup=self._main_keyboard())
+        await _cmd_pubrun_impl(self, update, context)
 
     async def _cmd_webop(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Web operator pack: list/run scenarios.
-
-        Usage:
-          /webop list
-          /webop run <scenario_name>
-        """
-        if await self._reject_stranger(update):
-            return
-        if not self._agent_registry:
-            await update.message.reply_text("AgentRegistry не подключён.", reply_markup=self._main_keyboard())
-            return
-        try:
-            from modules.web_operator_pack import WebOperatorPack
-            pack = WebOperatorPack(self._agent_registry)
-            args = context.args or []
-            if not args or args[0] in {"list", "ls"}:
-                items = pack.list_scenarios()
-                text = "WebOp scenarios:\n" + ("\n".join(f"- {x}" for x in items) if items else "- empty")
-                await update.message.reply_text(text, reply_markup=self._main_keyboard())
-                return
-            if args[0] == "run":
-                if len(args) < 2:
-                    await update.message.reply_text("Usage: /webop run <scenario_name>", reply_markup=self._main_keyboard())
-                    return
-                scenario = args[1]
-                res = await pack.run(scenario, overrides={})
-                await update.message.reply_text(
-                    f"WebOp run: {scenario}\nstatus={res.get('status')}\nerror={res.get('error','')}",
-                    reply_markup=self._main_keyboard(),
-                )
-                return
-            await update.message.reply_text("Usage: /webop list | /webop run <scenario>", reply_markup=self._main_keyboard())
-        except Exception as e:
-            await update.message.reply_text(f"WebOp error: {e}", reply_markup=self._main_keyboard())
+        await _cmd_webop_impl(self, update, context)
 
     async def _cmd_clear_goals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Удалить все цели из очереди."""
-        if await self._reject_stranger(update):
-            return
-        if not self._goal_engine:
-            await update.message.reply_text("GoalEngine не подключён.", reply_markup=self._main_keyboard())
-            return
-        if not self._is_confirmed(getattr(context, "args", None)):
-            await update.message.reply_text(
-                "Подтверди удаление всех целей: `/clear_goals yes`",
-                reply_markup=self._main_keyboard(),
-            )
-            return
-        removed = self._goal_engine.clear_all_goals()
-        await update.message.reply_text(
-            f"Очередь целей очищена. Удалено: {removed}.",
-            reply_markup=self._main_keyboard(),
-        )
+        await _cmd_clear_goals_impl(self, update, context)
 
     async def _cmd_nettest(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Проверка сети/интернета внутри процесса VITO."""
-        if await self._reject_stranger(update):
-            return
-        try:
-            from modules.network_utils import basic_net_report
-            report = basic_net_report()
-            lines = ["VITO NetTest"]
-            if report.get("seccomp"):
-                lines.append(f"seccomp: {report['seccomp']}")
-            for host, ok in report.get("dns", {}).items():
-                lines.append(f"{host}: {'OK' if ok else 'FAIL'}")
-            lines.append(f"overall: {'OK' if report.get('ok') else 'FAIL'}")
-            await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
-        except Exception as e:
-            await update.message.reply_text(f"NetTest error: {e}", reply_markup=self._main_keyboard())
+        await _cmd_nettest_impl(self, update, context)
 
     async def _cmd_smoke(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Manual safe smoke-check for platforms."""
-        if await self._reject_stranger(update):
-            return
-        try:
-            from modules.platform_smoke import PlatformSmoke
-            # use decision loop injected platforms if available
-            platforms = getattr(self._decision_loop, "_platforms", {}) if self._decision_loop else {}
-            sm = PlatformSmoke(platforms)
-            rows = await sm.run(names=["gumroad", "etsy", "kofi", "printful"])
-            ok = sum(1 for r in rows if r.get("status") == "success")
-            fail = len(rows) - ok
-            lines = [f"Smoke: ok={ok}, fail={fail}"]
-            for r in rows:
-                lines.append(f"- {r.get('platform')}: {r.get('status')} ({r.get('detail','')})")
-            await update.message.reply_text("\n".join(lines), reply_markup=self._main_keyboard())
-        except Exception as e:
-            await update.message.reply_text(f"Smoke error: {e}", reply_markup=self._main_keyboard())
+        await _cmd_smoke_impl(self, update, context)
 
     async def _cmd_llm_mode(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Switch LLM routing mode quickly: free/prod/status."""
@@ -2667,234 +2383,22 @@ class CommsAgent:
                 return
 
         lower = text.lower()
-        if self._pending_service_auth and self._is_auth_done_text(lower):
-            service = next(reversed(self._pending_service_auth))
-            pending = self._pending_service_auth.pop(service, None) or {}
-            ok, detail = await self._verify_service_auth(service)
-            title, _ = self._service_auth_meta(service)
-            self._touch_service_context(service)
-            if ok:
-                self._mark_service_auth_confirmed(service)
-                await update.message.reply_text(f"Вход подтверждён: {title}.", reply_markup=self._main_keyboard())
-                logger.info("Inline auth_done via text", extra={"event": "inline_auth_done", "context": {"service": service, "mode": "text"}})
-            else:
-                if self._requires_strict_auth_verification(service):
-                    since = str(pending.get("requested_at") or "")
-                    has_storage, storage_detail = self._has_cookie_storage_state(service, since_iso=since)
-                    if bool(pending.get("mode") == "remote") and has_storage:
-                        self._mark_service_auth_confirmed(service)
-                        await update.message.reply_text(
-                            f"Вход подтверждён: {title} (server storage захвачен, detail={storage_detail}).",
-                            reply_markup=self._main_keyboard(),
-                        )
-                        return
-                    self._clear_service_auth_confirmed(service)
-                    extra = f" {self._manual_capture_hint(service)}" if self._is_challenge_detail(detail) else ""
-                    await update.message.reply_text(
-                        self._service_needs_session_refresh_text(service, title, detail) + extra,
-                        reply_markup=self._main_keyboard(),
-                    )
-                elif self._is_manual_auth_service(service):
-                    self._mark_service_auth_confirmed(service)
-                    await update.message.reply_text(
-                        f"Вход зафиксирован вручную: {title}. Проверка: {detail}",
-                        reply_markup=self._main_keyboard(),
-                    )
-                    logger.info("Inline auth_done via text", extra={"event": "inline_auth_done", "context": {"service": service, "mode": "text_manual"}})
-                else:
-                    await update.message.reply_text(f"Не удалось подтвердить вход: {detail}", reply_markup=self._main_keyboard())
+        if await _handle_pending_service_auth_impl(self, update, lower):
             return
 
         # Highest-priority contextual routing: account inventory/status/auth issue.
-        service_inventory = self._detect_contextual_service_inventory_request(text)
-        if service_inventory:
-            await update.message.reply_text(
-                await self._format_service_inventory_snapshot(service_inventory),
-                reply_markup=self._main_keyboard(),
-            )
-            self._record_context_learning(
-                skill_name="contextual_service_inventory_resolution",
-                description=(
-                    "Если активен контекст платформы, запросы вида 'проверь товары/листинги' "
-                    "выполняются как проверка аккаунта этой платформы, а не как market research."
-                ),
-                anti_pattern=(
-                    "Плохо: отправлять владельца в analyze_niche, когда он просит проверить товары в текущем аккаунте."
-                ),
-                method={"service": service_inventory, "source_text": text[:120]},
-            )
+        if await _handle_contextual_service_prompts_impl(self, update, text):
             return
-        service_status = self._detect_contextual_service_status_request(text)
-        if service_status:
-            await update.message.reply_text(
-                await self._format_service_auth_status_live(service_status),
-                reply_markup=self._main_keyboard(),
-            )
-            self._record_context_learning(
-                skill_name="contextual_service_status_resolution",
-                description=(
-                    "Если у владельца активный контекст платформы, короткий запрос 'статус' трактуется "
-                    "как статус входа/аккаунта этой платформы."
-                ),
-                anti_pattern=(
-                    "Плохо: игнорировать недавний контекст сервиса и отвечать системным статусом VITO "
-                    "вместо статуса нужной платформы."
-                ),
-                method={"service": service_status, "source_text": text[:120]},
-            )
-            return
-        if self._is_auth_issue_prompt(text):
-            svc = self._last_service_context if self._has_fresh_service_context() else ""
-            if svc:
-                await update.message.reply_text(
-                    await self._format_service_auth_status_live(svc),
-                    reply_markup=self._main_keyboard(),
-                )
-                return
 
         lower = text.lower()
-        if self._pending_service_auth and self._is_auth_done_text(lower):
-            service = next(reversed(self._pending_service_auth))
-            pending = self._pending_service_auth.pop(service, None) or {}
-            ok, detail = await self._verify_service_auth(service)
-            title, _ = self._service_auth_meta(service)
-            self._touch_service_context(service)
-            if ok:
-                self._mark_service_auth_confirmed(service)
-                await update.message.reply_text(f"Вход подтверждён: {title}.", reply_markup=self._main_keyboard())
-                logger.info("Inline auth_done via text", extra={"event": "inline_auth_done", "context": {"service": service, "mode": "text"}})
-            else:
-                if self._requires_strict_auth_verification(service):
-                    since = str(pending.get("requested_at") or "")
-                    has_storage, storage_detail = self._has_cookie_storage_state(service, since_iso=since)
-                    if bool(pending.get("mode") == "remote") and has_storage:
-                        self._mark_service_auth_confirmed(service)
-                        await update.message.reply_text(
-                            f"Вход подтверждён: {title} (server storage захвачен, detail={storage_detail}).",
-                            reply_markup=self._main_keyboard(),
-                        )
-                        return
-                    self._clear_service_auth_confirmed(service)
-                    extra = f" {self._manual_capture_hint(service)}" if self._is_challenge_detail(detail) else ""
-                    await update.message.reply_text(
-                        self._service_needs_session_refresh_text(service, title, detail) + extra,
-                        reply_markup=self._main_keyboard(),
-                    )
-                elif self._is_manual_auth_service(service):
-                    self._mark_service_auth_confirmed(service)
-                    await update.message.reply_text(
-                        f"Вход зафиксирован вручную: {title}. Проверка: {detail}",
-                        reply_markup=self._main_keyboard(),
-                    )
-                    logger.info("Inline auth_done via text", extra={"event": "inline_auth_done", "context": {"service": service, "mode": "text_manual"}})
-                else:
-                    await update.message.reply_text(f"Не удалось подтвердить вход: {detail}", reply_markup=self._main_keyboard())
+        if await _handle_pending_service_auth_impl(self, update, lower):
             return
-        if self._pending_owner_confirmation and (self._is_yes_token(lower) or self._is_no_token(lower)):
-            payload = self._pending_owner_confirmation or {}
-            self._pending_owner_confirmation = None
-            kind = str(payload.get("kind") or "")
-            if self._is_yes_token(lower):
-                if kind == "clear_goals" and self._goal_engine:
-                    removed = int(self._goal_engine.clear_all_goals() or 0)
-                    await update.message.reply_text(
-                        f"Готово. Очередь целей очищена ({removed}).",
-                        reply_markup=self._main_keyboard(),
-                    )
-                elif kind == "rollback" and self._self_updater:
-                    backup_path = str(payload.get("backup_path") or "")
-                    if not backup_path:
-                        await update.message.reply_text(
-                            "Нет пути к бэкапу для отката.",
-                            reply_markup=self._main_keyboard(),
-                        )
-                    else:
-                        success = self._self_updater.rollback(backup_path)
-                        status = "Откат выполнен" if success else "Ошибка отката"
-                        await update.message.reply_text(
-                            f"{status}: {backup_path}",
-                            reply_markup=self._main_keyboard(),
-                        )
-                else:
-                    await update.message.reply_text("Принял. Выполняю.", reply_markup=self._main_keyboard())
-            else:
-                await update.message.reply_text("Ок, отменил.", reply_markup=self._main_keyboard())
+        if await _handle_pending_owner_confirmation_impl(self, update, lower):
             return
-        if self._pending_system_action:
-            pending_kind = str((self._pending_system_action or {}).get("kind") or "").strip().lower()
-            allow_numeric_choice = text.isdigit() and (
-                (not strict_cmds) or pending_kind == "research_options"
-            )
-            if allow_numeric_choice:
-                idx = int(text)
-                picked = self._select_pending_research_option(idx)
-                if picked is not None:
-                    await update.message.reply_text(
-                        f"Принял вариант {idx}. Запускаю.",
-                        reply_markup=self._main_keyboard(),
-                    )
-                    await self._execute_pending_system_action(update)
-                    return
-                actions = list((self._pending_system_action or {}).get("actions") or [])
-                if 1 <= idx <= len(actions):
-                    self._pending_system_action = {"actions": [actions[idx - 1]], "origin_text": f"choice:{idx}"}
-                    await update.message.reply_text(
-                        f"Принял вариант {idx}. Запускаю.",
-                        reply_markup=self._main_keyboard(),
-                    )
-                    await self._execute_pending_system_action(update)
-                    return
-            if self._is_yes_token(lower):
-                payload = self._pending_system_action or {}
-                if str(payload.get("kind") or "").strip().lower() == "research_options":
-                    rec_idx = int(payload.get("recommended_index") or 1)
-                    self._select_pending_research_option(rec_idx)
-                await self._execute_pending_system_action(update)
-                return
-            if self._is_no_token(lower):
-                self._pending_system_action = None
-                await update.message.reply_text(
-                    "Ок, системное действие отменено.",
-                    reply_markup=self._main_keyboard(),
-                )
-                return
-        # Pending schedule clarification (user selects which to update)
-        if self._pending_schedule_update:
-            sel = text.strip()
-            if sel.isdigit():
-                idx = int(sel)
-                choices = self._pending_schedule_update.get("choices", [])
-                new_sched = self._pending_schedule_update.get("new_schedule")
-                mode = self._pending_schedule_update.get("mode", "update")
-                if 1 <= idx <= len(choices):
-                    task = choices[idx - 1]
-                    try:
-                        if mode == "delete":
-                            self._schedule_manager.delete_task(task.id)
-                            await update.message.reply_text(
-                                f"Готово. Расписание #{task.id} удалено.",
-                                reply_markup=self._main_keyboard(),
-                            )
-                        else:
-                            self._schedule_manager.update_task(
-                                task.id,
-                                schedule_type=new_sched.schedule_type,
-                                time_of_day=new_sched.time_of_day,
-                                weekday=new_sched.weekday,
-                                run_at=new_sched.run_at,
-                            )
-                            await update.message.reply_text(
-                                f"Готово. Обновил расписание для задачи #{task.id}.",
-                                reply_markup=self._main_keyboard(),
-                            )
-                    except Exception as e:
-                        await update.message.reply_text(
-                            f"Ошибка обновления расписания: {e}",
-                            reply_markup=self._main_keyboard(),
-                        )
-                    self._pending_schedule_update = None
-                    return
-            # If not a valid selection, continue normal flow
+        if await _handle_pending_system_action_impl(self, update, text, lower, strict_cmds):
+            return
+        if await _handle_pending_schedule_update_impl(self, update, text):
+            return
 
         if text.isdigit() and self._prime_research_pending_actions_from_owner_state(text):
             idx = int(text)
